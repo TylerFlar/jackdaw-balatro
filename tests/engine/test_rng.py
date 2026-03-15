@@ -277,14 +277,94 @@ class TestPseudoRandomRandom:
 
 
 class TestPseudoRandomElement:
-    """PseudoRandom.element(): deterministic selection."""
+    """PseudoRandom.element(): deterministic selection.
 
-    def test_selects_valid_entry(self):
+    Ground truth from LuaJIT 2.1 pseudorandom_element() with seed 'TESTSEED'.
+    Each test uses sequential pseudoseed advances on a named stream, then
+    passes the resulting float to element() — exactly matching the game's
+    usage pattern.
+    """
+
+    # LuaJIT ground truth: 5 calls on 'elem_str' stream with string-key dict
+    EXPECTED_STR = [
+        ("alpha", 1), ("alpha", 1), ("gamma", 3), ("alpha", 1), ("gamma", 3),
+    ]
+
+    def test_string_key_dict_matches_luajit(self):
+        """String keys are sorted lexicographically before selection."""
         prng = PseudoRandom("TESTSEED")
-        table = {"a": 1, "b": 2, "c": 3}
-        val, key = prng.element(table, 0.42)
-        assert key in table
-        assert val == table[key]
+        table = {"alpha": 1, "beta": 2, "gamma": 3, "delta": 4, "epsilon": 5}
+        for i, (exp_key, exp_val) in enumerate(self.EXPECTED_STR):
+            sv = prng.seed("elem_str")
+            val, key = prng.element(table, sv)
+            assert key == exp_key and val == exp_val, (
+                f"str[{i + 1}]: got ({key!r}, {val}) expected ({exp_key!r}, {exp_val})"
+            )
+
+    # LuaJIT ground truth: sort_id dicts
+    EXPECTED_SORTID = [
+        ("b_second", "second"), ("y_fourth", "fourth"), ("b_second", "second"),
+        ("a_first", "first"), ("y_fourth", "fourth"),
+    ]
+
+    def test_sort_id_dict_matches_luajit(self):
+        """Dicts with sort_id values are sorted by sort_id, not key."""
+        prng = PseudoRandom("TESTSEED")
+        # Keys are deliberately mis-ordered relative to sort_id
+        table = {
+            "z_last": {"sort_id": 5, "name": "last"},
+            "a_first": {"sort_id": 1, "name": "first"},
+            "m_mid": {"sort_id": 3, "name": "mid"},
+            "b_second": {"sort_id": 2, "name": "second"},
+            "y_fourth": {"sort_id": 4, "name": "fourth"},
+        }
+        for i, (exp_key, exp_name) in enumerate(self.EXPECTED_SORTID):
+            sv = prng.seed("elem_sortid")
+            val, key = prng.element(table, sv)
+            assert key == exp_key and val["name"] == exp_name, (
+                f"sortid[{i + 1}]: got ({key!r}, {val['name']!r}) "
+                f"expected ({exp_key!r}, {exp_name!r})"
+            )
+
+    # LuaJIT ground truth: large dict (20 items)
+    EXPECTED_LARGE = [
+        ("key_08", 8), ("key_15", 15), ("key_13", 13), ("key_12", 12), ("key_16", 16),
+    ]
+
+    def test_large_dict_matches_luajit(self):
+        """20-item dict — verifies sort and selection over a larger space."""
+        prng = PseudoRandom("TESTSEED")
+        table = {f"key_{i:02d}": i for i in range(1, 21)}
+        for i, (exp_key, exp_val) in enumerate(self.EXPECTED_LARGE):
+            sv = prng.seed("elem_large")
+            val, key = prng.element(table, sv)
+            assert key == exp_key and val == exp_val, (
+                f"large[{i + 1}]: got ({key!r}, {val}) expected ({exp_key!r}, {exp_val})"
+            )
+
+    def test_single_element_dict(self):
+        """Single-element dict always returns that element."""
+        prng = PseudoRandom("TESTSEED")
+        sv = prng.seed("elem_single")
+        val, key = prng.element({"only": 42}, sv)
+        assert key == "only" and val == 42
+
+    # LuaJIT ground truth: list input (Lua array with integer keys 1..N)
+    EXPECTED_LIST = [
+        (4, "date"), (5, "elderberry"), (1, "apple"), (5, "elderberry"), (3, "cherry"),
+    ]
+
+    def test_list_input_matches_luajit(self):
+        """Lists use 1-based integer keys matching Lua arrays."""
+        prng = PseudoRandom("TESTSEED")
+        items = ["apple", "banana", "cherry", "date", "elderberry"]
+        for i, (exp_key, exp_val) in enumerate(self.EXPECTED_LIST):
+            sv = prng.seed("elem_list")
+            val, key = prng.element(items, sv)
+            assert key == exp_key and val == exp_val, (
+                f"list[{i + 1}]: got (key={key}, val={val!r}) "
+                f"expected (key={exp_key}, val={exp_val!r})"
+            )
 
     def test_deterministic(self):
         prng = PseudoRandom("TESTSEED")
@@ -292,32 +372,6 @@ class TestPseudoRandomElement:
         v1, k1 = prng.element(table, 0.42)
         v2, k2 = prng.element(table, 0.42)
         assert k1 == k2 and v1 == v2
-
-    def test_different_seeds_can_differ(self):
-        prng = PseudoRandom("TESTSEED")
-        table = {str(i): i for i in range(20)}
-        _, k1 = prng.element(table, 0.1)
-        _, k2 = prng.element(table, 0.9)
-        assert k1 != k2
-
-    def test_list_input(self):
-        prng = PseudoRandom("TESTSEED")
-        items = ["apple", "banana", "cherry"]
-        val, key = prng.element(items, 0.5)
-        assert val in items
-        assert isinstance(key, int)  # 1-based index
-
-    def test_sort_by_sort_id(self):
-        """Dicts with sort_id should be sorted by that field."""
-        prng = PseudoRandom("TESTSEED")
-        table = {
-            "z_first": {"sort_id": 1, "name": "first"},
-            "a_second": {"sort_id": 2, "name": "second"},
-        }
-        # Same seed, same sort → same result
-        v1, _ = prng.element(table, 0.1)
-        v2, _ = prng.element(table, 0.1)
-        assert v1 == v2
 
     def test_empty_raises(self):
         prng = PseudoRandom("TESTSEED")
