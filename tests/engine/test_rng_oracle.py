@@ -49,6 +49,14 @@ def find_lua() -> str | None:
         path = shutil.which(name)
         if path:
             return path
+    # Check common Windows install locations
+    for candidate in [
+        Path.home() / "AppData/Local/Programs/LuaJIT/bin/luajit.exe",
+        Path("C:/Program Files/LuaJIT/bin/luajit.exe"),
+        Path("C:/Program Files (x86)/LuaJIT/bin/luajit.exe"),
+    ]:
+        if candidate.exists():
+            return str(candidate)
     return None
 
 
