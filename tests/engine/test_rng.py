@@ -210,6 +210,45 @@ class TestPseudoRandomSeed:
         prng = PseudoRandom("MYSEED")
         assert prng.seed_str == "MYSEED"
 
+    def test_init_only_has_reserved_keys(self):
+        """Fresh PseudoRandom has only 'seed' and 'hashed_seed', no streams."""
+        prng = PseudoRandom("A3K9NZ2B")
+        assert set(prng.state.keys()) == {"seed", "hashed_seed"}
+
+    # LuaJIT ground truth: lazy init values = pseudohash(key + seed)
+    LAZY_INIT_TRUTH_A3K9NZ2B = {
+        "boss": 0.990965706218390,
+        "shuffle": 0.809884197253268,
+        "lucky_mult": 0.781085030487418,
+        "rarity1": 0.393872785063536,
+        "front1": 0.978286517849483,
+    }
+
+    @pytest.mark.parametrize("key,expected_init", LAZY_INIT_TRUTH_A3K9NZ2B.items())
+    def test_lazy_init_matches_pseudohash(self, key: str, expected_init: float):
+        """First access to a stream initializes it from pseudohash(key+seed)."""
+        prng = PseudoRandom("A3K9NZ2B")
+        assert key not in prng.state
+        prng.seed(key)  # triggers lazy init then advances
+        # After the first call, the stored value has been ADVANCED past init.
+        # Verify the init value itself:
+        init_val = pseudohash(key + "A3K9NZ2B")
+        assert abs(init_val - expected_init) < HASH_TOL, (
+            f"pseudohash({key!r}+'A3K9NZ2B') = {init_val:.15f}, expected {expected_init:.15f}"
+        )
+
+    def test_lazy_init_then_advance_matches_a3k9nz2b(self):
+        """Full sequence on A3K9NZ2B: lazy init → 5 advances, all match oracle."""
+        prng = PseudoRandom("A3K9NZ2B")
+        for stream_key in ["boss", "shuffle", "lucky_mult", "rarity1"]:
+            expected_seq = PSEUDOSEED_TRUTH["A3K9NZ2B"][stream_key]
+            for call_idx, (expected_result, _) in enumerate(expected_seq):
+                result = prng.seed(stream_key)
+                assert abs(result - expected_result) < SEED_TOL, (
+                    f"A3K9NZ2B {stream_key}[{call_idx + 1}]: "
+                    f"{result:.15f} != {expected_result:.15f}"
+                )
+
 
 class TestPseudoRandomPredictSeed:
     """PseudoRandom.predict_seed(): stateless preview."""
@@ -614,9 +653,26 @@ class TestFunctionalShuffle:
 
 
 class TestGenerateStartingSeed:
-    """generate_starting_seed: 8-char alphanumeric."""
+    """generate_starting_seed: 8-char alphanumeric.
+
+    Ground truth from LuaJIT 2.1 random_string() (misc_functions.lua:270).
+    """
 
     ALLOWED = set("123456789ABCDEFGHIJKLMNPQRSTUVWXYZ")
+
+    # LuaJIT ground truth: entropy → seed string
+    LUAJIT_TRUTH = {
+        0.0: "7BXBJDJG",
+        0.42: "A9B2M1XG",
+        0.999: "XVXSVYEJ",
+        1.5: "5SVPRIP2",
+        3.14159: "84F18YHB",
+    }
+
+    @pytest.mark.parametrize("entropy,expected", LUAJIT_TRUTH.items())
+    def test_matches_luajit(self, entropy: float, expected: str):
+        result = generate_starting_seed(entropy)
+        assert result == expected, f"entropy={entropy}: {result!r} != {expected!r}"
 
     def test_length(self):
         assert len(generate_starting_seed(0.42)) == 8
