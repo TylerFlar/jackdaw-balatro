@@ -138,7 +138,7 @@ celerybeat.pid
 .env
 .envrc
 .venv
-env/
+/env/
 venv/
 ENV/
 env.bak/
@@ -205,3 +205,6 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Balatro
+balatro_source/

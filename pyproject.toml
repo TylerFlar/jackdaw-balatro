@@ -1,0 +1,24 @@
+[project]
+name = "jackdaw"
+version = "0.1.0"
+description = "Headless Balatro simulator for reinforcement learning research"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=6.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["-v", "--tb=short"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
