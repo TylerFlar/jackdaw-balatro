@@ -380,54 +380,121 @@ class TestPseudoRandomElement:
 
 
 class TestPseudoRandomShuffle:
-    """PseudoRandom.shuffle(): Fisher-Yates."""
+    """PseudoRandom.shuffle(): Fisher-Yates with sort_id pre-sort.
 
-    def test_preserves_elements(self):
-        prng = PseudoRandom("TESTSEED")
-        lst = list(range(52))
-        prng.shuffle(lst, 0.42)
-        assert sorted(lst) == list(range(52))
+    Ground truth from LuaJIT 2.1 pseudoshuffle() with seed 'TESTSEED'.
+    Each test uses sequential pseudoseed advances on a named stream, then
+    passes the resulting float to shuffle() — exactly matching the game's
+    deck shuffle pattern.
+    """
 
-    def test_actually_shuffles(self):
-        prng = PseudoRandom("TESTSEED")
-        lst = list(range(20))
-        original = lst.copy()
-        prng.shuffle(lst, 0.42)
-        assert lst != original
+    # LuaJIT ground truth: plain [1..10], 3 trials on 'shuf_plain' stream
+    EXPECTED_PLAIN = [
+        [7, 1, 5, 3, 8, 10, 6, 9, 2, 4],
+        [4, 10, 1, 2, 6, 7, 5, 8, 9, 3],
+        [4, 10, 8, 6, 7, 3, 2, 5, 1, 9],
+    ]
 
-    def test_deterministic(self):
+    def test_plain_list_matches_luajit(self):
+        """[1..10] shuffled 3 times must match LuaJIT exactly."""
         prng = PseudoRandom("TESTSEED")
-        a = list(range(20))
-        b = list(range(20))
-        prng.shuffle(a, 0.42)
-        prng.shuffle(b, 0.42)
-        assert a == b
+        for trial, expected in enumerate(self.EXPECTED_PLAIN):
+            sv = prng.seed("shuf_plain")
+            lst = list(range(1, 11))
+            prng.shuffle(lst, sv)
+            assert lst == expected, (
+                f"plain[{trial + 1}]: {lst} != {expected}"
+            )
 
-    def test_different_seeds_different_order(self):
-        prng = PseudoRandom("TESTSEED")
-        a = list(range(20))
-        b = list(range(20))
-        prng.shuffle(a, 0.1)
-        prng.shuffle(b, 0.9)
-        assert a != b
+    # LuaJIT ground truth: 52-item deck shuffle
+    EXPECTED_DECK52 = [
+        43, 19, 4, 45, 14, 3, 13, 52, 50, 7, 24, 33, 48, 20, 29,
+        41, 21, 26, 31, 37, 12, 25, 28, 40, 16, 1, 47, 5, 22, 42,
+        10, 46, 18, 23, 30, 15, 36, 8, 11, 39, 6, 35, 2, 38, 27,
+        34, 51, 17, 44, 32, 49, 9,
+    ]
 
-    def test_sort_id_presort(self):
-        """Elements with sort_id should be pre-sorted before shuffling."""
+    def test_52_card_deck_matches_luajit(self):
+        """Full 52-card deck shuffle — the actual game use case."""
         prng = PseudoRandom("TESTSEED")
+        sv = prng.seed("shuf_deck")
+        deck = list(range(1, 53))
+        prng.shuffle(deck, sv)
+        assert deck == self.EXPECTED_DECK52
+
+    # LuaJIT ground truth: sort_id pre-sort
+    EXPECTED_SORTID = [8, 2, 5, 6, 4, 7, 1, 3, 10, 9]
+
+    def test_sort_id_presort_reversed_input(self):
+        """Items with sort_id in reverse order are pre-sorted then shuffled."""
 
         class Item:
             def __init__(self, sort_id: int):
                 self.sort_id = sort_id
+                self.val = sort_id
 
-        items = [Item(5), Item(1), Item(3), Item(2), Item(4)]
-        prng.shuffle(items, 0.42)
-        # Can't assert specific order, but all items should be present
-        assert sorted(x.sort_id for x in items) == [1, 2, 3, 4, 5]
+        prng = PseudoRandom("TESTSEED")
+        sv = prng.seed("shuf_sortid")
+        items = [Item(i) for i in range(10, 0, -1)]  # reversed
+        prng.shuffle(items, sv)
+        result = [x.val for x in items]
+        assert result == self.EXPECTED_SORTID, (
+            f"sortid_rev: {result} != {self.EXPECTED_SORTID}"
+        )
+
+    def test_sort_id_presort_forward_input(self):
+        """Items with sort_id in forward order produce same result as reversed."""
+
+        class Item:
+            def __init__(self, sort_id: int):
+                self.sort_id = sort_id
+                self.val = sort_id
+
+        prng = PseudoRandom("TESTSEED")
+        sv = prng.seed("shuf_sortid")
+        items = [Item(i) for i in range(1, 11)]  # forward
+        prng.shuffle(items, sv)
+        result = [x.val for x in items]
+        assert result == self.EXPECTED_SORTID, (
+            f"sortid_fwd: {result} != {self.EXPECTED_SORTID}"
+        )
+
+    def test_sort_id_presort_random_input(self):
+        """Items in arbitrary order still produce same result after pre-sort."""
+
+        class Item:
+            def __init__(self, sort_id: int):
+                self.sort_id = sort_id
+                self.val = sort_id
+
+        prng = PseudoRandom("TESTSEED")
+        sv = prng.seed("shuf_sortid")
+        items = [Item(i) for i in [5, 2, 8, 1, 9, 3, 7, 10, 6, 4]]  # scrambled
+        prng.shuffle(items, sv)
+        result = [x.val for x in items]
+        assert result == self.EXPECTED_SORTID
+
+    def test_dict_sort_id_presort(self):
+        """sort_id on dicts works the same as on objects."""
+        prng = PseudoRandom("TESTSEED")
+        sv = prng.seed("shuf_sortid")
+        items = [{"sort_id": i, "val": i} for i in range(10, 0, -1)]
+        prng.shuffle(items, sv)
+        result = [x["val"] for x in items]
+        assert result == self.EXPECTED_SORTID
+
+    def test_two_elements(self):
+        prng = PseudoRandom("TESTSEED")
+        sv = prng.seed("shuf_two")
+        lst = [1, 2]
+        prng.shuffle(lst, sv)
+        assert lst == [2, 1]  # LuaJIT ground truth
 
     def test_single_element(self):
         prng = PseudoRandom("TESTSEED")
+        sv = prng.seed("shuf_one")
         lst = [42]
-        prng.shuffle(lst, 0.5)
+        prng.shuffle(lst, sv)
         assert lst == [42]
 
     def test_empty_list(self):
@@ -435,6 +502,12 @@ class TestPseudoRandomShuffle:
         lst: list = []
         prng.shuffle(lst, 0.5)
         assert lst == []
+
+    def test_preserves_elements(self):
+        prng = PseudoRandom("TESTSEED")
+        lst = list(range(52))
+        prng.shuffle(lst, 0.42)
+        assert sorted(lst) == list(range(52))
 
 
 class TestPseudoRandomStateManagement:
