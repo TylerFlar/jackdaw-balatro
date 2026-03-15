@@ -3,16 +3,93 @@
 Replicates the three-layer RNG architecture from the Balatro source:
   1. pseudohash(str) — deterministic string → float hash
   2. PseudoRandom.seed(key) — stateful float-domain LCG per named stream
-  3. PseudoRandom.random() — bridges to uniform random output
+  3. PseudoRandom.random() — bridges to uniform random output via LuaJIT's TW223
 
 The original Lua code lives in misc_functions.lua (lines 206-320).
+The secondary PRNG (TW223) replicates LuaJIT's math.randomseed/math.random
+from lj_prng.c — a combined Tausworthe generator with period 2^223.
+
 See docs/source-map/rng-system.md for the full specification.
 """
 
 from __future__ import annotations
 
 import math
-import random as _random_mod  # aliased to avoid shadowing by method names
+import struct
+
+_MASK64 = 0xFFFF_FFFF_FFFF_FFFF
+
+
+# ---------------------------------------------------------------------------
+# LuaJIT TW223 PRNG — replicates lj_prng.c
+# ---------------------------------------------------------------------------
+# Combined Tausworthe generator (4 × 64-bit state words).
+# Parameters from LuaJIT v2.1 src/lj_prng.c TW223_GEN macro.
+
+_TW223_PARAMS: list[tuple[int, int, int]] = [
+    (63, 31, 18),
+    (58, 19, 28),
+    (55, 24, 7),
+    (47, 21, 8),
+]
+
+
+def _tw223_step(state: list[int]) -> int:
+    """Advance the TW223 state and return a raw 64-bit result.
+
+    Replicates the ``TW223_STEP`` macro in ``lj_prng.c``.
+    """
+    r = 0
+    for i, (k, q, s) in enumerate(_TW223_PARAMS):
+        z = state[i]
+        # TW223_GEN:
+        #   z = (((z<<q)^z) >> (k-s)) ^ ((z & high_mask) << s)
+        # where high_mask = upper k bits = (-1 << (64-k))
+        high_mask = (_MASK64 << (64 - k)) & _MASK64
+        z = ((((z << q) & _MASK64) ^ z) >> (k - s)) ^ (((z & high_mask) << s) & _MASK64)
+        r ^= z
+        state[i] = z
+    return r & _MASK64
+
+
+def _luajit_seed(seed_double: float) -> list[int]:
+    """Initialise a TW223 state from a double, matching ``random_seed()`` in lib_math.c.
+
+    The double is iteratively transformed (``d = d*pi + e``), reinterpreted
+    as uint64 via IEEE 754 bit pattern, and stored into 4 state words.
+    A minimum-bit threshold is applied per word, then 10 warm-up steps are run.
+    """
+    state = [0, 0, 0, 0]
+    r = 0x11090601  # encodes min-bit thresholds: bytes 1, 6, 9, 17
+    d = seed_double
+    for i in range(4):
+        m = 1 << (r & 0xFF)
+        r >>= 8
+        d = d * 3.14159265358979323846 + 2.7182818284590452354
+        u64 = struct.unpack("<Q", struct.pack("<d", d))[0]
+        if u64 < m:
+            u64 += m
+        state[i] = u64
+    # 10 warm-up iterations (lj_prng_u64, discards output)
+    for _ in range(10):
+        _tw223_step(state)
+    return state
+
+
+def _luajit_random(state: list[int]) -> float:
+    """Draw a float in [0, 1) from TW223 state, matching ``lj_prng_u64d`` + lib_math.c."""
+    r = _tw223_step(state)
+    # Mask to 52-bit mantissa, set exponent for [1.0, 2.0)
+    u64 = (r & 0x000F_FFFF_FFFF_FFFF) | 0x3FF0_0000_0000_0000
+    d = struct.unpack("<d", struct.pack("<Q", u64))[0]
+    return d - 1.0
+
+
+def _luajit_random_int(state: list[int], a: int, b: int) -> int:
+    """Draw an int in [a, b] from TW223 state, matching LuaJIT ``math.random(a, b)``."""
+    d = _luajit_random(state)
+    return int(math.floor(d * (b - a + 1))) + a
+
 
 # ---------------------------------------------------------------------------
 # Module-level pure function — used standalone and by PseudoRandom
@@ -31,8 +108,6 @@ def pseudohash(s: str) -> float:
     For an empty string the loop body never executes and the result is 1.0.
     """
     num = 1.0
-    # Lua: for i=#str, 1, -1 do ... string.byte(str, i)
-    # i is 1-based, so for Python's 0-based indexing: byte = ord(s[i-1])
     for i in range(len(s), 0, -1):
         byte = ord(s[i - 1])
         num = ((1.1239285023 / num) * byte * math.pi + math.pi * i) % 1
@@ -42,20 +117,10 @@ def pseudohash(s: str) -> float:
 def _truncate_13(x: float) -> float:
     """Replicate Lua's ``tonumber(string.format("%.13f", x))``.
 
-    Truncates (rounds) to 13 decimal places, then converts back to float.
-    This prevents floating-point drift and is essential for cross-platform
-    determinism between Lua and Python.
+    Rounds to 13 decimal places then converts back to float.  This prevents
+    floating-point drift and is essential for cross-platform determinism.
     """
     return float(f"{x:.13f}")
-
-
-# ---------------------------------------------------------------------------
-# Internal RNG used by PseudoRandom.random / .element / .shuffle
-# ---------------------------------------------------------------------------
-# We use a *dedicated* Random instance so we never disturb (or get disturbed
-# by) the module-level ``random`` state that other code might rely on.
-
-_rng = _random_mod.Random()
 
 
 # ---------------------------------------------------------------------------
@@ -77,7 +142,6 @@ class PseudoRandom:
     mutating state (used by ``get_first_legendary`` in the source).
     """
 
-    # The two reserved keys that are NOT stream counters
     _RESERVED = frozenset({"seed", "hashed_seed"})
 
     def __init__(self, seed_str: str) -> None:
@@ -107,36 +171,18 @@ class PseudoRandom:
         """Advance stream *key* and return a coupled float.
 
         Equivalent to Lua ``pseudoseed(key)`` (misc_functions.lua:298).
-
-        On the first call for a given *key*, initialises the stream from
-        ``pseudohash(key + seed_string)``.  Each call then advances via a
-        float-domain LCG::
-
-            state[key] = abs(truncate_13( (2.134453429141 + state[key] * 1.72431234) % 1 ))
-
-        and returns ``(state[key] + hashed_seed) / 2``.
         """
         st = self._state
-
-        # Lazy init
         if key not in st:
             st[key] = pseudohash(key + st["seed"])
-
-        # Advance
         raw = (2.134453429141 + st[key] * 1.72431234) % 1
         st[key] = abs(_truncate_13(raw))
-
         return (st[key] + st["hashed_seed"]) / 2
 
     # -- predict_seed (stateless) -------------------------------------------
 
     def predict_seed(self, key: str, predict_seed_str: str) -> float:
-        """Stateless seed preview — does NOT mutate any stream.
-
-        Equivalent to Lua ``pseudoseed(key, predict_seed)``
-        (misc_functions.lua:302-307).  Used by ``get_first_legendary``
-        to test what a hypothetical seed would produce.
-        """
+        """Stateless seed preview — does NOT mutate any stream."""
         _pseed = pseudohash(key + predict_seed_str)
         _pseed = abs(_truncate_13((2.134453429141 + _pseed * 1.72431234) % 1))
         return (_pseed + pseudohash(predict_seed_str)) / 2
@@ -155,8 +201,8 @@ class PseudoRandom:
         (misc_functions.lua:315).
 
         If *key* is a string, :meth:`seed` is called first to advance
-        that stream and obtain a numeric seed.  The numeric seed is then
-        used to initialise a one-shot RNG from which the output is drawn.
+        that stream.  The resulting float seeds LuaJIT's TW223 PRNG,
+        from which the output is drawn.
 
         Returns a float in [0, 1) when no range is given, or an int
         in [min_val, max_val] inclusive otherwise.
@@ -166,11 +212,10 @@ class PseudoRandom:
         else:
             numeric_seed = key
 
-        _rng.seed(numeric_seed)
-
+        tw_state = _luajit_seed(numeric_seed)
         if min_val is not None and max_val is not None:
-            return _rng.randint(min_val, max_val)
-        return _rng.random()
+            return _luajit_random_int(tw_state, min_val, max_val)
+        return _luajit_random(tw_state)
 
     # -- pseudorandom_element -----------------------------------------------
 
@@ -181,24 +226,21 @@ class PseudoRandom:
         (misc_functions.lua:253).
 
         The collection is first sorted deterministically — by ``sort_id``
-        attribute if the values are dicts/objects with one, otherwise by
-        key — to compensate for non-deterministic iteration order.
+        if available, otherwise by key — then a random index is drawn.
 
         Returns ``(selected_value, selected_key)``.
         """
-        _rng.seed(seed_val)
+        tw_state = _luajit_seed(seed_val)
 
-        # Build (key, value) pairs
         if isinstance(table, dict):
-            entries = [(k, v) for k, v in table.items()]
+            entries = list(table.items())
         else:
-            # Lists: key is the 1-based index (matching Lua)
             entries = [(i + 1, v) for i, v in enumerate(table)]
 
         if not entries:
             raise ValueError("cannot select from empty table")
 
-        # Deterministic sort
+        # Deterministic sort (matches Lua pseudorandom_element)
         first_val = entries[0][1]
         if isinstance(first_val, dict) and "sort_id" in first_val:
             entries.sort(key=lambda e: e[1]["sort_id"])
@@ -207,8 +249,8 @@ class PseudoRandom:
         else:
             entries.sort(key=lambda e: (isinstance(e[0], str), e[0]))
 
-        idx = _rng.randint(0, len(entries) - 1)
-        k, v = entries[idx]
+        idx = _luajit_random_int(tw_state, 1, len(entries))
+        k, v = entries[idx - 1]  # Lua is 1-based
         return v, k
 
     # -- pseudoshuffle ------------------------------------------------------
@@ -218,12 +260,8 @@ class PseudoRandom:
 
         Equivalent to Lua ``pseudoshuffle(list, seed)``
         (misc_functions.lua:206).
-
-        Pre-sorts by ``sort_id`` (if elements have one) to ensure a
-        deterministic starting order, then applies the standard backward
-        Fisher-Yates.
         """
-        _rng.seed(seed_val)
+        tw_state = _luajit_seed(seed_val)
 
         # Pre-sort by sort_id if available
         if lst and hasattr(lst[0], "sort_id"):
@@ -231,9 +269,9 @@ class PseudoRandom:
         elif lst and isinstance(lst[0], dict) and "sort_id" in lst[0]:
             lst.sort(key=lambda x: x.get("sort_id", 1))
 
-        # Backward Fisher-Yates (matches Lua: for i = #list, 2, -1)
+        # Backward Fisher-Yates: for i = #list, 2, -1 do j = random(i)
         for i in range(len(lst) - 1, 0, -1):
-            j = _rng.randint(0, i)  # Lua: math.random(i) returns 1..i
+            j = _luajit_random_int(tw_state, 1, i + 1) - 1  # convert 1-based to 0-based
             lst[i], lst[j] = lst[j], lst[i]
 
     # -- state management ---------------------------------------------------
@@ -264,13 +302,10 @@ def pseudoseed(key: str, state: dict[str, float]) -> float:
     Thin wrapper matching the original Lua ``pseudoseed(key)`` signature.
     Mutates *state* in place.
     """
-    # Lazy init
     if key not in state:
         state[key] = pseudohash(key + (state.get("seed") or ""))
-
     raw = (2.134453429141 + state[key] * 1.72431234) % 1
     state[key] = abs(_truncate_13(raw))
-
     return (state[key] + (state.get("hashed_seed") or 0)) / 2
 
 
@@ -288,18 +323,18 @@ def pseudorandom(
     else:
         numeric = seed
 
-    _rng.seed(numeric)
+    tw_state = _luajit_seed(numeric)
     if min_val is not None and max_val is not None:
-        return _rng.randint(min_val, max_val)
-    return _rng.random()
+        return _luajit_random_int(tw_state, min_val, max_val)
+    return _luajit_random(tw_state)
 
 
 def pseudorandom_element(table: dict | list, seed: float) -> tuple:
     """Functional API matching Lua ``pseudorandom_element(_t, seed)``."""
-    _rng.seed(seed)
+    tw_state = _luajit_seed(seed)
 
     if isinstance(table, dict):
-        entries = [(k, v) for k, v in table.items()]
+        entries = list(table.items())
     else:
         entries = [(i + 1, v) for i, v in enumerate(table)]
 
@@ -314,14 +349,14 @@ def pseudorandom_element(table: dict | list, seed: float) -> tuple:
     else:
         entries.sort(key=lambda e: (isinstance(e[0], str), e[0]))
 
-    idx = _rng.randint(0, len(entries) - 1)
-    k, v = entries[idx]
+    idx = _luajit_random_int(tw_state, 1, len(entries))
+    k, v = entries[idx - 1]
     return v, k
 
 
 def pseudoshuffle(lst: list, seed: float) -> None:
     """Functional API matching Lua ``pseudoshuffle(list, seed)``."""
-    _rng.seed(seed)
+    tw_state = _luajit_seed(seed)
 
     if lst and hasattr(lst[0], "sort_id"):
         lst.sort(key=lambda x: getattr(x, "sort_id", 1))
@@ -329,7 +364,7 @@ def pseudoshuffle(lst: list, seed: float) -> None:
         lst.sort(key=lambda x: x.get("sort_id", 1))
 
     for i in range(len(lst) - 1, 0, -1):
-        j = _rng.randint(0, i)
+        j = _luajit_random_int(tw_state, 1, i + 1) - 1
         lst[i], lst[j] = lst[j], lst[i]
 
 
@@ -339,16 +374,14 @@ def generate_starting_seed(entropy: float = 0.0) -> str:
     Characters: digits 1-9, letters A-N, P-Z (no 0 or O).
     Matches Lua ``random_string`` (misc_functions.lua:270).
     """
-    _rng.seed(entropy)
+    tw_state = _luajit_seed(entropy)
+
     chars: list[str] = []
     for _ in range(8):
-        if _rng.random() > 0.7:
-            # digit 1-9
-            chars.append(chr(_rng.randint(ord("1"), ord("9"))))
-        elif _rng.random() > 0.45:
-            # letter A-N
-            chars.append(chr(_rng.randint(ord("A"), ord("N"))))
+        if _luajit_random(tw_state) > 0.7:
+            chars.append(chr(_luajit_random_int(tw_state, ord("1"), ord("9"))))
+        elif _luajit_random(tw_state) > 0.45:
+            chars.append(chr(_luajit_random_int(tw_state, ord("A"), ord("N"))))
         else:
-            # letter P-Z
-            chars.append(chr(_rng.randint(ord("P"), ord("Z"))))
+            chars.append(chr(_luajit_random_int(tw_state, ord("P"), ord("Z"))))
     return "".join(chars).upper()
