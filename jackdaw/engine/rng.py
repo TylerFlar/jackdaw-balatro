@@ -1,21 +1,101 @@
-"""Balatro-compatible PRNG system.
+"""Balatro-compatible PRNG system — bit-exact with LuaJIT 2.1.
 
-Replicates the three-layer RNG architecture from the Balatro source:
-  1. pseudohash(str) — deterministic string → float hash
-  2. PseudoRandom.seed(key) — stateful float-domain LCG per named stream
-  3. PseudoRandom.random() — bridges to uniform random output via LuaJIT's TW223
+Three-Layer Architecture
+========================
 
-The original Lua code lives in misc_functions.lua (lines 206-320).
-The secondary PRNG (TW223) replicates LuaJIT's math.randomseed/math.random
-from lj_prng.c — a combined Tausworthe generator with period 2^223.
+Balatro's RNG is a three-layer system.  Each layer feeds into the next:
 
-See docs/source-map/rng-system.md for the full specification.
+**Layer 1 — pseudohash (string → float)**
+    A custom hash that maps any string to a float in [0, 1).  Iterates the
+    string's bytes in reverse with a nonlinear accumulator involving division,
+    multiplication by π, and mod 1.  Used only for *initialisation*, never
+    during gameplay random draws.  Source: ``misc_functions.lua:279``.
+
+**Layer 2 — pseudoseed (stateful float LCG per named stream)**
+    Each gameplay system (shop, scoring, blinds, etc.) has its own *named
+    stream* stored as a float in ``G.GAME.pseudorandom[key]``.  On first
+    access the stream is lazily initialised from ``pseudohash(key + seed)``.
+    Each call advances the stream via a float-domain linear congruential
+    generator::
+
+        state[key] = abs(truncate_13( (2.134453429141 + state[key] * 1.72431234) % 1 ))
+        return (state[key] + hashed_seed) / 2
+
+    The ``truncate_13`` step (``tonumber(string.format("%.13f", x))`` in Lua)
+    rounds to 13 decimal places to prevent floating-point drift.  Streams are
+    independent — advancing ``'boss'`` never touches ``'shuffle'``.
+    Source: ``misc_functions.lua:298``.
+
+**Layer 3 — pseudorandom (LuaJIT TW223 secondary PRNG)**
+    The float from Layer 2 is used to seed LuaJIT's TW223 combined Tausworthe
+    generator (``lj_prng.c``), from which the actual uniform output is drawn.
+    The game calls ``math.randomseed(seed_float)`` then ``math.random()`` on
+    every random operation — effectively using TW223 as a one-shot
+    seed-to-output function.  This module replicates TW223 exactly, including
+    the IEEE 754 bit-pattern reinterpretation during seeding and the 10-step
+    warm-up.  Source: ``misc_functions.lua:315``, ``lj_prng.c``.
+
+Per-Stream Independence
+=======================
+
+The ~65 named streams (``'boss'``, ``'shuffle'``, ``'lucky_mult'``,
+``'rarity'``, ``'cdt'``, etc.) each maintain their own float counter.
+Advancing one stream never affects another.  Many keys include the current
+ante as a suffix (e.g. ``'rarity1sho'``) so that the shop at ante 3 uses
+different values than the shop at ante 5.
+
+Seed Lifecycle
+==============
+
+1. **Run start**: seed string is set (player-entered, ``"TUTORIAL"``, or
+   generated from cursor entropy via :func:`generate_starting_seed`).
+2. ``hashed_seed = pseudohash(seed_string)`` — computed once, mixed into
+   every Layer 2 output.
+3. Streams are lazily initialised on first access:
+   ``state[key] = pseudohash(key + seed_string)``.
+4. The entire ``state`` dict is serialised on save and restored on load.
+   Stream values of ``0`` are re-hashed (the save convention).
+
+Known Non-Determinism
+=====================
+
+Three ``math.random()`` calls in the Lua source bypass the pseudoseed
+system entirely, drawing from whatever state LuaJIT's global RNG happens
+to be in.  These are **not** reproducible from the seed alone:
+
+- ``tag.lua:211`` — Charm Tag: picks Mega Arcana pack variant 1 or 2
+- ``tag.lua:226`` — Meteor Tag: picks Mega Celestial pack variant 1 or 2
+- ``common_events.lua:1947`` — first Buffoon pack: picks variant 1 or 2
+
+In practice these are often "accidentally deterministic" because
+``pseudorandom`` re-seeds the global RNG on every call, but they are
+**not guaranteed** to match across implementations.  The simulator
+treats these as a known deviation and makes a deterministic choice
+(always variant 1) or uses the pseudoseed system instead.
+
+Public API
+==========
+
+.. autoclass:: PseudoRandom
+.. autofunction:: pseudohash
+.. autofunction:: generate_starting_seed
 """
 
 from __future__ import annotations
 
 import math
 import struct
+
+__all__ = [
+    "PseudoRandom",
+    "pseudohash",
+    "generate_starting_seed",
+    # Functional wrappers (for use without a PseudoRandom instance):
+    "pseudoseed",
+    "pseudorandom",
+    "pseudorandom_element",
+    "pseudoshuffle",
+]
 
 _MASK64 = 0xFFFF_FFFF_FFFF_FFFF
 
