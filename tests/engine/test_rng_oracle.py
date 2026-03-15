@@ -231,7 +231,6 @@ class TestLiveLuaOracle:
     def test_other_seeds(self, lua_path, seed_str):
         """Cross-validate additional seeds beyond TESTSEED."""
         oracle = run_lua_oracle(seed_str, lua_path)
-        prng = PseudoRandom(seed_str)
 
         # hashed_seed
         assert abs(pseudohash(seed_str) - oracle["hashed_seed"]) < HASH_TOL

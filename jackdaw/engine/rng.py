@@ -19,37 +19,64 @@ import struct
 
 _MASK64 = 0xFFFF_FFFF_FFFF_FFFF
 
+# Pre-compiled struct formatters (avoids repeated format string parsing)
+_PACK_D = struct.Struct("<d")
+_PACK_Q = struct.Struct("<Q")
+
 
 # ---------------------------------------------------------------------------
 # LuaJIT TW223 PRNG — replicates lj_prng.c
 # ---------------------------------------------------------------------------
 # Combined Tausworthe generator (4 × 64-bit state words).
 # Parameters from LuaJIT v2.1 src/lj_prng.c TW223_GEN macro.
+# Unrolled for performance (called millions of times during RL training).
 
-_TW223_PARAMS: list[tuple[int, int, int]] = [
-    (63, 31, 18),
-    (58, 19, 28),
-    (55, 24, 7),
-    (47, 21, 8),
-]
+# Pre-computed high masks for each generator
+_HMASK0 = (_MASK64 << 1) & _MASK64   # 64-63 = 1
+_HMASK1 = (_MASK64 << 6) & _MASK64   # 64-58 = 6
+_HMASK2 = (_MASK64 << 9) & _MASK64   # 64-55 = 9
+_HMASK3 = (_MASK64 << 17) & _MASK64  # 64-47 = 17
+
+# Min-bit thresholds (from 0x11090601 constant)
+_MIN0 = 1 << 1    # 2
+_MIN1 = 1 << 6    # 64
+_MIN2 = 1 << 9    # 512
+_MIN3 = 1 << 17   # 131072
+
+# Seeding constants
+_PI = 3.14159265358979323846
+_E = 2.7182818284590452354
 
 
 def _tw223_step(state: list[int]) -> int:
     """Advance the TW223 state and return a raw 64-bit result.
 
     Replicates the ``TW223_STEP`` macro in ``lj_prng.c``.
+    Unrolled for ~30% speedup over the loop version.
     """
-    r = 0
-    for i, (k, q, s) in enumerate(_TW223_PARAMS):
-        z = state[i]
-        # TW223_GEN:
-        #   z = (((z<<q)^z) >> (k-s)) ^ ((z & high_mask) << s)
-        # where high_mask = upper k bits = (-1 << (64-k))
-        high_mask = (_MASK64 << (64 - k)) & _MASK64
-        z = ((((z << q) & _MASK64) ^ z) >> (k - s)) ^ (((z & high_mask) << s) & _MASK64)
-        r ^= z
-        state[i] = z
-    return r & _MASK64
+    M = _MASK64
+
+    z = state[0]
+    z = ((((z << 31) & M) ^ z) >> 45) ^ (((z & _HMASK0) << 18) & M)
+    r = z
+    state[0] = z
+
+    z = state[1]
+    z = ((((z << 19) & M) ^ z) >> 30) ^ (((z & _HMASK1) << 28) & M)
+    r ^= z
+    state[1] = z
+
+    z = state[2]
+    z = ((((z << 24) & M) ^ z) >> 48) ^ (((z & _HMASK2) << 7) & M)
+    r ^= z
+    state[2] = z
+
+    z = state[3]
+    z = ((((z << 21) & M) ^ z) >> 39) ^ (((z & _HMASK3) << 8) & M)
+    r ^= z
+    state[3] = z
+
+    return r & M
 
 
 def _luajit_seed(seed_double: float) -> list[int]:
@@ -59,17 +86,33 @@ def _luajit_seed(seed_double: float) -> list[int]:
     as uint64 via IEEE 754 bit pattern, and stored into 4 state words.
     A minimum-bit threshold is applied per word, then 10 warm-up steps are run.
     """
-    state = [0, 0, 0, 0]
-    r = 0x11090601  # encodes min-bit thresholds: bytes 1, 6, 9, 17
+    pack_d = _PACK_D.pack
+    unpack_q = _PACK_Q.unpack
+
     d = seed_double
-    for i in range(4):
-        m = 1 << (r & 0xFF)
-        r >>= 8
-        d = d * 3.14159265358979323846 + 2.7182818284590452354
-        u64 = struct.unpack("<Q", struct.pack("<d", d))[0]
-        if u64 < m:
-            u64 += m
-        state[i] = u64
+
+    d = d * _PI + _E
+    u0 = unpack_q(pack_d(d))[0]
+    if u0 < _MIN0:
+        u0 += _MIN0
+
+    d = d * _PI + _E
+    u1 = unpack_q(pack_d(d))[0]
+    if u1 < _MIN1:
+        u1 += _MIN1
+
+    d = d * _PI + _E
+    u2 = unpack_q(pack_d(d))[0]
+    if u2 < _MIN2:
+        u2 += _MIN2
+
+    d = d * _PI + _E
+    u3 = unpack_q(pack_d(d))[0]
+    if u3 < _MIN3:
+        u3 += _MIN3
+
+    state = [u0, u1, u2, u3]
+
     # 10 warm-up iterations (lj_prng_u64, discards output)
     for _ in range(10):
         _tw223_step(state)
@@ -81,7 +124,7 @@ def _luajit_random(state: list[int]) -> float:
     r = _tw223_step(state)
     # Mask to 52-bit mantissa, set exponent for [1.0, 2.0)
     u64 = (r & 0x000F_FFFF_FFFF_FFFF) | 0x3FF0_0000_0000_0000
-    d = struct.unpack("<d", struct.pack("<Q", u64))[0]
+    d = _PACK_D.unpack(_PACK_Q.pack(u64))[0]
     return d - 1.0
 
 
