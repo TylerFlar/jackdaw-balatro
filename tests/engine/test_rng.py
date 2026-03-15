@@ -2,17 +2,19 @@
 
 Test strategy:
   - Validate pseudohash against known Lua outputs for specific strings
-  - Validate pseudoseed stream advancement produces expected sequences
-  - Validate pseudorandom integer/float output ranges
-  - Validate pseudoshuffle produces Fisher-Yates results for known seeds
-  - Validate pseudorandom_element deterministic sorting + selection
-  - Validate generate_starting_seed format (length, character set)
-  - Cross-validate against Balatro save files or known seed outcomes
+  - Validate PseudoRandom.seed() stream advancement via Lua ground truth
+  - Validate PseudoRandom class API: random, element, shuffle, predict_seed
+  - Validate functional wrappers (pseudoseed, pseudorandom, etc.)
+  - Validate generate_starting_seed format
+
+Ground-truth values were obtained by running the original Lua functions
+(misc_functions.lua:279-320) via lupa, matching to 15 decimal places.
 """
 
 import pytest
 
 from jackdaw.engine.rng import (
+    PseudoRandom,
     generate_starting_seed,
     pseudohash,
     pseudorandom,
@@ -21,161 +23,480 @@ from jackdaw.engine.rng import (
     pseudoshuffle,
 )
 
+# Tolerance: Lua uses IEEE 754 doubles, same as Python. pseudohash has no
+# truncation so we require near-exact equality. pseudoseed truncates to 13
+# decimal places via string.format("%.13f", ...).
+HASH_TOL = 1e-15
+SEED_TOL = 1e-13
+
+
+# ============================================================================
+# Ground-truth from Lua (via lupa)
+# ============================================================================
+
+PSEUDOHASH_TRUTH = {
+    "TESTSEED": 0.319272078222355,
+    "TUTORIAL": 0.417952113690717,
+    "A3K9NZ2B": 0.946384286395556,
+    "A": 0.651751842670649,
+    "a": 0.641368674218143,
+    "AB": 0.916420555346463,
+    "bossTUTORIAL": 0.174561306470309,
+    "shuffleTUTORIAL": 0.663191794746467,
+    "lucky_multTUTORIAL": 0.853518645904103,
+    "Joker1shoA3K9NZ2B": 0.854421527927570,
+}
+
+# pseudoseed ground truth: {seed_str: {stream_key: [(result, stored), ...]}}
+PSEUDOSEED_TRUTH = {
+    "TESTSEED": {
+        "boss": [
+            (0.655250828936977, 0.991229579651600),
+            (0.581457451664827, 0.843642825107300),
+            (0.454214620624177, 0.589157163026000),
+            (0.234808236884227, 0.150344395546100),
+            (0.356483101926677, 0.393694125631000),
+        ],
+        "shuffle": [
+            (0.259181259155277, 0.199090440088200),
+            (0.398509804991727, 0.477747531761100),
+            (0.638755735891777, 0.958239393561200),
+            (0.553014759177527, 0.786757440132700),
+            (0.405170534985477, 0.491068991748600),
+        ],
+        "lucky_mult": [
+            (0.384863452913327, 0.450454827604300),
+            (0.615225162607027, 0.911178246991700),
+            (0.512440701295377, 0.705609324368400),
+            (0.335208186295427, 0.351144294368500),
+            (0.529603973631777, 0.739935869041200),
+        ],
+        "rarity1": [
+            (0.358788231947277, 0.398304385672200),
+            (0.570263337327027, 0.821254596431700),
+            (0.434912471136127, 0.550552864049900),
+            (0.201525302333477, 0.083778526444600),
+            (0.299092927169377, 0.278913776116400),
+        ],
+    },
+    "A3K9NZ2B": {
+        "boss": [
+            (0.894786055642878, 0.843187824890200),
+            (0.767378443466228, 0.588372600536900),
+            (0.547687925580128, 0.148991564764700),
+            (0.668872854608128, 0.391361422820700),
+            (0.877833523153128, 0.809282759910700),
+        ],
+        "shuffle": [
+            (0.738665515415678, 0.530946744435800),
+            (0.498177869425028, 0.049971452454500),
+            (0.583502053825778, 0.220619821256000),
+            (0.730627597888428, 0.514870909381300),
+            (0.484317989044878, 0.022251691694200),
+        ],
+        "lucky_mult": [
+            (0.713836136097628, 0.481287985799700),
+            (0.955364264272378, 0.964344242149200),
+            (0.871834196141178, 0.797284105886800),
+            (0.727802268901528, 0.509220251407500),
+            (0.479446239408228, 0.012508192420900),
+        ],
+        "rarity1": [
+            (0.879998709605878, 0.813613132816200),
+            (0.741880440218778, 0.537376594042000),
+            (0.503721403935178, 0.061058521474800),
+            (0.593060838788878, 0.239737391182200),
+            (0.747109928755728, 0.547835571115900),
+        ],
+    },
+}
+
+# predict_seed ground truth
+PREDICT_SEED_TRUTH = [
+    ("Joker4", "TESTSEED", 0.236212407946077),
+    ("Joker4", "TUTORIAL", 0.585922460919508),
+    ("boss", "A3K9NZ2B", 0.894786055642878),
+]
+
+
+# ============================================================================
+# pseudohash tests
+# ============================================================================
 
 class TestPseudohash:
-    """pseudohash: string → float in [0, 1)."""
+    """pseudohash: string -> float."""
 
-    def test_returns_float_in_unit_interval(self):
-        result = pseudohash("test")
-        assert isinstance(result, float)
-        assert 0.0 <= result < 1.0
+    @pytest.mark.parametrize("s,expected", PSEUDOHASH_TRUTH.items())
+    def test_matches_lua(self, s: str, expected: float):
+        assert abs(pseudohash(s) - expected) < HASH_TOL, (
+            f"pseudohash({s!r}): {pseudohash(s):.15f} != {expected:.15f}"
+        )
+
+    def test_empty_string(self):
+        assert pseudohash("") == 1.0
 
     def test_deterministic(self):
         assert pseudohash("hello") == pseudohash("hello")
 
-    def test_different_strings_different_hashes(self):
+    def test_different_strings_differ(self):
         assert pseudohash("foo") != pseudohash("bar")
 
-    def test_empty_string(self):
-        result = pseudohash("")
+    def test_case_sensitive(self):
+        assert pseudohash("A") != pseudohash("a")
+
+    def test_long_string_in_range(self):
+        result = pseudohash("x" * 500)
+        assert 0.0 <= result < 1.0
+
+
+# ============================================================================
+# PseudoRandom class tests
+# ============================================================================
+
+class TestPseudoRandomSeed:
+    """PseudoRandom.seed(): stateful LCG per stream."""
+
+    @pytest.mark.parametrize("seed_str", ["TESTSEED", "A3K9NZ2B"])
+    @pytest.mark.parametrize("stream_key", ["boss", "shuffle", "lucky_mult", "rarity1"])
+    def test_matches_lua_sequence(self, seed_str: str, stream_key: str):
+        """5 sequential calls per stream must match Lua ground truth."""
+        prng = PseudoRandom(seed_str)
+        expected_seq = PSEUDOSEED_TRUTH[seed_str][stream_key]
+
+        for call_idx, (expected_result, expected_stored) in enumerate(expected_seq):
+            result = prng.seed(stream_key)
+            stored = prng.state[stream_key]
+
+            assert abs(result - expected_result) < SEED_TOL, (
+                f"seed={seed_str!r} stream={stream_key!r} call {call_idx + 1}: "
+                f"result {result:.15f} != {expected_result:.15f}"
+            )
+            assert abs(stored - expected_stored) < SEED_TOL, (
+                f"seed={seed_str!r} stream={stream_key!r} call {call_idx + 1}: "
+                f"stored {stored:.15f} != {expected_stored:.15f}"
+            )
+
+    def test_streams_are_independent(self):
+        """Advancing one stream must not affect another."""
+        prng = PseudoRandom("TESTSEED")
+
+        # Prime both streams
+        prng.seed("alpha")
+        prng.seed("beta")
+        alpha_val = prng.state["alpha"]
+
+        # Advance beta many times
+        for _ in range(10):
+            prng.seed("beta")
+
+        assert prng.state["alpha"] == alpha_val
+
+    def test_never_repeats_in_50_calls(self):
+        prng = PseudoRandom("TESTSEED")
+        values = [prng.seed("test") for _ in range(50)]
+        assert len(set(values)) == 50
+
+    def test_output_range(self):
+        prng = PseudoRandom("TESTSEED")
+        for _ in range(500):
+            v = prng.seed("range_check")
+            assert 0.0 <= v <= 1.0
+
+    def test_hashed_seed_matches_pseudohash(self):
+        prng = PseudoRandom("TUTORIAL")
+        assert abs(prng.hashed_seed - pseudohash("TUTORIAL")) < HASH_TOL
+
+    def test_init_stores_seed_string(self):
+        prng = PseudoRandom("MYSEED")
+        assert prng.seed_str == "MYSEED"
+
+
+class TestPseudoRandomPredictSeed:
+    """PseudoRandom.predict_seed(): stateless preview."""
+
+    @pytest.mark.parametrize("key,pseed,expected", PREDICT_SEED_TRUTH)
+    def test_matches_lua(self, key: str, pseed: str, expected: float):
+        prng = PseudoRandom("IRRELEVANT")  # state doesn't matter
+        result = prng.predict_seed(key, pseed)
+        assert abs(result - expected) < SEED_TOL, (
+            f"predict_seed({key!r}, {pseed!r}): {result:.15f} != {expected:.15f}"
+        )
+
+    def test_does_not_mutate_state(self):
+        prng = PseudoRandom("TESTSEED")
+        state_before = prng.get_state()
+        prng.predict_seed("Joker4", "TESTSEED")
+        state_after = prng.get_state()
+        assert state_before == state_after
+
+    def test_predict_matches_first_seed_call(self):
+        """predict_seed(key, seed) should equal the first seed(key) call."""
+        prng = PseudoRandom("A3K9NZ2B")
+        predicted = prng.predict_seed("boss", "A3K9NZ2B")
+        actual = prng.seed("boss")
+        assert abs(predicted - actual) < SEED_TOL
+
+
+class TestPseudoRandomRandom:
+    """PseudoRandom.random(): uniform output from stream."""
+
+    def test_float_in_unit_interval(self):
+        prng = PseudoRandom("TESTSEED")
+        result = prng.random("test")
         assert isinstance(result, float)
         assert 0.0 <= result < 1.0
 
-    def test_known_seed_tutorial(self):
-        """The TUTORIAL seed must hash to a specific value for determinism."""
-        result = pseudohash("TUTORIAL")
-        assert isinstance(result, float)
-        assert 0.0 <= result < 1.0
-        # TODO: fill in exact expected value from Lua cross-validation
-
-
-class TestPseudoseed:
-    """pseudoseed: stateful float LCG per named stream."""
-
-    @pytest.fixture
-    def fresh_state(self):
-        seed = "TESTSEEED"
-        return {
-            "seed": seed,
-            "hashed_seed": pseudohash(seed),
-        }
-
-    def test_initializes_new_key(self, fresh_state):
-        result = pseudoseed("boss", fresh_state)
-        assert isinstance(result, float)
-        assert "boss" in fresh_state
-
-    def test_advances_on_each_call(self, fresh_state):
-        r1 = pseudoseed("shop", fresh_state)
-        r2 = pseudoseed("shop", fresh_state)
-        assert r1 != r2
-
-    def test_independent_streams(self, fresh_state):
-        pseudoseed("stream_a", fresh_state)
-        pseudoseed("stream_b", fresh_state)
-        # Calling stream_a shouldn't affect stream_b
-        val_a1 = fresh_state.get("stream_a")
-        pseudoseed("stream_b", fresh_state)
-        val_a2 = fresh_state.get("stream_a")
-        assert val_a1 == val_a2
-
-    def test_output_in_unit_interval(self, fresh_state):
-        for _ in range(100):
-            result = pseudoseed("test", fresh_state)
-            assert 0.0 <= result <= 1.0
-
-
-class TestPseudorandom:
-    """pseudorandom: bridge to uniform output."""
-
-    @pytest.fixture
-    def state(self):
-        seed = "FIXEDSEED"
-        return {
-            "seed": seed,
-            "hashed_seed": pseudohash(seed),
-        }
-
-    def test_float_output(self, state):
-        result = pseudorandom("test_key", state)
-        assert isinstance(result, float)
-        assert 0.0 <= result < 1.0
-
-    def test_integer_range(self, state):
-        result = pseudorandom("test_key", state, min_val=1, max_val=10)
+    def test_integer_range(self):
+        prng = PseudoRandom("TESTSEED")
+        result = prng.random("test", min_val=1, max_val=6)
         assert isinstance(result, int)
-        assert 1 <= result <= 10
+        assert 1 <= result <= 6
 
-    def test_deterministic_with_same_state(self):
-        def make_state():
-            seed = "SAMESEED"
-            return {"seed": seed, "hashed_seed": pseudohash(seed)}
+    def test_integer_range_coverage(self):
+        """Over many calls, all values in range should appear."""
+        prng = PseudoRandom("TESTSEED")
+        values = {prng.random("roll", min_val=1, max_val=6) for _ in range(200)}
+        assert values == {1, 2, 3, 4, 5, 6}
 
-        s1, s2 = make_state(), make_state()
-        assert pseudorandom("key", s1) == pseudorandom("key", s2)
+    def test_deterministic_with_same_seed(self):
+        p1 = PseudoRandom("SAME")
+        p2 = PseudoRandom("SAME")
+        assert p1.random("key") == p2.random("key")
 
-    def test_float_seed_input(self):
-        result = pseudorandom(0.5)
+    def test_float_key(self):
+        """Passing a numeric seed directly (bypassing stream)."""
+        prng = PseudoRandom("TESTSEED")
+        result = prng.random(0.5)
         assert isinstance(result, float)
 
+    def test_advances_stream(self):
+        """Calling random(str_key) should advance that stream's state."""
+        prng = PseudoRandom("TESTSEED")
+        prng.random("mystream")
+        assert "mystream" in prng.state
 
-class TestPseudorandomElement:
-    """pseudorandom_element: deterministic selection from collection."""
 
-    def test_selects_from_dict(self):
+class TestPseudoRandomElement:
+    """PseudoRandom.element(): deterministic selection."""
+
+    def test_selects_valid_entry(self):
+        prng = PseudoRandom("TESTSEED")
         table = {"a": 1, "b": 2, "c": 3}
-        value, key = pseudorandom_element(table, 0.42)
+        val, key = prng.element(table, 0.42)
         assert key in table
-        assert value == table[key]
+        assert val == table[key]
 
     def test_deterministic(self):
+        prng = PseudoRandom("TESTSEED")
         table = {"x": 10, "y": 20, "z": 30}
-        v1, k1 = pseudorandom_element(table, 0.42)
-        v2, k2 = pseudorandom_element(table, 0.42)
+        v1, k1 = prng.element(table, 0.42)
+        v2, k2 = prng.element(table, 0.42)
         assert k1 == k2 and v1 == v2
 
     def test_different_seeds_can_differ(self):
+        prng = PseudoRandom("TESTSEED")
         table = {str(i): i for i in range(20)}
-        _, k1 = pseudorandom_element(table, 0.1)
-        _, k2 = pseudorandom_element(table, 0.9)
-        # With 20 elements, very likely to differ
+        _, k1 = prng.element(table, 0.1)
+        _, k2 = prng.element(table, 0.9)
         assert k1 != k2
 
+    def test_list_input(self):
+        prng = PseudoRandom("TESTSEED")
+        items = ["apple", "banana", "cherry"]
+        val, key = prng.element(items, 0.5)
+        assert val in items
+        assert isinstance(key, int)  # 1-based index
 
-class TestPseudoshuffle:
-    """pseudoshuffle: Fisher-Yates with deterministic pre-sort."""
+    def test_sort_by_sort_id(self):
+        """Dicts with sort_id should be sorted by that field."""
+        prng = PseudoRandom("TESTSEED")
+        table = {
+            "z_first": {"sort_id": 1, "name": "first"},
+            "a_second": {"sort_id": 2, "name": "second"},
+        }
+        # Same seed, same sort → same result
+        v1, _ = prng.element(table, 0.1)
+        v2, _ = prng.element(table, 0.1)
+        assert v1 == v2
 
-    def test_shuffles_in_place(self):
-        lst = list(range(10))
+    def test_empty_raises(self):
+        prng = PseudoRandom("TESTSEED")
+        with pytest.raises(ValueError, match="empty"):
+            prng.element({}, 0.5)
+
+
+class TestPseudoRandomShuffle:
+    """PseudoRandom.shuffle(): Fisher-Yates."""
+
+    def test_preserves_elements(self):
+        prng = PseudoRandom("TESTSEED")
+        lst = list(range(52))
+        prng.shuffle(lst, 0.42)
+        assert sorted(lst) == list(range(52))
+
+    def test_actually_shuffles(self):
+        prng = PseudoRandom("TESTSEED")
+        lst = list(range(20))
         original = lst.copy()
-        pseudoshuffle(lst, 0.42)
-        assert lst != original  # very unlikely to be identical
-        assert sorted(lst) == sorted(original)
+        prng.shuffle(lst, 0.42)
+        assert lst != original
 
     def test_deterministic(self):
+        prng = PseudoRandom("TESTSEED")
         a = list(range(20))
         b = list(range(20))
+        prng.shuffle(a, 0.42)
+        prng.shuffle(b, 0.42)
+        assert a == b
+
+    def test_different_seeds_different_order(self):
+        prng = PseudoRandom("TESTSEED")
+        a = list(range(20))
+        b = list(range(20))
+        prng.shuffle(a, 0.1)
+        prng.shuffle(b, 0.9)
+        assert a != b
+
+    def test_sort_id_presort(self):
+        """Elements with sort_id should be pre-sorted before shuffling."""
+        prng = PseudoRandom("TESTSEED")
+
+        class Item:
+            def __init__(self, sort_id: int):
+                self.sort_id = sort_id
+
+        items = [Item(5), Item(1), Item(3), Item(2), Item(4)]
+        prng.shuffle(items, 0.42)
+        # Can't assert specific order, but all items should be present
+        assert sorted(x.sort_id for x in items) == [1, 2, 3, 4, 5]
+
+    def test_single_element(self):
+        prng = PseudoRandom("TESTSEED")
+        lst = [42]
+        prng.shuffle(lst, 0.5)
+        assert lst == [42]
+
+    def test_empty_list(self):
+        prng = PseudoRandom("TESTSEED")
+        lst: list = []
+        prng.shuffle(lst, 0.5)
+        assert lst == []
+
+
+class TestPseudoRandomStateManagement:
+    """State save/load for persistence."""
+
+    def test_get_state_is_copy(self):
+        prng = PseudoRandom("TESTSEED")
+        prng.seed("boss")
+        state = prng.get_state()
+        prng.seed("boss")  # advance
+        assert state["boss"] != prng.state["boss"]
+
+    def test_load_state_restores(self):
+        prng1 = PseudoRandom("TESTSEED")
+        for _ in range(5):
+            prng1.seed("boss")
+        saved = prng1.get_state()
+
+        prng2 = PseudoRandom("IGNORED")
+        prng2.load_state(saved)
+
+        # Both should produce identical next values
+        assert prng1.seed("boss") == prng2.seed("boss")
+
+    def test_load_state_rehashes_zeroes(self):
+        """Save convention: stream values of 0 are re-hashed on load."""
+        prng = PseudoRandom("TESTSEED")
+        prng.load_state({"seed": "TESTSEED", "hashed_seed": pseudohash("TESTSEED"), "boss": 0})
+        # boss should have been re-hashed, not left at 0
+        assert prng.state["boss"] != 0
+        assert abs(prng.state["boss"] - pseudohash("bossTESTSEED")) < HASH_TOL
+
+
+# ============================================================================
+# Functional API wrappers (backward compat)
+# ============================================================================
+
+class TestFunctionalPseudoseed:
+    """pseudoseed(): functional wrapper matching old API."""
+
+    def test_matches_class_api(self):
+        # Class API
+        prng = PseudoRandom("TESTSEED")
+        class_results = [prng.seed("boss") for _ in range(5)]
+
+        # Functional API
+        state = {"seed": "TESTSEED", "hashed_seed": pseudohash("TESTSEED")}
+        func_results = [pseudoseed("boss", state) for _ in range(5)]
+
+        for i, (c, f) in enumerate(zip(class_results, func_results)):
+            assert abs(c - f) < SEED_TOL, f"Call {i}: class={c:.15f} func={f:.15f}"
+
+
+class TestFunctionalPseudorandom:
+    """pseudorandom(): functional wrapper."""
+
+    def test_float_output(self):
+        state = {"seed": "TESTSEED", "hashed_seed": pseudohash("TESTSEED")}
+        result = pseudorandom("boss", state)
+        assert isinstance(result, float)
+        assert 0.0 <= result < 1.0
+
+    def test_integer_output(self):
+        state = {"seed": "TESTSEED", "hashed_seed": pseudohash("TESTSEED")}
+        result = pseudorandom("boss", state, min_val=1, max_val=10)
+        assert isinstance(result, int)
+        assert 1 <= result <= 10
+
+    def test_float_seed_direct(self):
+        result = pseudorandom(0.5)
+        assert isinstance(result, float)
+
+    def test_string_key_requires_state(self):
+        with pytest.raises(ValueError, match="state dict required"):
+            pseudorandom("boss")
+
+
+class TestFunctionalElement:
+    """pseudorandom_element(): functional wrapper."""
+
+    def test_basic_selection(self):
+        table = {"a": 1, "b": 2, "c": 3}
+        val, key = pseudorandom_element(table, 0.42)
+        assert key in table and val == table[key]
+
+    def test_deterministic(self):
+        table = {"a": 1, "b": 2, "c": 3}
+        assert pseudorandom_element(table, 0.42) == pseudorandom_element(table, 0.42)
+
+
+class TestFunctionalShuffle:
+    """pseudoshuffle(): functional wrapper."""
+
+    def test_preserves_and_shuffles(self):
+        lst = list(range(20))
+        pseudoshuffle(lst, 0.42)
+        assert sorted(lst) == list(range(20))
+
+    def test_deterministic(self):
+        a, b = list(range(20)), list(range(20))
         pseudoshuffle(a, 0.42)
         pseudoshuffle(b, 0.42)
         assert a == b
 
-    def test_preserves_elements(self):
-        lst = list(range(52))
-        pseudoshuffle(lst, 0.123)
-        assert sorted(lst) == list(range(52))
-
 
 class TestGenerateStartingSeed:
-    """generate_starting_seed: 8-char alphanumeric string."""
+    """generate_starting_seed: 8-char alphanumeric."""
+
+    ALLOWED = set("123456789ABCDEFGHIJKLMNPQRSTUVWXYZ")
 
     def test_length(self):
-        seed = generate_starting_seed(0.42)
-        assert len(seed) == 8
+        assert len(generate_starting_seed(0.42)) == 8
 
     def test_character_set(self):
         seed = generate_starting_seed(0.42)
-        allowed = set("123456789ABCDEFGHIJKLMNPQRSTUVWXYZ")
-        assert all(c in allowed for c in seed), f"Invalid chars in {seed}"
+        assert all(c in self.ALLOWED for c in seed), f"Bad chars in {seed!r}"
 
     def test_no_zero_or_oh(self):
         seed = generate_starting_seed(0.42)
@@ -184,3 +505,6 @@ class TestGenerateStartingSeed:
 
     def test_deterministic(self):
         assert generate_starting_seed(0.42) == generate_starting_seed(0.42)
+
+    def test_different_entropy_different_seeds(self):
+        assert generate_starting_seed(0.1) != generate_starting_seed(0.9)

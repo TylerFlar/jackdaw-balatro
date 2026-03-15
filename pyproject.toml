@@ -8,8 +8,10 @@ dependencies = []
 
 [dependency-groups]
 dev = [
+    "lupa>=2.6",
     "pytest>=8.0",
     "pytest-cov>=6.0",
+    "ruff>=0.15.6",
 ]
 
 [tool.pytest.ini_options]
