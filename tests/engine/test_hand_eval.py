@@ -10,11 +10,14 @@ from __future__ import annotations
 import pytest
 
 from jackdaw.engine.card import Card, reset_sort_id_counter
+from jackdaw.engine.card_factory import create_joker
 from jackdaw.engine.data.enums import Rank, Suit
 from jackdaw.engine.hand_eval import (
     evaluate_poker_hand,
+    find_joker,
     get_best_hand,
     get_flush,
+    get_hand_eval_flags,
     get_highest,
     get_straight,
     get_x_same,
@@ -669,3 +672,151 @@ class TestJokerFlags:
         ]
         name, _, _ = get_best_hand(hand, four_fingers=True)
         assert name == "Straight Flush"
+
+
+# ============================================================================
+# find_joker
+# ============================================================================
+
+class TestFindJoker:
+    """find_joker matches by ability.name, excludes debuffed by default."""
+
+    def test_finds_by_name(self):
+        j = create_joker("j_four_fingers")
+        result = find_joker("Four Fingers", [j])
+        assert len(result) == 1
+        assert result[0] is j
+
+    def test_not_found(self):
+        j = create_joker("j_joker")
+        assert find_joker("Four Fingers", [j]) == []
+
+    def test_empty_list(self):
+        assert find_joker("Four Fingers", []) == []
+
+    def test_debuffed_excluded_by_default(self):
+        """Debuffed jokers are excluded from find_joker by default.
+
+        Source: find_joker (misc_functions.lua:903) uses the condition
+        ``(non_debuff or not v.debuff)`` — with default nil/false for
+        non_debuff, this evaluates to ``not v.debuff``, excluding
+        debuffed jokers.
+        """
+        j = create_joker("j_four_fingers")
+        j.set_debuff(True)
+        assert find_joker("Four Fingers", [j]) == []
+
+    def test_debuffed_included_with_non_debuff(self):
+        """non_debuff=True includes debuffed jokers (rare, but supported)."""
+        j = create_joker("j_four_fingers")
+        j.set_debuff(True)
+        result = find_joker("Four Fingers", [j], non_debuff=True)
+        assert len(result) == 1
+
+    def test_multiple_matches(self):
+        """Multiple jokers with same name (via Showman)."""
+        j1 = create_joker("j_four_fingers")
+        j2 = create_joker("j_four_fingers")
+        result = find_joker("Four Fingers", [j1, j2])
+        assert len(result) == 2
+
+
+# ============================================================================
+# get_hand_eval_flags
+# ============================================================================
+
+class TestGetHandEvalFlags:
+    """Extract modifier flags from active jokers."""
+
+    def test_no_jokers(self):
+        flags = get_hand_eval_flags([])
+        assert flags == {
+            "four_fingers": False, "shortcut": False,
+            "smeared": False, "splash": False, "pareidolia": False,
+        }
+
+    def test_four_fingers(self):
+        flags = get_hand_eval_flags([create_joker("j_four_fingers")])
+        assert flags["four_fingers"] is True
+        assert flags["shortcut"] is False
+
+    def test_shortcut(self):
+        flags = get_hand_eval_flags([create_joker("j_shortcut")])
+        assert flags["shortcut"] is True
+
+    def test_smeared(self):
+        flags = get_hand_eval_flags([create_joker("j_smeared")])
+        assert flags["smeared"] is True
+
+    def test_splash(self):
+        flags = get_hand_eval_flags([create_joker("j_splash")])
+        assert flags["splash"] is True
+
+    def test_pareidolia(self):
+        flags = get_hand_eval_flags([create_joker("j_pareidolia")])
+        assert flags["pareidolia"] is True
+
+    def test_multiple_modifiers(self):
+        jokers = [
+            create_joker("j_four_fingers"),
+            create_joker("j_shortcut"),
+            create_joker("j_smeared"),
+        ]
+        flags = get_hand_eval_flags(jokers)
+        assert flags["four_fingers"] is True
+        assert flags["shortcut"] is True
+        assert flags["smeared"] is True
+        assert flags["splash"] is False
+
+    def test_non_meta_joker_ignored(self):
+        """Regular jokers don't set any flags."""
+        flags = get_hand_eval_flags([create_joker("j_joker")])
+        assert not any(flags.values())
+
+    def test_debuffed_meta_joker_excluded(self):
+        """Debuffed meta jokers do NOT apply their passive effects.
+
+        Source: find_joker (misc_functions.lua:903) excludes debuffed
+        jokers by default.  The condition ``(non_debuff or not v.debuff)``
+        with nil non_debuff evaluates to ``not v.debuff``.
+        """
+        j = create_joker("j_four_fingers")
+        j.set_debuff(True)
+        flags = get_hand_eval_flags([j])
+        assert flags["four_fingers"] is False
+
+    def test_mixed_debuffed_and_active(self):
+        j1 = create_joker("j_four_fingers")
+        j1.set_debuff(True)  # debuffed → excluded
+        j2 = create_joker("j_shortcut")  # active
+        flags = get_hand_eval_flags([j1, j2])
+        assert flags["four_fingers"] is False
+        assert flags["shortcut"] is True
+
+    def test_integration_with_evaluate(self):
+        """Detection flags feed into evaluate_poker_hand.
+
+        Note: splash and pareidolia are applied in the scoring pipeline,
+        not in hand detection — only four_fingers, shortcut, and smeared
+        are passed to evaluate_poker_hand.
+        """
+        jokers = [create_joker("j_four_fingers")]
+        flags = get_hand_eval_flags(jokers)
+
+        hand = [
+            _card("Clubs", "3"), _card("Clubs", "7"),
+            _card("Clubs", "10"), _card("Clubs", "King"),
+            _card("Hearts", "Ace"),
+        ]
+        # Without flags: no flush (only 4 clubs)
+        name_no, _, _ = get_best_hand(hand)
+        assert name_no != "Flush"
+
+        # With detection flags from jokers: flush detected
+        # Filter to only the 3 flags evaluate_poker_hand accepts
+        detect_flags = {
+            k: v for k, v in flags.items()
+            if k in ("four_fingers", "shortcut", "smeared")
+        }
+        name_yes, _, _ = get_best_hand(hand, **detect_flags)
+        assert name_yes == "Flush"

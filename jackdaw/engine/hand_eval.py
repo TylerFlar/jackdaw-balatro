@@ -219,6 +219,81 @@ def get_highest(hand: list[Card]) -> list[list[Card]]:
 
 
 # ---------------------------------------------------------------------------
+# Joker modifier flag extraction
+# ---------------------------------------------------------------------------
+
+# Mapping from P_CENTERS key → flag name for meta jokers that affect detection
+_META_JOKER_FLAGS: dict[str, str] = {
+    "j_four_fingers": "four_fingers",
+    "j_shortcut": "shortcut",
+    "j_smeared": "smeared",
+    "j_splash": "splash",
+    "j_pareidolia": "pareidolia",
+}
+
+
+def find_joker(name: str, jokers: list[Card], *, non_debuff: bool = False) -> list[Card]:
+    """Find jokers by ability name, matching ``find_joker`` (misc_functions.lua:903).
+
+    By default, **debuffed jokers are excluded** — the source's default call
+    ``find_joker('name')`` passes ``non_debuff=nil``, and the condition
+    ``(non_debuff or not v.debuff)`` evaluates to ``not v.debuff`` when
+    ``non_debuff`` is falsy.
+
+    Args:
+        name: The ``ability.name`` to match (e.g. ``"Four Fingers"``).
+        jokers: List of joker Card objects to search.
+        non_debuff: If True, include debuffed jokers too.
+
+    Returns:
+        List of matching (non-debuffed by default) joker Cards.
+    """
+    return [
+        j for j in jokers
+        if j.ability.get("name") == name and (non_debuff or not j.debuff)
+    ]
+
+
+def get_hand_eval_flags(jokers: list[Card]) -> dict[str, bool]:
+    """Extract hand evaluation modifier flags from active jokers.
+
+    These jokers modify hand **detection**, not scoring.  They are checked
+    via ``find_joker`` (misc_functions.lua:903), which by default excludes
+    debuffed jokers — so a debuffed Four Fingers does NOT enable 4-card
+    flushes.
+
+    Flags:
+        - ``four_fingers``: flush/straight need only 4 cards
+        - ``shortcut``: straights allow 1-rank gaps
+        - ``smeared``: Hearts=Diamonds, Spades=Clubs for suit checks
+        - ``splash``: all played cards become scoring cards (applied in
+          evaluate_play, not in hand detection itself)
+        - ``pareidolia``: all cards count as face cards (affects is_face
+          checks, not hand detection directly)
+
+    Args:
+        jokers: List of joker Card objects (typically ``G.jokers.cards``).
+
+    Returns:
+        Dict of flag name → bool.
+    """
+    flags = {
+        "four_fingers": False,
+        "shortcut": False,
+        "smeared": False,
+        "splash": False,
+        "pareidolia": False,
+    }
+    for j in jokers:
+        if j.debuff:
+            continue
+        flag = _META_JOKER_FLAGS.get(j.center_key)
+        if flag:
+            flags[flag] = True
+    return flags
+
+
+# ---------------------------------------------------------------------------
 # evaluate_poker_hand — master detection (misc_functions.lua:376)
 # ---------------------------------------------------------------------------
 
