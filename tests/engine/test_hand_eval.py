@@ -11,7 +11,14 @@ import pytest
 
 from jackdaw.engine.card import Card, reset_sort_id_counter
 from jackdaw.engine.data.enums import Rank, Suit
-from jackdaw.engine.hand_eval import get_flush, get_highest, get_straight, get_x_same
+from jackdaw.engine.hand_eval import (
+    evaluate_poker_hand,
+    get_best_hand,
+    get_flush,
+    get_highest,
+    get_straight,
+    get_x_same,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -387,3 +394,278 @@ class TestEdgeCases:
         result = get_flush(hand, smeared=True)
         assert len(result) == 1
         assert len(result[0]) == 5
+
+
+# ============================================================================
+# evaluate_poker_hand
+# ============================================================================
+
+class TestEvaluatePokerHand:
+    """Master detection function returning all matching hands."""
+
+    def test_high_card(self):
+        hand = [
+            _card("Hearts", "2"), _card("Spades", "5"),
+            _card("Clubs", "8"), _card("Diamonds", "Jack"),
+            _card("Hearts", "Ace"),
+        ]
+        results = evaluate_poker_hand(hand)
+        assert results["High Card"]
+        assert not results["Pair"]
+
+    def test_pair(self):
+        hand = [
+            _card("Hearts", "5"), _card("Spades", "5"),
+            _card("Clubs", "8"), _card("Diamonds", "Jack"),
+            _card("Hearts", "Ace"),
+        ]
+        results = evaluate_poker_hand(hand)
+        assert results["Pair"]
+        assert not results["Two Pair"]
+
+    def test_two_pair(self):
+        hand = [
+            _card("Hearts", "5"), _card("Spades", "5"),
+            _card("Clubs", "Jack"), _card("Diamonds", "Jack"),
+            _card("Hearts", "Ace"),
+        ]
+        results = evaluate_poker_hand(hand)
+        assert results["Two Pair"]
+        assert results["Pair"]  # downward: Two Pair also has Pair
+
+    def test_three_of_a_kind(self):
+        hand = [
+            _card("Hearts", "King"), _card("Spades", "King"),
+            _card("Clubs", "King"), _card("Diamonds", "5"),
+            _card("Hearts", "2"),
+        ]
+        results = evaluate_poker_hand(hand)
+        assert results["Three of a Kind"]
+        assert results["Pair"]  # downward propagation
+
+    def test_straight(self):
+        hand = [
+            _card("Hearts", "4"), _card("Spades", "5"),
+            _card("Clubs", "6"), _card("Diamonds", "7"),
+            _card("Hearts", "8"),
+        ]
+        results = evaluate_poker_hand(hand)
+        assert results["Straight"]
+
+    def test_flush(self):
+        hand = [_card("Hearts", r) for r in ["2", "5", "8", "Jack", "Ace"]]
+        results = evaluate_poker_hand(hand)
+        assert results["Flush"]
+
+    def test_full_house(self):
+        hand = [
+            _card("Hearts", "King"), _card("Spades", "King"),
+            _card("Clubs", "King"), _card("Diamonds", "5"),
+            _card("Hearts", "5"),
+        ]
+        results = evaluate_poker_hand(hand)
+        assert results["Full House"]
+        assert results["Three of a Kind"]  # downward
+        assert results["Pair"]  # downward
+
+    def test_four_of_a_kind(self):
+        hand = [
+            _card("Hearts", "7"), _card("Spades", "7"),
+            _card("Clubs", "7"), _card("Diamonds", "7"),
+            _card("Hearts", "Ace"),
+        ]
+        results = evaluate_poker_hand(hand)
+        assert results["Four of a Kind"]
+        assert results["Three of a Kind"]  # downward
+        assert results["Pair"]  # downward
+
+    def test_straight_flush(self):
+        hand = [
+            _card("Hearts", "4"), _card("Hearts", "5"),
+            _card("Hearts", "6"), _card("Hearts", "7"),
+            _card("Hearts", "8"),
+        ]
+        results = evaluate_poker_hand(hand)
+        assert results["Straight Flush"]
+        assert results["Flush"]
+        assert results["Straight"]
+
+    def test_five_of_a_kind(self):
+        hand = [
+            _card("Hearts", "Ace"), _card("Spades", "Ace"),
+            _card("Clubs", "Ace"), _card("Diamonds", "Ace"),
+            _card("Hearts", "Ace"),
+        ]
+        results = evaluate_poker_hand(hand)
+        assert results["Five of a Kind"]
+        assert results["Four of a Kind"]  # downward
+        assert results["Three of a Kind"]  # downward
+        assert results["Pair"]  # downward
+
+    def test_flush_five(self):
+        hand = [
+            _card("Hearts", "Ace"), _card("Hearts", "Ace"),
+            _card("Hearts", "Ace"), _card("Hearts", "Ace"),
+            _card("Hearts", "Ace"),
+        ]
+        results = evaluate_poker_hand(hand)
+        assert results["Flush Five"]
+        assert results["Five of a Kind"]
+        assert results["Flush"]
+
+    def test_flush_house(self):
+        hand = [
+            _card("Hearts", "King"), _card("Hearts", "King"),
+            _card("Hearts", "King"), _card("Hearts", "5"),
+            _card("Hearts", "5"),
+        ]
+        results = evaluate_poker_hand(hand)
+        assert results["Flush House"]
+        assert results["Full House"]
+        assert results["Flush"]
+
+    def test_high_card_always_populated(self):
+        """High Card entry is always populated for non-empty hands."""
+        hand = [_card("Hearts", "5"), _card("Spades", "5")]
+        results = evaluate_poker_hand(hand)
+        assert results["High Card"]
+
+
+class TestDownwardPropagation:
+    """Downward propagation: higher hands populate lower entries."""
+
+    def test_five_of_a_kind_populates_four_three_pair(self):
+        hand = [
+            _card("Hearts", "Ace"), _card("Spades", "Ace"),
+            _card("Clubs", "Ace"), _card("Diamonds", "Ace"),
+            _card("Hearts", "Ace"),
+        ]
+        results = evaluate_poker_hand(hand)
+        assert results["Five of a Kind"]
+        assert results["Four of a Kind"]
+        assert results["Three of a Kind"]
+        assert results["Pair"]
+
+    def test_four_of_a_kind_populates_three_pair(self):
+        hand = [
+            _card("Hearts", "7"), _card("Spades", "7"),
+            _card("Clubs", "7"), _card("Diamonds", "7"),
+            _card("Hearts", "Ace"),
+        ]
+        results = evaluate_poker_hand(hand)
+        assert results["Four of a Kind"]
+        assert results["Three of a Kind"]
+        assert results["Pair"]
+        assert not results["Five of a Kind"]
+
+    def test_three_of_a_kind_populates_pair(self):
+        hand = [
+            _card("Hearts", "King"), _card("Spades", "King"),
+            _card("Clubs", "King"), _card("Diamonds", "5"),
+            _card("Hearts", "2"),
+        ]
+        results = evaluate_poker_hand(hand)
+        assert results["Three of a Kind"]
+        assert results["Pair"]
+        assert not results["Four of a Kind"]
+
+    def test_pair_does_not_propagate_up(self):
+        hand = [
+            _card("Hearts", "5"), _card("Spades", "5"),
+            _card("Clubs", "8"), _card("Diamonds", "Jack"),
+            _card("Hearts", "Ace"),
+        ]
+        results = evaluate_poker_hand(hand)
+        assert results["Pair"]
+        assert not results["Three of a Kind"]
+
+
+class TestGetBestHand:
+    """get_best_hand returns the highest-priority detected hand."""
+
+    def test_full_house_over_flush(self):
+        """Full House has higher priority than Flush — but both can coexist."""
+        hand = [
+            _card("Hearts", "King"), _card("Hearts", "King"),
+            _card("Hearts", "King"), _card("Hearts", "5"),
+            _card("Hearts", "5"),
+        ]
+        name, scoring, results = get_best_hand(hand)
+        # Flush House is highest priority here (it's a flush + full house)
+        assert name == "Flush House"
+        assert results["Full House"]
+        assert results["Flush"]
+
+    def test_straight_flush_detected(self):
+        hand = [
+            _card("Spades", "9"), _card("Spades", "10"),
+            _card("Spades", "Jack"), _card("Spades", "Queen"),
+            _card("Spades", "King"),
+        ]
+        name, scoring, _ = get_best_hand(hand)
+        assert name == "Straight Flush"
+        assert len(scoring) == 5
+
+    def test_high_card(self):
+        hand = [
+            _card("Hearts", "2"), _card("Spades", "5"),
+            _card("Clubs", "8"), _card("Diamonds", "Jack"),
+            _card("Hearts", "Ace"),
+        ]
+        name, scoring, _ = get_best_hand(hand)
+        assert name == "High Card"
+        assert len(scoring) == 1
+
+    def test_empty_hand(self):
+        name, scoring, _ = get_best_hand([])
+        assert name == "NULL"
+        assert scoring == []
+
+
+class TestJokerFlags:
+    """Joker modifiers passed through to evaluate_poker_hand."""
+
+    def test_four_fingers_flush(self):
+        hand = [
+            _card("Clubs", "3"), _card("Clubs", "7"),
+            _card("Clubs", "10"), _card("Clubs", "King"),
+            _card("Hearts", "Ace"),
+        ]
+        name, _, _ = get_best_hand(hand, four_fingers=True)
+        assert name == "Flush"
+
+    def test_four_fingers_straight(self):
+        hand = [
+            _card("Hearts", "4"), _card("Spades", "5"),
+            _card("Clubs", "6"), _card("Diamonds", "7"),
+            _card("Hearts", "King"),
+        ]
+        name, _, _ = get_best_hand(hand, four_fingers=True)
+        assert name == "Straight"
+
+    def test_shortcut_straight(self):
+        hand = [
+            _card("Hearts", "3"), _card("Spades", "4"),
+            _card("Clubs", "6"), _card("Diamonds", "7"),
+            _card("Hearts", "8"),
+        ]
+        name, _, _ = get_best_hand(hand, shortcut=True)
+        assert name == "Straight"
+
+    def test_smeared_flush(self):
+        hand = [
+            _card("Hearts", "2"), _card("Hearts", "5"),
+            _card("Diamonds", "8"), _card("Diamonds", "Jack"),
+            _card("Hearts", "Ace"),
+        ]
+        name, _, _ = get_best_hand(hand, smeared=True)
+        assert name == "Flush"
+
+    def test_four_fingers_straight_flush(self):
+        hand = [
+            _card("Hearts", "5"), _card("Hearts", "6"),
+            _card("Hearts", "7"), _card("Hearts", "8"),
+            _card("Spades", "King"),
+        ]
+        name, _, _ = get_best_hand(hand, four_fingers=True)
+        assert name == "Straight Flush"

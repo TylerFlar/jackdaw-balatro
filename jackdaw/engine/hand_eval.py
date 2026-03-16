@@ -216,3 +216,173 @@ def get_highest(hand: list[Card]) -> list[list[Card]]:
 
     highest = max(hand, key=_card_nominal)
     return [[highest]]
+
+
+# ---------------------------------------------------------------------------
+# evaluate_poker_hand — master detection (misc_functions.lua:376)
+# ---------------------------------------------------------------------------
+
+# Type alias for the results dict
+HandResults = dict[str, list[list["Card"]]]
+
+
+def evaluate_poker_hand(
+    hand: list[Card],
+    *,
+    four_fingers: bool = False,
+    shortcut: bool = False,
+    smeared: bool = False,
+) -> HandResults:
+    """Detect all poker hands present in *hand*.
+
+    Matches ``evaluate_poker_hand`` (misc_functions.lua:376-519).
+
+    Returns a dict mapping hand name strings to lists of card groups.
+    Multiple hands can be populated simultaneously (e.g. a Full House
+    also populates Three of a Kind and Pair).
+
+    Downward propagation (lines 507-517): Five of a Kind also populates
+    Four/Three/Pair.  Four of a Kind also populates Three/Pair.  Three
+    of a Kind also populates Pair.  This ensures jokers like The Duo
+    that check ``poker_hands['Pair']`` work regardless of the actual
+    detected hand.
+
+    Args:
+        four_fingers: If True, flush/straight need only 4 cards.
+        shortcut: If True, straights allow 1-rank gaps.
+        smeared: If True, Hearts/Diamonds and Spades/Clubs are
+            interchangeable for flushes.
+    """
+    results: HandResults = {
+        "Flush Five": [],
+        "Flush House": [],
+        "Five of a Kind": [],
+        "Straight Flush": [],
+        "Four of a Kind": [],
+        "Full House": [],
+        "Flush": [],
+        "Straight": [],
+        "Three of a Kind": [],
+        "Two Pair": [],
+        "Pair": [],
+        "High Card": [],
+    }
+
+    # Compute component parts
+    _5 = get_x_same(5, hand)
+    _4 = get_x_same(4, hand)
+    _3 = get_x_same(3, hand)
+    _2 = get_x_same(2, hand)
+    _flush = get_flush(hand, four_fingers=four_fingers, smeared=smeared)
+    _straight = get_straight(hand, four_fingers=four_fingers, shortcut=shortcut)
+    _highest = get_highest(hand)
+
+    # Check in priority order — populate all that match
+
+    # Flush Five: 5-of-a-kind AND flush
+    if _5 and _flush:
+        results["Flush Five"] = _5
+
+    # Flush House: 3-of-a-kind AND pair AND flush
+    if _3 and _2 and _flush:
+        fh_hand = list(_3[0]) + list(_2[0])
+        results["Flush House"] = [fh_hand]
+
+    # Five of a Kind
+    if _5:
+        results["Five of a Kind"] = _5
+
+    # Straight Flush: flush AND straight (merge cards from both)
+    if _flush and _straight:
+        # Start with flush cards, add straight cards not already in flush
+        flush_set = set(id(c) for c in _flush[0])
+        merged = list(_flush[0])
+        for c in _straight[0]:
+            if id(c) not in flush_set:
+                merged.append(c)
+        results["Straight Flush"] = [merged]
+
+    # Four of a Kind
+    if _4:
+        results["Four of a Kind"] = _4
+
+    # Full House: 3-of-a-kind AND pair
+    if _3 and _2:
+        fh_hand = list(_3[0]) + list(_2[0])
+        results["Full House"] = [fh_hand]
+
+    # Flush
+    if _flush:
+        results["Flush"] = _flush
+
+    # Straight
+    if _straight:
+        results["Straight"] = _straight
+
+    # Three of a Kind
+    if _3:
+        results["Three of a Kind"] = _3
+
+    # Two Pair: 2 pairs, OR 1 triple + 1 pair (the triple counts as a "pair")
+    if len(_2) >= 2 or (len(_3) == 1 and len(_2) == 1):
+        if len(_2) >= 2:
+            tp_hand = list(_2[0]) + list(_2[1])
+        else:
+            # _3 exists but only 1 _2 → use _3[0] as the second "pair"
+            tp_hand = list(_2[0]) + list(_3[0])
+        results["Two Pair"] = [tp_hand]
+
+    # Pair
+    if _2:
+        results["Pair"] = _2
+
+    # High Card
+    if _highest:
+        results["High Card"] = _highest
+
+    # -- Downward propagation (misc_functions.lua:507-517) --
+    # Five of a Kind → Four/Three/Pair
+    if results["Five of a Kind"]:
+        results["Four of a Kind"] = results["Five of a Kind"]
+    # Four of a Kind → Three/Pair
+    if results["Four of a Kind"]:
+        results["Three of a Kind"] = results["Four of a Kind"]
+    # Three of a Kind → Pair
+    if results["Three of a Kind"]:
+        results["Pair"] = results["Three of a Kind"]
+
+    return results
+
+
+def get_best_hand(
+    hand: list[Card],
+    *,
+    four_fingers: bool = False,
+    shortcut: bool = False,
+    smeared: bool = False,
+) -> tuple[str, list[Card], HandResults]:
+    """Determine the best poker hand and its scoring cards.
+
+    Matches ``G.FUNCS.get_poker_hand_info`` (state_events.lua:540).
+
+    Returns:
+        ``(hand_name, scoring_cards, full_results)`` where:
+        - ``hand_name`` is the detected hand type string (e.g. ``"Full House"``)
+        - ``scoring_cards`` is the list of cards forming that hand
+        - ``full_results`` is the complete dict from ``evaluate_poker_hand``
+    """
+    from jackdaw.engine.data.hands import HAND_ORDER
+
+    results = evaluate_poker_hand(
+        hand,
+        four_fingers=four_fingers,
+        shortcut=shortcut,
+        smeared=smeared,
+    )
+
+    # Walk priority order — first non-empty match wins
+    for ht in HAND_ORDER:
+        if results[ht.value]:
+            return ht.value, results[ht.value][0], results
+
+    return "NULL", [], results
