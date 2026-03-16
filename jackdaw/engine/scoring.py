@@ -1,15 +1,17 @@
-"""Card evaluation wrapper for the scoring pipeline.
+"""Scoring pipeline and eval_card wrapper.
 
-Ports ``eval_card`` from ``common_events.lua:580``.  This is the function
-that calls the appropriate Card scoring methods based on context and assembles
-the return dict consumed by the scoring pipeline.
+Ports ``eval_card`` from ``common_events.lua:580`` and the base scoring
+pipeline from ``state_events.lua:571-1065`` (Phases 1-4, 6-8, 12 without
+joker effects).
 
 Note: ``calculate_joker`` calls are stubbed — joker effects will be added
-when the joker system is implemented (M5+).
+when the joker system is implemented.
 """
 
 from __future__ import annotations
 
+import math
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -117,3 +119,175 @@ def eval_card(
         # else: calculate_joker stub
 
     return ret
+
+
+# ---------------------------------------------------------------------------
+# ScoreResult
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ScoreResult:
+    """Result of the base scoring pipeline (without joker effects)."""
+
+    hand_type: str
+    """Detected hand type (e.g. ``"Full House"``) or ``"NULL"``."""
+
+    scoring_cards: list[Card]
+    """Cards that scored (including Splash/Stone augmentation)."""
+
+    chips: float
+    """Final chip value (after all per-card and edition bonuses)."""
+
+    mult: float
+    """Final mult value (after all additive and multiplicative bonuses)."""
+
+    total: int
+    """``floor(chips * mult)`` — the score added to G.GAME.chips."""
+
+    dollars_earned: int
+    """Dollars earned from scoring (Gold Seal, Lucky Card, etc.)."""
+
+    debuffed: bool
+    """True if the hand was blocked by a boss blind."""
+
+    breakdown: list[str] = field(default_factory=list)
+    """Step-by-step log for debugging."""
+
+
+# ---------------------------------------------------------------------------
+# Base scoring pipeline (Phases 1-4, 6-8, 12 without joker effects)
+# ---------------------------------------------------------------------------
+
+
+def score_hand_base(
+    played_cards: list[Card],
+    held_cards: list[Card],
+    hand_levels: Any,  # HandLevels
+    blind: Any,  # Blind
+    rng: PseudoRandom,
+    *,
+    probabilities_normal: float = 1.0,
+    joker_flags: dict[str, bool] | None = None,
+) -> ScoreResult:
+    """Score a hand without joker effects.
+
+    Implements Phases 1-4, 6-8, 12 of the scoring pipeline from
+    ``state_events.lua:571-1065``.
+    """
+    from jackdaw.engine.hand_eval import evaluate_hand
+
+    _ = joker_flags  # reserved for future joker flag passing
+    dollars = 0
+    breakdown: list[str] = []
+
+    # === Phase 1-2: Hand detection ===
+    eval_result = evaluate_hand(played_cards, jokers=None)
+    hand_type = eval_result.detected_hand
+    scoring_cards = eval_result.scoring_cards
+    poker_hands = eval_result.poker_hands
+
+    if hand_type == "NULL":
+        return ScoreResult(
+            hand_type="NULL", scoring_cards=[], chips=0, mult=0,
+            total=0, dollars_earned=0, debuffed=False, breakdown=["No hand"],
+        )
+
+    # === Phase 3: Boss blind debuff check ===
+    debuffed = blind.debuff_hand(scoring_cards, poker_hands, hand_type)
+    if debuffed:
+        return ScoreResult(
+            hand_type=hand_type, scoring_cards=scoring_cards,
+            chips=0, mult=0, total=0, dollars_earned=0, debuffed=True,
+            breakdown=[f"Hand blocked by {blind.name}"],
+        )
+
+    # === Phase 4: Base chips/mult from hand level ===
+    base_chips, base_mult = hand_levels.get(hand_type)
+    hand_chips = float(base_chips)
+    mult = float(base_mult)
+    breakdown.append(
+        f"Base: {hand_type} L{hand_levels[hand_type].level}"
+        f" -> {int(hand_chips)} chips, {int(mult)} mult"
+    )
+
+    # Record play
+    hand_levels.record_play(hand_type)
+
+    # === Phase 6: Blind modify_hand (The Flint) ===
+    new_mult, new_chips, modified = blind.modify_hand(mult, int(hand_chips))
+    if modified:
+        mult = float(new_mult)
+        hand_chips = float(new_chips)
+        breakdown.append(f"Blind modify: {int(hand_chips)} chips, {int(mult)} mult")
+
+    # === Phase 7: Per scored card (with retriggers) ===
+    for card in scoring_cards:
+        if card.debuff:
+            continue
+
+        # Collect retriggers
+        reps = [1]  # base evaluation
+        seal_result = card.calculate_seal(repetition=True)
+        if seal_result and seal_result.get("repetitions"):
+            for _ in range(seal_result["repetitions"]):
+                reps.append(seal_result)
+
+        for _rep_idx in range(len(reps)):
+            ev = eval_card(
+                card, {"cardarea": "play"},
+                rng=rng, probabilities_normal=probabilities_normal,
+            )
+
+            # Apply effects in source order (state_events.lua:702-776)
+            if "chips" in ev:
+                hand_chips += ev["chips"]
+            if "mult" in ev:
+                mult += ev["mult"]
+            if "p_dollars" in ev:
+                dollars += ev["p_dollars"]
+            if "x_mult" in ev:
+                mult *= ev["x_mult"]
+            if "edition" in ev:
+                ed = ev["edition"]
+                hand_chips += ed.get("chip_mod", 0)
+                mult += ed.get("mult_mod", 0)
+                mult *= ed.get("x_mult_mod", 1)
+
+    # === Phase 8: Per held card (with retriggers) ===
+    for card in held_cards:
+        if card.debuff:
+            continue
+
+        reps = [1]
+        seal_result = card.calculate_seal(repetition=True)
+        if seal_result and seal_result.get("repetitions"):
+            for _ in range(seal_result["repetitions"]):
+                reps.append(seal_result)
+
+        for _rep_idx in range(len(reps)):
+            ev = eval_card(
+                card, {"cardarea": "hand"},
+                rng=rng, probabilities_normal=probabilities_normal,
+            )
+
+            # Apply in source order (state_events.lua:845-862)
+            if "h_mult" in ev:
+                mult += ev["h_mult"]
+            if "x_mult" in ev:
+                mult *= ev["x_mult"]
+
+    # === Phase 12: Final score ===
+    total = math.floor(hand_chips * mult)
+    breakdown.append(f"Final: {int(hand_chips)} x {mult:.1f} = {total}")
+
+    return ScoreResult(
+        hand_type=hand_type,
+        scoring_cards=scoring_cards,
+        chips=hand_chips,
+        mult=mult,
+        total=total,
+        dollars_earned=dollars,
+        debuffed=False,
+        breakdown=breakdown,
+    )
