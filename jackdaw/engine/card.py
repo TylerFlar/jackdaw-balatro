@@ -285,6 +285,75 @@ class Card:
     def set_debuff(self, should_debuff: bool) -> None:
         self.debuff = should_debuff
 
+    def set_cost(
+        self,
+        *,
+        inflation: int = 0,
+        discount_percent: int = 0,
+        ante: int = 1,
+        booster_ante_scaling: bool = False,
+        has_astronomer: bool = False,
+        is_couponed: bool = False,
+    ) -> None:
+        """Calculate cost and sell_cost, matching card.lua:369 (Card:set_cost).
+
+        Takes game-state values as parameters rather than reading global state,
+        keeping Card independent of the game loop.
+
+        Args:
+            inflation: ``G.GAME.inflation`` — cumulative price inflation.
+            discount_percent: ``G.GAME.discount_percent`` — 0/25/50 from vouchers.
+            ante: Current ante (for booster ante scaling).
+            booster_ante_scaling: ``G.GAME.modifiers.booster_ante_scaling``.
+            has_astronomer: Whether the Astronomer joker is active.
+            is_couponed: Whether a tag set ``ability.couponed = true``.
+        """
+        import math
+
+        # Edition surcharge
+        edition_extra = 0
+        if self.edition:
+            edition_extra += 2 if self.edition.get("foil") else 0
+            edition_extra += 3 if self.edition.get("holo") else 0
+            edition_extra += 5 if self.edition.get("polychrome") else 0
+            edition_extra += 5 if self.edition.get("negative") else 0
+
+        self.extra_cost = inflation + edition_extra
+
+        # Base formula (card.lua:375)
+        self.cost = max(
+            1,
+            math.floor(
+                (self.base_cost + self.extra_cost + 0.5)
+                * (100 - discount_percent) / 100
+            ),
+        )
+
+        # Booster ante scaling (card.lua:376)
+        if self.ability.get("set") == "Booster" and booster_ante_scaling:
+            self.cost += ante - 1
+
+        # Astronomer: planets and celestial packs cost 0 (card.lua:380)
+        if has_astronomer:
+            ability_set = self.ability.get("set", "")
+            ability_name = self.ability.get("name", "")
+            if ability_set == "Planet" or (
+                ability_set == "Booster" and "Celestial" in ability_name
+            ):
+                self.cost = 0
+
+        # Rental override (card.lua:381)
+        if self.ability.get("rental") or self.rental:
+            self.cost = 1
+
+        # Sell price (card.lua:382)
+        extra_value = self.ability.get("extra_value", 0)
+        self.sell_cost = max(1, math.floor(self.cost / 2)) + extra_value
+
+        # Couponed by tag: cost 0 (card.lua:383)
+        if is_couponed:
+            self.cost = 0
+
     def is_face(self) -> bool:
         """Check if this is a face card (J/Q/K), matching Card:is_face.
 

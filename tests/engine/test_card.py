@@ -363,3 +363,224 @@ class TestStickers:
         c = Card()
         c.set_seal("Red")
         assert c.seal == "Red"
+
+
+# ============================================================================
+# set_cost
+# ============================================================================
+
+class TestSetCost:
+    """Card.set_cost() matching card.lua:369."""
+
+    def _make_joker(self, key: str = "j_joker") -> Card:
+        """Helper: create a joker with set_ability."""
+        c = Card()
+        c.set_ability(key)
+        return c
+
+    # -- Base formula --
+
+    def test_base_cost_no_modifiers(self):
+        """j_joker: base_cost=2, no inflation/discount/edition."""
+        c = self._make_joker("j_joker")
+        c.set_cost()
+        # floor((2 + 0 + 0.5) * 100/100) = floor(2.5) = 2
+        assert c.cost == 2
+
+    def test_base_cost_5(self):
+        """j_greedy_joker: base_cost=5."""
+        c = self._make_joker("j_greedy_joker")
+        c.set_cost()
+        # floor((5 + 0 + 0.5) * 100/100) = floor(5.5) = 5
+        assert c.cost == 5
+
+    def test_sell_cost_is_half(self):
+        """sell_cost = max(1, floor(cost/2))."""
+        c = self._make_joker("j_greedy_joker")
+        c.set_cost()
+        # cost=5, sell = max(1, floor(5/2)) = max(1, 2) = 2
+        assert c.sell_cost == 2
+
+    def test_sell_cost_minimum_is_1(self):
+        """Even cost=1 gives sell_cost=1."""
+        c = self._make_joker("j_joker")
+        c.set_cost()
+        assert c.cost == 2
+        # floor(2/2) = 1
+        assert c.sell_cost == 1
+
+    # -- Discount --
+
+    def test_25_percent_discount(self):
+        """Clearance Sale: 25% discount on cost=5."""
+        c = self._make_joker("j_greedy_joker")
+        c.set_cost(discount_percent=25)
+        # floor((5 + 0 + 0.5) * 75/100) = floor(4.125) = 4
+        assert c.cost == 4
+
+    def test_50_percent_discount(self):
+        """Liquidation: 50% discount on cost=5."""
+        c = self._make_joker("j_greedy_joker")
+        c.set_cost(discount_percent=50)
+        # floor((5 + 0 + 0.5) * 50/100) = floor(2.75) = 2
+        assert c.cost == 2
+
+    def test_discount_minimum_1(self):
+        """Discount can't reduce cost below 1."""
+        c = self._make_joker("j_joker")  # base_cost=2
+        c.set_cost(discount_percent=50)
+        # floor((2 + 0 + 0.5) * 50/100) = floor(1.25) = 1
+        assert c.cost == 1
+
+    # -- Edition surcharges --
+
+    def test_foil_surcharge(self):
+        """Foil edition adds +2 to cost."""
+        c = self._make_joker("j_greedy_joker")
+        c.set_edition({"foil": True})
+        c.set_cost()
+        # floor((5 + 2 + 0.5) * 100/100) = floor(7.5) = 7
+        assert c.cost == 7
+
+    def test_holo_surcharge(self):
+        """Holographic edition adds +3."""
+        c = self._make_joker("j_greedy_joker")
+        c.set_edition({"holo": True})
+        c.set_cost()
+        # floor((5 + 3 + 0.5) * 100/100) = floor(8.5) = 8
+        assert c.cost == 8
+
+    def test_polychrome_surcharge(self):
+        """Polychrome edition adds +5."""
+        c = self._make_joker("j_greedy_joker")
+        c.set_edition({"polychrome": True})
+        c.set_cost()
+        # floor((5 + 5 + 0.5) * 100/100) = floor(10.5) = 10
+        assert c.cost == 10
+
+    def test_negative_surcharge(self):
+        """Negative edition adds +5."""
+        c = self._make_joker("j_greedy_joker")
+        c.set_edition({"negative": True})
+        c.set_cost()
+        assert c.cost == 10
+
+    def test_edition_with_discount(self):
+        """Foil + 25% discount on cost=5."""
+        c = self._make_joker("j_greedy_joker")
+        c.set_edition({"foil": True})
+        c.set_cost(discount_percent=25)
+        # floor((5 + 2 + 0.5) * 75/100) = floor(5.625) = 5
+        assert c.cost == 5
+
+    # -- Inflation --
+
+    def test_inflation(self):
+        """Inflation adds to extra_cost."""
+        c = self._make_joker("j_greedy_joker")
+        c.set_cost(inflation=3)
+        # floor((5 + 3 + 0.5) * 100/100) = floor(8.5) = 8
+        assert c.cost == 8
+
+    def test_inflation_with_discount(self):
+        c = self._make_joker("j_greedy_joker")
+        c.set_cost(inflation=3, discount_percent=25)
+        # floor((5 + 3 + 0.5) * 75/100) = floor(6.375) = 6
+        assert c.cost == 6
+
+    # -- Rental override --
+
+    def test_rental_override(self):
+        """Rental cards always cost 1."""
+        c = self._make_joker("j_greedy_joker")
+        c.set_rental(True)
+        c.set_cost()
+        assert c.cost == 1
+        assert c.sell_cost == 1  # floor(1/2) = 0, clamped to 1
+
+    def test_rental_via_ability_flag(self):
+        """ability.rental also triggers the override."""
+        c = self._make_joker("j_greedy_joker")
+        c.ability["rental"] = True
+        c.set_cost()
+        assert c.cost == 1
+
+    # -- Astronomer --
+
+    def test_astronomer_planet(self):
+        """Astronomer makes planet cards cost 0."""
+        c = Card()
+        c.set_ability({
+            "key": "c_pluto", "name": "Pluto", "set": "Planet",
+            "config": {"hand_type": "High Card"}, "cost": 3,
+        })
+        c.set_cost(has_astronomer=True)
+        assert c.cost == 0
+
+    def test_astronomer_celestial_booster(self):
+        """Astronomer makes celestial boosters cost 0."""
+        c = Card()
+        c.set_ability({
+            "key": "p_celestial_normal_1", "name": "Celestial Pack",
+            "set": "Booster", "config": {}, "cost": 4,
+        })
+        c.set_cost(has_astronomer=True)
+        assert c.cost == 0
+
+    def test_astronomer_non_planet(self):
+        """Astronomer doesn't affect joker costs."""
+        c = self._make_joker("j_joker")
+        c.set_cost(has_astronomer=True)
+        assert c.cost == 2  # unchanged
+
+    # -- Couponed --
+
+    def test_couponed(self):
+        """Couponed by tag: cost = 0, but sell_cost calculated before."""
+        c = self._make_joker("j_greedy_joker")
+        c.set_cost(is_couponed=True)
+        assert c.cost == 0
+        # sell_cost is calculated before couponed override
+        assert c.sell_cost == 2  # floor(5/2) = 2
+
+    # -- Booster ante scaling --
+
+    def test_booster_ante_scaling(self):
+        """Booster cost += ante - 1 when modifier active."""
+        c = Card()
+        c.set_ability({
+            "key": "p_arcana_normal_1", "name": "Arcana Pack",
+            "set": "Booster", "config": {}, "cost": 4,
+        })
+        c.set_cost(ante=5, booster_ante_scaling=True)
+        # base formula: floor((4 + 0 + 0.5) * 100/100) = 4
+        # then + (5 - 1) = 4 + 4 = 8
+        assert c.cost == 8
+
+    def test_booster_ante_scaling_non_booster(self):
+        """Ante scaling doesn't apply to non-boosters."""
+        c = self._make_joker("j_joker")
+        c.set_cost(ante=5, booster_ante_scaling=True)
+        assert c.cost == 2  # unchanged
+
+    # -- extra_value (Egg/Gift Card) --
+
+    def test_extra_value_adds_to_sell(self):
+        """Egg joker's extra_value increases sell_cost."""
+        c = self._make_joker("j_greedy_joker")
+        c.ability["extra_value"] = 9  # 3 rounds * 3
+        c.set_cost()
+        # cost=5, base sell = floor(5/2) = 2, + 9 = 11
+        assert c.sell_cost == 11
+
+    # -- Compound scenario --
+
+    def test_foil_inflation_discount(self):
+        """Foil + inflation=2 + 25% discount on base_cost=8."""
+        c = self._make_joker("j_stencil")  # cost=8, uncommon
+        c.set_edition({"foil": True})
+        c.set_cost(inflation=2, discount_percent=25)
+        # extra_cost = 2 + 2 = 4
+        # floor((8 + 4 + 0.5) * 75/100) = floor(9.375) = 9
+        assert c.cost == 9
+        assert c.sell_cost == 4  # floor(9/2) = 4
