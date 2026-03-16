@@ -296,6 +296,190 @@ class Blind:
 
         return mult, hand_chips, False
 
+    def press_play(
+        self,
+        hand_cards: list[Any],
+        played_cards: list[Any],
+        rng: Any | None = None,
+    ) -> dict[str, Any]:
+        """Boss reaction when player presses Play (Phase 0 of scoring).
+
+        Matches ``Blind:press_play`` (blind.lua:464-508).
+
+        Returns a side-effect descriptor dict:
+            ``discard_indices``: list of indices into hand_cards to discard (The Hook)
+            ``money_cost``: dollars lost per played card (The Tooth)
+            ``triggered``: whether the boss effect activated
+        """
+        if self.disabled:
+            return {}
+
+        result: dict[str, Any] = {}
+
+        if self.name == "The Hook":
+            # Discard 2 random cards from hand
+            if rng and hand_cards:
+                indices_to_discard: list[int] = []
+                available = list(range(len(hand_cards)))
+                for _ in range(min(2, len(available))):
+                    if not available:
+                        break
+                    _, idx = rng.element(
+                        {i: i for i in available},
+                        rng.seed("hook"),
+                    )
+                    indices_to_discard.append(idx)
+                    available.remove(idx)
+                result["discard_indices"] = indices_to_discard
+            self.triggered = True
+
+        elif self.name == "The Tooth":
+            # Lose $1 per card played
+            result["money_cost"] = len(played_cards)
+            self.triggered = True
+
+        elif self.name == "Crimson Heart":
+            # Prep for drawn_to_hand joker debuff
+            self.triggered = True
+            result["prepped"] = True
+
+        elif self.name == "The Fish":
+            result["prepped"] = True
+
+        return result
+
+    def drawn_to_hand(
+        self,
+        hand_cards: list[Any],
+        joker_cards: list[Any] | None = None,
+        rng: Any | None = None,
+    ) -> dict[str, Any]:
+        """Boss effect when cards are drawn to hand.
+
+        Matches ``Blind:drawn_to_hand`` (blind.lua:572-603).
+
+        Returns side-effect descriptor:
+            ``forced_card_index``: index in hand_cards to force-select (Cerulean Bell)
+            ``debuffed_joker_index``: index in joker_cards to debuff (Crimson Heart)
+        """
+        result: dict[str, Any] = {}
+
+        if self.disabled:
+            return result
+
+        if self.name == "Cerulean Bell" and rng and hand_cards:
+            # Check if any card already has forced_selection
+            any_forced = any(
+                c.ability.get("forced_selection") for c in hand_cards
+            )
+            if not any_forced:
+                _, idx = rng.element(
+                    {i: c for i, c in enumerate(hand_cards)},
+                    rng.seed("cerulean_bell"),
+                )
+                result["forced_card_index"] = idx
+
+        if self.name == "Crimson Heart" and rng and joker_cards:
+            # Clear all joker debuffs, then debuff one random
+            eligible = []
+            for i, j in enumerate(joker_cards):
+                if not j.debuff or len(joker_cards) < 2:
+                    eligible.append(i)
+                j.set_debuff(False)
+            if eligible:
+                _, idx = rng.element(
+                    {i: i for i in eligible},
+                    rng.seed("crimson_heart"),
+                )
+                joker_cards[idx].set_debuff(True)
+                result["debuffed_joker_index"] = idx
+
+        return result
+
+    def stay_flipped(
+        self,
+        card: Any,
+        *,
+        rng: Any | None = None,
+        probabilities_normal: float = 1.0,
+        hands_played: int = 0,
+        discards_used: int = 0,
+        pareidolia: bool = False,
+    ) -> bool:
+        """Should a card stay face-down when dealt to hand?
+
+        Matches ``Blind:stay_flipped`` (blind.lua:605-622).
+        """
+        if self.disabled:
+            return False
+
+        if self.name == "The Wheel" and rng:
+            roll = rng.random("wheel")
+            if roll < probabilities_normal / 7:
+                return True
+
+        if self.name == "The House":
+            if hands_played == 0 and discards_used == 0:
+                return True
+
+        if self.name == "The Mark":
+            if card.is_face(from_boss=True, pareidolia=pareidolia):
+                return True
+
+        if self.name == "The Fish":
+            # Fish flips cards after each play (prepped flag)
+            # Handled via prepped state set in press_play
+            pass
+
+        return False
+
+    def disable(
+        self,
+        playing_cards: list[Any] | None = None,
+        joker_cards: list[Any] | None = None,
+    ) -> dict[str, Any]:
+        """Disable this boss blind's effects.
+
+        Matches ``Blind:disable`` (blind.lua:356-415).
+        Called by Chicot joker (on boss set) or Luchador (when sold).
+
+        Returns side-effect descriptor:
+            ``restore_discards``: discards to restore (The Water)
+            ``restore_hands``: hands to restore (The Needle)
+            ``restore_hand_size``: hand size change (The Manacle: +1)
+            ``halve_chips``: True if chips halved (The Wall, Violet Vessel)
+            ``clear_forced``: True if forced_selection cleared (Cerulean Bell)
+        """
+        self.disabled = True
+        result: dict[str, Any] = {}
+
+        if self.name == "The Water" and self.discards_sub is not None:
+            result["restore_discards"] = self.discards_sub
+
+        if self.name == "The Needle" and self.hands_sub is not None:
+            result["restore_hands"] = self.hands_sub
+
+        if self.name == "The Wall":
+            self.chips = int(self.chips / 2)
+            result["halve_chips"] = True
+
+        if self.name == "Violet Vessel":
+            self.chips = int(self.chips / 3)
+            result["halve_chips"] = True
+
+        if self.name == "Cerulean Bell":
+            result["clear_forced"] = True
+
+        if self.name == "The Manacle":
+            result["restore_hand_size"] = 1
+
+        # Re-debuff all cards (clears debuffs since disabled=True)
+        for cards in [playing_cards or [], joker_cards or []]:
+            for card in cards:
+                self.debuff_card(card)
+
+        return result
+
     def get_type(self) -> str:
         """Return blind type string: ``'Small'``, ``'Big'``, or ``'Boss'``."""
         if self.name == "Small Blind":

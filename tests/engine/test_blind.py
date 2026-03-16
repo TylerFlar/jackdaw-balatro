@@ -11,6 +11,7 @@ import pytest
 from jackdaw.engine.blind import Blind
 from jackdaw.engine.card import Card, reset_sort_id_counter
 from jackdaw.engine.data.blind_scaling import get_blind_amount
+from jackdaw.engine.rng import PseudoRandom
 
 # ============================================================================
 # Small Blind
@@ -611,3 +612,207 @@ class TestModifyHand:
         b = Blind.create("bl_small", ante=1)
         mult, chips, modified = b.modify_hand(20.0, 100)
         assert modified is False
+
+
+# ============================================================================
+# press_play
+# ============================================================================
+
+
+class TestPressPlayHook:
+    """The Hook: discard 2 random cards from hand."""
+
+    def test_returns_discard_indices(self):
+        reset_sort_id_counter()
+        b = Blind.create("bl_hook", ante=1)
+        hand = [_card("Hearts", str(i)) for i in range(2, 10)]
+        rng = PseudoRandom("TESTSEED")
+        result = b.press_play(hand, [], rng=rng)
+        assert "discard_indices" in result
+        assert len(result["discard_indices"]) == 2
+        assert b.triggered is True
+
+    def test_indices_are_valid(self):
+        reset_sort_id_counter()
+        b = Blind.create("bl_hook", ante=1)
+        hand = [_card("Hearts", str(i)) for i in range(2, 7)]
+        rng = PseudoRandom("TESTSEED")
+        result = b.press_play(hand, [], rng=rng)
+        for idx in result["discard_indices"]:
+            assert 0 <= idx < len(hand)
+
+    def test_indices_are_unique(self):
+        reset_sort_id_counter()
+        b = Blind.create("bl_hook", ante=1)
+        hand = [_card("Hearts", str(i)) for i in range(2, 10)]
+        rng = PseudoRandom("TESTSEED")
+        result = b.press_play(hand, [], rng=rng)
+        assert len(set(result["discard_indices"])) == 2
+
+    def test_disabled(self):
+        reset_sort_id_counter()
+        b = Blind.create("bl_hook", ante=1)
+        b.disabled = True
+        result = b.press_play([], [], rng=PseudoRandom("X"))
+        assert result == {}
+
+
+class TestPressPlayTooth:
+    """The Tooth: lose $1 per card played."""
+
+    def test_money_cost(self):
+        reset_sort_id_counter()
+        b = Blind.create("bl_tooth", ante=1)
+        played = [_card("Hearts", "5"), _card("Spades", "King")]
+        result = b.press_play([], played)
+        assert result["money_cost"] == 2
+        assert b.triggered is True
+
+
+class TestPressPlayOthers:
+    """Bosses with no press_play effect."""
+
+    def test_small_blind(self):
+        b = Blind.create("bl_small", ante=1)
+        assert b.press_play([], []) == {}
+
+    def test_the_wall(self):
+        b = Blind.create("bl_wall", ante=1)
+        assert b.press_play([], []) == {}
+
+
+# ============================================================================
+# drawn_to_hand
+# ============================================================================
+
+class TestDrawnToHandBell:
+    """Cerulean Bell: force-select a random card."""
+
+    def test_returns_forced_index(self):
+        reset_sort_id_counter()
+        b = Blind.create("bl_final_bell", ante=1)
+        hand = [_card("Hearts", "5"), _card("Spades", "King"), _card("Clubs", "Ace")]
+        rng = PseudoRandom("TESTSEED")
+        result = b.drawn_to_hand(hand, rng=rng)
+        assert "forced_card_index" in result
+        assert 0 <= result["forced_card_index"] < len(hand)
+
+    def test_disabled(self):
+        reset_sort_id_counter()
+        b = Blind.create("bl_final_bell", ante=1)
+        b.disabled = True
+        result = b.drawn_to_hand([], rng=PseudoRandom("X"))
+        assert result == {}
+
+
+class TestDrawnToHandCrimsonHeart:
+    """Crimson Heart: debuff a random joker."""
+
+    def test_debuffs_one_joker(self):
+        reset_sort_id_counter()
+        b = Blind.create("bl_final_heart", ante=1)
+        from jackdaw.engine.card_factory import create_joker
+        jokers = [create_joker("j_joker"), create_joker("j_greedy_joker")]
+        rng = PseudoRandom("TESTSEED")
+        result = b.drawn_to_hand([], joker_cards=jokers, rng=rng)
+        assert "debuffed_joker_index" in result
+        # Exactly one joker should be debuffed
+        debuffed = [j for j in jokers if j.debuff]
+        assert len(debuffed) == 1
+
+
+# ============================================================================
+# stay_flipped
+# ============================================================================
+
+class TestStayFlipped:
+    def test_the_house_first_hand(self):
+        reset_sort_id_counter()
+        b = Blind.create("bl_house", ante=1)
+        c = _card("Hearts", "5")
+        assert b.stay_flipped(c, hands_played=0, discards_used=0) is True
+
+    def test_the_house_after_play(self):
+        reset_sort_id_counter()
+        b = Blind.create("bl_house", ante=1)
+        c = _card("Hearts", "5")
+        assert b.stay_flipped(c, hands_played=1, discards_used=0) is False
+
+    def test_the_mark_face_card(self):
+        reset_sort_id_counter()
+        b = Blind.create("bl_mark", ante=1)
+        c = _card("Hearts", "King")
+        assert b.stay_flipped(c) is True
+
+    def test_the_mark_number_card(self):
+        reset_sort_id_counter()
+        b = Blind.create("bl_mark", ante=1)
+        c = _card("Hearts", "5")
+        assert b.stay_flipped(c) is False
+
+    def test_disabled(self):
+        reset_sort_id_counter()
+        b = Blind.create("bl_house", ante=1)
+        b.disabled = True
+        c = _card("Hearts", "5")
+        assert b.stay_flipped(c, hands_played=0, discards_used=0) is False
+
+    def test_non_flipping_blind(self):
+        b = Blind.create("bl_hook", ante=1)
+        c = _card("Hearts", "5")
+        assert b.stay_flipped(c) is False
+
+
+# ============================================================================
+# disable
+# ============================================================================
+
+class TestDisable:
+    def test_sets_disabled(self):
+        b = Blind.create("bl_hook", ante=1)
+        b.disable()
+        assert b.disabled is True
+
+    def test_the_wall_halves_chips(self):
+        b = Blind.create("bl_wall", ante=1)
+        original_chips = b.chips
+        result = b.disable()
+        assert b.chips == original_chips // 2
+        assert result.get("halve_chips") is True
+
+    def test_violet_vessel_thirds_chips(self):
+        b = Blind.create("bl_final_vessel", ante=1)
+        original_chips = b.chips
+        b.disable()
+        assert b.chips == original_chips // 3
+
+    def test_the_water_restore_discards(self):
+        b = Blind.create("bl_water", ante=1)
+        b.discards_sub = 3
+        result = b.disable()
+        assert result["restore_discards"] == 3
+
+    def test_the_needle_restore_hands(self):
+        b = Blind.create("bl_needle", ante=1)
+        b.hands_sub = 3
+        result = b.disable()
+        assert result["restore_hands"] == 3
+
+    def test_the_manacle_restore_hand_size(self):
+        b = Blind.create("bl_manacle", ante=1)
+        result = b.disable()
+        assert result["restore_hand_size"] == 1
+
+    def test_cerulean_bell_clear_forced(self):
+        b = Blind.create("bl_final_bell", ante=1)
+        result = b.disable()
+        assert result.get("clear_forced") is True
+
+    def test_clears_card_debuffs(self):
+        reset_sort_id_counter()
+        b = Blind.create("bl_goad", ante=1)
+        c = _card("Spades", "5")
+        b.debuff_card(c)
+        assert c.debuff is True
+        b.disable(playing_cards=[c])
+        assert c.debuff is False
