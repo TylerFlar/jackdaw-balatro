@@ -60,7 +60,7 @@ class TestCreatePlayingCard:
 
     def test_with_edition(self):
         c = create_playing_card(Suit.HEARTS, Rank.ACE, edition={"foil": True})
-        assert c.edition == {"foil": True}
+        assert c.edition["foil"] is True
 
     def test_with_seal(self):
         c = create_playing_card(Suit.SPADES, Rank.QUEEN, seal="Red")
@@ -74,7 +74,7 @@ class TestCreatePlayingCard:
             seal="Gold",
         )
         assert c.center_key == "m_steel"
-        assert c.edition == {"polychrome": True}
+        assert c.edition["polychrome"] is True
         assert c.seal == "Gold"
         assert c.base.rank is Rank.JACK
 
@@ -119,7 +119,7 @@ class TestCreateJoker:
 
     def test_with_foil_edition(self):
         c = create_joker("j_joker", edition={"foil": True})
-        assert c.edition == {"foil": True}
+        assert c.edition["foil"] is True
 
     def test_eternal(self):
         c = create_joker("j_joker", eternal=True)
@@ -143,7 +143,7 @@ class TestCreateJoker:
         )
         assert c.eternal is True
         assert c.rental is True
-        assert c.edition == {"negative": True}
+        assert c.edition["negative"] is True
 
     def test_ice_cream_extra(self):
         c = create_joker("j_ice_cream")
@@ -217,7 +217,7 @@ class TestCardFromControl:
         assert c.base.rank is Rank.KING
         assert c.center_key == "m_gold"
         assert c.ability["effect"] == "Gold Card"
-        assert c.edition == {"holo": True}
+        assert c.edition["holo"] is True
         assert c.seal == "Red"
 
     def test_glass_enhancement(self):

@@ -256,7 +256,7 @@ class TestChallengeFiltering:
         rng = PseudoRandom("TESTSEED")
         cards = build_deck("b_red", rng, challenge=challenge)
         for c in cards:
-            assert c.edition == {"foil": True}
+            assert c.edition["foil"] is True
             assert c.seal == "Gold"
 
 

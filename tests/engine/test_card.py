@@ -517,7 +517,7 @@ class TestStickers:
     def test_set_edition(self):
         c = Card()
         c.set_edition({"foil": True})
-        assert c.edition == {"foil": True}
+        assert c.edition["foil"] is True
 
     def test_set_seal(self):
         c = Card()

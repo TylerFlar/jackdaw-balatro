@@ -264,8 +264,31 @@ class Card:
         self.ability["hands_played_at_create"] = hands_played
 
     def set_edition(self, edition: dict[str, bool] | None) -> None:
-        """Set the card's edition."""
-        self.edition = edition
+        """Set the card's edition, populating scoring values.
+
+        Matches card.lua:387 (Card:set_edition).  The source stores both
+        the boolean flag (``foil=True``) and the scoring value (``chips=50``)
+        on ``self.edition``.
+        """
+        self.edition = None
+        if not edition:
+            return
+        self.edition = {}
+        if edition.get("foil"):
+            self.edition["foil"] = True
+            self.edition["chips"] = 50
+            self.edition["type"] = "foil"
+        elif edition.get("holo"):
+            self.edition["holo"] = True
+            self.edition["mult"] = 10
+            self.edition["type"] = "holo"
+        elif edition.get("polychrome"):
+            self.edition["polychrome"] = True
+            self.edition["x_mult"] = 1.5
+            self.edition["type"] = "polychrome"
+        elif edition.get("negative"):
+            self.edition["negative"] = True
+            self.edition["type"] = "negative"
 
     def set_seal(self, seal: str | None) -> None:
         """Set the card's seal."""
@@ -439,8 +462,14 @@ class Card:
             return 0
         return self.base.id
 
+    # -- scoring methods (card.lua:976-1089) --------------------------------
+
     def get_chip_bonus(self) -> int:
-        """Chip bonus when scored, matching Card:get_chip_bonus."""
+        """Chip bonus when scored, matching Card:get_chip_bonus (card.lua:976).
+
+        Stone Card: ignores base nominal, returns bonus + perma_bonus only.
+        Normal card: base.nominal + bonus + perma_bonus.
+        """
         if self.debuff:
             return 0
         if self.ability.get("effect") == "Stone Card":
@@ -449,20 +478,141 @@ class Card:
             return 0
         return self.base.nominal + self.ability.get("bonus", 0) + self.ability.get("perma_bonus", 0)
 
-    def get_chip_mult(self) -> float:
-        """Mult bonus when scored, matching Card:get_chip_mult."""
+    def get_chip_mult(
+        self,
+        *,
+        rng: object | None = None,
+        probabilities_normal: float = 1.0,
+    ) -> float:
+        """Additive mult when scored, matching Card:get_chip_mult (card.lua:984).
+
+        Lucky Card: probabilistic — ``pseudorandom('lucky_mult') < normal/5``.
+        If *rng* is provided, does the actual roll (simulation mode).
+        If *rng* is None, returns the non-lucky value (ability.mult for
+        non-Lucky, 0 for Lucky — caller handles EV separately).
+
+        Mult Card: returns ability.mult (default 4).
+        All others: returns ability.mult (typically 0).
+        """
         if self.debuff:
             return 0
+        if self.ability.get("set") == "Joker":
+            return 0
+        if self.ability.get("effect") == "Lucky Card":
+            if rng is not None:
+                from jackdaw.engine.rng import PseudoRandom
+
+                if isinstance(rng, PseudoRandom):
+                    roll = rng.random("lucky_mult")
+                    if roll < probabilities_normal / 5:
+                        self.ability["lucky_trigger"] = True
+                        return self.ability.get("mult", 0)
+                return 0
+            return 0  # Without RNG, Lucky Card returns 0 (needs actual roll)
         return self.ability.get("mult", 0)
 
     def get_chip_x_mult(self) -> float:
-        """X-mult bonus when scored, matching Card:get_chip_x_mult."""
+        """Multiplicative mult when scored, matching Card:get_chip_x_mult (card.lua:999).
+
+        Glass Card: returns ability.x_mult (default 2.0) if > 1.
+        All others: returns 0 (no multiplicative effect).
+        """
         if self.debuff:
+            return 0
+        if self.ability.get("set") == "Joker":
             return 0
         xm = self.ability.get("x_mult", 1)
         if xm <= 1:
             return 0
         return xm
+
+    def get_chip_h_mult(self) -> float:
+        """Additive mult for a card HELD in hand, matching Card:get_chip_h_mult (card.lua:1006).
+
+        Returns ability.h_mult (typically 0 for most cards).
+        No standard enhancement uses this directly — it's available for
+        modded effects or future use.
+        """
+        if self.debuff:
+            return 0
+        return self.ability.get("h_mult", 0)
+
+    def get_chip_h_x_mult(self) -> float:
+        """Multiplicative mult for held card (Card:get_chip_h_x_mult, card.lua:1011).
+
+        Steel Card: returns ability.h_x_mult (default 1.5).
+        """
+        if self.debuff:
+            return 0
+        return self.ability.get("h_x_mult", 0)
+
+    def get_edition(self) -> dict | None:
+        """Edition scoring bonuses, matching Card:get_edition (card.lua:1016).
+
+        Returns a dict with scoring fields, or None if debuffed/no edition.
+        Fields: chip_mod (Foil=50), mult_mod (Holo=10), x_mult_mod (Poly=1.5).
+        """
+        if self.debuff:
+            return None
+        if not self.edition:
+            return None
+        ret: dict = {"card": self}
+        if self.edition.get("x_mult"):
+            ret["x_mult_mod"] = self.edition["x_mult"]
+        if self.edition.get("mult"):
+            ret["mult_mod"] = self.edition["mult"]
+        if self.edition.get("chips"):
+            ret["chip_mod"] = self.edition["chips"]
+        return ret
+
+    def get_p_dollars(
+        self,
+        *,
+        rng: object | None = None,
+        probabilities_normal: float = 1.0,
+    ) -> int:
+        """Dollars earned when this card scores, matching Card:get_p_dollars (card.lua:1068).
+
+        Gold Seal: +3.
+        Gold Card (enhancement): ability.p_dollars (0 — wait, Gold Card uses h_dollars).
+        Lucky Card: probabilistic — ``pseudorandom('lucky_money') < normal/15 → +20``.
+        """
+        if self.debuff:
+            return 0
+        ret = 0
+        # Gold Seal bonus
+        if self.seal == "Gold":
+            ret += 3
+        # Card ability dollars
+        p_dollars = self.ability.get("p_dollars", 0)
+        if p_dollars > 0:
+            if self.ability.get("effect") == "Lucky Card":
+                if rng is not None:
+                    from jackdaw.engine.rng import PseudoRandom
+
+                    if isinstance(rng, PseudoRandom):
+                        roll = rng.random("lucky_money")
+                        if roll < probabilities_normal / 15:
+                            self.ability["lucky_trigger"] = True
+                            ret += p_dollars
+                # Without RNG, Lucky Card $ returns 0
+            else:
+                ret += p_dollars
+        return ret
+
+    def calculate_seal(self, *, repetition: bool = False) -> dict | None:
+        """Seal effects, matching Card:calculate_seal (card.lua:2242).
+
+        For the repetition context:
+        - Red Seal: returns ``{'repetitions': 1}`` (one extra evaluation).
+        - Other seals have non-repetition effects handled elsewhere.
+        """
+        if self.debuff:
+            return None
+        if repetition:
+            if self.seal == "Red":
+                return {"repetitions": 1, "card": self}
+        return None
 
     def __repr__(self) -> str:
         if self.base:
