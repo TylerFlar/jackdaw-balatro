@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import pytest
 
-from jackdaw.engine.blind import Blind
+from jackdaw.engine.blind import Blind, get_ante_blinds, get_new_boss
 from jackdaw.engine.card import Card, reset_sort_id_counter
 from jackdaw.engine.data.blind_scaling import get_blind_amount
+from jackdaw.engine.data.prototypes import BLINDS as ALL_BLINDS
 from jackdaw.engine.rng import PseudoRandom
 
 # ============================================================================
@@ -816,3 +817,114 @@ class TestDisable:
         assert c.debuff is True
         b.disable(playing_cards=[c])
         assert c.debuff is False
+
+
+# ============================================================================
+# get_new_boss / get_ante_blinds
+# ============================================================================
+
+class TestGetNewBoss:
+    """Boss blind selection matching common_events.lua:2338."""
+
+    def test_returns_valid_boss(self):
+        bosses_used = {k: 0 for k in ALL_BLINDS if ALL_BLINDS[k].boss}
+        rng = PseudoRandom("TESTSEED")
+        boss = get_new_boss(1, bosses_used, rng)
+        assert boss in ALL_BLINDS
+        assert ALL_BLINDS[boss].boss is not None
+
+    def test_deterministic(self):
+        bosses_used1 = {k: 0 for k in ALL_BLINDS if ALL_BLINDS[k].boss}
+        bosses_used2 = {k: 0 for k in ALL_BLINDS if ALL_BLINDS[k].boss}
+        b1 = get_new_boss(1, bosses_used1, PseudoRandom("TESTSEED"))
+        b2 = get_new_boss(1, bosses_used2, PseudoRandom("TESTSEED"))
+        assert b1 == b2
+
+    def test_increments_usage(self):
+        bosses_used = {k: 0 for k in ALL_BLINDS if ALL_BLINDS[k].boss}
+        rng = PseudoRandom("TESTSEED")
+        boss = get_new_boss(1, bosses_used, rng)
+        assert bosses_used[boss] == 1
+
+    def test_avoids_overused_bosses(self):
+        """Bosses with higher usage count are excluded in favor of least-used."""
+        bosses_used = {k: 0 for k in ALL_BLINDS if ALL_BLINDS[k].boss}
+        rng = PseudoRandom("FIXEDSEED")
+
+        # Select many bosses — they should spread across available options
+        selected = set()
+        for _ in range(20):
+            boss = get_new_boss(3, bosses_used, rng)
+            selected.add(boss)
+
+        # With 20 selections, we should have used multiple different bosses
+        assert len(selected) > 5
+
+    def test_ante_1_excludes_high_min(self):
+        """Bosses with boss.min > 1 shouldn't appear at ante 1."""
+        bosses_used = {k: 0 for k in ALL_BLINDS if ALL_BLINDS[k].boss}
+        rng = PseudoRandom("TESTSEED")
+
+        for _ in range(50):
+            boss = get_new_boss(1, bosses_used, rng)
+            proto = ALL_BLINDS[boss]
+            assert proto.boss["min"] <= 1, (
+                f"{boss} has min={proto.boss['min']} but appeared at ante 1"
+            )
+
+    def test_showdown_at_ante_8(self):
+        """At ante 8 (win_ante), only showdown blinds are eligible."""
+        bosses_used = {k: 0 for k in ALL_BLINDS if ALL_BLINDS[k].boss}
+        rng = PseudoRandom("TESTSEED")
+
+        boss = get_new_boss(8, bosses_used, rng, win_ante=8)
+        proto = ALL_BLINDS[boss]
+        assert proto.boss.get("showdown") is True, (
+            f"{boss} is not a showdown blind but was selected at ante 8"
+        )
+
+    def test_showdown_at_ante_16(self):
+        """Ante 16 is also a showdown ante (16 % 8 == 0)."""
+        bosses_used = {k: 0 for k in ALL_BLINDS if ALL_BLINDS[k].boss}
+        rng = PseudoRandom("TESTSEED")
+
+        boss = get_new_boss(16, bosses_used, rng, win_ante=8)
+        proto = ALL_BLINDS[boss]
+        assert proto.boss.get("showdown") is True
+
+    def test_non_showdown_at_ante_7(self):
+        """Ante 7 is NOT a showdown ante — no showdown blinds."""
+        bosses_used = {k: 0 for k in ALL_BLINDS if ALL_BLINDS[k].boss}
+        rng = PseudoRandom("TESTSEED")
+
+        for _ in range(20):
+            boss = get_new_boss(7, bosses_used, rng, win_ante=8)
+            proto = ALL_BLINDS[boss]
+            assert not proto.boss.get("showdown"), (
+                f"{boss} is showdown but appeared at ante 7"
+            )
+
+    def test_banned_keys_excluded(self):
+        bosses_used = {k: 0 for k in ALL_BLINDS if ALL_BLINDS[k].boss}
+        rng = PseudoRandom("TESTSEED")
+        banned = {"bl_hook": True, "bl_club": True}
+
+        for _ in range(30):
+            boss = get_new_boss(1, bosses_used, rng, banned_keys=banned)
+            assert boss not in banned
+
+
+class TestGetAnteBlinds:
+    def test_structure(self):
+        bosses_used = {k: 0 for k in ALL_BLINDS if ALL_BLINDS[k].boss}
+        rng = PseudoRandom("TESTSEED")
+        result = get_ante_blinds(1, bosses_used, rng)
+        assert result["Small"] == "bl_small"
+        assert result["Big"] == "bl_big"
+        assert result["Boss"] in ALL_BLINDS
+
+    def test_boss_is_valid(self):
+        bosses_used = {k: 0 for k in ALL_BLINDS if ALL_BLINDS[k].boss}
+        rng = PseudoRandom("TESTSEED")
+        result = get_ante_blinds(3, bosses_used, rng)
+        assert ALL_BLINDS[result["Boss"]].boss is not None

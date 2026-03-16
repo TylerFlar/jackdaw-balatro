@@ -495,3 +495,103 @@ class Blind:
             f"Blind({self.name!r}, chips={self.chips:,}, "
             f"boss={self.boss}, disabled={self.disabled})"
         )
+
+
+# ---------------------------------------------------------------------------
+# Boss selection (common_events.lua:2338-2383)
+# ---------------------------------------------------------------------------
+
+
+def get_new_boss(
+    ante: int,
+    bosses_used: dict[str, int],
+    rng: Any,
+    *,
+    win_ante: int = 8,
+    banned_keys: dict[str, bool] | None = None,
+) -> str:
+    """Select a boss blind for the given ante.
+
+    Matches ``get_new_boss`` (common_events.lua:2338-2383).
+
+    Selection logic:
+        1. Build eligible pool from P_BLINDS based on ante and boss min/max.
+        2. At showdown antes (ante % win_ante == 0, ante >= 2): only showdown bosses.
+        3. At other antes: only non-showdown bosses with boss.min <= ante.
+        4. Remove banned keys (challenge restrictions).
+        5. Find the minimum usage count among eligible bosses.
+        6. Remove any boss with usage > minimum (favor least-used).
+        7. Pick randomly via ``pseudorandom_element`` with seed ``'boss'``.
+        8. Increment usage count for the selected boss.
+
+    Args:
+        ante: Current ante number.
+        bosses_used: ``{blind_key: usage_count}`` tracking dict. Mutated in place.
+        rng: PseudoRandom instance.
+        win_ante: Ante to win (default 8). Showdown blinds appear at multiples.
+        banned_keys: ``{key: True}`` for challenge-banned blinds.
+    """
+    banned = banned_keys or {}
+    is_showdown_ante = ante >= 2 and ante % win_ante == 0
+
+    # Build eligible pool
+    eligible: dict[str, int] = {}
+    for key, proto in BLINDS.items():
+        if proto.boss is None:
+            continue  # not a boss (Small/Big)
+
+        boss_cfg = proto.boss
+        is_showdown = boss_cfg.get("showdown", False)
+        boss_min = boss_cfg.get("min", 1)
+
+        if is_showdown_ante:
+            if is_showdown:
+                eligible[key] = bosses_used.get(key, 0)
+        else:
+            if not is_showdown and boss_min <= max(1, ante):
+                eligible[key] = bosses_used.get(key, 0)
+
+    # Remove banned keys
+    for key in banned:
+        eligible.pop(key, None)
+
+    if not eligible:
+        # Fallback — shouldn't happen with standard data
+        return "bl_hook"
+
+    # Find minimum usage count
+    min_use = min(eligible.values())
+
+    # Keep only bosses with minimum usage (favor least-used)
+    eligible = {k: v for k, v in eligible.items() if v <= min_use}
+
+    # Random selection
+    _, boss_key = rng.element(eligible, rng.seed("boss"))
+
+    # Track usage
+    bosses_used[boss_key] = bosses_used.get(boss_key, 0) + 1
+
+    return boss_key
+
+
+def get_ante_blinds(
+    ante: int,
+    bosses_used: dict[str, int],
+    rng: Any,
+    *,
+    win_ante: int = 8,
+    banned_keys: dict[str, bool] | None = None,
+) -> dict[str, str]:
+    """Get the blind assignments for an ante.
+
+    Returns ``{'Small': 'bl_small', 'Big': 'bl_big', 'Boss': <boss_key>}``.
+    """
+    boss_key = get_new_boss(
+        ante, bosses_used, rng,
+        win_ante=win_ante, banned_keys=banned_keys,
+    )
+    return {
+        "Small": "bl_small",
+        "Big": "bl_big",
+        "Boss": boss_key,
+    }
