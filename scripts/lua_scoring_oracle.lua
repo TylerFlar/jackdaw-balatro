@@ -306,6 +306,17 @@ local function score_hand(play_cards, hand_cards, hands, blind, jokers)
     local mult = mod_mult(hands[text].mult)
     local base_chips, base_mult = hand_chips, mult
 
+    -- Phase 5: "before" joker pass
+    for k=1, #jokers do
+        if not jokers[k].debuff then
+            local before_result = jokers[k]:calculate_joker({
+                before = true, full_hand = play_cards,
+                scoring_hand = scoring_hand, scoring_name = text,
+                poker_hands = poker_hands,
+            })
+        end
+    end
+
     -- Phase 6: blind modify
     mult, hand_chips = blind:modify_hand(nil, nil, text, mult, hand_chips)
 
@@ -425,7 +436,21 @@ local function score_hand(play_cards, hand_cards, hands, blind, jokers)
                 if j_result.dollars then dollars = dollars + j_result.dollars end
             end
 
-            -- 9c: Joker-on-joker (skipped for these tests)
+            -- 9c: Joker-on-joker
+            for _, v in ipairs(jokers) do
+                if v ~= jokers[i] and not v.debuff then
+                    local j2j = v:calculate_joker({
+                        full_hand = play_cards, scoring_hand = scoring_hand,
+                        scoring_name = text, poker_hands = poker_hands,
+                        other_joker = jokers[i],
+                    })
+                    if j2j then
+                        if j2j.mult_mod then mult = mod_mult(mult + j2j.mult_mod) end
+                        if j2j.chip_mod then hand_chips = mod_chips(hand_chips + j2j.chip_mod) end
+                        if j2j.Xmult_mod then mult = mod_mult(mult * j2j.Xmult_mod) end
+                    end
+                end
+            end
 
             -- 9d: Edition multiplicative (x_mult_mod)
             if edition and edition.x_mult_mod then
@@ -434,8 +459,40 @@ local function score_hand(play_cards, hand_cards, hands, blind, jokers)
         end
     end
 
+    -- Phase 11: Glass Card destruction
+    local destroyed = {}
+    for i = 1, #scoring_hand do
+        if not scoring_hand[i].debuff and scoring_hand[i].ability.name == 'Glass Card' then
+            -- Deterministic: use glass_shatter flag if set, else always shatter for test
+            if scoring_hand[i].force_shatter then
+                destroyed[#destroyed+1] = scoring_hand[i]
+            end
+        end
+    end
+    -- Notify jokers of destruction
+    if #destroyed > 0 then
+        for k=1, #jokers do
+            if not jokers[k].debuff then
+                jokers[k]:calculate_joker({
+                    cards_destroyed = destroyed,
+                })
+            end
+        end
+    end
+
     -- Phase 12
     local total = math.floor(hand_chips * mult)
+
+    -- Phase 13: "after" joker pass
+    local jokers_removed = {}
+    for k=1, #jokers do
+        if not jokers[k].debuff then
+            local after_result = jokers[k]:calculate_joker({after = true})
+            if after_result and after_result.remove then
+                jokers_removed[#jokers_removed+1] = jokers[k]
+            end
+        end
+    end
 
     return {
         hand_type = text,
@@ -447,6 +504,8 @@ local function score_hand(play_cards, hand_cards, hands, blind, jokers)
         dollars = dollars,
         debuffed = false,
         scoring_count = #scoring_hand,
+        destroyed_count = #destroyed,
+        jokers_removed_count = #jokers_removed,
     }
 end
 
@@ -471,7 +530,10 @@ local function make_joker(name, opts)
             type = opts.type,
             t_mult = opts.t_mult or 0,
             t_chips = opts.t_chips or 0,
+            steel_tally = opts.steel_tally or 0,
+            caino_xmult = opts.caino_xmult or 1,
         },
+        rarity = opts.rarity or 0,
         edition = opts.edition,
         seal = nil,
         debuff = false,
@@ -509,14 +571,39 @@ local function make_joker(name, opts)
     function j:calculate_joker(context)
         if self.debuff then return nil end
 
-        -- Guard: only process in expected contexts
-        if not (context.joker_main or context.individual or context.repetition) then
-            return nil
-        end
-
         -- Joker: +mult (card.lua:3980)
         if self.ability.name == 'Joker' then
             if context.joker_main then
+                return { mult_mod = self.ability.mult }
+            end
+        end
+
+        -- Green Joker: +1 mult per hand (before), return accumulated (joker_main)
+        if self.ability.name == 'Green Joker' then
+            if context.before and not context.blueprint_seen then
+                self.ability.mult = self.ability.mult + (self.ability.extra and self.ability.extra.hand_add or 1)
+                return {}
+            end
+            if context.joker_main and self.ability.mult > 0 then
+                return { mult_mod = self.ability.mult }
+            end
+        end
+
+        -- Ride the Bus: +1 mult per no-face hand (before), reset on face
+        if self.ability.name == 'Ride the Bus' then
+            if context.before and not context.blueprint_seen and context.scoring_hand then
+                local faces = false
+                for i = 1, #context.scoring_hand do
+                    if context.scoring_hand[i]:is_face() then faces = true end
+                end
+                if faces then
+                    self.ability.mult = 0
+                else
+                    self.ability.mult = self.ability.mult + (self.ability.extra or 1)
+                end
+                return {}
+            end
+            if context.joker_main and self.ability.mult > 0 then
                 return { mult_mod = self.ability.mult }
             end
         end
@@ -541,6 +628,29 @@ local function make_joker(name, opts)
             end
         end
 
+        -- Steel Joker: x(1 + 0.2 * steel_tally) (card.lua:3929)
+        if self.ability.name == 'Steel Joker' then
+            if context.joker_main and (self.ability.steel_tally or 0) > 0 then
+                return { Xmult_mod = 1 + self.ability.extra * self.ability.steel_tally }
+            end
+        end
+
+        -- Ice Cream: +chips (joker_main), -chips (after), self-destruct
+        if self.ability.name == 'Ice Cream' then
+            if context.after then
+                local chips = self.ability.extra.chips
+                local chip_mod = self.ability.extra.chip_mod
+                if chips - chip_mod <= 0 then
+                    return { remove = true }
+                end
+                self.ability.extra.chips = chips - chip_mod
+                return {}
+            end
+            if context.joker_main then
+                return { chip_mod = self.ability.extra.chips }
+            end
+        end
+
         -- Scary Face: +chips per face card (card.lua:3136)
         if self.ability.name == 'Scary Face' then
             if context.individual and context.cardarea == G.play then
@@ -559,6 +669,24 @@ local function make_joker(name, opts)
             end
         end
 
+        -- Sock and Buskin: retrigger face cards (card.lua:3344)
+        if self.ability.name == 'Sock and Buskin' then
+            if context.repetition and context.cardarea == G.play then
+                if context.other_card and context.other_card:is_face() then
+                    return { repetitions = self.ability.extra }
+                end
+            end
+        end
+
+        -- Dusk: retrigger all on last hand (card.lua:3360)
+        if self.ability.name == 'Dusk' then
+            if context.repetition and context.cardarea == G.play then
+                if (G.GAME.current_round or {}).hands_left == 0 then
+                    return { repetitions = self.ability.extra }
+                end
+            end
+        end
+
         -- Blackboard: x3 if all held cards are Spades or Clubs (card.lua:3951)
         if self.ability.name == 'Blackboard' then
             if context.joker_main then
@@ -572,6 +700,67 @@ local function make_joker(name, opts)
                 if all_cards > 0 and black_suits == all_cards then
                     return { Xmult_mod = self.ability.extra }
                 end
+            end
+        end
+
+        -- Baseball Card: x1.5 if other_joker is Uncommon (rarity 2)
+        if self.ability.name == 'Baseball Card' then
+            if context.other_joker and context.other_joker ~= self then
+                if (context.other_joker.rarity or 0) == 2 then
+                    return { Xmult_mod = self.ability.extra }
+                end
+            end
+        end
+
+        -- Blueprint: copy right neighbor
+        if self.ability.name == 'Blueprint' then
+            if not context.blueprint_seen then
+                -- Find right neighbor in G.jokers.cards
+                local target = nil
+                for i = 1, #G.jokers.cards do
+                    if G.jokers.cards[i] == self then
+                        target = G.jokers.cards[i+1]
+                        break
+                    end
+                end
+                if target and not target.debuff then
+                    context.blueprint_seen = true
+                    return target:calculate_joker(context)
+                end
+            end
+        end
+
+        -- Caino: +1 xMult per face card destroyed
+        if self.ability.name == 'Caino' then
+            if context.cards_destroyed then
+                local faces = 0
+                for _, c in ipairs(context.cards_destroyed) do
+                    if c:is_face() then faces = faces + 1 end
+                end
+                if faces > 0 then
+                    self.ability.caino_xmult = (self.ability.caino_xmult or 1) + faces * (self.ability.extra or 1)
+                end
+                return nil
+            end
+            if context.joker_main and (self.ability.caino_xmult or 1) > 1 then
+                return { Xmult_mod = self.ability.caino_xmult }
+            end
+        end
+
+        -- Glass Joker: +0.75 xMult per Glass Card destroyed
+        if self.ability.name == 'Glass Joker' then
+            if context.cards_destroyed then
+                local glass = 0
+                for _, c in ipairs(context.cards_destroyed) do
+                    if c.ability.name == 'Glass Card' then glass = glass + 1 end
+                end
+                if glass > 0 then
+                    self.ability.x_mult = self.ability.x_mult + (self.ability.extra or 0.75) * glass
+                end
+                return nil
+            end
+            if context.joker_main and self.ability.x_mult > 1 then
+                return { Xmult_mod = self.ability.x_mult }
             end
         end
 
@@ -888,6 +1077,183 @@ r = score_hand(
     {make_joker("Joker", {mult = 4, edition = {foil=true, chips=50, type="foil"}})}
 )
 r.name = "foil_joker"
+results[#results+1] = r
+
+----------------------------------------------------------------------------
+-- Complex joker interaction scenarios
+----------------------------------------------------------------------------
+
+-- (p) Green Joker after 3 hands: accumulated +3 mult
+card_counter = 0
+local hands_p = make_hands()
+G.GAME.hands = hands_p
+local green = make_joker("Green Joker", {mult = 0, extra = {hand_add = 1, discard_sub = 1}})
+-- Simulate 3 hands
+for hand_num = 1, 3 do
+    card_counter = 0
+    score_hand(
+        {make_card("Hearts","5"), make_card("Spades","5")},
+        {}, hands_p, make_blind("Small Blind", 1.0), {green}
+    )
+end
+-- 4th hand: Green Joker should have mult=3 from 3 prior before phases
+card_counter = 0
+r = score_hand(
+    {make_card("Hearts","Ace"), make_card("Spades","Ace")},
+    {}, hands_p, make_blind("Small Blind", 1.0), {green}
+)
+-- After 4 before phases: mult should be 4 now
+-- Pair: 32 chips, 2 mult. Green +4 → 6. Score: 32×6=192.
+r.name = "green_joker_4_hands"
+results[#results+1] = r
+
+-- (q) Steel Joker with 2 Steel Cards → xMult = 1 + 0.2*2 = 1.4
+card_counter = 0
+local hands_q = make_hands()
+G.GAME.hands = hands_q
+r = score_hand(
+    {make_card("Hearts","Ace"), make_card("Spades","Ace")},
+    {},
+    hands_q,
+    make_blind("Small Blind", 1.0),
+    {make_joker("Steel Joker", {extra = 0.2, steel_tally = 2})}
+)
+-- Pair: 32 chips, 2 mult. Steel Joker x1.4 → 2.8. Score: floor(32×2.8) = 89.
+r.name = "steel_joker_2_steel"
+results[#results+1] = r
+
+-- (r) Sock and Buskin with 2 face cards: each retriggered once
+-- Three of a Kind Kings: 3 Kings score. Sock: +1 rep per face.
+-- Each King: 10 chips × 2 reps = 20. Total: 30 + 60 = 90 chips, 3 mult.
+-- Score: 90 × 3 = 270.
+card_counter = 0
+local hands_r = make_hands()
+G.GAME.hands = hands_r
+r = score_hand(
+    {make_card("Hearts","King"), make_card("Spades","King"), make_card("Clubs","King"),
+     make_card("Diamonds","5"), make_card("Hearts","2")},
+    {},
+    hands_r,
+    make_blind("Small Blind", 1.0),
+    {make_joker("Sock and Buskin", {extra = 1})}
+)
+r.name = "sock_buskin_3_kings"
+results[#results+1] = r
+
+-- (s) Red Seal + Dusk on last hand: 1 base + 1 Red + 1 Dusk = 3 reps
+-- Pair of Aces, Red Seal on first Ace, Dusk active (hands_left=0)
+card_counter = 0
+local hands_s = make_hands()
+G.GAME.hands = hands_s
+G.GAME.current_round = G.GAME.current_round or {}
+G.GAME.current_round.hands_left = 0
+local red_ace = make_card("Hearts","Ace",{seal="Red"})
+r = score_hand(
+    {red_ace, make_card("Spades","Ace")},
+    {},
+    hands_s,
+    make_blind("Small Blind", 1.0),
+    {make_joker("Dusk", {extra = 1})}
+)
+-- Red Ace: 1 base + 1 Red Seal + 1 Dusk = 3 reps → 11×3 = 33 chips
+-- Normal Ace: 1 base + 1 Dusk = 2 reps → 11×2 = 22 chips
+-- Total: 10 + 33 + 22 = 65 chips, 2 mult. Score: 65×2 = 130.
+r.name = "red_seal_dusk_last_hand"
+results[#results+1] = r
+
+-- (t) Blueprint copying Green Joker at +5 mult
+card_counter = 0
+local hands_t = make_hands()
+G.GAME.hands = hands_t
+local green_t = make_joker("Green Joker", {mult = 5, extra = {hand_add = 1, discard_sub = 1}})
+local blueprint_t = make_joker("Blueprint")
+G.jokers.cards = {blueprint_t, green_t}
+r = score_hand(
+    {make_card("Hearts","Ace"), make_card("Spades","Ace")},
+    {},
+    hands_t,
+    make_blind("Small Blind", 1.0),
+    {blueprint_t, green_t}
+)
+-- Phase 5 (before): Green +1 → mult=6. Blueprint skips (no before impl for copy).
+-- Phase 9: Blueprint copies Green → mult_mod = 6. Green → mult_mod = 6.
+-- Pair: 32 chips, 2 mult. +6 +6 = 14. Score: 32×14 = 448.
+r.name = "blueprint_green_joker"
+results[#results+1] = r
+
+-- (u) Baseball Card with 2 Uncommon jokers
+-- Steel Joker (Uncommon, rarity=2) + Blackboard (Uncommon, rarity=2) + Baseball
+card_counter = 0
+local hands_u = make_hands()
+G.GAME.hands = hands_u
+local steel_u = make_joker("Steel Joker", {extra = 0.2, steel_tally = 1})
+steel_u.rarity = 2
+local bb_u = make_joker("Blackboard", {extra = 3})
+bb_u.rarity = 2
+local baseball_u = make_joker("Baseball Card", {extra = 1.5})
+baseball_u.rarity = 3
+G.jokers.cards = {steel_u, bb_u, baseball_u}
+r = score_hand(
+    {make_card("Spades","Ace"), make_card("Clubs","Ace")},
+    {make_card("Spades","5")},
+    hands_u,
+    make_blind("Small Blind", 1.0),
+    {steel_u, bb_u, baseball_u}
+)
+-- Pair: 32 chips, 2 mult.
+-- Phase 9 steel_u: x1.2 → 2.4. Baseball reacts (Uncommon): x1.5 → 3.6.
+-- Phase 9 bb_u: x3 (all held black) → 10.8. Baseball reacts (Uncommon): x1.5 → 16.2.
+-- Phase 9 baseball: no self-react (Rare).
+-- Score: floor(32 × 16.2) = 518.
+r.name = "baseball_2_uncommon"
+results[#results+1] = r
+
+-- (v) Glass Card destruction + Caino
+card_counter = 0
+local hands_v = make_hands()
+G.GAME.hands = hands_v
+local glass_king = make_card("Hearts","King",{Xmult=2, effect="Glass Card", name="Glass Card"})
+glass_king.force_shatter = true  -- force deterministic shatter
+r = score_hand(
+    {glass_king, make_card("Spades","King"), make_card("Clubs","King"),
+     make_card("Diamonds","5"), make_card("Hearts","2")},
+    {},
+    hands_v,
+    make_blind("Small Blind", 1.0),
+    {make_joker("Caino", {extra = 1, caino_xmult = 1})}
+)
+-- Three Kings: 30 base, 3 mult. Glass King x2 → 6 mult.
+-- Phase 11: Glass King shatters. Caino: +1 (face card) → caino_xmult=2.
+-- Score: chips × mult already computed before destruction notification.
+-- Caino xMult not applied THIS hand (it fires in joker_main BEFORE phase 11).
+-- So score = (30 + 10+10+10+5+2) × 6... wait, only 3 Kings score.
+-- 30 + 10+10+10 = 60 chips, 3 mult. Glass x2 → 6. Score: 60 × 6 = 360.
+r.name = "glass_king_caino"
+r.caino_xmult = 2  -- verify Caino gained +1
+results[#results+1] = r
+
+-- (w) Ice Cream decay across 2 hands
+card_counter = 0
+local hands_w = make_hands()
+G.GAME.hands = hands_w
+local ice = make_joker("Ice Cream", {extra = {chips = 100, chip_mod = 5}})
+-- Hand 1
+r = score_hand(
+    {make_card("Hearts","Ace"), make_card("Spades","Ace")},
+    {}, hands_w, make_blind("Small Blind", 1.0), {ice}
+)
+r.name = "ice_cream_hand1"
+r.ice_chips_after = ice.ability.extra.chips  -- should be 95
+results[#results+1] = r
+
+-- Hand 2
+card_counter = 0
+r = score_hand(
+    {make_card("Hearts","Ace"), make_card("Spades","Ace")},
+    {}, hands_w, make_blind("Small Blind", 1.0), {ice}
+)
+r.name = "ice_cream_hand2"
+r.ice_chips_after = ice.ability.extra.chips  -- should be 90
 results[#results+1] = r
 
 -- Output

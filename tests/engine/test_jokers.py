@@ -2053,11 +2053,11 @@ class TestTrading:
 # ============================================================================
 
 class TestToDoList:
-    """j_to_do_list: +$4 if hand matches to_do_poker_hand."""
+    """j_todo_list: +$4 if hand matches to_do_poker_hand."""
 
     def test_matching_hand(self):
         joker = _joker_card(
-            "j_to_do_list",
+            "j_todo_list",
             extra={"dollars": 4, "poker_hand": "High Card"},
             to_do_poker_hand="Pair",
         )
@@ -2068,7 +2068,7 @@ class TestToDoList:
 
     def test_non_matching_hand(self):
         joker = _joker_card(
-            "j_to_do_list",
+            "j_todo_list",
             extra={"dollars": 4, "poker_hand": "High Card"},
             to_do_poker_hand="Pair",
         )
@@ -2077,7 +2077,7 @@ class TestToDoList:
 
     def test_no_target_no_effect(self):
         joker = _joker_card(
-            "j_to_do_list",
+            "j_todo_list",
             extra={"dollars": 4, "poker_hand": "High Card"},
         )
         ctx = JokerContext(joker_main=True, scoring_name="Pair")

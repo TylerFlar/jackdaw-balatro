@@ -226,6 +226,124 @@ def _run_foil_joker():
     )
 
 
+# --- Complex joker interaction scenarios ---
+
+def _run_green_joker_4_hands():
+    """Green Joker accumulates +1 per hand over 4 hands → mult=4."""
+    green = _joker("j_green_joker", mult=0, extra={"hand_add": 1, "discard_sub": 1})
+    blind = Blind.create("bl_small", ante=1)
+    # Play 3 prior hands to accumulate
+    for _ in range(3):
+        reset_sort_id_counter()
+        score_hand(
+            [_card("Hearts", "5"), _card("Spades", "5")],
+            [], [green], HandLevels(), blind, PseudoRandom("ORACLE"),
+        )
+    # 4th hand: Green fires before (+1 → total 4), then joker_main returns 4
+    reset_sort_id_counter()
+    return score_hand(
+        [_card("Hearts", "Ace"), _card("Spades", "Ace")],
+        [], [green], HandLevels(), blind, PseudoRandom("ORACLE"),
+    )
+
+
+def _run_steel_joker_2_steel():
+    reset_sort_id_counter()
+    j = _joker("j_steel_joker", extra=0.2)
+    return score_hand(
+        [_card("Hearts", "Ace"), _card("Spades", "Ace")],
+        [], [j], HandLevels(), Blind.create("bl_small", ante=1),
+        PseudoRandom("ORACLE"),
+        game_state={"steel_tally": 2},
+    )
+
+
+def _run_sock_buskin_3_kings():
+    reset_sort_id_counter()
+    j = _joker("j_sock_and_buskin", extra=1)
+    return score_hand(
+        [_card("Hearts", "King"), _card("Spades", "King"),
+         _card("Clubs", "King"), _card("Diamonds", "5"),
+         _card("Hearts", "2")],
+        [], [j], HandLevels(), Blind.create("bl_small", ante=1),
+        PseudoRandom("ORACLE"),
+    )
+
+
+def _run_red_seal_dusk_last_hand():
+    reset_sort_id_counter()
+    red_ace = _card("Hearts", "Ace")
+    red_ace.set_seal("Red")
+    j = _joker("j_dusk", extra=1)
+    return score_hand(
+        [red_ace, _card("Spades", "Ace")],
+        [], [j], HandLevels(), Blind.create("bl_small", ante=1),
+        PseudoRandom("ORACLE"),
+        game_state={"hands_left": 0},
+    )
+
+
+def _run_blueprint_green_joker():
+    reset_sort_id_counter()
+    green = _joker("j_green_joker", mult=5, extra={"hand_add": 1, "discard_sub": 1})
+    bp = _joker("j_blueprint")
+    jokers = [bp, green]
+    return score_hand(
+        [_card("Hearts", "Ace"), _card("Spades", "Ace")],
+        [], jokers, HandLevels(), Blind.create("bl_small", ante=1),
+        PseudoRandom("ORACLE"),
+    )
+
+
+def _run_baseball_2_uncommon():
+    reset_sort_id_counter()
+    steel = _joker("j_steel_joker", extra=0.2)
+    bb = _joker("j_blackboard", extra=3)
+    baseball = _joker("j_baseball", extra=1.5)
+    jokers = [steel, bb, baseball]
+    return score_hand(
+        [_card("Spades", "Ace"), _card("Clubs", "Ace")],
+        [_card("Spades", "5")],
+        jokers, HandLevels(), Blind.create("bl_small", ante=1),
+        PseudoRandom("ORACLE"),
+        game_state={"steel_tally": 1},
+    )
+
+
+def _run_glass_king_caino():
+    reset_sort_id_counter()
+    glass_king = _card("Hearts", "King", enhancement="m_glass")
+    caino = _joker("j_caino", caino_xmult=1, extra=1)
+    return score_hand(
+        [glass_king, _card("Spades", "King"), _card("Clubs", "King"),
+         _card("Diamonds", "5"), _card("Hearts", "2")],
+        [], [caino], HandLevels(), Blind.create("bl_small", ante=1),
+        PseudoRandom("ORACLE"),
+        probabilities_normal=100.0,  # force shatter
+    )
+
+
+def _run_ice_cream_hand1():
+    reset_sort_id_counter()
+    ice = _joker("j_ice_cream", extra={"chips": 100, "chip_mod": 5})
+    return score_hand(
+        [_card("Hearts", "Ace"), _card("Spades", "Ace")],
+        [], [ice], HandLevels(), Blind.create("bl_small", ante=1),
+        PseudoRandom("ORACLE"),
+    )
+
+
+def _run_ice_cream_hand2():
+    """Ice Cream after 1 prior hand: chips=95."""
+    reset_sort_id_counter()
+    ice = _joker("j_ice_cream", extra={"chips": 95, "chip_mod": 5})
+    return score_hand(
+        [_card("Hearts", "Ace"), _card("Spades", "Ace")],
+        [], [ice], HandLevels(), Blind.create("bl_small", ante=1),
+        PseudoRandom("ORACLE"),
+    )
+
+
 # Map test names to Python runners
 RUNNERS = {
     "pair_aces_basic": _run_pair_aces_basic,
@@ -243,6 +361,15 @@ RUNNERS = {
     "joker_then_blackboard": _run_joker_then_blackboard,
     "blackboard_then_joker": _run_blackboard_then_joker,
     "foil_joker": _run_foil_joker,
+    "green_joker_4_hands": _run_green_joker_4_hands,
+    "steel_joker_2_steel": _run_steel_joker_2_steel,
+    "sock_buskin_3_kings": _run_sock_buskin_3_kings,
+    "red_seal_dusk_last_hand": _run_red_seal_dusk_last_hand,
+    "blueprint_green_joker": _run_blueprint_green_joker,
+    "baseball_2_uncommon": _run_baseball_2_uncommon,
+    "glass_king_caino": _run_glass_king_caino,
+    "ice_cream_hand1": _run_ice_cream_hand1,
+    "ice_cream_hand2": _run_ice_cream_hand2,
 }
 
 

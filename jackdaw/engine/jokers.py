@@ -13,7 +13,7 @@ Source: card.lua:2291-4060 (calculate_joker), common_events.lua:571-1065 (call s
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import InitVar, dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -24,7 +24,44 @@ if TYPE_CHECKING:
 
 
 # ---------------------------------------------------------------------------
-# JokerContext — mirrors the ``context`` table passed to calculate_joker
+# GameSnapshot — immutable game state, built ONCE per score_hand call
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class GameSnapshot:
+    """Pre-computed game state shared across all JokerContext instances.
+
+    Built once at the start of ``score_hand`` and passed by reference to
+    every JokerContext created during the scoring pipeline.  This avoids
+    copying ~20 game-state fields into every context object.
+    """
+
+    joker_count: int = 0
+    joker_slots: int = 5
+    money: int = 0
+    deck_cards_remaining: int = 0
+    starting_deck_size: int = 52
+    playing_cards_count: int = 52
+    stone_tally: int = 0
+    steel_tally: int = 0
+    enhanced_card_count: int = 0
+    hands_left: int = 0
+    hands_played: int = 0
+    discards_left: int = 0
+    discards_used: int = 0
+    probabilities_normal: float = 1.0
+    consumable_usage_tarot: int = 0
+    mail_card_id: int | None = None
+    idol_card: dict[str, Any] | None = None
+    ancient_suit: str | None = None
+    skips: int = 0
+
+
+_DEFAULT_GAME = GameSnapshot()
+
+
+# ---------------------------------------------------------------------------
+# JokerContext — lightweight per-call context referencing shared GameSnapshot
 # ---------------------------------------------------------------------------
 
 @dataclass
@@ -33,6 +70,12 @@ class JokerContext:
 
     Exactly one phase flag should be set per call, matching the source's
     context-based branching in card.lua:2291+.
+
+    Game state lives on the shared :class:`GameSnapshot` referenced by
+    ``self.game``.  For backward compatibility, game-state fields can be
+    passed as keyword arguments — they are ``InitVar`` parameters that
+    auto-build a ``GameSnapshot`` in ``__post_init__`` when ``game`` is
+    not provided directly.
     """
 
     # Phase flags (exactly one set per call)
@@ -53,48 +96,122 @@ class JokerContext:
     selling_card: bool = False
     open_booster: bool = False
     skip_blind: bool = False
+    skipping_booster: bool = False
     reroll_shop: bool = False
     ending_shop: bool = False
     debuffed_hand: bool = False
     using_consumeable: bool = False
     playing_card_added: bool = False
+    individual_hand_end: bool = False
 
-    # Context data
+    # Per-call context data
     cardarea: str | None = None
     other_card: Card | None = None
     full_hand: list[Card] | None = None
     scoring_hand: list[Card] | None = None
     scoring_name: str | None = None
     poker_hands: dict[str, Any] | None = None
-    blueprint: int = 0
+    jokers: list[Card] | None = None
     rng: PseudoRandom | None = None
+    blind: Blind | None = None
     hand_levels: HandLevels | None = None
+    held_cards: list[Card] | None = None
+    consumeable: Card | None = None
+    cards: list[Card] | None = None
+
+    # Blueprint
+    blueprint: int = 0
+    blueprint_card: Card | None = None
+
+    # Meta joker flags
     smeared: bool = False
     pareidolia: bool = False
-    probabilities_normal: float = 1.0
-    ancient_suit: str | None = None
-    idol_card: dict[str, Any] | None = None
 
-    # Game state (pre-computed by scoring pipeline)
-    joker_count: int = 0
-    joker_slots: int = 5
-    hands_left: int = 0
-    discards_left: int = 0
-    deck_cards_remaining: int = 0
-    starting_deck_size: int = 52
-    playing_cards_count: int = 52
-    stone_tally: int = 0
-    steel_tally: int = 0
-    money: int = 0
-    enhanced_card_count: int = 0
-    consumable_usage_tarot: int = 0
-    hands_played: int = 0
-    held_cards: list[Card] | None = None
-    mail_card_id: int | None = None
-    discards_used: int = 0
-    blind: Blind | None = None
-    jokers: list[Card] | None = None
-    blueprint_card: Card | None = None
+    # Shared game snapshot (built once per score_hand call)
+    game: GameSnapshot = field(default_factory=lambda: _DEFAULT_GAME)
+
+    # --- Init-only fields for backward compatibility -------------------------
+    # Accepted in __init__, used to build GameSnapshot when game is not
+    # provided explicitly.  Not stored as instance attributes.
+    joker_count: InitVar[int] = 0
+    joker_slots: InitVar[int] = 5
+    money: InitVar[int] = 0
+    deck_cards_remaining: InitVar[int] = 0
+    starting_deck_size: InitVar[int] = 52
+    playing_cards_count: InitVar[int] = 52
+    stone_tally: InitVar[int] = 0
+    steel_tally: InitVar[int] = 0
+    enhanced_card_count: InitVar[int] = 0
+    hands_left: InitVar[int] = 0
+    hands_played: InitVar[int] = 0
+    discards_left: InitVar[int] = 0
+    discards_used: InitVar[int] = 0
+    probabilities_normal: InitVar[float] = 1.0
+    consumable_usage_tarot: InitVar[int] = 0
+    mail_card_id: InitVar[int | None] = None
+    idol_card: InitVar[dict[str, Any] | None] = None
+    ancient_suit: InitVar[str | None] = None
+    skips: InitVar[int] = 0
+
+    def __post_init__(
+        self,
+        joker_count: int,
+        joker_slots: int,
+        money: int,
+        deck_cards_remaining: int,
+        starting_deck_size: int,
+        playing_cards_count: int,
+        stone_tally: int,
+        steel_tally: int,
+        enhanced_card_count: int,
+        hands_left: int,
+        hands_played: int,
+        discards_left: int,
+        discards_used: int,
+        probabilities_normal: float,
+        consumable_usage_tarot: int,
+        mail_card_id: int | None,
+        idol_card: dict[str, Any] | None,
+        ancient_suit: str | None,
+        skips: int,
+    ) -> None:
+        """Build GameSnapshot from flat kwargs when game is the default."""
+        if self.game is _DEFAULT_GAME:
+            # Check if any non-default value was passed
+            has_custom = (
+                joker_count != 0 or joker_slots != 5 or money != 0
+                or deck_cards_remaining != 0 or starting_deck_size != 52
+                or playing_cards_count != 52 or stone_tally != 0
+                or steel_tally != 0 or enhanced_card_count != 0
+                or hands_left != 0 or hands_played != 0
+                or discards_left != 0 or discards_used != 0
+                or probabilities_normal != 1.0
+                or consumable_usage_tarot != 0 or mail_card_id is not None
+                or idol_card is not None or ancient_suit is not None
+                or skips != 0
+            )
+            if has_custom:
+                object.__setattr__(self, "game", GameSnapshot(
+                    joker_count=joker_count,
+                    joker_slots=joker_slots,
+                    money=money,
+                    deck_cards_remaining=deck_cards_remaining,
+                    starting_deck_size=starting_deck_size,
+                    playing_cards_count=playing_cards_count,
+                    stone_tally=stone_tally,
+                    steel_tally=steel_tally,
+                    enhanced_card_count=enhanced_card_count,
+                    hands_left=hands_left,
+                    hands_played=hands_played,
+                    discards_left=discards_left,
+                    discards_used=discards_used,
+                    probabilities_normal=probabilities_normal,
+                    consumable_usage_tarot=consumable_usage_tarot,
+                    mail_card_id=mail_card_id,
+                    idol_card=idol_card,
+                    ancient_suit=ancient_suit,
+                    skips=skips,
+                ))
 
 
 # ---------------------------------------------------------------------------
@@ -178,6 +295,77 @@ def calculate_joker(card: Card, context: JokerContext) -> JokerResult | None:
 def registered_jokers() -> list[str]:
     """Return sorted list of all registered joker center keys."""
     return sorted(_REGISTRY)
+
+
+# ---------------------------------------------------------------------------
+# Dollar bonus registry (calc_dollar_bonus — separate from calculate_joker)
+# Source: card.lua:1658-1677 — per-round dollar payout
+# ---------------------------------------------------------------------------
+
+DollarHandler = Callable[["Card", "GameSnapshot"], int]
+_DOLLAR_REGISTRY: dict[str, DollarHandler] = {}
+
+
+def register_dollars(key: str) -> Callable[[DollarHandler], DollarHandler]:
+    """Decorator to register a per-round dollar bonus handler."""
+    def wrapper(fn: DollarHandler) -> DollarHandler:
+        _DOLLAR_REGISTRY[key] = fn
+        return fn
+    return wrapper
+
+
+def calc_dollar_bonus(card: Card, game: GameSnapshot) -> int:
+    """Per-round dollar bonus. Mirrors card.lua:1658 (calc_dollar_bonus)."""
+    if card.debuff:
+        return 0
+    handler = _DOLLAR_REGISTRY.get(card.center_key)
+    if handler is None:
+        return 0
+    return handler(card, game)
+
+
+def on_end_of_round(
+    jokers: list[Card],
+    game: GameSnapshot,
+    rng: PseudoRandom | None = None,
+) -> dict[str, Any]:
+    """Process all joker end-of-round effects.
+
+    Returns a dict with:
+        dollars_earned: total dollars from calc_dollar_bonus
+        jokers_removed: list of jokers that self-destructed
+        mutations: list of side-effect descriptors
+    """
+    dollars = 0
+    removed: list[Card] = []
+    mutations: list[dict[str, Any]] = []
+
+    # 1. Dollar bonuses (calc_dollar_bonus)
+    for joker in jokers:
+        dollars += calc_dollar_bonus(joker, game)
+
+    # 2. End-of-round calculate_joker effects
+    ctx = JokerContext(
+        end_of_round=True,
+        jokers=jokers,
+        rng=rng,
+        game=game,
+    )
+    for joker in jokers:
+        if joker.debuff:
+            continue
+        result = calculate_joker(joker, ctx)
+        if result:
+            if result.remove:
+                removed.append(joker)
+            if result.extra:
+                mutations.append(result.extra)
+
+    return {
+        "dollars_earned": dollars,
+        "jokers_removed": removed,
+        "mutations": mutations,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -512,7 +700,7 @@ def _bloodstone(card: Card, ctx: JokerContext) -> JokerResult | None:
             odds = extra.get("odds", 2)
             if ctx.rng is not None:
                 roll = ctx.rng.random("bloodstone")
-                if roll < ctx.probabilities_normal / odds:
+                if roll < ctx.game.probabilities_normal / odds:
                     return JokerResult(x_mult=extra.get("Xmult", 1.5))
             # No RNG → no effect (same as Lucky Card)
     return None
@@ -525,7 +713,7 @@ def _ancient(card: Card, ctx: JokerContext) -> JokerResult | None:
     Source: card.lua:3255 — uses ``G.GAME.current_round.ancient_card.suit``.
     """
     if ctx.individual and ctx.cardarea == "play":
-        if ctx.ancient_suit and _is_suit(ctx, ctx.ancient_suit):
+        if ctx.game.ancient_suit and _is_suit(ctx, ctx.game.ancient_suit):
             return JokerResult(x_mult=card.ability.get("extra", 1.5))
     return None
 
@@ -648,10 +836,10 @@ def _idol(card: Card, ctx: JokerContext) -> JokerResult | None:
     Source: card.lua:3127 — checks both get_id() and is_suit().
     """
     if ctx.individual and ctx.cardarea == "play" and ctx.other_card is not None:
-        if ctx.idol_card is not None:
+        if ctx.game.idol_card is not None:
             if (
-                ctx.other_card.get_id() == ctx.idol_card.get("id")
-                and _is_suit(ctx, ctx.idol_card.get("suit", ""))
+                ctx.other_card.get_id() == ctx.game.idol_card.get("id")
+                and _is_suit(ctx, ctx.game.idol_card.get("suit", ""))
             ):
                 return JokerResult(x_mult=card.ability.get("extra", 2))
     return None
@@ -674,6 +862,59 @@ def _hack(card: Card, ctx: JokerContext) -> JokerResult | None:
     return None
 
 
+@register("j_sock_and_buskin")
+def _sock_and_buskin(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Sock and Buskin: +1 retrigger for face cards scored. Source: card.lua:3344."""
+    if ctx.repetition and ctx.cardarea == "play" and ctx.other_card is not None:
+        if ctx.other_card.is_face(pareidolia=ctx.pareidolia):
+            return JokerResult(repetitions=card.ability.get("extra", 1))
+    return None
+
+
+@register("j_hanging_chad")
+def _hanging_chad(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Hanging Chad: +2 retriggers for FIRST scored card. Source: card.lua:3352."""
+    if ctx.repetition and ctx.cardarea == "play" and ctx.other_card is not None:
+        if ctx.scoring_hand and ctx.other_card is ctx.scoring_hand[0]:
+            return JokerResult(repetitions=card.ability.get("extra", 2))
+    return None
+
+
+@register("j_dusk")
+def _dusk(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Dusk: +1 retrigger for all scored cards on last hand. Source: card.lua:3360."""
+    if ctx.repetition and ctx.cardarea == "play":
+        if ctx.game.hands_left == 0:
+            return JokerResult(repetitions=card.ability.get("extra", 1))
+    return None
+
+
+@register("j_selzer")
+def _seltzer(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Seltzer: +1 retrigger for all scored cards. Decrements, self-destructs.
+
+    Source: card.lua:3367 (repetition), 3601 (after).
+    Key is ``j_selzer`` (typo in source). Starts with extra=10 uses.
+    """
+    if ctx.repetition and ctx.cardarea == "play":
+        return JokerResult(repetitions=1)
+    if ctx.after and not ctx.blueprint:
+        uses = card.ability.get("extra", 10)
+        if uses - 1 <= 0:
+            return JokerResult(remove=True)
+        card.ability["extra"] = uses - 1
+        return JokerResult()
+    return None
+
+
+@register("j_mime")
+def _mime(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Mime: +1 retrigger for held cards. Source: card.lua:3387."""
+    if ctx.repetition and ctx.cardarea == "hand":
+        return JokerResult(repetitions=card.ability.get("extra", 1))
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Joker handlers — game-state-dependent (joker_main context)
 # ---------------------------------------------------------------------------
@@ -693,7 +934,7 @@ def _abstract(card: Card, ctx: JokerContext) -> JokerResult | None:
     """Abstract Joker: +3 mult per joker owned. Source: card.lua:3678."""
     if ctx.joker_main:
         return JokerResult(
-            mult_mod=ctx.joker_count * card.ability.get("extra", 3),
+            mult_mod=ctx.game.joker_count * card.ability.get("extra", 3),
         )
     return None
 
@@ -701,7 +942,7 @@ def _abstract(card: Card, ctx: JokerContext) -> JokerResult | None:
 @register("j_acrobat")
 def _acrobat(card: Card, ctx: JokerContext) -> JokerResult | None:
     """Acrobat: x3 mult on last hand of round. Source: card.lua:3688."""
-    if ctx.joker_main and ctx.hands_left == 0:
+    if ctx.joker_main and ctx.game.hands_left == 0:
         return JokerResult(Xmult_mod=card.ability.get("extra", 3))
     return None
 
@@ -711,7 +952,7 @@ def _mystic_summit(card: Card, ctx: JokerContext) -> JokerResult | None:
     """Mystic Summit: +15 mult when 0 discards left. Source: card.lua:3694."""
     if ctx.joker_main:
         extra = card.ability.get("extra", {})
-        if ctx.discards_left == extra.get("d_remaining", 0):
+        if ctx.game.discards_left == extra.get("d_remaining", 0):
             return JokerResult(mult_mod=extra.get("mult", 15))
     return None
 
@@ -719,9 +960,9 @@ def _mystic_summit(card: Card, ctx: JokerContext) -> JokerResult | None:
 @register("j_banner")
 def _banner(card: Card, ctx: JokerContext) -> JokerResult | None:
     """Banner: +30 chips per discard remaining. Source: card.lua:3707."""
-    if ctx.joker_main and ctx.discards_left > 0:
+    if ctx.joker_main and ctx.game.discards_left > 0:
         return JokerResult(
-            chip_mod=ctx.discards_left * card.ability.get("extra", 30),
+            chip_mod=ctx.game.discards_left * card.ability.get("extra", 30),
         )
     return None
 
@@ -729,9 +970,9 @@ def _banner(card: Card, ctx: JokerContext) -> JokerResult | None:
 @register("j_blue_joker")
 def _blue_joker(card: Card, ctx: JokerContext) -> JokerResult | None:
     """Blue Joker: +2 chips per card remaining in deck. Source: card.lua:3887."""
-    if ctx.joker_main and ctx.deck_cards_remaining > 0:
+    if ctx.joker_main and ctx.game.deck_cards_remaining > 0:
         return JokerResult(
-            chip_mod=card.ability.get("extra", 2) * ctx.deck_cards_remaining,
+            chip_mod=card.ability.get("extra", 2) * ctx.game.deck_cards_remaining,
         )
     return None
 
@@ -740,7 +981,7 @@ def _blue_joker(card: Card, ctx: JokerContext) -> JokerResult | None:
 def _erosion(card: Card, ctx: JokerContext) -> JokerResult | None:
     """Erosion: +4 mult per card below starting deck size. Source: card.lua:3894."""
     if ctx.joker_main:
-        below = ctx.starting_deck_size - ctx.playing_cards_count
+        below = ctx.game.starting_deck_size - ctx.game.playing_cards_count
         if below > 0:
             return JokerResult(
                 mult_mod=card.ability.get("extra", 4) * below,
@@ -751,9 +992,9 @@ def _erosion(card: Card, ctx: JokerContext) -> JokerResult | None:
 @register("j_stone")
 def _stone_joker(card: Card, ctx: JokerContext) -> JokerResult | None:
     """Stone Joker: +25 chips per Stone Card in full deck. Source: card.lua:3922."""
-    if ctx.joker_main and ctx.stone_tally > 0:
+    if ctx.joker_main and ctx.game.stone_tally > 0:
         return JokerResult(
-            chip_mod=card.ability.get("extra", 25) * ctx.stone_tally,
+            chip_mod=card.ability.get("extra", 25) * ctx.game.stone_tally,
         )
     return None
 
@@ -761,9 +1002,9 @@ def _stone_joker(card: Card, ctx: JokerContext) -> JokerResult | None:
 @register("j_steel_joker")
 def _steel_joker(card: Card, ctx: JokerContext) -> JokerResult | None:
     """Steel Joker: x(1 + 0.2 × steel_count) mult. Source: card.lua:3929."""
-    if ctx.joker_main and ctx.steel_tally > 0:
+    if ctx.joker_main and ctx.game.steel_tally > 0:
         return JokerResult(
-            Xmult_mod=1 + card.ability.get("extra", 0.2) * ctx.steel_tally,
+            Xmult_mod=1 + card.ability.get("extra", 0.2) * ctx.game.steel_tally,
         )
     return None
 
@@ -771,9 +1012,9 @@ def _steel_joker(card: Card, ctx: JokerContext) -> JokerResult | None:
 @register("j_bull")
 def _bull(card: Card, ctx: JokerContext) -> JokerResult | None:
     """Bull: +2 chips per $1 held. Source: card.lua:3936."""
-    if ctx.joker_main and ctx.money > 0:
+    if ctx.joker_main and ctx.game.money > 0:
         return JokerResult(
-            chip_mod=card.ability.get("extra", 2) * max(0, ctx.money),
+            chip_mod=card.ability.get("extra", 2) * max(0, ctx.game.money),
         )
     return None
 
@@ -781,7 +1022,7 @@ def _bull(card: Card, ctx: JokerContext) -> JokerResult | None:
 @register("j_drivers_license")
 def _drivers_license(card: Card, ctx: JokerContext) -> JokerResult | None:
     """Driver's License: x3 if ≥16 enhanced cards in deck. Source: card.lua:3943."""
-    if ctx.joker_main and ctx.enhanced_card_count >= 16:
+    if ctx.joker_main and ctx.game.enhanced_card_count >= 16:
         return JokerResult(Xmult_mod=card.ability.get("extra", 3))
     return None
 
@@ -884,7 +1125,7 @@ def _bootstraps(card: Card, ctx: JokerContext) -> JokerResult | None:
     if ctx.joker_main:
         extra = card.ability.get("extra", {})
         per = extra.get("dollars", 5)
-        buckets = ctx.money // per if per > 0 else 0
+        buckets = ctx.game.money // per if per > 0 else 0
         if buckets >= 1:
             return JokerResult(mult_mod=extra.get("mult", 2) * buckets)
     return None
@@ -893,8 +1134,8 @@ def _bootstraps(card: Card, ctx: JokerContext) -> JokerResult | None:
 @register("j_fortune_teller")
 def _fortune_teller(card: Card, ctx: JokerContext) -> JokerResult | None:
     """Fortune Teller: +mult = total tarot uses in run. Source: card.lua:4016."""
-    if ctx.joker_main and ctx.consumable_usage_tarot > 0:
-        return JokerResult(mult_mod=ctx.consumable_usage_tarot)
+    if ctx.joker_main and ctx.game.consumable_usage_tarot > 0:
+        return JokerResult(mult_mod=ctx.game.consumable_usage_tarot)
     return None
 
 
@@ -909,7 +1150,7 @@ def _loyalty_card(card: Card, ctx: JokerContext) -> JokerResult | None:
         extra = card.ability.get("extra", {})
         every = extra.get("every", 5)
         hands_at_create = card.ability.get("hands_played_at_create", 0)
-        remaining = (every - 1 - (ctx.hands_played - hands_at_create)) % (every + 1)
+        remaining = (every - 1 - (ctx.game.hands_played - hands_at_create)) % (every + 1)
         if remaining == every:
             return JokerResult(Xmult_mod=extra.get("Xmult", 4))
     return None
@@ -988,7 +1229,7 @@ def _business(card: Card, ctx: JokerContext) -> JokerResult | None:
         if ctx.other_card.is_face(pareidolia=ctx.pareidolia):
             if ctx.rng is not None:
                 odds = card.ability.get("extra", 2)
-                if ctx.rng.random("business") < ctx.probabilities_normal / odds:
+                if ctx.rng.random("business") < ctx.game.probabilities_normal / odds:
                     return JokerResult(dollars=2)
     return None
 
@@ -1004,7 +1245,7 @@ def _reserved_parking(card: Card, ctx: JokerContext) -> JokerResult | None:
             extra = card.ability.get("extra", {})
             odds = extra.get("odds", 2)
             if ctx.rng is not None:
-                if ctx.rng.random("parking") < ctx.probabilities_normal / odds:
+                if ctx.rng.random("parking") < ctx.game.probabilities_normal / odds:
                     if ctx.other_card.debuff:
                         return JokerResult(message="Debuffed")
                     return JokerResult(dollars=extra.get("dollars", 1))
@@ -1040,8 +1281,8 @@ def _mail(card: Card, ctx: JokerContext) -> JokerResult | None:
     Source: card.lua:2825. Fires per discarded card.
     """
     if ctx.discard and ctx.other_card is not None:
-        if not ctx.other_card.debuff and ctx.mail_card_id is not None:
-            if ctx.other_card.get_id() == ctx.mail_card_id:
+        if not ctx.other_card.debuff and ctx.game.mail_card_id is not None:
+            if ctx.other_card.get_id() == ctx.game.mail_card_id:
                 return JokerResult(dollars=card.ability.get("extra", 5))
     return None
 
@@ -1053,7 +1294,7 @@ def _trading(card: Card, ctx: JokerContext) -> JokerResult | None:
     Source: card.lua:2802. Returns extra={'destroy': True} to signal destruction.
     """
     if ctx.discard and ctx.full_hand is not None:
-        if ctx.discards_used <= 0 and len(ctx.full_hand) == 1:
+        if ctx.game.discards_used <= 0 and len(ctx.full_hand) == 1:
             return JokerResult(
                 dollars=card.ability.get("extra", 3),
                 remove=True,
@@ -1066,7 +1307,7 @@ def _trading(card: Card, ctx: JokerContext) -> JokerResult | None:
 # Joker handlers — hand-type economy (joker_main context)
 # ---------------------------------------------------------------------------
 
-@register("j_to_do_list")
+@register("j_todo_list")
 def _to_do_list(card: Card, ctx: JokerContext) -> JokerResult | None:
     """To Do List: +$4 if hand matches to_do_poker_hand. Source: card.lua:3491."""
     if ctx.joker_main and ctx.scoring_name:
@@ -1154,3 +1395,1124 @@ def _brainstorm(card: Card, ctx: JokerContext) -> JokerResult | None:
         blueprint_card=ctx.blueprint_card or card,
     )
     return calculate_joker(target, new_ctx)
+
+
+# ---------------------------------------------------------------------------
+# Joker handlers — scaling (mutate ability state per hand/discard/round)
+# ---------------------------------------------------------------------------
+
+@register("j_green_joker")
+def _green_joker(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Green Joker: +1 mult per hand, -1 per discard. Source: card.lua:3563, 2846.
+
+    Before context: ability.mult += hand_add (1).
+    Discard context: ability.mult -= discard_sub (1), clamped to 0.
+    Joker main: returns accumulated mult.
+    Blueprint skips mutation (``not context.blueprint``).
+    """
+    extra = card.ability.get("extra", {})
+    if ctx.before and not ctx.blueprint:
+        card.ability["mult"] = card.ability.get("mult", 0) + extra.get("hand_add", 1)
+        return JokerResult()
+    if ctx.discard and ctx.other_card is not None and ctx.full_hand:
+        if not ctx.blueprint and ctx.other_card is ctx.full_hand[-1]:
+            prev = card.ability.get("mult", 0)
+            card.ability["mult"] = max(0, prev - extra.get("discard_sub", 1))
+            return JokerResult() if card.ability["mult"] != prev else None
+    if ctx.joker_main and card.ability.get("mult", 0) > 0:
+        return JokerResult(mult_mod=card.ability["mult"])
+    return None
+
+
+@register("j_ride_the_bus")
+def _ride_the_bus(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Ride the Bus: +1 mult per consecutive hand with no face cards scored.
+
+    Source: card.lua:3525. Resets to 0 when a face card IS scored.
+    """
+    if ctx.before and not ctx.blueprint and ctx.scoring_hand is not None:
+        has_face = any(c.is_face() for c in ctx.scoring_hand)
+        if has_face:
+            card.ability["mult"] = 0
+        else:
+            card.ability["mult"] = card.ability.get("mult", 0) + card.ability.get("extra", 1)
+        return JokerResult()
+    if ctx.joker_main and card.ability.get("mult", 0) > 0:
+        return JokerResult(mult_mod=card.ability["mult"])
+    return None
+
+
+@register("j_trousers")
+def _spare_trousers(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Spare Trousers: +2 mult when Two Pair or Full House played.
+
+    Source: card.lua:3412. Checks poker_hands containment for both.
+    """
+    if ctx.before and not ctx.blueprint and ctx.poker_hands is not None:
+        has_tp = bool(ctx.poker_hands.get("Two Pair"))
+        has_fh = bool(ctx.poker_hands.get("Full House"))
+        if has_tp or has_fh:
+            card.ability["mult"] = card.ability.get("mult", 0) + card.ability.get("extra", 2)
+            return JokerResult()
+    if ctx.joker_main and card.ability.get("mult", 0) > 0:
+        return JokerResult(mult_mod=card.ability["mult"])
+    return None
+
+
+@register("j_square")
+def _square_joker(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Square Joker: +4 chips when exactly 4 cards played.
+
+    Source: card.lua:3427. Mutates ability.extra.chips.
+    """
+    if ctx.before and not ctx.blueprint and ctx.full_hand is not None:
+        if len(ctx.full_hand) == 4:
+            extra = card.ability.get("extra", {})
+            extra["chips"] = extra.get("chips", 0) + extra.get("chip_mod", 4)
+            card.ability["extra"] = extra
+            return JokerResult()
+    if ctx.joker_main:
+        extra = card.ability.get("extra", {})
+        chips = extra.get("chips", 0)
+        if chips > 0:
+            return JokerResult(chip_mod=chips)
+    return None
+
+
+@register("j_ice_cream")
+def _ice_cream(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Ice Cream: starts +100 chips, -5 per hand. Self-destructs at 0.
+
+    Source: card.lua:3571. Mutation in after context.
+    """
+    if ctx.after and not ctx.blueprint:
+        extra = card.ability.get("extra", {})
+        chips = extra.get("chips", 100)
+        chip_mod = extra.get("chip_mod", 5)
+        if chips - chip_mod <= 0:
+            return JokerResult(remove=True)
+        extra["chips"] = chips - chip_mod
+        card.ability["extra"] = extra
+        return JokerResult()
+    if ctx.joker_main:
+        extra = card.ability.get("extra", {})
+        chips = extra.get("chips", 100)
+        if chips > 0:
+            return JokerResult(chip_mod=chips)
+    return None
+
+
+@register("j_popcorn")
+def _popcorn(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Popcorn: starts +20 mult, -4 per round. Self-destructs at 0.
+
+    Source: card.lua:2945. Mutation in end_of_round context.
+    """
+    if ctx.end_of_round and not ctx.blueprint:
+        m = card.ability.get("mult", 20)
+        sub = card.ability.get("extra", 4)
+        if m - sub <= 0:
+            return JokerResult(remove=True)
+        card.ability["mult"] = m - sub
+        return JokerResult()
+    if ctx.joker_main and card.ability.get("mult", 0) > 0:
+        return JokerResult(mult_mod=card.ability["mult"])
+    return None
+
+
+@register("j_flash")
+def _flash_card(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Flash Card: +2 mult per shop reroll. Source: card.lua:2403."""
+    if ctx.reroll_shop and not ctx.blueprint:
+        card.ability["mult"] = card.ability.get("mult", 0) + card.ability.get("extra", 2)
+        return JokerResult()
+    if ctx.joker_main and card.ability.get("mult", 0) > 0:
+        return JokerResult(mult_mod=card.ability["mult"])
+    return None
+
+
+@register("j_red_card")
+def _red_card(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Red Card: +3 mult per booster pack skipped. Source: card.lua:2441."""
+    if ctx.skipping_booster and not ctx.blueprint:
+        card.ability["mult"] = card.ability.get("mult", 0) + card.ability.get("extra", 3)
+        return JokerResult()
+    if ctx.joker_main and card.ability.get("mult", 0) > 0:
+        return JokerResult(mult_mod=card.ability["mult"])
+    return None
+
+
+@register("j_wee")
+def _wee_joker(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Wee Joker: +8 chips per 2-rank card scored. Source: card.lua:3083.
+
+    Accumulates on ability.extra.chips. Mutation in individual/play context.
+    """
+    if ctx.individual and ctx.cardarea == "play" and ctx.other_card is not None:
+        if ctx.other_card.get_id() == 2 and not ctx.blueprint:
+            extra = card.ability.get("extra", {})
+            extra["chips"] = extra.get("chips", 0) + extra.get("chip_mod", 8)
+            card.ability["extra"] = extra
+    if ctx.joker_main:
+        extra = card.ability.get("extra", {})
+        chips = extra.get("chips", 0)
+        if chips > 0:
+            return JokerResult(chip_mod=chips)
+    return None
+
+
+@register("j_lucky_cat")
+def _lucky_cat(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Lucky Cat: +0.25 xMult per Lucky Card trigger. Source: card.lua:3076.
+
+    Accumulates on ability.x_mult. Scored via the generic x_mult > 1 handler
+    pattern (card.lua:3653) with type=''.
+    """
+    if ctx.individual and ctx.cardarea == "play" and ctx.other_card is not None:
+        if getattr(ctx.other_card, "lucky_trigger", False) and not ctx.blueprint:
+            card.ability["x_mult"] = card.ability.get("x_mult", 1) + card.ability.get("extra", 0.25)
+    if ctx.joker_main:
+        x = card.ability.get("x_mult", 1)
+        if x > 1:
+            return JokerResult(Xmult_mod=x)
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Joker handlers — xMult scaling (accumulate multiplicative mult over time)
+# ---------------------------------------------------------------------------
+
+@register("j_campfire")
+def _campfire(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Campfire: +0.25 xMult per card sold. Resets on boss blind.
+
+    Source: card.lua:2396 (selling_card), 2889 (end_of_round boss reset).
+    """
+    if ctx.selling_card and not ctx.blueprint:
+        card.ability["x_mult"] = card.ability.get("x_mult", 1) + card.ability.get("extra", 0.25)
+        return JokerResult()
+    if ctx.end_of_round and not ctx.blueprint:
+        if ctx.blind and getattr(ctx.blind, "boss", False) and card.ability.get("x_mult", 1) > 1:
+            card.ability["x_mult"] = 1
+            return JokerResult()
+    if ctx.joker_main:
+        x = card.ability.get("x_mult", 1)
+        if x > 1:
+            return JokerResult(Xmult_mod=x)
+    return None
+
+
+@register("j_hologram")
+def _hologram(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Hologram: +0.25 xMult per card added to deck. Source: card.lua:2457."""
+    if ctx.playing_card_added and not ctx.blueprint and ctx.cards:
+        card.ability["x_mult"] = (
+            card.ability.get("x_mult", 1)
+            + len(ctx.cards) * card.ability.get("extra", 0.25)
+        )
+        return JokerResult()
+    if ctx.joker_main:
+        x = card.ability.get("x_mult", 1)
+        if x > 1:
+            return JokerResult(Xmult_mod=x)
+    return None
+
+
+@register("j_constellation")
+def _constellation(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Constellation: +0.1 xMult per Planet card used. Source: card.lua:2727."""
+    if ctx.using_consumeable and not ctx.blueprint:
+        if ctx.consumeable and ctx.consumeable.ability.get("set") == "Planet":
+            card.ability["x_mult"] = card.ability.get("x_mult", 1) + card.ability.get("extra", 0.1)
+            return JokerResult()
+    if ctx.joker_main:
+        x = card.ability.get("x_mult", 1)
+        if x > 1:
+            return JokerResult(Xmult_mod=x)
+    return None
+
+
+@register("j_glass")
+def _glass_joker(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Glass Joker: +0.75 xMult per Glass Card destroyed. Source: card.lua:2647."""
+    if ctx.cards_destroyed and not ctx.blueprint:
+        glass_count = sum(
+            1 for c in ctx.cards_destroyed
+            if c.ability.get("effect") == "Glass Card"
+            or c.ability.get("name") == "Glass Card"
+        )
+        if glass_count > 0:
+            card.ability["x_mult"] = (
+                card.ability.get("x_mult", 1)
+                + card.ability.get("extra", 0.75) * glass_count
+            )
+            return JokerResult()
+    if ctx.joker_main:
+        x = card.ability.get("x_mult", 1)
+        if x > 1:
+            return JokerResult(Xmult_mod=x)
+    return None
+
+
+@register("j_caino")
+def _caino(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Caino: +1.0 xMult per face card destroyed. Source: card.lua:2623.
+
+    Uses ``ability.caino_xmult`` (separate from x_mult).
+    """
+    if ctx.cards_destroyed and not ctx.blueprint:
+        face_count = sum(1 for c in ctx.cards_destroyed if c.is_face())
+        if face_count > 0:
+            card.ability["caino_xmult"] = (
+                card.ability.get("caino_xmult", 1)
+                + card.ability.get("extra", 1) * face_count
+            )
+            return JokerResult()
+    if ctx.joker_main:
+        x = card.ability.get("caino_xmult", 1)
+        if x > 1:
+            return JokerResult(Xmult_mod=x)
+    return None
+
+
+@register("j_vampire")
+def _vampire(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Vampire: +0.1 xMult per enhancement stripped from scored cards.
+
+    Source: card.lua:3465. Fires in individual_hand_end context.
+    Side effect: strips enhancement from scored cards (sets ability to c_base).
+    """
+    if ctx.individual_hand_end and not ctx.blueprint and ctx.scoring_hand:
+        enhanced_count = 0
+        for c in ctx.scoring_hand:
+            if (
+                c.ability.get("effect", "") not in ("", "Default Base")
+                and c.ability.get("name", "") != "Default Base"
+                and not c.debuff
+                and not getattr(c, "vampired", False)
+            ):
+                enhanced_count += 1
+                c.vampired = True
+                c.set_ability("c_base")
+        if enhanced_count > 0:
+            card.ability["x_mult"] = (
+                card.ability.get("x_mult", 1)
+                + card.ability.get("extra", 0.1) * enhanced_count
+            )
+            return JokerResult(Xmult_mod=card.ability["x_mult"])
+    if ctx.joker_main:
+        x = card.ability.get("x_mult", 1)
+        if x > 1:
+            return JokerResult(Xmult_mod=x)
+    return None
+
+
+@register("j_obelisk")
+def _obelisk(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Obelisk: +0.2 xMult per consecutive non-most-played hand.
+
+    Source: card.lua:3543. Resets to 1 when most-played hand IS played.
+    """
+    if ctx.individual_hand_end and not ctx.blueprint:
+        if ctx.scoring_name and ctx.hand_levels is not None:
+            current_played = ctx.hand_levels[ctx.scoring_name].played
+            is_most_played = True
+            for ht, info in ctx.hand_levels._hands.items():
+                if ht.value != ctx.scoring_name and info.played >= current_played and info.visible:
+                    is_most_played = False
+                    break
+            if is_most_played:
+                if card.ability.get("x_mult", 1) > 1:
+                    card.ability["x_mult"] = 1
+            else:
+                card.ability["x_mult"] = (
+                    card.ability.get("x_mult", 1)
+                    + card.ability.get("extra", 0.2)
+                )
+        return JokerResult()
+    if ctx.joker_main:
+        x = card.ability.get("x_mult", 1)
+        if x > 1:
+            return JokerResult(Xmult_mod=x)
+    return None
+
+
+@register("j_madness")
+def _madness(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Madness: +0.5 xMult per non-boss blind. Destroys random joker.
+
+    Source: card.lua:2503. Side effect returned as extra.
+    """
+    if ctx.setting_blind and not ctx.blueprint:
+        if ctx.blind and not getattr(ctx.blind, "boss", False):
+            card.ability["x_mult"] = (
+                card.ability.get("x_mult", 1)
+                + card.ability.get("extra", 0.5)
+            )
+            return JokerResult(extra={"destroy_random_joker": True})
+    if ctx.joker_main:
+        x = card.ability.get("x_mult", 1)
+        if x > 1:
+            return JokerResult(Xmult_mod=x)
+    return None
+
+
+@register("j_hit_the_road")
+def _hit_the_road(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Hit the Road: +0.5 xMult per Jack discarded this round.
+
+    Source: card.lua:2835. Resets at end of round.
+    """
+    if ctx.discard and ctx.other_card is not None and not ctx.blueprint:
+        if not ctx.other_card.debuff and ctx.other_card.get_id() == 11:
+            card.ability["x_mult"] = (
+                card.ability.get("x_mult", 1)
+                + card.ability.get("extra", 0.5)
+            )
+            return JokerResult(Xmult_mod=card.ability["x_mult"])
+    if ctx.end_of_round and not ctx.blueprint:
+        if card.ability.get("x_mult", 1) > 1:
+            card.ability["x_mult"] = 1
+            return JokerResult()
+    if ctx.joker_main:
+        x = card.ability.get("x_mult", 1)
+        if x > 1:
+            return JokerResult(Xmult_mod=x)
+    return None
+
+
+@register("j_throwback")
+def _throwback(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Throwback: xMult = 1 + 0.25 * total_blinds_skipped.
+
+    Source: card.lua:4176. Formula-based, not cumulative.
+    """
+    if ctx.joker_main:
+        x = 1 + ctx.game.skips * card.ability.get("extra", 0.25)
+        if x > 1:
+            return JokerResult(Xmult_mod=x)
+    return None
+
+
+@register("j_yorick")
+def _yorick(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Yorick: xMult +1 every 23 discards. Source: card.lua:2788.
+
+    Counter on ability.yorick_discards decrements per card discarded.
+    """
+    if ctx.discard and not ctx.blueprint:
+        counter = card.ability.get("yorick_discards", 23)
+        if counter <= 1:
+            extra = card.ability.get("extra", {})
+            card.ability["yorick_discards"] = extra.get("discards", 23)
+            card.ability["x_mult"] = (
+                card.ability.get("x_mult", 1)
+                + extra.get("xmult", 1)
+            )
+            return JokerResult(Xmult_mod=card.ability["x_mult"])
+        card.ability["yorick_discards"] = counter - 1
+        return JokerResult()
+    if ctx.joker_main:
+        x = card.ability.get("x_mult", 1)
+        if x > 1:
+            return JokerResult(Xmult_mod=x)
+    return None
+
+
+@register("j_ceremonial")
+def _ceremonial(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Ceremonial Dagger: +2× right neighbor's sell_cost as mult when destroyed.
+
+    Source: card.lua:2561. Fires in setting_blind. Returns mult_mod (NOT xMult).
+    Side effect: signals destruction of right neighbor via extra.
+    """
+    if ctx.setting_blind and not ctx.blueprint and ctx.jokers:
+        my_pos = None
+        for i, j in enumerate(ctx.jokers):
+            if j is card:
+                my_pos = i
+                break
+        if my_pos is not None and my_pos + 1 < len(ctx.jokers):
+            target = ctx.jokers[my_pos + 1]
+            if (
+                not getattr(target, "eternal", False)
+                and not getattr(target, "getting_sliced", False)
+                and not getattr(card, "getting_sliced", False)
+            ):
+                card.ability["mult"] = (
+                    card.ability.get("mult", 0) + target.sell_cost * 2
+                )
+                return JokerResult(
+                    extra={"destroy_joker": target},
+                )
+    if ctx.joker_main and card.ability.get("mult", 0) > 0:
+        return JokerResult(mult_mod=card.ability["mult"])
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Joker handlers — joker-on-joker (other_joker context, Phase 9c)
+# ---------------------------------------------------------------------------
+
+def _get_rarity(joker_card: Card) -> int:
+    """Look up rarity for a joker from centers.json. Returns 0 if unknown."""
+    from jackdaw.engine.card import _resolve_center
+
+    try:
+        center = _resolve_center(joker_card.center_key)
+        return center.get("rarity", 0)
+    except (KeyError, AttributeError):
+        return 0
+
+
+@register("j_baseball")
+def _baseball(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Baseball Card: x1.5 mult if other_joker is Uncommon (rarity 2).
+
+    Source: card.lua:3396. Fires in other_joker context.
+    Does NOT check debuff on the other joker (source omits this check).
+    """
+    if ctx.other_joker is not None and ctx.other_joker is not card:
+        if _get_rarity(ctx.other_joker) == 2:
+            return JokerResult(Xmult_mod=card.ability.get("extra", 1.5))
+    return None
+
+
+@register("j_swashbuckler")
+def _swashbuckler(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Swashbuckler: +mult = sum of all other jokers' sell values.
+
+    Source: card.lua:4240 (computed in Card:update, not calculate_joker).
+    We compute it in joker_main since we don't have a game tick loop.
+    """
+    if ctx.joker_main and ctx.jokers:
+        sell_total = sum(
+            j.sell_cost for j in ctx.jokers
+            if j is not card and not j.debuff
+        )
+        if sell_total > 0:
+            return JokerResult(mult_mod=sell_total)
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Joker handlers — card creation (stubbed as side-effect descriptors)
+# Actual card creation deferred to M10 (pool generation).
+# ---------------------------------------------------------------------------
+
+@register("j_certificate")
+def _certificate(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Certificate: create playing card with random seal on first hand drawn.
+
+    Source: card.lua:2462. Seeds: 'cert_fr' (card), 'certsl' (seal).
+    """
+    if ctx.first_hand_drawn:
+        return JokerResult(extra={
+            "create": {"type": "playing_card", "seal": True, "key": "cert"},
+        })
+    return None
+
+
+@register("j_marble")
+def _marble(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Marble Joker: add Stone Card to deck on setting_blind.
+
+    Source: card.lua:2580. Seed: 'marb_fr'.
+    """
+    if ctx.setting_blind and not getattr(card, "getting_sliced", False):
+        return JokerResult(extra={
+            "create": {"type": "playing_card", "enhancement": "m_stone", "key": "marble"},
+        })
+    return None
+
+
+@register("j_dna")
+def _dna(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """DNA: copy first card into deck on first hand (1 card played).
+
+    Source: card.lua:3501. Fires in before context when hands_played == 0
+    and exactly 1 card in full_hand.
+    """
+    if ctx.before and not ctx.blueprint:
+        if ctx.game.hands_played == 0 and ctx.full_hand and len(ctx.full_hand) == 1:
+            return JokerResult(extra={
+                "create": {
+                    "type": "playing_card_copy",
+                    "source_card": ctx.full_hand[0],
+                    "key": "dna",
+                },
+            })
+    return None
+
+
+@register("j_riff_raff")
+def _riff_raff(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Riff-raff: create up to 2 Common jokers on setting_blind.
+
+    Source: card.lua:2529. Checks joker slot availability.
+    """
+    if ctx.setting_blind and not getattr(card, "getting_sliced", False):
+        joker_count = ctx.game.joker_count if ctx.game else 0
+        joker_slots = ctx.game.joker_slots if ctx.game else 5
+        available = joker_slots - joker_count
+        if available > 0:
+            count = min(card.ability.get("extra", 2), available)
+            return JokerResult(extra={
+                "create": {
+                    "type": "Joker",
+                    "rarity": "Common",
+                    "count": count,
+                    "key": "rif",
+                },
+            })
+    return None
+
+
+@register("j_cartomancer")
+def _cartomancer(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Cartomancer: create Tarot card on setting_blind.
+
+    Source: card.lua:2545. Checks consumable slot.
+    """
+    if ctx.setting_blind and not getattr(card, "getting_sliced", False):
+        return JokerResult(extra={
+            "create": {"type": "Tarot", "key": "car"},
+        })
+    return None
+
+
+@register("j_8_ball")
+def _eight_ball(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """8 Ball: scored rank 8 → 1/4 chance → create Tarot.
+
+    Source: card.lua:3106. Seed: '8ball'. Probability: normal/extra (1/4).
+    """
+    if ctx.individual and ctx.cardarea == "play" and ctx.other_card is not None:
+        if ctx.other_card.get_id() == 8:
+            odds = card.ability.get("extra", 4)
+            if ctx.rng is not None:
+                if ctx.rng.random("8ball") < ctx.game.probabilities_normal / odds:
+                    return JokerResult(extra={
+                        "create": {"type": "Tarot", "key": "8ba"},
+                    })
+    return None
+
+
+@register("j_vagabond")
+def _vagabond(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Vagabond: create Tarot if money ≤ $4. Source: card.lua:3743."""
+    if ctx.joker_main:
+        if ctx.game.money <= card.ability.get("extra", 4):
+            return JokerResult(extra={
+                "create": {"type": "Tarot", "key": "vag"},
+            })
+    return None
+
+
+@register("j_superposition")
+def _superposition(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Superposition: Ace in hand + Straight → create Tarot.
+
+    Source: card.lua:3762. Checks scoring_hand for Ace and poker_hands
+    for Straight.
+    """
+    if ctx.joker_main and ctx.scoring_hand and ctx.poker_hands:
+        has_ace = any(c.get_id() == 14 for c in ctx.scoring_hand)
+        has_straight = bool(ctx.poker_hands.get("Straight"))
+        if has_ace and has_straight:
+            return JokerResult(extra={
+                "create": {"type": "Tarot", "key": "sup"},
+            })
+    return None
+
+
+@register("j_seance")
+def _seance(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Seance: hand matches target type → create Spectral.
+
+    Source: card.lua:3787. Default target: Straight Flush.
+    """
+    if ctx.joker_main and ctx.poker_hands:
+        extra = card.ability.get("extra", {})
+        target = extra.get("poker_hand", "Straight Flush")
+        if ctx.poker_hands.get(target):
+            return JokerResult(extra={
+                "create": {"type": "Spectral", "key": "sea"},
+            })
+    return None
+
+
+@register("j_sixth_sense")
+def _sixth_sense(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Sixth Sense: rank 6, first hand, 1 card played → create Spectral + destroy.
+
+    Source: card.lua:2604. Fires in destroying_card context.
+    """
+    if ctx.destroying_card is not None and not ctx.blueprint:
+        if (
+            ctx.full_hand
+            and len(ctx.full_hand) == 1
+            and ctx.full_hand[0].get_id() == 6
+            and ctx.game.hands_played == 0
+        ):
+            return JokerResult(
+                remove=True,
+                extra={"create": {"type": "Spectral", "key": "sixth"}},
+            )
+    return None
+
+
+@register("j_hallucination")
+def _hallucination(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Hallucination: open_booster → probability roll → create Tarot.
+
+    Source: card.lua:2335. Seed: 'halu'+ante. Probability: normal/extra (1/2).
+    """
+    if ctx.open_booster:
+        odds = card.ability.get("extra", 2)
+        if ctx.rng is not None:
+            if ctx.rng.random("hallucination") < ctx.game.probabilities_normal / odds:
+                return JokerResult(extra={
+                    "create": {"type": "Tarot", "key": "hal"},
+                })
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Joker handlers — destructive / rule-modifying side effects
+# ---------------------------------------------------------------------------
+
+@register("j_gros_michel")
+def _gros_michel(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Gros Michel: +15 mult. 1/6 chance of extinction per round.
+
+    Source: card.lua:3019 (end_of_round), scoring via mult_mod.
+    Sets pool_flags.gros_michel_extinct on destruction.
+    """
+    if ctx.end_of_round and not ctx.blueprint:
+        extra = card.ability.get("extra", {})
+        odds = extra.get("odds", 6)
+        if ctx.rng is not None:
+            if ctx.rng.random("gros_michel") < ctx.game.probabilities_normal / odds:
+                return JokerResult(
+                    remove=True,
+                    extra={"pool_flag": "gros_michel_extinct"},
+                )
+        return JokerResult(saved=True)
+    if ctx.joker_main:
+        extra = card.ability.get("extra", {})
+        m = extra.get("mult", 15)
+        if m > 0:
+            return JokerResult(mult_mod=m)
+    return None
+
+
+@register("j_cavendish")
+def _cavendish(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Cavendish: x3 mult. 1/1000 chance of extinction per round.
+
+    Source: card.lua:3019. Same destruction pattern as Gros Michel.
+    """
+    if ctx.end_of_round and not ctx.blueprint:
+        extra = card.ability.get("extra", {})
+        odds = extra.get("odds", 1000)
+        if ctx.rng is not None:
+            if ctx.rng.random("cavendish") < ctx.game.probabilities_normal / odds:
+                return JokerResult(remove=True)
+        return JokerResult(saved=True)
+    if ctx.joker_main:
+        extra = card.ability.get("extra", {})
+        x = extra.get("Xmult", 3)
+        if x > 1:
+            return JokerResult(Xmult_mod=x)
+    return None
+
+
+@register("j_chicot")
+def _chicot(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Chicot: disable boss blind on setting_blind. Persists (does NOT self-destruct).
+
+    Source: card.lua:2492. Also fires when added to deck (card.lua:596).
+    """
+    if ctx.setting_blind and not ctx.blueprint:
+        if ctx.blind and getattr(ctx.blind, "boss", False):
+            if not getattr(ctx.blind, "disabled", False):
+                return JokerResult(extra={"disable_blind": True})
+    return None
+
+
+@register("j_luchador")
+def _luchador(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Luchador: when sold, disable the current boss blind.
+
+    Source: card.lua:2354. Checks blind is boss and not already disabled.
+    """
+    if ctx.selling_self:
+        if ctx.blind and not getattr(ctx.blind, "disabled", False):
+            if getattr(ctx.blind, "boss", False):
+                return JokerResult(extra={"disable_blind": True})
+    return None
+
+
+@register("j_burglar")
+def _burglar(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Burglar: on setting_blind, +3 hands, remove all discards.
+
+    Source: card.lua:2522. Returns side-effect descriptor.
+    """
+    if ctx.setting_blind and not getattr(card, "getting_sliced", False):
+        extra_hands = card.ability.get("extra", 3)
+        return JokerResult(extra={
+            "set_hands": extra_hands,
+            "set_discards": 0,
+        })
+    return None
+
+
+@register("j_midas_mask")
+def _midas_mask(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Midas Mask: convert all face cards in scoring hand to Gold Cards.
+
+    Source: card.lua:3443. Fires in before context. Mutates card ability
+    in-place — enhancement change persists for future hands.
+    """
+    if ctx.before and not ctx.blueprint and ctx.scoring_hand:
+        faces = []
+        for c in ctx.scoring_hand:
+            if c.is_face(pareidolia=ctx.pareidolia) and not c.debuff:
+                faces.append(c)
+        if faces:
+            for c in faces:
+                c.set_ability("m_gold")
+            return JokerResult()
+    return None
+
+
+@register("j_hiker")
+def _hiker(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Hiker: +5 permanent chip bonus per scored card.
+
+    Source: card.lua:3067. Fires in individual/play context.
+    Mutates other_card.ability.perma_bonus in-place.
+    """
+    if ctx.individual and ctx.cardarea == "play" and ctx.other_card is not None:
+        if not ctx.blueprint:
+            pb = ctx.other_card.ability.get("perma_bonus", 0)
+            ctx.other_card.ability["perma_bonus"] = pb + card.ability.get("extra", 5)
+        return JokerResult()
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Joker handlers — end-of-round dollar bonuses (calc_dollar_bonus)
+# Source: card.lua:1658-1677
+# ---------------------------------------------------------------------------
+
+@register_dollars("j_golden")
+def _golden_dollars(card: Card, game: GameSnapshot) -> int:
+    """Golden Joker: +$4 per round. Source: card.lua:1658."""
+    return card.ability.get("extra", 4)
+
+
+@register_dollars("j_cloud_9")
+def _cloud_9_dollars(card: Card, game: GameSnapshot) -> int:
+    """Cloud 9: +$1 per 9-rank card in full deck. Source: card.lua:1661."""
+    tally = card.ability.get("nine_tally", 0)
+    if tally > 0:
+        return card.ability.get("extra", 1) * tally
+    return 0
+
+
+@register_dollars("j_rocket")
+def _rocket_dollars(card: Card, game: GameSnapshot) -> int:
+    """Rocket: +$dollars (grows per boss beaten). Source: card.lua:1666."""
+    extra = card.ability.get("extra", {})
+    return extra.get("dollars", 1)
+
+
+@register_dollars("j_satellite")
+def _satellite_dollars(card: Card, game: GameSnapshot) -> int:
+    """Satellite: +$1 per unique Planet type used. Source: card.lua:1669."""
+    planet_types = card.ability.get("planet_types_used", 0)
+    if planet_types > 0:
+        return card.ability.get("extra", 1) * planet_types
+    return 0
+
+
+@register_dollars("j_delayed_grat")
+def _delayed_grat_dollars(card: Card, game: GameSnapshot) -> int:
+    """Delayed Gratification: +$2 per discard remaining IF none used.
+
+    Source: card.lua:1675. Checks discards_used == 0 AND discards_left > 0.
+    """
+    if game.discards_used == 0 and game.discards_left > 0:
+        return game.discards_left * card.ability.get("extra", 2)
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Joker handlers — end-of-round mutations (calculate_joker end_of_round)
+# Source: card.lua:2896-3010
+# ---------------------------------------------------------------------------
+
+@register("j_rocket")
+def _rocket(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Rocket: +$2 to dollar payout after each boss blind. Source: card.lua:2896."""
+    if ctx.end_of_round and not ctx.blueprint:
+        if ctx.blind and getattr(ctx.blind, "boss", False):
+            extra = card.ability.get("extra", {})
+            extra["dollars"] = extra.get("dollars", 1) + extra.get("increase", 2)
+            card.ability["extra"] = extra
+            return JokerResult()
+    return None
+
+
+@register("j_egg")
+def _egg(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Egg: +$3 to sell value per round. Source: card.lua:2940."""
+    if ctx.end_of_round and not ctx.blueprint:
+        inc = card.ability.get("extra", 3)
+        card.ability["extra_value"] = card.ability.get("extra_value", 0) + inc
+        card.sell_cost = card.sell_cost + inc
+        return JokerResult()
+    return None
+
+
+@register("j_gift")
+def _gift_card(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Gift Card: +$1 sell value to ALL jokers and consumables.
+
+    Source: card.lua:2920. Iterates all jokers (and consumables).
+    """
+    if ctx.end_of_round and not ctx.blueprint and ctx.jokers:
+        increment = card.ability.get("extra", 1)
+        for j in ctx.jokers:
+            j.ability["extra_value"] = j.ability.get("extra_value", 0) + increment
+            j.sell_cost = j.sell_cost + increment
+        return JokerResult()
+    return None
+
+
+@register("j_invisible")
+def _invisible(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Invisible Joker: count rounds. When threshold reached + sold, duplicate.
+
+    Source: card.lua:2909. Counter: ability.invis_rounds.
+    """
+    if ctx.end_of_round and not ctx.blueprint:
+        card.ability["invis_rounds"] = card.ability.get("invis_rounds", 0) + 1
+        return JokerResult()
+    if ctx.selling_self and not ctx.blueprint:
+        threshold = card.ability.get("extra", 2)
+        if card.ability.get("invis_rounds", 0) >= threshold:
+            return JokerResult(extra={"duplicate_random_joker": True})
+    return None
+
+
+@register("j_diet_cola")
+def _diet_cola(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Diet Cola: on sell, create Double Tag. Source: card.lua:2361."""
+    if ctx.selling_self:
+        return JokerResult(extra={"create": {"type": "Tag", "key": "tag_double"}})
+    return None
+
+
+@register("j_space")
+def _space_joker(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Space Joker: 1/4 chance to level up played hand type.
+
+    Source: card.lua:3420. Fires in before context. Seed: 'space'.
+    """
+    if ctx.before:
+        odds = card.ability.get("extra", 4)
+        if ctx.rng is not None:
+            if ctx.rng.random("space") < ctx.game.probabilities_normal / odds:
+                return JokerResult(level_up=True)
+    return None
+
+
+@register("j_to_the_moon")
+def _to_the_moon(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """To the Moon: +$1 extra interest per $5 held.
+
+    Source: card.lua:613. Modifies interest_amount (side effect descriptor).
+    Not a calculate_joker effect — fires on add_to_deck. Stubbed here for
+    completeness; actual interest modification handled by state machine.
+    """
+    return None
+
+
+@register("j_golden")
+def _golden_joker(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Golden Joker: scoring stub — dollars handled by calc_dollar_bonus."""
+    return None
+
+
+# Dollar-only jokers — no-op in calculate_joker, payout via calc_dollar_bonus
+@register("j_cloud_9")
+def _cloud_9(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Cloud 9: dollars handled by calc_dollar_bonus."""
+    return None
+
+
+@register("j_delayed_grat")
+def _delayed_grat(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Delayed Gratification: dollars handled by calc_dollar_bonus."""
+    return None
+
+
+@register("j_satellite")
+def _satellite(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Satellite: dollars handled by calc_dollar_bonus."""
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Joker handlers — active effects for remaining jokers
+# ---------------------------------------------------------------------------
+
+@register("j_castle")
+def _castle(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Castle: +3 chips per card of matching suit discarded. Source: card.lua:2857.
+
+    Accumulates on ability.extra.chips. Suit target: current_round.castle_card.suit.
+    Fires in discard context.
+    """
+    if ctx.discard and ctx.other_card is not None and not ctx.blueprint:
+        castle_suit = card.ability.get("castle_card_suit")
+        if castle_suit and ctx.other_card.is_suit(castle_suit, smeared=ctx.smeared):
+            extra = card.ability.get("extra", {})
+            extra["chips"] = extra.get("chips", 0) + extra.get("chip_mod", 3)
+            card.ability["extra"] = extra
+            return JokerResult()
+    if ctx.joker_main:
+        extra = card.ability.get("extra", {})
+        chips = extra.get("chips", 0)
+        if chips > 0:
+            return JokerResult(chip_mod=chips)
+    return None
+
+
+@register("j_runner")
+def _runner(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Runner: +15 chips per Straight played. Source: card.lua:3435.
+
+    Accumulates on ability.extra.chips in before context.
+    """
+    if ctx.before and not ctx.blueprint and ctx.poker_hands:
+        if ctx.poker_hands.get("Straight"):
+            extra = card.ability.get("extra", {})
+            extra["chips"] = extra.get("chips", 0) + extra.get("chip_mod", 15)
+            card.ability["extra"] = extra
+            return JokerResult()
+    if ctx.joker_main:
+        extra = card.ability.get("extra", {})
+        chips = extra.get("chips", 0)
+        if chips > 0:
+            return JokerResult(chip_mod=chips)
+    return None
+
+
+@register("j_ramen")
+def _ramen(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Ramen: x2 mult, loses 0.01 per card discarded. Self-destructs at x1.
+
+    Source: card.lua:2757 (discard), 3653 (scoring via generic x_mult).
+    """
+    if ctx.discard and not ctx.blueprint:
+        x = card.ability.get("x_mult", 2)
+        loss = card.ability.get("extra", 0.01)
+        if x - loss <= 1:
+            return JokerResult(remove=True)
+        card.ability["x_mult"] = x - loss
+        return JokerResult()
+    if ctx.joker_main:
+        x = card.ability.get("x_mult", 2)
+        if x > 1:
+            return JokerResult(Xmult_mod=x)
+    return None
+
+
+@register("j_mr_bones")
+def _mr_bones(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Mr. Bones: prevents death if score ≥ 25% of blind. Source: card.lua:3047.
+
+    Returns saved=True and remove=True (self-destructs after saving).
+    """
+    if getattr(ctx, "game_over", False):
+        return JokerResult(saved=True, remove=True)
+    return None
+
+
+@register("j_burnt")
+def _burnt(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Burnt Joker: level up discard hand on first discard of round.
+
+    Source: card.lua:2749. Fires in discard context when discards_used <= 0.
+    """
+    if ctx.discard and not ctx.blueprint:
+        if ctx.game.discards_used <= 0 and ctx.other_card is not None:
+            if ctx.full_hand and ctx.other_card is ctx.full_hand[-1]:
+                return JokerResult(level_up=True)
+    return None
+
+
+@register("j_turtle_bean")
+def _turtle_bean(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Turtle Bean: +5 hand size, -1 per round. Self-destructs at 0.
+
+    Source: card.lua:2903. Effect is via h_size (passive). Decay in end_of_round.
+    """
+    if ctx.end_of_round and not ctx.blueprint:
+        extra = card.ability.get("extra", {})
+        h_size = extra.get("h_size", 5)
+        h_mod = extra.get("h_mod", 1)
+        if h_size - h_mod <= 0:
+            return JokerResult(remove=True)
+        extra["h_size"] = h_size - h_mod
+        card.ability["extra"] = extra
+        return JokerResult()
+    return None
+
+
+@register("j_perkeo")
+def _perkeo(card: Card, ctx: JokerContext) -> JokerResult | None:
+    """Perkeo: copy random consumable when leaving shop. Source: card.lua:2413."""
+    if ctx.ending_shop and not ctx.blueprint:
+        return JokerResult(extra={
+            "create": {"type": "consumable_copy", "edition": "negative", "key": "perkeo"},
+        })
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Passive/meta jokers — no calculate_joker effect.
+# Their effects are applied via add_to_deck/remove_from_deck or checked
+# inline by other systems (hand eval, shop, set_cost, etc.).
+# Registered as no-op handlers for completeness.
+# ---------------------------------------------------------------------------
+
+_PASSIVE_JOKERS = {
+    "j_four_fingers": "Hand eval: flushes/straights with 4 cards",
+    "j_shortcut": "Hand eval: straights with gaps",
+    "j_pareidolia": "Hand eval: all cards are face cards",
+    "j_smeared": "Hand eval: suit pairs interchangeable",
+    "j_splash": "Scoring: all played cards score",
+    "j_ring_master": "Pool: allows duplicate jokers",
+    "j_juggler": "Passive: +1 hand size (h_size)",
+    "j_drunkard": "Passive: +1 discard (d_size)",
+    "j_troubadour": "Passive: +2 hand size, -1 hand",
+    "j_merry_andy": "Passive: +3 discards, -1 hand size",
+    "j_oops": "Passive: doubles probabilities.normal",
+    "j_credit_card": "Passive: allows -$20 debt",
+    "j_chaos": "Shop: 1 free reroll per shop visit",
+    "j_astronomer": "Shop: Planet cards cost $0",
+}
+
+for _key, _doc in _PASSIVE_JOKERS.items():
+    def _make_passive(doc: str) -> JokerHandler:
+        def _passive(card: Card, ctx: JokerContext) -> JokerResult | None:
+            return None
+        _passive.__doc__ = f"Passive/meta: {doc}"
+        return _passive
+    register(_key)(_make_passive(_doc))

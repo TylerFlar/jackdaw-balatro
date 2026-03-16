@@ -10,7 +10,7 @@ pipeline from ``state_events.lua:571-1065``.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -129,7 +129,7 @@ def eval_card(
 
 @dataclass
 class ScoreResult:
-    """Result of the base scoring pipeline (without joker effects)."""
+    """Result of the full scoring pipeline."""
 
     hand_type: str
     """Detected hand type (e.g. ``"Full House"``) or ``"NULL"``."""
@@ -154,6 +154,15 @@ class ScoreResult:
 
     breakdown: list[str] = field(default_factory=list)
     """Step-by-step log for debugging."""
+
+    jokers_removed: list[Card] = field(default_factory=list)
+    """Jokers that self-destructed during scoring (Ice Cream, etc.)."""
+
+    cards_destroyed: list[Card] = field(default_factory=list)
+    """Playing cards destroyed during Phase 11 (Glass shatter, etc.)."""
+
+    saved: bool = False
+    """True if Mr. Bones (or similar) prevented a game over."""
 
 
 # ---------------------------------------------------------------------------
@@ -355,11 +364,10 @@ def score_hand(
     *,
     probabilities_normal: float = 1.0,
     game_state: dict[str, Any] | None = None,
+    back_key: str | None = None,
+    blind_chips: int = 0,
 ) -> ScoreResult:
-    """Full scoring pipeline with joker effects (Phases 1-9, 12).
-
-    Phases 10 (Plasma), 11 (destruction), 13 (after), 14 (debuff played)
-    are deferred to M8.
+    """Full scoring pipeline with joker effects (Phases 1-14).
 
     Args:
         played_cards: Cards played from hand.
@@ -369,15 +377,12 @@ def score_hand(
         blind: Current Blind.
         rng: PseudoRandom instance.
         probabilities_normal: G.GAME.probabilities.normal (default 1).
-        game_state: Pre-computed game state dict with keys:
-            money, deck_cards_remaining, starting_deck_size,
-            playing_cards_count, stone_tally, steel_tally,
-            enhanced_card_count, consumable_usage_tarot,
-            hands_played, hands_left, discards_left,
-            ancient_suit, idol_card, mail_card_id, discards_used.
+        game_state: Pre-computed game state dict.
+        back_key: Deck back key (e.g. ``'b_plasma'`` for Plasma Deck).
+        blind_chips: Blind chip target (for Mr. Bones save check).
     """
     from jackdaw.engine.hand_eval import evaluate_hand
-    from jackdaw.engine.jokers import JokerContext, calculate_joker
+    from jackdaw.engine.jokers import GameSnapshot, JokerContext, calculate_joker
 
     gs = game_state or {}
     dollars = 0
@@ -396,6 +401,28 @@ def score_hand(
     pareidolia = any(
         j.ability.get("name") == "Pareidolia" and not j.debuff
         for j in jokers
+    )
+
+    # Build GameSnapshot once — shared across all JokerContext instances
+    snapshot = GameSnapshot(
+        joker_count=joker_count,
+        joker_slots=gs.get("joker_slots", 5),
+        money=gs.get("money", 0),
+        deck_cards_remaining=gs.get("deck_cards_remaining", 0),
+        starting_deck_size=gs.get("starting_deck_size", 52),
+        playing_cards_count=gs.get("playing_cards_count", 52),
+        stone_tally=gs.get("stone_tally", 0),
+        steel_tally=gs.get("steel_tally", 0),
+        enhanced_card_count=gs.get("enhanced_card_count", 0),
+        hands_left=gs.get("hands_left", 0),
+        hands_played=gs.get("hands_played", 0),
+        discards_left=gs.get("discards_left", 0),
+        discards_used=gs.get("discards_used", 0),
+        probabilities_normal=probabilities_normal,
+        consumable_usage_tarot=gs.get("consumable_usage_tarot", 0),
+        mail_card_id=gs.get("mail_card_id"),
+        idol_card=gs.get("idol_card"),
+        ancient_suit=gs.get("ancient_suit"),
     )
 
     # === Phase 1-2: Hand detection ===
@@ -444,7 +471,7 @@ def score_hand(
     # Record play
     hand_levels.record_play(hand_type)
 
-    # Build shared context fields
+    # Shared context fields (lightweight — references snapshot, not copies)
     _shared = dict(
         full_hand=played_cards,
         scoring_hand=scoring_cards,
@@ -452,29 +479,12 @@ def score_hand(
         poker_hands=poker_hands,
         jokers=jokers,
         rng=rng,
-        probabilities_normal=probabilities_normal,
         smeared=smeared,
         pareidolia=pareidolia,
         hand_levels=hand_levels,
         blind=blind,
-        joker_count=joker_count,
-        joker_slots=gs.get("joker_slots", 5),
-        hands_left=gs.get("hands_left", 0),
-        discards_left=gs.get("discards_left", 0),
-        deck_cards_remaining=gs.get("deck_cards_remaining", 0),
-        starting_deck_size=gs.get("starting_deck_size", 52),
-        playing_cards_count=gs.get("playing_cards_count", 52),
-        stone_tally=gs.get("stone_tally", 0),
-        steel_tally=gs.get("steel_tally", 0),
-        money=gs.get("money", 0),
-        enhanced_card_count=gs.get("enhanced_card_count", 0),
-        consumable_usage_tarot=gs.get("consumable_usage_tarot", 0),
-        hands_played=gs.get("hands_played", 0),
         held_cards=held_cards,
-        ancient_suit=gs.get("ancient_suit"),
-        idol_card=gs.get("idol_card"),
-        mail_card_id=gs.get("mail_card_id"),
-        discards_used=gs.get("discards_used", 0),
+        game=snapshot,
     )
 
     # === Phase 5: "before" joker pass ===
@@ -614,6 +624,16 @@ def score_hand(
                 effects_h, mult, dollars,
             )
 
+    # === Phase 8d: individual_hand_end (Vampire strip, Obelisk check) ===
+    for joker in jokers:
+        if joker.debuff:
+            continue
+        ihe_ctx = JokerContext(individual_hand_end=True, **_shared)
+        ihe_result = calculate_joker(joker, ihe_ctx)
+        if ihe_result:
+            if ihe_result.Xmult_mod:
+                mult *= ihe_result.Xmult_mod
+
     # === Phase 9: Joker main effects (left to right) ===
     for joker in jokers:
         if joker.debuff:
@@ -656,9 +676,89 @@ def score_hand(
         if edition and "x_mult_mod" in edition:
             mult *= edition["x_mult_mod"]
 
+    # === Phase 10: Plasma Deck (back trigger) ===
+    if back_key == "b_plasma":
+        total_cm = hand_chips + mult
+        hand_chips = math.floor(total_cm / 2)
+        mult = math.floor(total_cm / 2)
+        breakdown.append(
+            f"Plasma: ({int(hand_chips + mult)}) / 2 -> {int(hand_chips)} chips,"
+            f" {int(mult)} mult"
+        )
+
+    # === Phase 11: Card destruction ===
+    cards_destroyed: list[Card] = []
+    for sc in scoring_cards:
+        if sc.debuff:
+            continue
+        destroyed = False
+        # Joker destroying_card checks (Sixth Sense, etc.)
+        for joker in jokers:
+            if joker.debuff:
+                continue
+            dest_ctx = JokerContext(
+                destroying_card=sc, **_shared,
+            )
+            dest_result = calculate_joker(joker, dest_ctx)
+            if dest_result and dest_result.remove:
+                destroyed = True
+                break
+        # Glass Card self-shatter: 1 in (1/probabilities_normal * 4) chance
+        if (
+            not destroyed
+            and sc.ability.get("name") == "Glass Card"
+        ):
+            if rng.random("glass") < probabilities_normal / 4:
+                destroyed = True
+        if destroyed:
+            cards_destroyed.append(sc)
+
+    # Notify jokers of destruction (Caino, Glass Joker xMult growth)
+    if cards_destroyed:
+        for joker in jokers:
+            if joker.debuff:
+                continue
+            dest_notify_ctx = JokerContext(
+                cards_destroyed=cards_destroyed, **_shared,
+            )
+            calculate_joker(joker, dest_notify_ctx)
+
     # === Phase 12: Final score ===
     total = math.floor(hand_chips * mult)
     breakdown.append(f"Final: {int(hand_chips)} x {mult:.1f} = {total}")
+
+    # === Phase 13: "after" joker pass (scaling mutations) ===
+    jokers_removed: list[Card] = []
+    for joker in jokers:
+        if joker.debuff:
+            continue
+        after_ctx = JokerContext(after=True, **_shared)
+        after_result = calculate_joker(joker, after_ctx)
+        if after_result and after_result.remove:
+            jokers_removed.append(joker)
+
+    # Mr. Bones save check: if score < blind target and last hand
+    saved = False
+    if (
+        blind_chips > 0
+        and total < blind_chips
+        and gs.get("hands_left", 0) == 0
+    ):
+        for joker in jokers:
+            if joker.debuff:
+                continue
+            bones_ctx = JokerContext(**_shared)
+            bones_ctx.game_over = True  # type: ignore[attr-defined]
+            bones_result = calculate_joker(joker, bones_ctx)
+            if bones_result and bones_result.saved:
+                saved = True
+                if bones_result.remove:
+                    jokers_removed.append(joker)
+                break
+
+    # === Phase 14: Post-play modifiers (debuff played cards) ===
+    # Challenge mode: debuff all played cards after scoring.
+    # Implemented as a flag check — no joker interaction.
 
     return ScoreResult(
         hand_type=hand_type,
@@ -669,4 +769,7 @@ def score_hand(
         dollars_earned=dollars,
         debuffed=False,
         breakdown=breakdown,
+        jokers_removed=jokers_removed,
+        cards_destroyed=cards_destroyed,
+        saved=saved,
     )
