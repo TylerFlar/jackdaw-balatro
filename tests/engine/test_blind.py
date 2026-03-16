@@ -452,3 +452,162 @@ class TestDebuffCardClearsDebuff:
         c.debuff = True  # previously debuffed
         b.debuff_card(c)
         assert c.debuff is False  # Hearts not debuffed by The Goad
+
+
+# ============================================================================
+# debuff_hand
+# ============================================================================
+
+class TestDebuffHandEye:
+    """The Eye: each hand type can only be used once."""
+
+    def test_first_use_allowed(self):
+        b = Blind.create("bl_eye", ante=1)
+        assert b.debuff_hand([], {}, "Pair") is False
+
+    def test_second_use_blocked(self):
+        b = Blind.create("bl_eye", ante=1)
+        b.debuff_hand([], {}, "Pair")
+        assert b.debuff_hand([], {}, "Pair") is True
+
+    def test_different_type_allowed(self):
+        b = Blind.create("bl_eye", ante=1)
+        b.debuff_hand([], {}, "Pair")
+        assert b.debuff_hand([], {}, "Flush") is False
+
+    def test_check_mode_no_register(self):
+        """check=True: previews without registering the hand type."""
+        b = Blind.create("bl_eye", ante=1)
+        b.debuff_hand([], {}, "Pair", check=True)
+        # Pair should NOT be registered
+        assert b.debuff_hand([], {}, "Pair") is False  # first real use
+
+    def test_triggered_on_block(self):
+        b = Blind.create("bl_eye", ante=1)
+        b.debuff_hand([], {}, "Pair")
+        b.debuff_hand([], {}, "Pair")
+        assert b.triggered is True
+
+    def test_disabled(self):
+        b = Blind.create("bl_eye", ante=1)
+        b.disabled = True
+        b.debuff_hand([], {}, "Pair")
+        assert b.debuff_hand([], {}, "Pair") is False
+
+
+class TestDebuffHandMouth:
+    """The Mouth: only one hand type allowed per round."""
+
+    def test_first_hand_allowed(self):
+        b = Blind.create("bl_mouth", ante=1)
+        assert b.debuff_hand([], {}, "Flush") is False
+
+    def test_same_type_allowed(self):
+        b = Blind.create("bl_mouth", ante=1)
+        b.debuff_hand([], {}, "Flush")
+        assert b.debuff_hand([], {}, "Flush") is False
+
+    def test_different_type_blocked(self):
+        b = Blind.create("bl_mouth", ante=1)
+        b.debuff_hand([], {}, "Flush")
+        assert b.debuff_hand([], {}, "Pair") is True
+
+    def test_check_mode_no_lock(self):
+        b = Blind.create("bl_mouth", ante=1)
+        b.debuff_hand([], {}, "Flush", check=True)
+        assert b.only_hand is None
+        assert b.debuff_hand([], {}, "Pair") is False  # not locked yet
+
+
+class TestDebuffHandPsychic:
+    """The Psychic: must play at least 5 cards (h_size_ge=5)."""
+
+    def test_5_cards_allowed(self):
+        b = Blind.create("bl_psychic", ante=1)
+        cards = [_card("Hearts", str(i)) for i in range(2, 7)]
+        assert b.debuff_hand(cards, {}, "Straight") is False
+
+    def test_4_cards_blocked(self):
+        b = Blind.create("bl_psychic", ante=1)
+        cards = [_card("Hearts", str(i)) for i in range(2, 6)]
+        assert b.debuff_hand(cards, {}, "Pair") is True
+
+    def test_3_cards_blocked(self):
+        b = Blind.create("bl_psychic", ante=1)
+        cards = [_card("Hearts", "5"), _card("Spades", "5"), _card("Clubs", "5")]
+        assert b.debuff_hand(cards, {}, "Three of a Kind") is True
+
+    def test_1_card_blocked(self):
+        b = Blind.create("bl_psychic", ante=1)
+        cards = [_card("Hearts", "Ace")]
+        assert b.debuff_hand(cards, {}, "High Card") is True
+
+
+class TestDebuffHandNonBlocking:
+    """Bosses that don't block hands via debuff_hand."""
+
+    @pytest.mark.parametrize("key", [
+        "bl_hook", "bl_wall", "bl_flint", "bl_tooth", "bl_water",
+        "bl_needle", "bl_serpent", "bl_manacle", "bl_fish",
+        "bl_wheel", "bl_house", "bl_mark", "bl_pillar",
+    ])
+    def test_non_blocking_bosses(self, key: str):
+        b = Blind.create(key, ante=1)
+        assert b.debuff_hand([], {}, "Pair") is False
+
+    def test_small_blind(self):
+        b = Blind.create("bl_small", ante=1)
+        assert b.debuff_hand([], {}, "Pair") is False
+
+
+# ============================================================================
+# modify_hand
+# ============================================================================
+
+class TestModifyHand:
+    """Blind.modify_hand: The Flint halves chips and mult."""
+
+    def test_the_flint(self):
+        b = Blind.create("bl_flint", ante=1)
+        mult, chips, modified = b.modify_hand(20.0, 100)
+        assert modified is True
+        # floor(20 * 0.5 + 0.5) = 10, floor(100 * 0.5 + 0.5) = 50
+        assert mult == 10.0
+        assert chips == 50
+
+    def test_the_flint_odd_values(self):
+        b = Blind.create("bl_flint", ante=1)
+        mult, chips, modified = b.modify_hand(7.0, 15)
+        # floor(7 * 0.5 + 0.5) = 4, floor(15 * 0.5 + 0.5) = 8
+        assert mult == 4.0
+        assert chips == 8
+
+    def test_the_flint_minimum_mult_1(self):
+        b = Blind.create("bl_flint", ante=1)
+        mult, chips, _ = b.modify_hand(1.0, 2)
+        assert mult >= 1.0
+
+    def test_the_flint_minimum_chips_0(self):
+        b = Blind.create("bl_flint", ante=1)
+        mult, chips, _ = b.modify_hand(1.0, 0)
+        assert chips >= 0
+
+    def test_the_flint_disabled(self):
+        b = Blind.create("bl_flint", ante=1)
+        b.disabled = True
+        mult, chips, modified = b.modify_hand(20.0, 100)
+        assert modified is False
+        assert mult == 20.0
+        assert chips == 100
+
+    def test_non_flint_no_modify(self):
+        b = Blind.create("bl_hook", ante=1)
+        mult, chips, modified = b.modify_hand(20.0, 100)
+        assert modified is False
+        assert mult == 20.0
+        assert chips == 100
+
+    def test_small_blind_no_modify(self):
+        b = Blind.create("bl_small", ante=1)
+        mult, chips, modified = b.modify_hand(20.0, 100)
+        assert modified is False

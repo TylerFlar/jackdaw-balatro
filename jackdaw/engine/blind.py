@@ -185,6 +185,117 @@ class Blind:
         # No debuff applies
         card.set_debuff(False)
 
+    def debuff_hand(
+        self,
+        cards: list[Any],
+        poker_hands: dict[str, list],
+        handname: str,
+        *,
+        check: bool = False,
+    ) -> bool:
+        """Check whether the entire hand is blocked by the boss blind.
+
+        Matches ``Blind:debuff_hand`` (blind.lua:519-570).
+
+        Returns ``True`` if the hand is completely blocked (scores zero).
+        Some bosses have side effects but don't block (The Arm, The Ox) —
+        those return ``False`` and the side effects are noted via
+        ``self.triggered``.
+
+        Args:
+            cards: The scoring cards (for size checks).
+            poker_hands: Full detection results dict.
+            handname: Detected hand type name (e.g. ``"Full House"``).
+            check: If True, don't mutate state (preview mode for
+                ``parse_highlighted``).  The Eye won't register the hand,
+                The Mouth won't lock.
+        """
+        if self.disabled:
+            return False
+
+        # Config-driven debuffs (self.debuff in Lua — always a table for bosses)
+        if self.boss:
+            cfg = self.debuff_config
+            self.triggered = False
+
+            # Hand-type debuff (not used by vanilla blinds, but supported)
+            if "hand" in cfg:
+                entries = poker_hands.get(cfg["hand"], [])
+                if entries:
+                    self.triggered = True
+                    return True
+
+            # Minimum card count: The Psychic (h_size_ge=5 → need ≥5 cards)
+            if "h_size_ge" in cfg:
+                if len(cards) < cfg["h_size_ge"]:
+                    self.triggered = True
+                    return True
+
+            # Maximum card count (not used by vanilla blinds)
+            if "h_size_le" in cfg:
+                if len(cards) > cfg["h_size_le"]:
+                    self.triggered = True
+                    return True
+
+            # The Eye: each hand type can only be used once
+            if self.name == "The Eye":
+                if handname in self.hands_used:
+                    self.triggered = True
+                    return True
+                if not check:
+                    self.hands_used[handname] = True
+
+            # The Mouth: only one hand type allowed per round
+            if self.name == "The Mouth":
+                if self.only_hand is not None and self.only_hand != handname:
+                    self.triggered = True
+                    return True
+                if not check:
+                    self.only_hand = handname
+
+        # The Arm: doesn't block, but sets triggered if hand level > 1
+        # (actual level-down happens in the scoring pipeline)
+        if self.name == "The Arm" and not self.disabled:
+            self.triggered = False
+            # We can't check hand level here without a HandLevels reference,
+            # so we just set a flag that the scoring pipeline will check
+            self.triggered = True  # conservatively flag; pipeline checks level
+
+        # The Ox: doesn't block, but sets triggered if most-played hand
+        # (actual money drain happens in the scoring pipeline)
+        if self.name == "The Ox" and not self.disabled:
+            self.triggered = False
+            # most_played check happens at the pipeline level
+
+        return False
+
+    def modify_hand(
+        self,
+        mult: float,
+        hand_chips: int,
+    ) -> tuple[float, int, bool]:
+        """Modify chips/mult for boss blind effects.
+
+        Matches ``Blind:modify_hand`` (blind.lua:510-517).
+
+        Returns ``(new_mult, new_hand_chips, was_modified)``.
+
+        Currently only The Flint uses this: halves both chips and mult
+        (with rounding: ``floor(x * 0.5 + 0.5)``).
+        """
+        import math
+
+        if self.disabled:
+            return mult, hand_chips, False
+
+        if self.name == "The Flint":
+            self.triggered = True
+            new_mult = max(math.floor(mult * 0.5 + 0.5), 1)
+            new_chips = max(math.floor(hand_chips * 0.5 + 0.5), 0)
+            return float(new_mult), new_chips, True
+
+        return mult, hand_chips, False
+
     def get_type(self) -> str:
         """Return blind type string: ``'Small'``, ``'Big'``, or ``'Boss'``."""
         if self.name == "Small Blind":
