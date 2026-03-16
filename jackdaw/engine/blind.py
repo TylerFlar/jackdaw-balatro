@@ -115,6 +115,76 @@ class Blind:
             boss=False,
         )
 
+    def debuff_card(
+        self,
+        card: Any,
+        *,
+        is_joker_area: bool = False,
+        pareidolia: bool = False,
+    ) -> None:
+        """Set card.debuff based on boss blind effect.
+
+        Matches ``Blind:debuff_card`` (blind.lua:624-652).
+
+        The debuff is driven by ``self.debuff_config`` (from the prototype)
+        plus special-case name checks for The Pillar and Verdant Leaf.
+
+        Args:
+            card: The Card to check and debuff.
+            is_joker_area: If True, the card is in the joker area (not a
+                playing card).  Most debuffs only apply to playing cards.
+            pareidolia: If True, all cards count as face cards (for The Plant).
+        """
+        # Check prototype-driven debuffs (suit, face, pillar, value, nominal)
+        # Note: in Lua, empty table {} is truthy.  All boss blinds have a
+        # debuff table (even if empty), so this block runs for all bosses.
+        # We check 'boss' to replicate this — non-boss blinds skip.
+        if self.boss and not self.disabled and not is_joker_area:
+            cfg = self.debuff_config
+
+            # Suit debuff: The Club (Clubs), The Goad (Spades),
+            # The Head (Hearts), The Window (Diamonds)
+            if "suit" in cfg:
+                if card.is_suit(cfg["suit"], bypass_debuff=True):
+                    card.set_debuff(True)
+                    return
+
+            # Face card debuff: The Plant
+            if cfg.get("is_face") == "face":
+                if card.is_face(from_boss=True, pareidolia=pareidolia):
+                    card.set_debuff(True)
+                    return
+
+            # The Pillar: debuffs cards played in previous hands this ante
+            if self.name == "The Pillar":
+                if card.ability.get("played_this_ante"):
+                    card.set_debuff(True)
+                    return
+
+            # Value-based debuff (not used by vanilla blinds, but supported)
+            if "value" in cfg and card.base is not None:
+                if cfg["value"] == card.base.rank.value:
+                    card.set_debuff(True)
+                    return
+
+            # Nominal-based debuff (not used by vanilla blinds, but supported)
+            if "nominal" in cfg and card.base is not None:
+                if cfg["nominal"] == card.base.nominal:
+                    card.set_debuff(True)
+                    return
+
+        # Crimson Heart: debuffs a random joker (handled elsewhere, not here)
+        if self.name == "Crimson Heart" and not self.disabled and is_joker_area:
+            return  # joker debuff handled separately in drawn_to_hand
+
+        # Verdant Leaf: debuffs ALL non-joker cards unconditionally
+        if self.name == "Verdant Leaf" and not self.disabled and not is_joker_area:
+            card.set_debuff(True)
+            return
+
+        # No debuff applies
+        card.set_debuff(False)
+
     def get_type(self) -> str:
         """Return blind type string: ``'Small'``, ``'Big'``, or ``'Boss'``."""
         if self.name == "Small Blind":

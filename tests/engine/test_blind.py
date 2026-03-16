@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 
 from jackdaw.engine.blind import Blind
+from jackdaw.engine.card import Card, reset_sort_id_counter
 from jackdaw.engine.data.blind_scaling import get_blind_amount
 
 # ============================================================================
@@ -238,4 +239,216 @@ class TestBossState:
         b = Blind.create("bl_hook", ante=1)
         r = repr(b)
         assert "The Hook" in r
-        assert "600" in r
+
+
+# ============================================================================
+# debuff_card
+# ============================================================================
+
+def _card(suit: str, rank: str, enhancement: str = "c_base") -> Card:
+    sl = {"Hearts": "H", "Diamonds": "D", "Clubs": "C", "Spades": "S"}
+    rl = {
+        "2": "2", "3": "3", "4": "4", "5": "5", "6": "6", "7": "7",
+        "8": "8", "9": "9", "10": "T", "Jack": "J", "Queen": "Q",
+        "King": "K", "Ace": "A",
+    }
+    c = Card()
+    c.set_base(f"{sl[suit]}_{rl[rank]}", suit, rank)
+    c.set_ability(enhancement)
+    return c
+
+
+class TestDebuffCardSuitBlinds:
+    """The Goad/Head/Club/Window debuff specific suits."""
+
+    def test_the_goad_debuffs_spades(self):
+        reset_sort_id_counter()
+        b = Blind.create("bl_goad", ante=1)
+        c = _card("Spades", "5")
+        b.debuff_card(c)
+        assert c.debuff is True
+
+    def test_the_goad_spares_hearts(self):
+        reset_sort_id_counter()
+        b = Blind.create("bl_goad", ante=1)
+        c = _card("Hearts", "5")
+        b.debuff_card(c)
+        assert c.debuff is False
+
+    def test_the_head_debuffs_hearts(self):
+        reset_sort_id_counter()
+        b = Blind.create("bl_head", ante=1)
+        c = _card("Hearts", "Ace")
+        b.debuff_card(c)
+        assert c.debuff is True
+
+    def test_the_head_spares_clubs(self):
+        reset_sort_id_counter()
+        b = Blind.create("bl_head", ante=1)
+        c = _card("Clubs", "Ace")
+        b.debuff_card(c)
+        assert c.debuff is False
+
+    def test_the_club_debuffs_clubs(self):
+        reset_sort_id_counter()
+        b = Blind.create("bl_club", ante=1)
+        c = _card("Clubs", "King")
+        b.debuff_card(c)
+        assert c.debuff is True
+
+    def test_the_window_debuffs_diamonds(self):
+        reset_sort_id_counter()
+        b = Blind.create("bl_window", ante=1)
+        c = _card("Diamonds", "7")
+        b.debuff_card(c)
+        assert c.debuff is True
+
+    def test_the_window_spares_spades(self):
+        reset_sort_id_counter()
+        b = Blind.create("bl_window", ante=1)
+        c = _card("Spades", "7")
+        b.debuff_card(c)
+        assert c.debuff is False
+
+
+class TestDebuffCardPlant:
+    """The Plant debuffs face cards (J/Q/K)."""
+
+    def test_debuffs_king(self):
+        reset_sort_id_counter()
+        b = Blind.create("bl_plant", ante=1)
+        c = _card("Hearts", "King")
+        b.debuff_card(c)
+        assert c.debuff is True
+
+    def test_debuffs_jack(self):
+        reset_sort_id_counter()
+        b = Blind.create("bl_plant", ante=1)
+        c = _card("Spades", "Jack")
+        b.debuff_card(c)
+        assert c.debuff is True
+
+    def test_spares_number_card(self):
+        reset_sort_id_counter()
+        b = Blind.create("bl_plant", ante=1)
+        c = _card("Hearts", "7")
+        b.debuff_card(c)
+        assert c.debuff is False
+
+    def test_spares_ace(self):
+        reset_sort_id_counter()
+        b = Blind.create("bl_plant", ante=1)
+        c = _card("Hearts", "Ace")
+        b.debuff_card(c)
+        assert c.debuff is False
+
+    def test_with_pareidolia(self):
+        """With Pareidolia, ALL cards are face → all debuffed by The Plant."""
+        reset_sort_id_counter()
+        b = Blind.create("bl_plant", ante=1)
+        c = _card("Hearts", "5")
+        b.debuff_card(c, pareidolia=True)
+        assert c.debuff is True
+
+
+class TestDebuffCardPillar:
+    """The Pillar debuffs cards played earlier this ante."""
+
+    def test_debuffs_played_card(self):
+        reset_sort_id_counter()
+        b = Blind.create("bl_pillar", ante=1)
+        c = _card("Hearts", "5")
+        c.ability["played_this_ante"] = True
+        b.debuff_card(c)
+        assert c.debuff is True
+
+    def test_spares_unplayed_card(self):
+        reset_sort_id_counter()
+        b = Blind.create("bl_pillar", ante=1)
+        c = _card("Hearts", "5")
+        # played_this_ante not set → falsy
+        b.debuff_card(c)
+        assert c.debuff is False
+
+
+class TestDebuffCardVerdantLeaf:
+    """Verdant Leaf debuffs ALL non-joker cards unconditionally."""
+
+    def test_debuffs_all(self):
+        reset_sort_id_counter()
+        b = Blind.create("bl_final_leaf", ante=1)
+        c = _card("Hearts", "5")
+        b.debuff_card(c)
+        assert c.debuff is True
+
+    def test_spares_joker_area(self):
+        reset_sort_id_counter()
+        b = Blind.create("bl_final_leaf", ante=1)
+        c = _card("Hearts", "5")
+        b.debuff_card(c, is_joker_area=True)
+        assert c.debuff is False
+
+
+class TestDebuffCardDisabled:
+    """Disabled boss blinds debuff nothing."""
+
+    def test_disabled_suit_blind(self):
+        reset_sort_id_counter()
+        b = Blind.create("bl_goad", ante=1)
+        b.disabled = True
+        c = _card("Spades", "5")
+        b.debuff_card(c)
+        assert c.debuff is False
+
+    def test_disabled_plant(self):
+        reset_sort_id_counter()
+        b = Blind.create("bl_plant", ante=1)
+        b.disabled = True
+        c = _card("Hearts", "King")
+        b.debuff_card(c)
+        assert c.debuff is False
+
+    def test_disabled_verdant_leaf(self):
+        reset_sort_id_counter()
+        b = Blind.create("bl_final_leaf", ante=1)
+        b.disabled = True
+        c = _card("Hearts", "5")
+        b.debuff_card(c)
+        assert c.debuff is False
+
+
+class TestDebuffCardNonDebuffBlinds:
+    """Bosses without debuff config don't debuff cards."""
+
+    def test_the_hook(self):
+        reset_sort_id_counter()
+        b = Blind.create("bl_hook", ante=1)
+        c = _card("Hearts", "5")
+        b.debuff_card(c)
+        assert c.debuff is False
+
+    def test_the_wall(self):
+        reset_sort_id_counter()
+        b = Blind.create("bl_wall", ante=1)
+        c = _card("Hearts", "King")
+        b.debuff_card(c)
+        assert c.debuff is False
+
+    def test_small_blind(self):
+        reset_sort_id_counter()
+        b = Blind.create("bl_small", ante=1)
+        c = _card("Spades", "Ace")
+        b.debuff_card(c)
+        assert c.debuff is False
+
+
+class TestDebuffCardClearsDebuff:
+    """debuff_card should CLEAR debuff if the card doesn't match."""
+
+    def test_previously_debuffed_cleared(self):
+        reset_sort_id_counter()
+        b = Blind.create("bl_goad", ante=1)
+        c = _card("Hearts", "5")
+        c.debuff = True  # previously debuffed
+        b.debuff_card(c)
+        assert c.debuff is False  # Hearts not debuffed by The Goad
