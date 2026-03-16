@@ -297,23 +297,184 @@ class TestPermaBonus:
 # Scoring methods
 # ============================================================================
 
-class TestScoringMethods:
-    def test_is_face_jack(self):
+class TestIsFace:
+    """Card.is_face() matching card.lua:964."""
+
+    def test_jack_is_face(self):
         c = Card()
         c.set_base("H_J", "Hearts", "Jack")
         assert c.is_face() is True
 
-    def test_is_face_ace_is_false(self):
+    def test_queen_is_face(self):
+        c = Card()
+        c.set_base("S_Q", "Spades", "Queen")
+        assert c.is_face() is True
+
+    def test_king_is_face(self):
+        c = Card()
+        c.set_base("D_K", "Diamonds", "King")
+        assert c.is_face() is True
+
+    def test_ace_is_not_face(self):
         c = Card()
         c.set_base("D_A", "Diamonds", "Ace")
         assert c.is_face() is False
 
-    def test_is_face_debuffed(self):
+    def test_ten_is_not_face(self):
+        c = Card()
+        c.set_base("S_T", "Spades", "10")
+        assert c.is_face() is False
+
+    def test_five_is_not_face(self):
+        c = Card()
+        c.set_base("H_5", "Hearts", "5")
+        assert c.is_face() is False
+
+    def test_debuffed_is_not_face(self):
         c = Card()
         c.set_base("H_K", "Hearts", "King")
         c.debuff = True
         assert c.is_face() is False
 
+    def test_debuffed_with_from_boss(self):
+        """from_boss=True bypasses debuff check (The Plant boss blind)."""
+        c = Card()
+        c.set_base("H_K", "Hearts", "King")
+        c.debuff = True
+        assert c.is_face(from_boss=True) is True
+
+    def test_pareidolia_makes_all_face(self):
+        """Pareidolia joker: ALL cards are face cards."""
+        c = Card()
+        c.set_base("H_5", "Hearts", "5")
+        assert c.is_face(pareidolia=True) is True
+
+    def test_pareidolia_ace(self):
+        c = Card()
+        c.set_base("D_A", "Diamonds", "Ace")
+        assert c.is_face(pareidolia=True) is True
+
+    def test_pareidolia_debuffed(self):
+        """Debuffed card with Pareidolia: debuff takes precedence."""
+        c = Card()
+        c.set_base("H_5", "Hearts", "5")
+        c.debuff = True
+        assert c.is_face(pareidolia=True) is False
+
+    def test_pareidolia_debuffed_from_boss(self):
+        """from_boss bypasses debuff even with Pareidolia."""
+        c = Card()
+        c.set_base("H_5", "Hearts", "5")
+        c.debuff = True
+        assert c.is_face(pareidolia=True, from_boss=True) is True
+
+    def test_no_base(self):
+        c = Card()
+        assert c.is_face() is False
+
+
+class TestIsSuit:
+    """Card.is_suit() matching card.lua:4064."""
+
+    def test_basic_match(self):
+        c = Card()
+        c.set_base("S_A", "Spades", "Ace")
+        assert c.is_suit("Spades") is True
+        assert c.is_suit("Hearts") is False
+
+    def test_all_four_suits(self):
+        for suit_str in ["Hearts", "Diamonds", "Clubs", "Spades"]:
+            c = Card()
+            c.set_base(f"{suit_str[0]}_5", suit_str, "5")
+            assert c.is_suit(suit_str) is True
+
+    def test_wild_card_matches_all(self):
+        """Wild Card matches every suit."""
+        c = Card()
+        c.set_base("H_5", "Hearts", "5")
+        c.set_ability("m_wild")
+        assert c.is_suit("Spades") is True
+        assert c.is_suit("Hearts") is True
+        assert c.is_suit("Diamonds") is True
+        assert c.is_suit("Clubs") is True
+
+    def test_wild_card_debuffed(self):
+        """Debuffed Wild Card: debuff check returns False before Wild check."""
+        c = Card()
+        c.set_base("H_5", "Hearts", "5")
+        c.set_ability("m_wild")
+        c.debuff = True
+        assert c.is_suit("Spades") is False
+
+    def test_wild_card_flush_calc_debuffed(self):
+        """In flush_calc mode: Wild Card still matches if debuffed? No.
+
+        Source card.lua:4069: Wild Card matches in flush_calc only if NOT debuffed.
+        """
+        c = Card()
+        c.set_base("H_5", "Hearts", "5")
+        c.set_ability("m_wild")
+        c.debuff = True
+        assert c.is_suit("Spades", flush_calc=True) is False
+
+    def test_stone_card_never_matches(self):
+        c = Card()
+        c.set_base("H_5", "Hearts", "5")
+        c.set_ability("m_stone")
+        assert c.is_suit("Hearts") is False
+
+    def test_smeared_red_suits(self):
+        """Smeared: Heart matches Diamond (both red)."""
+        c = Card()
+        c.set_base("H_5", "Hearts", "5")
+        c.set_ability("c_base")
+        assert c.is_suit("Diamonds", smeared=True) is True
+        assert c.is_suit("Hearts", smeared=True) is True
+
+    def test_smeared_black_suits(self):
+        """Smeared: Club matches Spade (both black)."""
+        c = Card()
+        c.set_base("C_5", "Clubs", "5")
+        c.set_ability("c_base")
+        assert c.is_suit("Spades", smeared=True) is True
+        assert c.is_suit("Clubs", smeared=True) is True
+
+    def test_smeared_red_not_black(self):
+        """Smeared: Heart does NOT match Spade (red vs black)."""
+        c = Card()
+        c.set_base("H_5", "Hearts", "5")
+        c.set_ability("c_base")
+        assert c.is_suit("Spades", smeared=True) is False
+
+    def test_smeared_black_not_red(self):
+        c = Card()
+        c.set_base("S_5", "Spades", "5")
+        c.set_ability("c_base")
+        assert c.is_suit("Diamonds", smeared=True) is False
+
+    def test_bypass_debuff(self):
+        c = Card()
+        c.set_base("H_5", "Hearts", "5")
+        c.set_ability("c_base")
+        c.debuff = True
+        assert c.is_suit("Hearts") is False
+        assert c.is_suit("Hearts", bypass_debuff=True) is True
+
+    def test_suit_enum_input(self):
+        """Accepts Suit enum as well as string."""
+        from jackdaw.engine.data.enums import Suit
+        c = Card()
+        c.set_base("S_A", "Spades", "Ace")
+        c.set_ability("c_base")
+        assert c.is_suit(Suit.SPADES) is True
+        assert c.is_suit(Suit.HEARTS) is False
+
+    def test_no_base(self):
+        c = Card()
+        assert c.is_suit("Hearts") is False
+
+
+class TestScoringMethods:
     def test_get_id_stone_card(self):
         c = Card()
         c.set_base("H_5", "Hearts", "5")
@@ -327,9 +488,8 @@ class TestScoringMethods:
 
     def test_stone_card_ignores_base_nominal(self):
         c = Card()
-        c.set_base("H_A", "Hearts", "Ace")  # nominal = 11
+        c.set_base("H_A", "Hearts", "Ace")
         c.set_ability("m_stone")
-        # Stone Card uses bonus only (50), not base nominal
         assert c.get_chip_bonus() == 50
 
     def test_repr(self):

@@ -29,49 +29,12 @@ def is_suit(
     flush_calc: bool = False,
     smeared: bool = False,
 ) -> bool:
-    """Check if *card* matches *suit*, matching ``Card:is_suit`` (card.lua:4064).
+    """Check if *card* matches *suit*.
 
-    Args:
-        card: The card to check.
-        suit: Target suit string (``"Spades"``, ``"Hearts"``, etc.).
-        flush_calc: If True, use flush-specific rules (Stone Cards excluded,
-            Wild Cards match everything regardless of debuff).
-        smeared: If True, Hearts/Diamonds are interchangeable and
-            Spades/Clubs are interchangeable (Smeared Joker active).
+    Delegates to ``Card.is_suit`` (card.lua:4064).  Kept as a module-level
+    function for backward compatibility with existing tests.
     """
-    if card.base is None:
-        return False
-
-    effect = card.ability.get("effect", "")
-    card_suit = card.base.suit.value
-
-    if flush_calc:
-        # Stone Cards never match in flush calculation
-        if effect == "Stone Card":
-            return False
-        # Wild Cards match every suit (regardless of debuff in flush_calc)
-        if card.ability.get("name") == "Wild Card" and not card.debuff:
-            return True
-        # Smeared Joker: red suits interchangeable, black suits interchangeable
-        if smeared:
-            target_is_red = suit in ("Hearts", "Diamonds")
-            card_is_red = card_suit in ("Hearts", "Diamonds")
-            if target_is_red == card_is_red:
-                return True
-        return card_suit == suit
-    else:
-        if card.debuff:
-            return False
-        if effect == "Stone Card":
-            return False
-        if card.ability.get("name") == "Wild Card":
-            return True
-        if smeared:
-            target_is_red = suit in ("Hearts", "Diamonds")
-            card_is_red = card_suit in ("Hearts", "Diamonds")
-            if target_is_red == card_is_red:
-                return True
-        return card_suit == suit
+    return card.is_suit(suit, flush_calc=flush_calc, smeared=smeared)
 
 
 def get_flush(
