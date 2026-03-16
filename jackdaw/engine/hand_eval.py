@@ -16,6 +16,7 @@ Joker modifiers that affect detection:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -424,3 +425,109 @@ def get_best_hand(
             return ht.value, results[ht.value][0], results
 
     return "NULL", [], results
+
+
+# ---------------------------------------------------------------------------
+# HandEvalResult — output of the complete evaluation pipeline
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class HandEvalResult:
+    """Result of the complete hand evaluation pipeline.
+
+    Contains everything the downstream scoring pipeline (Phase 3+) needs.
+    """
+
+    detected_hand: str
+    """The best hand type detected (e.g. ``"Full House"``), or ``"NULL"``."""
+
+    poker_hands: HandResults
+    """Full detection results for all 12 hand types.  Used by jokers
+    that check sub-hand presence (e.g. The Duo checks for Pair)."""
+
+    scoring_cards: list[Card]
+    """Cards that will score, ordered left-to-right.  Includes Stone Card
+    augmentation and Splash expansion."""
+
+    all_played: list[Card]
+    """All cards that were played (``G.play.cards``), for context."""
+
+
+# ---------------------------------------------------------------------------
+# evaluate_hand — complete pipeline entry point
+# ---------------------------------------------------------------------------
+
+
+def evaluate_hand(
+    played_cards: list[Card],
+    jokers: list[Card] | None = None,
+) -> HandEvalResult:
+    """Complete hand evaluation pipeline.
+
+    Ties together modifier flag extraction, poker hand detection, scoring
+    card augmentation (Splash, Stone), and result packaging.
+
+    Replaces the source's ``get_poker_hand_info`` + scoring hand
+    augmentation from ``evaluate_play`` (state_events.lua:571-600).
+
+    Steps:
+        1. Extract modifier flags from active jokers
+        2. Run ``evaluate_poker_hand`` with detection flags
+        3. Determine the detected (best) hand type via priority walk
+        4. Augment scoring cards: Splash adds all played cards,
+           Stone Cards are added as "pures" if not already included
+        5. Return ``HandEvalResult``
+
+    Args:
+        played_cards: Cards the player chose to play (1-5 cards).
+        jokers: Active joker cards (for modifier flag extraction).
+            Pass ``None`` or ``[]`` if no jokers.
+    """
+    from jackdaw.engine.data.hands import HAND_ORDER
+
+    joker_list = jokers or []
+    flags = get_hand_eval_flags(joker_list)
+
+    # Detection flags for evaluate_poker_hand (only 3 of 5 flags apply)
+    results = evaluate_poker_hand(
+        played_cards,
+        four_fingers=flags["four_fingers"],
+        shortcut=flags["shortcut"],
+        smeared=flags["smeared"],
+    )
+
+    # Determine best hand
+    detected_hand = "NULL"
+    scoring_cards: list[Card] = []
+    for ht in HAND_ORDER:
+        if results[ht.value]:
+            detected_hand = ht.value
+            scoring_cards = list(results[ht.value][0])
+            break
+
+    # -- Augment scoring cards (state_events.lua:580-600) --
+
+    # Splash joker: ALL played cards become scoring cards
+    if flags["splash"]:
+        scoring_ids = {id(c) for c in scoring_cards}
+        for c in played_cards:
+            if id(c) not in scoring_ids:
+                scoring_cards.append(c)
+
+    # Stone Cards: add as "pures" if not already in scoring hand
+    scoring_ids = {id(c) for c in scoring_cards}
+    for c in played_cards:
+        if id(c) not in scoring_ids and c.ability.get("effect") == "Stone Card":
+            scoring_cards.append(c)
+
+    # Sort scoring cards by position (left-to-right = by index in played_cards)
+    played_order = {id(c): i for i, c in enumerate(played_cards)}
+    scoring_cards.sort(key=lambda c: played_order.get(id(c), 999))
+
+    return HandEvalResult(
+        detected_hand=detected_hand,
+        poker_hands=results,
+        scoring_cards=scoring_cards,
+        all_played=list(played_cards),
+    )
