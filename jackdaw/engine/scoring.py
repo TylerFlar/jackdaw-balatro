@@ -1,21 +1,22 @@
 """Scoring pipeline and eval_card wrapper.
 
-Ports ``eval_card`` from ``common_events.lua:580`` and the base scoring
-pipeline from ``state_events.lua:571-1065`` (Phases 1-4, 6-8, 12 without
-joker effects).
+Ports ``eval_card`` from ``common_events.lua:580`` and the scoring
+pipeline from ``state_events.lua:571-1065``.
 
-Note: ``calculate_joker`` calls are stubbed — joker effects will be added
-when the joker system is implemented.
+``score_hand_base``: Phases 1-4, 6-8, 12 without joker effects.
+``score_hand``: Full pipeline including Phases 5, 7b-d, 8b-c, 9 with jokers.
 """
 
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from jackdaw.engine.blind import Blind
     from jackdaw.engine.card import Card
+    from jackdaw.engine.hand_levels import HandLevels
     from jackdaw.engine.rng import PseudoRandom
 
 
@@ -276,6 +277,384 @@ def score_hand_base(
                 mult += ev["h_mult"]
             if "x_mult" in ev:
                 mult *= ev["x_mult"]
+
+    # === Phase 12: Final score ===
+    total = math.floor(hand_chips * mult)
+    breakdown.append(f"Final: {int(hand_chips)} x {mult:.1f} = {total}")
+
+    return ScoreResult(
+        hand_type=hand_type,
+        scoring_cards=scoring_cards,
+        chips=hand_chips,
+        mult=mult,
+        total=total,
+        dollars_earned=dollars,
+        debuffed=False,
+        breakdown=breakdown,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Full scoring pipeline WITH joker effects (Phases 1-9, 12)
+# ---------------------------------------------------------------------------
+
+
+def _apply_individual_joker_effects(
+    effects: list[dict[str, Any]],
+    hand_chips: float,
+    mult: float,
+    dollars: int,
+) -> tuple[float, float, int]:
+    """Apply a list of individual-context joker results to running totals.
+
+    Matches the effect application order from state_events.lua:704-776:
+    chips → mult → p_dollars → dollars → extra → x_mult → edition.
+    """
+    for eff in effects:
+        if "chips" in eff:
+            hand_chips += eff["chips"]
+        if "mult" in eff:
+            mult += eff["mult"]
+        if "p_dollars" in eff:
+            dollars += eff["p_dollars"]
+        if "dollars" in eff:
+            dollars += eff["dollars"]
+        if "x_mult" in eff:
+            mult *= eff["x_mult"]
+        if "edition" in eff:
+            ed = eff["edition"]
+            hand_chips += ed.get("chip_mod", 0)
+            mult += ed.get("mult_mod", 0)
+            mult *= ed.get("x_mult_mod", 1)
+    return hand_chips, mult, dollars
+
+
+def _apply_held_joker_effects(
+    effects: list[dict[str, Any]],
+    mult: float,
+    dollars: int,
+) -> tuple[float, int]:
+    """Apply held-card joker effects. Order: dollars → h_mult → x_mult."""
+    for eff in effects:
+        if "dollars" in eff:
+            dollars += eff["dollars"]
+        if "h_mult" in eff:
+            mult += eff["h_mult"]
+        if "x_mult" in eff:
+            mult *= eff["x_mult"]
+    return mult, dollars
+
+
+def score_hand(
+    played_cards: list[Card],
+    held_cards: list[Card],
+    jokers: list[Card],
+    hand_levels: HandLevels,
+    blind: Blind,
+    rng: PseudoRandom,
+    *,
+    probabilities_normal: float = 1.0,
+    game_state: dict[str, Any] | None = None,
+) -> ScoreResult:
+    """Full scoring pipeline with joker effects (Phases 1-9, 12).
+
+    Phases 10 (Plasma), 11 (destruction), 13 (after), 14 (debuff played)
+    are deferred to M8.
+
+    Args:
+        played_cards: Cards played from hand.
+        held_cards: Cards remaining in hand.
+        jokers: Joker cards in order (left to right).
+        hand_levels: HandLevels instance for base chips/mult.
+        blind: Current Blind.
+        rng: PseudoRandom instance.
+        probabilities_normal: G.GAME.probabilities.normal (default 1).
+        game_state: Pre-computed game state dict with keys:
+            money, deck_cards_remaining, starting_deck_size,
+            playing_cards_count, stone_tally, steel_tally,
+            enhanced_card_count, consumable_usage_tarot,
+            hands_played, hands_left, discards_left,
+            ancient_suit, idol_card, mail_card_id, discards_used.
+    """
+    from jackdaw.engine.hand_eval import evaluate_hand
+    from jackdaw.engine.jokers import JokerContext, calculate_joker
+
+    gs = game_state or {}
+    dollars = 0
+    breakdown: list[str] = []
+
+    # Pre-compute derived values
+    joker_count = sum(1 for j in jokers if j.ability.get("set") == "Joker")
+    if joker_count == 0:
+        joker_count = len(jokers)  # fallback: count all
+
+    # Check for meta-jokers
+    smeared = any(
+        j.ability.get("name") == "Smeared Joker" and not j.debuff
+        for j in jokers
+    )
+    pareidolia = any(
+        j.ability.get("name") == "Pareidolia" and not j.debuff
+        for j in jokers
+    )
+
+    # === Phase 1-2: Hand detection ===
+    eval_result = evaluate_hand(played_cards, jokers=None)
+    hand_type = eval_result.detected_hand
+    scoring_cards = eval_result.scoring_cards
+    poker_hands = eval_result.poker_hands
+
+    if hand_type == "NULL":
+        return ScoreResult(
+            hand_type="NULL", scoring_cards=[], chips=0, mult=0,
+            total=0, dollars_earned=0, debuffed=False, breakdown=["No hand"],
+        )
+
+    # === Phase 3: Boss blind debuff check ===
+    debuffed = blind.debuff_hand(scoring_cards, poker_hands, hand_type)
+    if debuffed:
+        # Phase 3a: Matador check on debuffed hands
+        for joker in jokers:
+            if joker.debuff:
+                continue
+            ctx = JokerContext(
+                debuffed_hand=True, blind=blind, jokers=jokers,
+                full_hand=played_cards, scoring_hand=scoring_cards,
+                scoring_name=hand_type, poker_hands=poker_hands,
+            )
+            result = calculate_joker(joker, ctx)
+            if result and result.dollars:
+                dollars += result.dollars
+
+        return ScoreResult(
+            hand_type=hand_type, scoring_cards=scoring_cards,
+            chips=0, mult=0, total=0, dollars_earned=dollars, debuffed=True,
+            breakdown=[f"Hand blocked by {blind.name}"],
+        )
+
+    # === Phase 4: Base chips/mult from hand level ===
+    base_chips, base_mult = hand_levels.get(hand_type)
+    hand_chips = float(base_chips)
+    mult = float(base_mult)
+    breakdown.append(
+        f"Base: {hand_type} L{hand_levels[hand_type].level}"
+        f" -> {int(hand_chips)} chips, {int(mult)} mult"
+    )
+
+    # Record play
+    hand_levels.record_play(hand_type)
+
+    # Build shared context fields
+    _shared = dict(
+        full_hand=played_cards,
+        scoring_hand=scoring_cards,
+        scoring_name=hand_type,
+        poker_hands=poker_hands,
+        jokers=jokers,
+        rng=rng,
+        probabilities_normal=probabilities_normal,
+        smeared=smeared,
+        pareidolia=pareidolia,
+        hand_levels=hand_levels,
+        blind=blind,
+        joker_count=joker_count,
+        joker_slots=gs.get("joker_slots", 5),
+        hands_left=gs.get("hands_left", 0),
+        discards_left=gs.get("discards_left", 0),
+        deck_cards_remaining=gs.get("deck_cards_remaining", 0),
+        starting_deck_size=gs.get("starting_deck_size", 52),
+        playing_cards_count=gs.get("playing_cards_count", 52),
+        stone_tally=gs.get("stone_tally", 0),
+        steel_tally=gs.get("steel_tally", 0),
+        money=gs.get("money", 0),
+        enhanced_card_count=gs.get("enhanced_card_count", 0),
+        consumable_usage_tarot=gs.get("consumable_usage_tarot", 0),
+        hands_played=gs.get("hands_played", 0),
+        held_cards=held_cards,
+        ancient_suit=gs.get("ancient_suit"),
+        idol_card=gs.get("idol_card"),
+        mail_card_id=gs.get("mail_card_id"),
+        discards_used=gs.get("discards_used", 0),
+    )
+
+    # === Phase 5: "before" joker pass ===
+    for joker in jokers:
+        if joker.debuff:
+            continue
+        ctx = JokerContext(before=True, **_shared)
+        result = calculate_joker(joker, ctx)
+        if result and result.level_up:
+            hand_levels.level_up(hand_type)
+            base_chips, base_mult = hand_levels.get(hand_type)
+            hand_chips = float(base_chips)
+            mult = float(base_mult)
+
+    # === Phase 6: Blind modify_hand (The Flint) ===
+    new_mult, new_chips, modified = blind.modify_hand(mult, int(hand_chips))
+    if modified:
+        mult = float(new_mult)
+        hand_chips = float(new_chips)
+        breakdown.append(
+            f"Blind modify: {int(hand_chips)} chips, {int(mult)} mult"
+        )
+
+    # === Phase 7: Per scored card (with retriggers) ===
+    for card in scoring_cards:
+        if card.debuff:
+            continue
+
+        # 7a: Collect retriggers (seal + joker)
+        reps = [1]
+        seal_result = card.calculate_seal(repetition=True)
+        if seal_result and seal_result.get("repetitions"):
+            for _ in range(seal_result["repetitions"]):
+                reps.append(seal_result)
+
+        for joker in jokers:
+            if joker.debuff:
+                continue
+            rep_ctx = JokerContext(
+                repetition=True, cardarea="play", other_card=card,
+                **_shared,
+            )
+            rep_result = calculate_joker(joker, rep_ctx)
+            if rep_result and rep_result.repetitions > 0:
+                for _ in range(rep_result.repetitions):
+                    reps.append(rep_result)
+
+        # 7b-d: Each repetition
+        for _rep in reps:
+            # Card's own effects
+            ev = eval_card(
+                card, {"cardarea": "play"},
+                rng=rng, probabilities_normal=probabilities_normal,
+            )
+            effects: list[dict[str, Any]] = [ev]
+
+            # Joker individual effects on this card
+            for joker in jokers:
+                if joker.debuff:
+                    continue
+                ind_ctx = JokerContext(
+                    individual=True, cardarea="play", other_card=card,
+                    **_shared,
+                )
+                ind_result = calculate_joker(joker, ind_ctx)
+                if ind_result:
+                    eff: dict[str, Any] = {}
+                    if ind_result.chips:
+                        eff["chips"] = ind_result.chips
+                    if ind_result.mult:
+                        eff["mult"] = ind_result.mult
+                    if ind_result.x_mult:
+                        eff["x_mult"] = ind_result.x_mult
+                    if ind_result.dollars:
+                        eff["dollars"] = ind_result.dollars
+                    if eff:
+                        eff["card"] = joker
+                        effects.append(eff)
+
+            hand_chips, mult, dollars = _apply_individual_joker_effects(
+                effects, hand_chips, mult, dollars,
+            )
+
+    # === Phase 8: Per held card (with retriggers) ===
+    for card in held_cards:
+        if card.debuff:
+            continue
+
+        # 8a: Collect retriggers
+        reps = [1]
+        seal_result = card.calculate_seal(repetition=True)
+        if seal_result and seal_result.get("repetitions"):
+            for _ in range(seal_result["repetitions"]):
+                reps.append(seal_result)
+
+        for joker in jokers:
+            if joker.debuff:
+                continue
+            rep_ctx = JokerContext(
+                repetition=True, cardarea="hand", other_card=card,
+                **_shared,
+            )
+            rep_result = calculate_joker(joker, rep_ctx)
+            if rep_result and rep_result.repetitions > 0:
+                for _ in range(rep_result.repetitions):
+                    reps.append(rep_result)
+
+        # 8b-c: Each repetition
+        for _rep in reps:
+            ev = eval_card(
+                card, {"cardarea": "hand"},
+                rng=rng, probabilities_normal=probabilities_normal,
+            )
+            effects_h: list[dict[str, Any]] = [ev]
+
+            # Joker individual effects on held card
+            for joker in jokers:
+                if joker.debuff:
+                    continue
+                ind_ctx = JokerContext(
+                    individual=True, cardarea="hand", other_card=card,
+                    **_shared,
+                )
+                ind_result = calculate_joker(joker, ind_ctx)
+                if ind_result:
+                    eff_h: dict[str, Any] = {}
+                    if ind_result.h_mult:
+                        eff_h["h_mult"] = ind_result.h_mult
+                    if ind_result.x_mult:
+                        eff_h["x_mult"] = ind_result.x_mult
+                    if ind_result.dollars:
+                        eff_h["dollars"] = ind_result.dollars
+                    if eff_h:
+                        effects_h.append(eff_h)
+
+            mult, dollars = _apply_held_joker_effects(
+                effects_h, mult, dollars,
+            )
+
+    # === Phase 9: Joker main effects (left to right) ===
+    for joker in jokers:
+        if joker.debuff:
+            continue
+
+        # 9a: Edition additive (chip_mod, mult_mod) BEFORE joker effect
+        edition = joker.get_edition()
+        if edition:
+            hand_chips += edition.get("chip_mod", 0)
+            mult += edition.get("mult_mod", 0)
+
+        # 9b: Main joker effect
+        main_ctx = JokerContext(joker_main=True, **_shared)
+        result = calculate_joker(joker, main_ctx)
+        if result:
+            if result.mult_mod:
+                mult += result.mult_mod
+            if result.chip_mod:
+                hand_chips += result.chip_mod
+            if result.Xmult_mod:
+                mult *= result.Xmult_mod
+            if result.dollars:
+                dollars += result.dollars
+
+        # 9c: Joker-on-joker (other_joker context)
+        for other in jokers:
+            if other is joker or other.debuff:
+                continue
+            j2j_ctx = JokerContext(other_joker=joker, **_shared)
+            j2j = calculate_joker(other, j2j_ctx)
+            if j2j:
+                if j2j.mult_mod:
+                    mult += j2j.mult_mod
+                if j2j.chip_mod:
+                    hand_chips += j2j.chip_mod
+                if j2j.Xmult_mod:
+                    mult *= j2j.Xmult_mod
+
+        # 9d: Edition multiplicative (x_mult_mod) AFTER joker effect
+        if edition and "x_mult_mod" in edition:
+            mult *= edition["x_mult_mod"]
 
     # === Phase 12: Final score ===
     total = math.floor(hand_chips * mult)

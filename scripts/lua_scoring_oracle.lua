@@ -269,10 +269,13 @@ end
 -- Scoring pipeline (stripped of UI/animation)
 ----------------------------------------------------------------------------
 
-local function score_hand(play_cards, hand_cards, hands, blind)
+local function score_hand(play_cards, hand_cards, hands, blind, jokers)
+    jokers = jokers or {}
     G.play.cards = play_cards
     G.hand.cards = hand_cards
+    G.jokers.cards = jokers
     G.GAME.blind = blind
+    G.GAME.hands = hands
 
     local text, _, poker_hands, scoring_hand = G.FUNCS.get_poker_hand_info(play_cards)
     if text == "NULL" then
@@ -306,32 +309,67 @@ local function score_hand(play_cards, hand_cards, hands, blind)
     -- Phase 6: blind modify
     mult, hand_chips = blind:modify_hand(nil, nil, text, mult, hand_chips)
 
-    -- Phase 7: per scored card with retriggers
+    -- Phase 7: per scored card with retriggers + joker individual effects
     local dollars = 0
     for i = 1, #scoring_hand do
         if not scoring_hand[i].debuff then
+            -- 7a: Collect retriggers (seal + joker)
             local reps = {1}
             local seal = scoring_hand[i]:calculate_seal({repetition = true})
             if seal and seal.repetitions then
                 for h = 1, seal.repetitions do reps[#reps+1] = seal end
             end
+            for k=1, #jokers do
+                if not jokers[k].debuff then
+                    local rep_eval = jokers[k]:calculate_joker({
+                        cardarea = G.play, full_hand = play_cards,
+                        scoring_hand = scoring_hand, scoring_name = text,
+                        poker_hands = poker_hands,
+                        other_card = scoring_hand[i], repetition = true,
+                    })
+                    if rep_eval and rep_eval.repetitions then
+                        for h = 1, rep_eval.repetitions do reps[#reps+1] = rep_eval end
+                    end
+                end
+            end
 
+            -- 7b-d: Each repetition
             for j = 1, #reps do
+                -- Card's own effects
                 local ev = eval_card(scoring_hand[i], {cardarea = G.play})
-                if ev.chips then hand_chips = mod_chips(hand_chips + ev.chips) end
-                if ev.mult then mult = mod_mult(mult + ev.mult) end
-                if ev.p_dollars then dollars = dollars + ev.p_dollars end
-                if ev.x_mult then mult = mod_mult(mult * ev.x_mult) end
-                if ev.edition then
-                    hand_chips = mod_chips(hand_chips + (ev.edition.chip_mod or 0))
-                    mult = mult + (ev.edition.mult_mod or 0)
-                    mult = mod_mult(mult * (ev.edition.x_mult_mod or 1))
+                local effects = {ev}
+
+                -- Joker individual effects on this card
+                for k=1, #jokers do
+                    if not jokers[k].debuff then
+                        local j_eval = jokers[k]:calculate_joker({
+                            cardarea = G.play, full_hand = play_cards,
+                            scoring_hand = scoring_hand, scoring_name = text,
+                            poker_hands = poker_hands,
+                            other_card = scoring_hand[i], individual = true,
+                        })
+                        if j_eval then effects[#effects+1] = j_eval end
+                    end
+                end
+
+                -- Apply effects in source order
+                for ii = 1, #effects do
+                    if effects[ii].chips then hand_chips = mod_chips(hand_chips + effects[ii].chips) end
+                    if effects[ii].mult then mult = mod_mult(mult + effects[ii].mult) end
+                    if effects[ii].p_dollars then dollars = dollars + effects[ii].p_dollars end
+                    if effects[ii].dollars then dollars = dollars + effects[ii].dollars end
+                    if effects[ii].x_mult then mult = mod_mult(mult * effects[ii].x_mult) end
+                    if effects[ii].edition then
+                        hand_chips = mod_chips(hand_chips + (effects[ii].edition.chip_mod or 0))
+                        mult = mult + (effects[ii].edition.mult_mod or 0)
+                        mult = mod_mult(mult * (effects[ii].edition.x_mult_mod or 1))
+                    end
                 end
             end
         end
     end
 
-    -- Phase 8: per held card
+    -- Phase 8: per held card + joker individual effects
     for i = 1, #hand_cards do
         if not hand_cards[i].debuff then
             local reps = {1}
@@ -341,8 +379,57 @@ local function score_hand(play_cards, hand_cards, hands, blind)
             end
             for j = 1, #reps do
                 local ev = eval_card(hand_cards[i], {cardarea = G.hand})
-                if ev.h_mult then mult = mod_mult(mult + ev.h_mult) end
-                if ev.x_mult then mult = mod_mult(mult * ev.x_mult) end
+                local effects = {ev}
+
+                for k=1, #jokers do
+                    if not jokers[k].debuff then
+                        local j_eval = jokers[k]:calculate_joker({
+                            cardarea = G.hand, full_hand = play_cards,
+                            scoring_hand = scoring_hand, scoring_name = text,
+                            poker_hands = poker_hands,
+                            other_card = hand_cards[i], individual = true,
+                        })
+                        if j_eval then effects[#effects+1] = j_eval end
+                    end
+                end
+
+                for ii = 1, #effects do
+                    if effects[ii].h_mult then mult = mod_mult(mult + effects[ii].h_mult) end
+                    if effects[ii].x_mult then mult = mod_mult(mult * effects[ii].x_mult) end
+                    if effects[ii].dollars then dollars = dollars + effects[ii].dollars end
+                end
+            end
+        end
+    end
+
+    -- Phase 9: joker main effects (left to right)
+    for i = 1, #jokers do
+        if not jokers[i].debuff then
+            -- 9a: Edition additive (chip_mod, mult_mod)
+            local edition = jokers[i]:get_edition()
+            if edition then
+                if edition.chip_mod then hand_chips = mod_chips(hand_chips + edition.chip_mod) end
+                if edition.mult_mod then mult = mod_mult(mult + edition.mult_mod) end
+            end
+
+            -- 9b: Main joker effect
+            local j_result = jokers[i]:calculate_joker({
+                cardarea = G.jokers, full_hand = play_cards,
+                scoring_hand = scoring_hand, scoring_name = text,
+                poker_hands = poker_hands, joker_main = true,
+            })
+            if j_result then
+                if j_result.mult_mod then mult = mod_mult(mult + j_result.mult_mod) end
+                if j_result.chip_mod then hand_chips = mod_chips(hand_chips + j_result.chip_mod) end
+                if j_result.Xmult_mod then mult = mod_mult(mult * j_result.Xmult_mod) end
+                if j_result.dollars then dollars = dollars + j_result.dollars end
+            end
+
+            -- 9c: Joker-on-joker (skipped for these tests)
+
+            -- 9d: Edition multiplicative (x_mult_mod)
+            if edition and edition.x_mult_mod then
+                mult = mod_mult(mult * edition.x_mult_mod)
             end
         end
     end
@@ -361,6 +448,137 @@ local function score_hand(play_cards, hand_cards, hands, blind)
         debuffed = false,
         scoring_count = #scoring_hand,
     }
+end
+
+----------------------------------------------------------------------------
+-- Joker constructor
+----------------------------------------------------------------------------
+
+local function make_joker(name, opts)
+    opts = opts or {}
+    card_counter = card_counter + 1
+    local j = {
+        base = nil,
+        ability = {
+            name = name,
+            set = "Joker",
+            effect = opts.effect or "",
+            mult = opts.mult or 0,
+            h_mult = 0, h_x_mult = 0, h_dollars = 0, p_dollars = 0,
+            bonus = 0, perma_bonus = 0,
+            x_mult = opts.Xmult or 1,
+            extra = opts.extra,
+            type = opts.type,
+            t_mult = opts.t_mult or 0,
+            t_chips = opts.t_chips or 0,
+        },
+        edition = opts.edition,
+        seal = nil,
+        debuff = false,
+        sort_id = card_counter,
+        unique_val = card_counter * 0.001,
+        T = { x = card_counter },
+        playing_card = false,
+    }
+
+    -- Stub methods matching playing cards (unused but prevent nil errors)
+    function j:get_id() return 0 end
+    function j:is_suit() return false end
+    function j:is_face() return false end
+    function j:get_chip_bonus() return 0 end
+    function j:get_chip_mult() return 0 end
+    function j:get_chip_x_mult() return 0 end
+    function j:get_chip_h_mult() return 0 end
+    function j:get_chip_h_x_mult() return 0 end
+    function j:get_edition()
+        if self.debuff then return end
+        if self.edition then
+            local ret = {card = self}
+            if self.edition.x_mult then ret.x_mult_mod = self.edition.x_mult end
+            if self.edition.mult then ret.mult_mod = self.edition.mult end
+            if self.edition.chips then ret.chip_mod = self.edition.chips end
+            return ret
+        end
+    end
+    function j:get_p_dollars() return 0 end
+    function j:calculate_seal() return nil end
+    function j:set_debuff(b) self.debuff = b end
+    function j:juice_up() end
+
+    -- calculate_joker: implement the specific joker effects
+    function j:calculate_joker(context)
+        if self.debuff then return nil end
+
+        -- Guard: only process in expected contexts
+        if not (context.joker_main or context.individual or context.repetition) then
+            return nil
+        end
+
+        -- Joker: +mult (card.lua:3980)
+        if self.ability.name == 'Joker' then
+            if context.joker_main then
+                return { mult_mod = self.ability.mult }
+            end
+        end
+
+        -- Jolly Joker: +t_mult if hand contains Pair (card.lua:3660)
+        if self.ability.name == 'Jolly Joker' then
+            if context.joker_main then
+                if self.ability.t_mult > 0 and context.poker_hands
+                    and next(context.poker_hands[self.ability.type] or {}) then
+                    return { mult_mod = self.ability.t_mult }
+                end
+            end
+        end
+
+        -- The Duo: xMult if hand contains type (card.lua:3653)
+        if self.ability.name == 'The Duo' then
+            if context.joker_main then
+                if self.ability.x_mult > 1 and context.poker_hands
+                    and next(context.poker_hands[self.ability.type] or {}) then
+                    return { Xmult_mod = self.ability.x_mult }
+                end
+            end
+        end
+
+        -- Scary Face: +chips per face card (card.lua:3136)
+        if self.ability.name == 'Scary Face' then
+            if context.individual and context.cardarea == G.play then
+                if context.other_card and context.other_card:is_face() then
+                    return { chips = self.ability.extra }
+                end
+            end
+        end
+
+        -- Lusty Joker: +s_mult per Heart scored (card.lua:3065, Suit Mult)
+        if self.ability.name == 'Lusty Joker' then
+            if context.individual and context.cardarea == G.play then
+                if context.other_card and context.other_card:is_suit(self.ability.extra.suit) then
+                    return { mult = self.ability.extra.s_mult }
+                end
+            end
+        end
+
+        -- Blackboard: x3 if all held cards are Spades or Clubs (card.lua:3951)
+        if self.ability.name == 'Blackboard' then
+            if context.joker_main then
+                local black_suits, all_cards = 0, 0
+                for _, v in ipairs(G.hand.cards) do
+                    all_cards = all_cards + 1
+                    if v:is_suit('Clubs', nil, true) or v:is_suit('Spades', nil, true) then
+                        black_suits = black_suits + 1
+                    end
+                end
+                if all_cards > 0 and black_suits == all_cards then
+                    return { Xmult_mod = self.ability.extra }
+                end
+            end
+        end
+
+        return nil
+    end
+
+    return j
 end
 
 ----------------------------------------------------------------------------
@@ -529,6 +747,147 @@ r = score_hand(
     {}, hands_g, eye_blind
 )
 r.name = "pair_eye_debuffed"
+results[#results+1] = r
+
+----------------------------------------------------------------------------
+-- Joker test scenarios
+----------------------------------------------------------------------------
+
+-- (h) Pair of Aces + j_joker (+4 mult)
+-- Base: Pair L1 = 10 chips, 2 mult. Cards: 11+11=22. Total chips=32, mult=2.
+-- Phase 9: j_joker +4 mult → mult=6. Score: 32×6=192.
+card_counter = 0
+local hands_h = make_hands()
+G.GAME.hands = hands_h
+r = score_hand(
+    {make_card("Hearts","Ace"), make_card("Spades","Ace")},
+    {},
+    hands_h,
+    make_blind("Small Blind", 1.0),
+    {make_joker("Joker", {mult = 4})}
+)
+r.name = "pair_aces_joker"
+results[#results+1] = r
+
+-- (i) Flush of Hearts + j_lusty_joker (+3 mult per Heart scored)
+-- Base: Flush L1 = 35 chips, 4 mult. Cards: 2+5+8+10+11=36. Total chips=71.
+-- Phase 7: +3 mult per card × 5 Hearts = +15 mult → mult=19.
+-- Score: 71×19=1349.
+card_counter = 0
+local hands_i = make_hands()
+G.GAME.hands = hands_i
+r = score_hand(
+    {make_card("Hearts","2"), make_card("Hearts","5"), make_card("Hearts","8"),
+     make_card("Hearts","Jack"), make_card("Hearts","Ace")},
+    {},
+    hands_i,
+    make_blind("Small Blind", 1.0),
+    {make_joker("Lusty Joker", {extra = {s_mult = 3, suit = "Hearts"}})}
+)
+r.name = "flush_hearts_lusty"
+results[#results+1] = r
+
+-- (j) Three Kings + j_scary_face (+30 chips per face card)
+-- Base: Three of a Kind L1 = 30 chips, 3 mult. Cards: 10+10+10+5+2=37.
+-- Total chips = 30+37=67 base, then +30 per face (3 Kings) = +90 chips.
+-- Phase 7: 67 + 90 = 157 chips, mult = 3. Score: 157×3=471.
+card_counter = 0
+local hands_j = make_hands()
+G.GAME.hands = hands_j
+r = score_hand(
+    {make_card("Hearts","King"), make_card("Spades","King"), make_card("Clubs","King"),
+     make_card("Diamonds","5"), make_card("Hearts","2")},
+    {},
+    hands_j,
+    make_blind("Small Blind", 1.0),
+    {make_joker("Scary Face", {extra = 30})}
+)
+r.name = "three_kings_scary_face"
+results[#results+1] = r
+
+-- (k) Full House + j_jolly (+8 mult, triggers because Full House contains Pair)
+-- Base: Full House L1 = 40 chips, 4 mult. Cards: 10+10+10+5+5=40.
+-- Total chips = 40+40=80. Phase 9: +8 mult (Pair in poker_hands) → mult=12.
+-- Score: 80×12=960.
+card_counter = 0
+local hands_k = make_hands()
+G.GAME.hands = hands_k
+r = score_hand(
+    {make_card("Hearts","King"), make_card("Spades","King"), make_card("Clubs","King"),
+     make_card("Diamonds","5"), make_card("Hearts","5")},
+    {},
+    hands_k,
+    make_blind("Small Blind", 1.0),
+    {make_joker("Jolly Joker", {t_mult = 8, type = "Pair"})}
+)
+r.name = "full_house_jolly"
+results[#results+1] = r
+
+-- (l) Pair + j_duo (x2 mult, contains Pair → triggers)
+-- Base: Pair L1 = 10 chips, 2 mult. Cards: 11+11=22. Total chips=32.
+-- Phase 9: x2 mult → mult=4. Score: 32×4=128.
+card_counter = 0
+local hands_l = make_hands()
+G.GAME.hands = hands_l
+r = score_hand(
+    {make_card("Hearts","Ace"), make_card("Spades","Ace")},
+    {},
+    hands_l,
+    make_blind("Small Blind", 1.0),
+    {make_joker("The Duo", {Xmult = 2, type = "Pair"})}
+)
+r.name = "pair_duo_xmult"
+results[#results+1] = r
+
+-- (m) j_joker (+4) then j_blackboard (x3) — order matters
+-- Pair of Aces (black suits): 32 chips, 2 mult.
+-- Held: one black card (Spades 5) so Blackboard triggers.
+-- Phase 9: j_joker +4 → mult=6, then j_blackboard x3 → mult=18.
+-- Score: 32×18=576.
+card_counter = 0
+local hands_m = make_hands()
+G.GAME.hands = hands_m
+r = score_hand(
+    {make_card("Spades","Ace"), make_card("Clubs","Ace")},
+    {make_card("Spades","5")},
+    hands_m,
+    make_blind("Small Blind", 1.0),
+    {make_joker("Joker", {mult = 4}), make_joker("Blackboard", {extra = 3})}
+)
+r.name = "joker_then_blackboard"
+results[#results+1] = r
+
+-- (n) j_blackboard (x3) then j_joker (+4) — reversed order
+-- Phase 9: j_blackboard x3 → mult=6, then j_joker +4 → mult=10.
+-- Score: 32×10=320.
+card_counter = 0
+local hands_n = make_hands()
+G.GAME.hands = hands_n
+r = score_hand(
+    {make_card("Spades","Ace"), make_card("Clubs","Ace")},
+    {make_card("Spades","5")},
+    hands_n,
+    make_blind("Small Blind", 1.0),
+    {make_joker("Blackboard", {extra = 3}), make_joker("Joker", {mult = 4})}
+)
+r.name = "blackboard_then_joker"
+results[#results+1] = r
+
+-- (o) Foil j_joker → +50 chips from edition + +4 mult from effect
+-- Pair of Aces: 32 chips, 2 mult.
+-- Phase 9: Foil +50 chips → 82, then j_joker +4 mult → 6.
+-- Score: 82×6=492.
+card_counter = 0
+local hands_o = make_hands()
+G.GAME.hands = hands_o
+r = score_hand(
+    {make_card("Hearts","Ace"), make_card("Spades","Ace")},
+    {},
+    hands_o,
+    make_blind("Small Blind", 1.0),
+    {make_joker("Joker", {mult = 4, edition = {foil=true, chips=50, type="foil"}})}
+)
+r.name = "foil_joker"
 results[#results+1] = r
 
 -- Output

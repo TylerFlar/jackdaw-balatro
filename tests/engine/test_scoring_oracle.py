@@ -15,7 +15,7 @@ from jackdaw.engine.blind import Blind
 from jackdaw.engine.card import Card, reset_sort_id_counter
 from jackdaw.engine.hand_levels import HandLevels
 from jackdaw.engine.rng import PseudoRandom
-from jackdaw.engine.scoring import score_hand_base
+from jackdaw.engine.scoring import score_hand, score_hand_base
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 FIXTURE_PATH = PROJECT_ROOT / "tests" / "fixtures" / "scoring_oracle.json"
@@ -120,6 +120,112 @@ def _run_pair_eye_debuffed():
     return score_hand_base(p2, [], levels, blind, PseudoRandom("ORACLE"))
 
 
+def _joker(center_key: str, **ability_kw) -> Card:
+    """Create a minimal joker Card for oracle testing."""
+    c = Card()
+    c.center_key = center_key
+    c.ability = {"name": center_key, "set": "Joker", **ability_kw}
+    return c
+
+
+# --- Joker scenarios (use score_hand) ---
+
+def _run_pair_aces_joker():
+    reset_sort_id_counter()
+    played = [_card("Hearts", "Ace"), _card("Spades", "Ace")]
+    j = _joker("j_joker", mult=4)
+    return score_hand(
+        played, [], [j], HandLevels(), Blind.create("bl_small", ante=1),
+        PseudoRandom("ORACLE"),
+    )
+
+
+def _run_flush_hearts_lusty():
+    reset_sort_id_counter()
+    played = [
+        _card("Hearts", "2"), _card("Hearts", "5"), _card("Hearts", "8"),
+        _card("Hearts", "Jack"), _card("Hearts", "Ace"),
+    ]
+    j = _joker("j_lusty_joker", extra={"s_mult": 3, "suit": "Hearts"})
+    return score_hand(
+        played, [], [j], HandLevels(), Blind.create("bl_small", ante=1),
+        PseudoRandom("ORACLE"),
+    )
+
+
+def _run_three_kings_scary_face():
+    reset_sort_id_counter()
+    played = [
+        _card("Hearts", "King"), _card("Spades", "King"),
+        _card("Clubs", "King"), _card("Diamonds", "5"),
+        _card("Hearts", "2"),
+    ]
+    j = _joker("j_scary_face", extra=30)
+    return score_hand(
+        played, [], [j], HandLevels(), Blind.create("bl_small", ante=1),
+        PseudoRandom("ORACLE"),
+    )
+
+
+def _run_full_house_jolly():
+    reset_sort_id_counter()
+    played = [
+        _card("Hearts", "King"), _card("Spades", "King"),
+        _card("Clubs", "King"), _card("Diamonds", "5"),
+        _card("Hearts", "5"),
+    ]
+    j = _joker("j_jolly", t_mult=8, type="Pair")
+    return score_hand(
+        played, [], [j], HandLevels(), Blind.create("bl_small", ante=1),
+        PseudoRandom("ORACLE"),
+    )
+
+
+def _run_pair_duo_xmult():
+    reset_sort_id_counter()
+    played = [_card("Hearts", "Ace"), _card("Spades", "Ace")]
+    j = _joker("j_duo", x_mult=2, type="Pair")
+    return score_hand(
+        played, [], [j], HandLevels(), Blind.create("bl_small", ante=1),
+        PseudoRandom("ORACLE"),
+    )
+
+
+def _run_joker_then_blackboard():
+    reset_sort_id_counter()
+    played = [_card("Spades", "Ace"), _card("Clubs", "Ace")]
+    held = [_card("Spades", "5")]
+    j1 = _joker("j_joker", mult=4)
+    j2 = _joker("j_blackboard", extra=3)
+    return score_hand(
+        played, held, [j1, j2], HandLevels(), Blind.create("bl_small", ante=1),
+        PseudoRandom("ORACLE"),
+    )
+
+
+def _run_blackboard_then_joker():
+    reset_sort_id_counter()
+    played = [_card("Spades", "Ace"), _card("Clubs", "Ace")]
+    held = [_card("Spades", "5")]
+    j1 = _joker("j_blackboard", extra=3)
+    j2 = _joker("j_joker", mult=4)
+    return score_hand(
+        played, held, [j1, j2], HandLevels(), Blind.create("bl_small", ante=1),
+        PseudoRandom("ORACLE"),
+    )
+
+
+def _run_foil_joker():
+    reset_sort_id_counter()
+    played = [_card("Hearts", "Ace"), _card("Spades", "Ace")]
+    j = _joker("j_joker", mult=4)
+    j.set_edition({"foil": True})
+    return score_hand(
+        played, [], [j], HandLevels(), Blind.create("bl_small", ante=1),
+        PseudoRandom("ORACLE"),
+    )
+
+
 # Map test names to Python runners
 RUNNERS = {
     "pair_aces_basic": _run_pair_aces_basic,
@@ -129,6 +235,14 @@ RUNNERS = {
     "pair_aces_red_seal": _run_pair_aces_red_seal,
     "pair_aces_flint": _run_pair_aces_flint,
     "pair_eye_debuffed": _run_pair_eye_debuffed,
+    "pair_aces_joker": _run_pair_aces_joker,
+    "flush_hearts_lusty": _run_flush_hearts_lusty,
+    "three_kings_scary_face": _run_three_kings_scary_face,
+    "full_house_jolly": _run_full_house_jolly,
+    "pair_duo_xmult": _run_pair_duo_xmult,
+    "joker_then_blackboard": _run_joker_then_blackboard,
+    "blackboard_then_joker": _run_blackboard_then_joker,
+    "foil_joker": _run_foil_joker,
 }
 
 
