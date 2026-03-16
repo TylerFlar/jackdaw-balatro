@@ -105,6 +105,31 @@ class CardBase:
 
 
 # ---------------------------------------------------------------------------
+# Center resolution helper
+# ---------------------------------------------------------------------------
+
+# Lazy import to avoid circular dependency at module load time.
+# prototypes.py imports nothing from card.py, so this is safe.
+_centers_cache: dict[str, dict[str, Any]] | None = None
+
+
+def _resolve_center(key: str) -> dict[str, Any]:
+    """Look up a P_CENTERS entry by key, returning a plain dict.
+
+    Converts the frozen dataclass to a dict on first call and caches the
+    result for fast repeated access.
+    """
+    global _centers_cache  # noqa: PLW0603
+    if _centers_cache is None:
+        from jackdaw.engine.data.prototypes import _load_json
+
+        _centers_cache = _load_json("centers.json")
+    if key not in _centers_cache:
+        raise KeyError(f"Unknown center key: {key!r}")
+    return _centers_cache[key]
+
+
+# ---------------------------------------------------------------------------
 # Card — the main object
 # ---------------------------------------------------------------------------
 
@@ -156,22 +181,34 @@ class Card:
         self.card_key = card_key
         self.base = CardBase.from_card_key(card_key, suit, value)
 
-    def set_ability(self, center: dict[str, Any]) -> None:
-        """Populate ability from a P_CENTERS prototype, matching Card:set_ability.
+    def set_ability(
+        self,
+        center: dict[str, Any] | str,
+        *,
+        hands_played: int = 0,
+    ) -> None:
+        """Populate ability from a prototype, matching card.lua:223 (Card:set_ability).
 
         Args:
-            center: The prototype dict from P_CENTERS (or a loaded JSON entry).
-                    Must have at least 'name', 'set', and 'config' fields.
+            center: Either a P_CENTERS key string (e.g. ``"j_joker"``) or a raw
+                    dict with ``name``, ``set``, ``config``, etc. fields.
+            hands_played: Current ``G.GAME.hands_played`` for the
+                          ``hands_played_at_create`` field.
         """
+        if isinstance(center, str):
+            center = _resolve_center(center)
+
         config = center.get("config") or {}
         if isinstance(config, list):
-            config = {}  # empty Lua table [] normalization
+            config = {}  # empty Lua table [] → {}
 
+        # Preserve fields that survive center changes (card.lua:295-296)
         old_perma_bonus = self.ability.get("perma_bonus", 0)
         old_forced_selection = self.ability.get("forced_selection")
 
+        # Deep copy extra so each card instance owns its mutable state
         extra = config.get("extra")
-        if isinstance(extra, (dict, list)):
+        if extra is not None:
             extra = copy.deepcopy(extra)
 
         self.ability = {
@@ -185,7 +222,7 @@ class Card:
             "p_dollars": config.get("p_dollars", 0),
             "t_mult": config.get("t_mult", 0),
             "t_chips": config.get("t_chips", 0),
-            "x_mult": config.get("Xmult", 1),
+            "x_mult": config.get("Xmult", 1),  # Xmult → x_mult
             "h_size": config.get("h_size", 0),
             "d_size": config.get("d_size", 0),
             "extra": extra,
@@ -196,13 +233,35 @@ class Card:
             "perma_bonus": old_perma_bonus,
         }
 
+        # Bonus accumulates (card.lua:299)
         self.ability["bonus"] = self.ability.get("bonus", 0) + config.get("bonus", 0)
 
+        # Consumable config reference (card.lua:301-303)
         if center.get("consumeable"):
             self.ability["consumeable"] = config
 
         self.center_key = center.get("key", self.center_key)
         self.base_cost = center.get("cost", 1)
+
+        # -- Special post-init fields (card.lua:308-337) --
+
+        name = self.ability["name"]
+
+        if name == "Invisible Joker":
+            self.ability["invis_rounds"] = 0
+
+        if name == "Caino":
+            self.ability["caino_xmult"] = 1
+
+        if name == "Yorick" and isinstance(self.ability.get("extra"), dict):
+            self.ability["yorick_discards"] = self.ability["extra"].get("discards", 0)
+
+        if name == "Loyalty Card" and isinstance(self.ability.get("extra"), dict):
+            self.ability["burnt_hand"] = 0
+            self.ability["loyalty_remaining"] = self.ability["extra"].get("every", 0)
+
+        # hands_played_at_create (card.lua:337)
+        self.ability["hands_played_at_create"] = hands_played
 
     def set_edition(self, edition: dict[str, bool] | None) -> None:
         """Set the card's edition."""
