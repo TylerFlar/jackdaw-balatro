@@ -182,9 +182,16 @@ class NextRound:
 
 @dataclass(frozen=True)
 class PickPackCard:
-    """Select a card from an opened booster pack."""
+    """Select a card from an opened booster pack.
+
+    For Arcana/Spectral packs, ``target_indices`` specifies which dealt
+    hand cards the consumable should target (e.g. for The Magician
+    enhancing up to 2 cards).  ``None`` for non-targeted picks
+    (Celestial, Standard, Buffoon packs).
+    """
 
     card_index: int
+    target_indices: tuple[int, ...] | None = None
 
 
 @dataclass(frozen=True)

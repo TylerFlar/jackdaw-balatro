@@ -83,8 +83,8 @@ def step(game_state: dict[str, Any], action: Action) -> dict[str, Any]:
             return _handle_redeem_voucher(game_state, idx)
         case OpenBooster(card_index=idx):
             return _handle_open_booster(game_state, idx)
-        case PickPackCard(card_index=idx):
-            return _handle_pick_pack_card(game_state, idx)
+        case PickPackCard(card_index=idx, target_indices=targets):
+            return _handle_pick_pack_card(game_state, idx, targets)
         case SkipPack():
             return _handle_skip_pack(game_state)
         case Reroll():
@@ -764,9 +764,7 @@ def _handle_buy_and_use(
     gs["dollars"] -= card.cost
     shop_cards.pop(idx)
 
-    from jackdaw.engine.consumables import use_consumable
-
-    use_consumable(card, game_state=gs, target_indices=targets)
+    _use_consumable_card(gs, card, targets)
     return gs
 
 
@@ -808,10 +806,7 @@ def _handle_use_consumable(
         raise IllegalActionError(f"Invalid consumable index {idx}")
 
     card = consumables.pop(idx)
-
-    from jackdaw.engine.consumables import use_consumable
-
-    use_consumable(card, game_state=gs, target_indices=targets)
+    _use_consumable_card(gs, card, targets)
     return gs
 
 
@@ -862,8 +857,26 @@ def _handle_open_booster(gs: dict[str, Any], idx: int) -> dict[str, Any]:
     return gs
 
 
-def _handle_pick_pack_card(gs: dict[str, Any], idx: int) -> dict[str, Any]:
-    """Pick a card from an opened booster pack."""
+def _handle_pick_pack_card(
+    gs: dict[str, Any], idx: int, targets: tuple[int, ...] | None = None,
+) -> dict[str, Any]:
+    """Pick a card from an opened booster pack.
+
+    Matching ``button_callbacks.lua:2155-2247`` use_card:
+
+    - **Consumable** (Arcana/Spectral/Celestial): use immediately via
+      ``use_consumeable``.  For Arcana/Spectral, ``targets`` specifies
+      which dealt hand cards the consumable should target.  Planets
+      are used without targets (level up hand type).
+    - **Playing card** (Standard pack): added to deck.  Fires
+      ``playing_card_added`` joker context (Hologram).
+    - **Joker** (Buffoon pack): added to joker slots.  Marks in
+      ``used_jokers``.
+
+    When ``pack_choices_remaining`` hits 0 or pack is empty, the pack
+    closes: remaining cards are removed, dealt hand cards (if any)
+    return to deck, and phase restores to SHOP.
+    """
     _require_phase(gs, GamePhase.PACK_OPENING)
 
     pack_cards: list = gs.get("pack_cards", [])
@@ -876,29 +889,46 @@ def _handle_pick_pack_card(gs: dict[str, Any], idx: int) -> dict[str, Any]:
     card = pack_cards.pop(idx)
     gs["pack_choices_remaining"] = remaining - 1
 
-    # Place card in appropriate area
-    card_set = card.ability.get("set", "") if isinstance(card.ability, dict) else ""
-    if card_set == "Joker":
-        gs.setdefault("jokers", []).append(card)
-    elif card_set in ("Tarot", "Planet", "Spectral"):
-        gs.setdefault("consumables", []).append(card)
-    else:
-        gs.setdefault("deck", []).append(card)
+    # Determine card type and handle accordingly
+    card_set = _get_card_set(card)
 
-    # If no choices remaining, return to shop
+    if card_set in ("Tarot", "Planet", "Spectral"):
+        # Consumable: use immediately (Arcana/Spectral/Celestial pack)
+        _use_consumable_card(gs, card, targets)
+
+        # Fire using_consumeable joker context
+        _fire_shop_joker_context(gs, using_consumeable=True)
+
+    elif card_set == "Joker":
+        # Buffoon pack: add to joker slots
+        gs.setdefault("jokers", []).append(card)
+        gs.setdefault("used_jokers", {})[card.center_key] = True
+
+    else:
+        # Standard pack: playing card → add to deck
+        gs.setdefault("deck", []).append(card)
+        # Fire playing_card_added joker context (Hologram)
+        _fire_shop_joker_context(gs, playing_card_added=True, cards=[card])
+
+    # Check if pack should close
     if gs["pack_choices_remaining"] <= 0 or not pack_cards:
-        gs["pack_cards"] = []
-        gs["phase"] = gs.get("shop_return_phase", GamePhase.SHOP)
+        _close_pack(gs)
 
     return gs
 
 
 def _handle_skip_pack(gs: dict[str, Any]) -> dict[str, Any]:
-    """Skip remaining picks and return to shop."""
+    """Skip remaining pack cards.
+
+    Fires ``skipping_booster`` on all jokers (Red Card +mult per skip),
+    then closes the pack.
+    """
     _require_phase(gs, GamePhase.PACK_OPENING)
-    gs["pack_cards"] = []
-    gs["pack_choices_remaining"] = 0
-    gs["phase"] = gs.get("shop_return_phase", GamePhase.SHOP)
+
+    # Fire skipping_booster joker context (Red Card +mult)
+    _fire_shop_joker_context(gs, skipping_booster=True)
+
+    _close_pack(gs)
     return gs
 
 
@@ -1341,6 +1371,93 @@ def _apply_boss_blind_effects(gs: dict[str, Any], blind: Any) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _use_consumable_card(
+    gs: dict[str, Any],
+    card: Any,
+    targets: tuple[int, ...] | None = None,
+) -> None:
+    """Build a ConsumableContext and use a consumable card.
+
+    Bridges the game_state dict with the ``use_consumable(card, ctx)`` API.
+    """
+    from jackdaw.engine.consumables import ConsumableContext, use_consumable
+
+    hand: list = gs.get("hand", [])
+    highlighted: list = []
+    if targets:
+        highlighted = [hand[i] for i in targets if i < len(hand)]
+
+    ctx = ConsumableContext(
+        card=card,
+        highlighted=highlighted or None,
+        hand_cards=hand or None,
+        jokers=gs.get("jokers") or None,
+        consumables=gs.get("consumables") or None,
+        playing_cards=gs.get("deck") or None,
+        rng=gs.get("rng"),
+        game_state=gs,
+    )
+    result = use_consumable(card, ctx)
+
+    # Apply result side-effects
+    if result is not None:
+        _apply_consumable_result(gs, result)
+
+
+def _apply_consumable_result(gs: dict[str, Any], result: Any) -> None:
+    """Apply a ConsumableResult's mutations to game_state."""
+    # Track last_tarot_planet for The Fool
+    gs["last_tarot_planet"] = getattr(result, "last_tarot_planet", None) or gs.get("last_tarot_planet")
+
+    # Enhancement changes
+    if getattr(result, "enhance", None):
+        for card, enh_key in result.enhance:
+            card.set_ability(enh_key)
+
+    # Suit changes
+    if getattr(result, "change_suit", None):
+        for card, suit in result.change_suit:
+            if hasattr(card, "change_suit"):
+                card.change_suit(suit)
+
+    # Rank changes
+    if getattr(result, "change_rank", None):
+        for card, delta in result.change_rank:
+            if hasattr(card, "change_rank"):
+                card.change_rank(delta)
+
+    # Dollars
+    dollars = getattr(result, "dollars", 0)
+    if dollars:
+        gs["dollars"] = gs.get("dollars", 0) + dollars
+
+    # Level up hand type (Planet cards)
+    if getattr(result, "level_up", None):
+        hand_levels = gs.get("hand_levels")
+        if hand_levels:
+            for ht, amount in result.level_up:
+                hand_levels.level_up(ht, amount)
+
+    # Cards created
+    if getattr(result, "create_card", None):
+        for create in result.create_card:
+            ctype = create.get("type", "")
+            if ctype == "Joker":
+                gs.setdefault("jokers", []).append(create.get("card"))
+            elif ctype in ("Tarot", "Planet", "Spectral"):
+                gs.setdefault("consumables", []).append(create.get("card"))
+
+    # Cards destroyed
+    if getattr(result, "destroy", None):
+        deck: list = gs.get("deck", [])
+        hand: list = gs.get("hand", [])
+        for card in result.destroy:
+            if card in deck:
+                deck.remove(card)
+            if card in hand:
+                hand.remove(card)
+
+
 def _get_card_set(card: Any) -> str:
     """Get the set name from a Card's ability dict."""
     ability = getattr(card, "ability", None)
@@ -1417,6 +1534,35 @@ def _apply_shop_mutations(
                         duplicate = copy.copy(original)
                         duplicate.edition = {"negative": True}
                         consumables.append(duplicate)
+
+
+# ---------------------------------------------------------------------------
+# Pack close helper
+# ---------------------------------------------------------------------------
+
+
+def _close_pack(gs: dict[str, Any]) -> None:
+    """Close the current booster pack and return to the previous phase.
+
+    Matches ``end_consumeable`` in ``button_callbacks.lua:2565``:
+    - Remove remaining pack cards
+    - Return dealt hand cards to deck (Arcana/Spectral packs deal a hand)
+    - Fire ``new_blind_choice`` tags (deferred from skip)
+    - Restore phase from ``shop_return_phase``
+    """
+    # Clear pack state
+    gs["pack_cards"] = []
+    gs["pack_choices_remaining"] = 0
+
+    # Return dealt hand cards to deck (Arcana/Spectral packs deal from deck)
+    pack_hand: list = gs.get("pack_hand", [])
+    if pack_hand:
+        deck: list = gs.setdefault("deck", [])
+        deck.extend(pack_hand)
+        gs["pack_hand"] = []
+
+    # Restore phase
+    gs["phase"] = gs.get("shop_return_phase", GamePhase.SHOP)
 
 
 # ---------------------------------------------------------------------------
