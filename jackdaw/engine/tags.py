@@ -43,6 +43,25 @@ Pack key conventions
 - Ethereal Tag: ``p_spectral_normal_1``
 - Standard Tag: ``p_standard_mega_1``
 - Buffoon Tag:  ``p_buffoon_mega_1``
+
+Blind-tag generation
+--------------------
+
+Tags are generated once per ante in ``Game:start_run / reset_blinds``
+(``game.lua:2177-2180``).  The call order is strictly:
+
+1. ``get_new_boss()``        — boss blind for this ante
+2. ``get_next_voucher_key()`` — voucher for the shop after the boss
+3. ``get_next_tag_key()``    — skip reward for the Small blind
+4. ``get_next_tag_key()``    — skip reward for the Big blind
+
+Preserving this order is critical for seed determinism.
+
+Public generators
+-----------------
+:func:`generate_blind_tags` — produce the ``{Small, Big}`` tag dict.
+:func:`assign_ante_blinds`  — full ante setup returning blind choices,
+    blind tags, and voucher in one call; also updates ``game_state``.
 """
 
 from __future__ import annotations
@@ -358,3 +377,117 @@ class Tag:
 
     def __repr__(self) -> str:
         return f"Tag({self.key!r}, id={self.id})"
+
+
+# ---------------------------------------------------------------------------
+# Blind-tag generation
+# ---------------------------------------------------------------------------
+
+
+def generate_blind_tags(
+    ante: int,
+    rng: PseudoRandom,
+    game_state: dict[str, Any],
+) -> dict[str, str]:
+    """Generate tags for Small and Big blind skip rewards.
+
+    Calls :func:`~jackdaw.engine.pools.pick_card_from_pool` twice with the
+    ``"Tag"`` pool, applying ``min_ante`` and ``requires`` filters from
+    *game_state*.
+
+    Parameters
+    ----------
+    ante:
+        Current ante number (1–8).
+    rng:
+        Live :class:`~jackdaw.engine.rng.PseudoRandom` instance.  Each
+        call advances the ``"Tag{ante}"`` stream once.
+    game_state:
+        Run-state dict.  Reads:
+
+        * ``used_vouchers`` (iterable of str, optional) — purchased voucher
+          keys; used to gate tags with a ``requires`` field.
+
+    Returns
+    -------
+    dict
+        ``{"Small": tag_key, "Big": tag_key}``
+    """
+    from jackdaw.engine.pools import pick_card_from_pool
+
+    used_vouchers: set[str] = set(game_state.get("used_vouchers", []))
+    small = pick_card_from_pool("Tag", rng, ante, used_vouchers=used_vouchers)
+    big = pick_card_from_pool("Tag", rng, ante, used_vouchers=used_vouchers)
+    return {"Small": small, "Big": big}
+
+
+def assign_ante_blinds(
+    ante: int,
+    rng: PseudoRandom,
+    game_state: dict[str, Any],
+) -> dict[str, Any]:
+    """Set up blinds and tags for a new ante.
+
+    Mirrors the block at ``game.lua:2177-2180``.  RNG calls are issued in
+    the exact source order to preserve seed determinism:
+
+    1. ``get_new_boss()``         → Boss blind key
+    2. ``get_next_voucher_key()`` → Voucher for the post-boss shop
+    3. ``get_next_tag_key()``     → Small blind skip-reward tag
+    4. ``get_next_tag_key()``     → Big blind skip-reward tag
+
+    Side effects on *game_state*
+    ----------------------------
+    * ``game_state["bosses_used"]`` is created/updated in-place (boss usage
+      tracking that prevents the same boss from repeating too soon).
+    * ``game_state["round_resets"]["blind_tags"]`` is set to
+      ``{"Small": tag_key, "Big": tag_key}``.
+
+    Parameters
+    ----------
+    ante:
+        Current ante number (1–8+).
+    rng:
+        Live :class:`~jackdaw.engine.rng.PseudoRandom` instance.
+    game_state:
+        Mutable run-state dict.  Reads:
+
+        * ``bosses_used`` (dict[str, int], created if absent)
+        * ``used_vouchers`` (iterable of str, optional)
+
+    Returns
+    -------
+    dict
+        ``{"blind_choices": {"Small": "bl_small", "Big": "bl_big",
+        "Boss": boss_key}, "blind_tags": {"Small": tag_key,
+        "Big": tag_key}, "voucher": voucher_key_or_None}``
+    """
+    from jackdaw.engine.blind import get_new_boss
+    from jackdaw.engine.pools import pick_card_from_pool
+    from jackdaw.engine.vouchers import get_next_voucher_key
+
+    bosses_used: dict[str, int] = game_state.setdefault("bosses_used", {})
+    used_vouchers: set[str] = set(game_state.get("used_vouchers", []))
+    used_v_dict: dict[str, bool] = {k: True for k in used_vouchers}
+
+    # 1. Boss
+    boss = get_new_boss(ante, bosses_used, rng)
+
+    # 2. Voucher
+    voucher = get_next_voucher_key(rng, used_v_dict)
+
+    # 3-4. Tags (Small then Big)
+    small = pick_card_from_pool("Tag", rng, ante, used_vouchers=used_vouchers)
+    big = pick_card_from_pool("Tag", rng, ante, used_vouchers=used_vouchers)
+
+    blind_tags: dict[str, str] = {"Small": small, "Big": big}
+
+    # Persist to game_state (mirrors G.GAME.round_resets.blind_tags)
+    round_resets: dict[str, Any] = game_state.setdefault("round_resets", {})
+    round_resets["blind_tags"] = blind_tags
+
+    return {
+        "blind_choices": {"Small": "bl_small", "Big": "bl_big", "Boss": boss},
+        "blind_tags": blind_tags,
+        "voucher": voucher,
+    }
