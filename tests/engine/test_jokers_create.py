@@ -21,9 +21,19 @@ def _reset():
 
 _SL = {"Hearts": "H", "Diamonds": "D", "Clubs": "C", "Spades": "S"}
 _RL = {
-    "2": "2", "3": "3", "4": "4", "5": "5", "6": "6", "7": "7",
-    "8": "8", "9": "9", "10": "T", "Jack": "J", "Queen": "Q",
-    "King": "K", "Ace": "A",
+    "2": "2",
+    "3": "3",
+    "4": "4",
+    "5": "5",
+    "6": "6",
+    "7": "7",
+    "8": "8",
+    "9": "9",
+    "10": "T",
+    "Jack": "J",
+    "Queen": "Q",
+    "King": "K",
+    "Ace": "A",
 }
 
 
@@ -43,9 +53,18 @@ def _joker(key: str, **ability_kw) -> Card:
 
 def _poker_hands_with(*types: str) -> dict[str, list]:
     all_types = [
-        "Flush Five", "Flush House", "Five of a Kind", "Straight Flush",
-        "Four of a Kind", "Full House", "Flush", "Straight",
-        "Three of a Kind", "Two Pair", "Pair", "High Card",
+        "Flush Five",
+        "Flush House",
+        "Five of a Kind",
+        "Straight Flush",
+        "Four of a Kind",
+        "Full House",
+        "Flush",
+        "Straight",
+        "Three of a Kind",
+        "Two Pair",
+        "Pair",
+        "High Card",
     ]
     return {t: [["p"]] if t in types else [] for t in all_types}
 
@@ -53,6 +72,7 @@ def _poker_hands_with(*types: str) -> dict[str, list]:
 # ============================================================================
 # Certificate: create playing card with seal on first_hand_drawn
 # ============================================================================
+
 
 class TestCertificate:
     def test_first_hand_drawn_creates(self):
@@ -72,6 +92,7 @@ class TestCertificate:
 # Marble Joker: add Stone Card on setting_blind
 # ============================================================================
 
+
 class TestMarble:
     def test_setting_blind_creates(self):
         j = _joker("j_marble", extra=1)
@@ -90,6 +111,7 @@ class TestMarble:
 # ============================================================================
 # DNA: copy first card on first hand (1 card played)
 # ============================================================================
+
 
 class TestDna:
     def test_first_hand_single_card(self):
@@ -117,7 +139,10 @@ class TestDna:
         j = _joker("j_dna")
         played = [_card("Hearts", "Ace")]
         ctx = JokerContext(
-            before=True, full_hand=played, hands_played=0, blueprint=1,
+            before=True,
+            full_hand=played,
+            hands_played=0,
+            blueprint=1,
         )
         assert calculate_joker(j, ctx) is None
 
@@ -126,11 +151,14 @@ class TestDna:
 # Riff-raff: create Common jokers on setting_blind
 # ============================================================================
 
+
 class TestRiffRaff:
     def test_creates_two_jokers(self):
         j = _joker("j_riff_raff", extra=2)
         ctx = JokerContext(
-            setting_blind=True, joker_count=3, joker_slots=5,
+            setting_blind=True,
+            joker_count=3,
+            joker_slots=5,
         )
         result = calculate_joker(j, ctx)
         assert result is not None
@@ -141,7 +169,9 @@ class TestRiffRaff:
     def test_one_slot_creates_one(self):
         j = _joker("j_riff_raff", extra=2)
         ctx = JokerContext(
-            setting_blind=True, joker_count=4, joker_slots=5,
+            setting_blind=True,
+            joker_count=4,
+            joker_slots=5,
         )
         result = calculate_joker(j, ctx)
         assert result.extra["create"]["count"] == 1
@@ -149,7 +179,9 @@ class TestRiffRaff:
     def test_no_slots_no_effect(self):
         j = _joker("j_riff_raff", extra=2)
         ctx = JokerContext(
-            setting_blind=True, joker_count=5, joker_slots=5,
+            setting_blind=True,
+            joker_count=5,
+            joker_slots=5,
         )
         assert calculate_joker(j, ctx) is None
 
@@ -157,6 +189,7 @@ class TestRiffRaff:
 # ============================================================================
 # Cartomancer: create Tarot on setting_blind
 # ============================================================================
+
 
 class TestCartomancer:
     def test_setting_blind_creates_tarot(self):
@@ -171,13 +204,17 @@ class TestCartomancer:
 # 8 Ball: rank 8 scored → probability → Tarot
 # ============================================================================
 
+
 class TestEightBall:
     def test_rank_8_high_probability(self):
         j = _joker("j_8_ball", extra=4)
         eight = _card("Hearts", "8")
         ctx = JokerContext(
-            individual=True, cardarea="play", other_card=eight,
-            rng=PseudoRandom("8B"), probabilities_normal=1000.0,
+            individual=True,
+            cardarea="play",
+            other_card=eight,
+            rng=PseudoRandom("8B"),
+            probabilities_normal=1000.0,
         )
         result = calculate_joker(j, ctx)
         assert result is not None
@@ -187,7 +224,9 @@ class TestEightBall:
         j = _joker("j_8_ball", extra=4)
         eight = _card("Hearts", "8")
         ctx = JokerContext(
-            individual=True, cardarea="play", other_card=eight,
+            individual=True,
+            cardarea="play",
+            other_card=eight,
         )
         assert calculate_joker(j, ctx) is None
 
@@ -195,8 +234,11 @@ class TestEightBall:
         j = _joker("j_8_ball", extra=4)
         five = _card("Hearts", "5")
         ctx = JokerContext(
-            individual=True, cardarea="play", other_card=five,
-            rng=PseudoRandom("8B"), probabilities_normal=1000.0,
+            individual=True,
+            cardarea="play",
+            other_card=five,
+            rng=PseudoRandom("8B"),
+            probabilities_normal=1000.0,
         )
         assert calculate_joker(j, ctx) is None
 
@@ -204,6 +246,7 @@ class TestEightBall:
 # ============================================================================
 # Vagabond: money ≤ $4 → Tarot
 # ============================================================================
+
 
 class TestVagabond:
     def test_low_money_creates_tarot(self):
@@ -229,6 +272,7 @@ class TestVagabond:
 # Superposition: Ace + Straight → Tarot
 # ============================================================================
 
+
 class TestSuperposition:
     def test_ace_and_straight(self):
         j = _joker("j_superposition")
@@ -236,7 +280,9 @@ class TestSuperposition:
         scoring = [ace, _card("Hearts", "King")]
         ph = _poker_hands_with("Straight", "High Card")
         ctx = JokerContext(
-            joker_main=True, scoring_hand=scoring, poker_hands=ph,
+            joker_main=True,
+            scoring_hand=scoring,
+            poker_hands=ph,
         )
         result = calculate_joker(j, ctx)
         assert result is not None
@@ -247,7 +293,9 @@ class TestSuperposition:
         scoring = [_card("Hearts", "King"), _card("Hearts", "Queen")]
         ph = _poker_hands_with("Straight")
         ctx = JokerContext(
-            joker_main=True, scoring_hand=scoring, poker_hands=ph,
+            joker_main=True,
+            scoring_hand=scoring,
+            poker_hands=ph,
         )
         assert calculate_joker(j, ctx) is None
 
@@ -257,7 +305,9 @@ class TestSuperposition:
         scoring = [ace, _card("Hearts", "King")]
         ph = _poker_hands_with("Pair")
         ctx = JokerContext(
-            joker_main=True, scoring_hand=scoring, poker_hands=ph,
+            joker_main=True,
+            scoring_hand=scoring,
+            poker_hands=ph,
         )
         assert calculate_joker(j, ctx) is None
 
@@ -265,6 +315,7 @@ class TestSuperposition:
 # ============================================================================
 # Seance: hand matches target → Spectral
 # ============================================================================
+
 
 class TestSeance:
     def test_matching_hand(self):
@@ -286,12 +337,15 @@ class TestSeance:
 # Sixth Sense: rank 6, first hand, 1 card → Spectral + destroy
 # ============================================================================
 
+
 class TestSixthSense:
     def test_rank_6_first_hand_single_card(self):
         j = _joker("j_sixth_sense")
         six = _card("Hearts", "6")
         ctx = JokerContext(
-            destroying_card=six, full_hand=[six], hands_played=0,
+            destroying_card=six,
+            full_hand=[six],
+            hands_played=0,
         )
         result = calculate_joker(j, ctx)
         assert result is not None
@@ -302,7 +356,9 @@ class TestSixthSense:
         j = _joker("j_sixth_sense")
         five = _card("Hearts", "5")
         ctx = JokerContext(
-            destroying_card=five, full_hand=[five], hands_played=0,
+            destroying_card=five,
+            full_hand=[five],
+            hands_played=0,
         )
         assert calculate_joker(j, ctx) is None
 
@@ -311,7 +367,9 @@ class TestSixthSense:
         six = _card("Hearts", "6")
         other = _card("Spades", "3")
         ctx = JokerContext(
-            destroying_card=six, full_hand=[six, other], hands_played=0,
+            destroying_card=six,
+            full_hand=[six, other],
+            hands_played=0,
         )
         assert calculate_joker(j, ctx) is None
 
@@ -319,7 +377,9 @@ class TestSixthSense:
         j = _joker("j_sixth_sense")
         six = _card("Hearts", "6")
         ctx = JokerContext(
-            destroying_card=six, full_hand=[six], hands_played=1,
+            destroying_card=six,
+            full_hand=[six],
+            hands_played=1,
         )
         assert calculate_joker(j, ctx) is None
 
@@ -327,6 +387,7 @@ class TestSixthSense:
 # ============================================================================
 # Hallucination: open_booster → probability → Tarot
 # ============================================================================
+
 
 class TestHallucination:
     def test_high_probability_creates(self):

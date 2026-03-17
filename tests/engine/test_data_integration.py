@@ -44,6 +44,7 @@ def _reset():
 # 1. Cross-reference validation
 # ============================================================================
 
+
 class TestCrossReferences:
     """Verify no dangling references between data tables."""
 
@@ -61,9 +62,7 @@ class TestCrossReferences:
         """Every voucher's requires list references existing voucher keys."""
         for key, v in VOUCHERS.items():
             for req in v.requires:
-                assert req in VOUCHERS, (
-                    f"{key}: requires {req!r} but that voucher doesn't exist"
-                )
+                assert req in VOUCHERS, f"{key}: requires {req!r} but that voucher doesn't exist"
 
     def test_joker_enhancement_gates_valid(self):
         """Every enhancement_gate references a valid Enhancement key."""
@@ -76,6 +75,7 @@ class TestCrossReferences:
     def test_tag_requires_valid(self):
         """Tag requires field references existing center keys."""
         from jackdaw.engine.data.prototypes import _load_json
+
         all_centers = _load_json("centers.json")
         for key, t in TAGS.items():
             if t.requires:
@@ -90,9 +90,7 @@ class TestCrossReferences:
                 assert "min" in b.boss, f"{key}: boss missing 'min'"
                 assert "max" in b.boss, f"{key}: boss missing 'max'"
             else:
-                assert key in ("bl_small", "bl_big"), (
-                    f"{key}: not a boss but also not Small/Big"
-                )
+                assert key in ("bl_small", "bl_big"), f"{key}: not a boss but also not Small/Big"
 
     def test_hand_types_match_planet_configs(self):
         """Every planet's hand_type matches a HandType value."""
@@ -100,15 +98,19 @@ class TestCrossReferences:
         for key, p in PLANETS.items():
             ht = p.config.get("hand_type")
             if ht:
-                assert ht in valid_hands, (
-                    f"{key}: hand_type={ht!r} not in HandType"
-                )
+                assert ht in valid_hands, f"{key}: hand_type={ht!r} not in HandType"
 
     def test_all_center_pool_keys_exist(self):
         """Every key in CENTER_POOLS references a real prototype."""
         all_keys = (
-            set(JOKERS) | set(TAROTS) | set(PLANETS) | set(SPECTRALS)
-            | set(VOUCHERS) | set(BACKS) | set(BOOSTERS) | set(ENHANCEMENTS)
+            set(JOKERS)
+            | set(TAROTS)
+            | set(PLANETS)
+            | set(SPECTRALS)
+            | set(VOUCHERS)
+            | set(BACKS)
+            | set(BOOSTERS)
+            | set(ENHANCEMENTS)
             | set(EDITIONS)
         )
         for pool_name, keys in CENTER_POOLS.items():
@@ -121,6 +123,7 @@ class TestCrossReferences:
 # ============================================================================
 # 2. Standard 52-card deck
 # ============================================================================
+
 
 class TestStandard52CardDeck:
     """Build a standard deck and verify all fields."""
@@ -176,6 +179,7 @@ class TestStandard52CardDeck:
 # 3. Abandoned Deck
 # ============================================================================
 
+
 class TestAbandonedDeckIntegration:
     def test_40_cards_no_faces(self):
         rng = PseudoRandom("TESTSEED")
@@ -188,6 +192,7 @@ class TestAbandonedDeckIntegration:
 # ============================================================================
 # 4. Erratic Deck
 # ============================================================================
+
 
 class TestErraticDeckIntegration:
     def test_52_cards_with_duplicates(self):
@@ -207,6 +212,7 @@ class TestErraticDeckIntegration:
 # ============================================================================
 # 5. All 150 jokers
 # ============================================================================
+
 
 class TestAllJokers:
     """Create every joker and verify key properties."""
@@ -277,6 +283,7 @@ class TestAllJokers:
 # 6. Rarity pools
 # ============================================================================
 
+
 class TestRarityPoolIntegrity:
     def test_total_is_150(self):
         total = sum(len(pool) for pool in JOKER_RARITY_POOLS.values())
@@ -299,6 +306,7 @@ class TestRarityPoolIntegrity:
 # 7. Blind scaling
 # ============================================================================
 
+
 class TestBlindScalingIntegration:
     def test_ante_8_boss_scaling_3(self):
         target = get_blind_target(8, "Boss", scaling=3, ante_scaling=1.0)
@@ -316,6 +324,7 @@ class TestBlindScalingIntegration:
 # ============================================================================
 # 8. Hand data completeness
 # ============================================================================
+
 
 class TestHandDataIntegration:
     def test_all_12_hands_in_base(self):
@@ -336,6 +345,7 @@ class TestHandDataIntegration:
 # ============================================================================
 # 9. Performance
 # ============================================================================
+
 
 class TestPerformance:
     def test_deck_build_speed(self):

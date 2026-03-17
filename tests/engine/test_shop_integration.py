@@ -22,9 +22,9 @@ from typing import Any
 import pytest
 
 from jackdaw.engine.card_area import CardArea
-from jackdaw.engine.card_factory import create_consumable, create_joker, resolve_create_descriptor
+from jackdaw.engine.card_factory import create_consumable, resolve_create_descriptor
 from jackdaw.engine.consumables import ConsumableContext, use_consumable
-from jackdaw.engine.data.prototypes import BOOSTERS, JOKERS, TAROTS
+from jackdaw.engine.data.prototypes import BOOSTERS, JOKERS
 from jackdaw.engine.packs import generate_pack_cards
 from jackdaw.engine.pools import get_current_pool
 from jackdaw.engine.rng import PseudoRandom
@@ -35,7 +35,6 @@ from jackdaw.engine.shop import (
     reroll_shop,
 )
 from jackdaw.engine.vouchers import apply_voucher, get_next_voucher_key
-
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -163,7 +162,9 @@ class TestTarotMerchantVoucher:
 
     def test_tarot_rate_dominance_produces_more_tarots(self):
         """With joker_rate=0 and tarot_rate=10000, all slots are Tarot cards."""
-        rng, gs = _fresh_gs(seed="TAROT_DOMINANT", ante=1, tarot_rate=10000.0, joker_rate=0.0, planet_rate=0.0)
+        rng, gs = _fresh_gs(
+            seed="TAROT_DOMINANT", ante=1, tarot_rate=10000.0, joker_rate=0.0, planet_rate=0.0
+        )
         result = populate_shop(rng, 1, gs)
         for card in result["jokers"]:
             assert card.ability.get("set") == "Tarot", (
@@ -172,7 +173,9 @@ class TestTarotMerchantVoucher:
 
     def test_planet_rate_dominance_produces_more_planets(self):
         """With joker_rate=0, planet_rate=10000, all slots are Planet cards."""
-        rng, gs = _fresh_gs(seed="PLANET_DOMINANT", ante=1, planet_rate=10000.0, joker_rate=0.0, tarot_rate=0.0)
+        rng, gs = _fresh_gs(
+            seed="PLANET_DOMINANT", ante=1, planet_rate=10000.0, joker_rate=0.0, tarot_rate=0.0
+        )
         result = populate_shop(rng, 1, gs)
         for card in result["jokers"]:
             assert card.ability.get("set") == "Planet", (
@@ -198,6 +201,7 @@ class TestShowmanAllowsDuplicates:
     def test_showman_flag_passes_through_to_pool(self):
         """Without showman, a used rarity-1 joker is UNAVAILABLE in pool."""
         from jackdaw.engine.pools import UNAVAILABLE
+
         rng_base = PseudoRandom("SHOWMAN_TEST")
         # j_joker is a rarity-1 joker; marking it as used should make it UNAVAILABLE
         pool_no_showman, _ = get_current_pool(
@@ -209,11 +213,15 @@ class TestShowmanAllowsDuplicates:
             used_jokers={"j_joker"},
             has_showman=False,
         )
-        assert "j_joker" not in pool_no_showman or pool_no_showman[pool_no_showman.index("j_joker")] == UNAVAILABLE
+        assert (
+            "j_joker" not in pool_no_showman
+            or pool_no_showman[pool_no_showman.index("j_joker")] == UNAVAILABLE
+        )
 
     def test_showman_restores_full_pool(self):
         """With has_showman=True, a 'used' joker remains in the pool as a real key."""
         from jackdaw.engine.pools import UNAVAILABLE
+
         rng_base = PseudoRandom("SHOWMAN_TEST2")
         pool_with_showman, _ = get_current_pool(
             "Joker",
@@ -276,7 +284,7 @@ class TestReroll:
         rng, gs = _fresh_gs(seed="REROLL_CHANGE", ante=1, dollars=100)
         result = populate_shop(rng, 1, gs)
         shop_area = self._make_shop_area(result["jokers"])
-        before_keys = [c.center_key for c in shop_area.cards]
+        [c.center_key for c in shop_area.cards]
 
         reroll_shop(shop_area, rng, 1, gs)
         after_keys = [c.center_key for c in shop_area.cards]
@@ -288,6 +296,7 @@ class TestReroll:
 
     def test_reroll_determinism_same_seed(self):
         """Two identical runs produce identical reroll sequences."""
+
         def run_rerolls(seed: str) -> list[list[str]]:
             rng, gs = _fresh_gs(seed=seed, ante=1, dollars=100)
             result = populate_shop(rng, 1, gs)
@@ -373,6 +382,7 @@ class TestBuyJokerTracking:
             has_showman=False,
         )
         from jackdaw.engine.pools import UNAVAILABLE
+
         # The bought key must be UNAVAILABLE in the pool
         assert bought_key not in pool or pool[pool.index(bought_key)] == UNAVAILABLE
 
@@ -390,6 +400,7 @@ class TestBuyJokerTracking:
             has_showman=True,
         )
         from jackdaw.engine.pools import UNAVAILABLE
+
         # With showman, the bought key must appear as a real key
         assert bought_key in pool
         idx = pool.index(bought_key)
@@ -442,20 +453,30 @@ class TestArcanaPack:
         # All cards should be Tarot type (no Omen Globe)
         for card in cards:
             assert card.ability.get("set") in ("Tarot", "Spectral"), (
-                f"Unexpected set {card.ability.get('set')!r} in Arcana pack card {card.center_key!r}"
+                f"Unexpected set {card.ability.get('set')!r} "
+                f"in Arcana pack card {card.center_key!r}"
             )
 
     def test_arcana_pack_normal_cards_are_tarots(self):
         """Without Omen Globe, Arcana pack generates only Tarots."""
         key = self._arcana_pack_key("normal")
-        rng = PseudoRandom("ARCANA_TAROT_ONLY")
+        PseudoRandom("ARCANA_TAROT_ONLY")
         gs = {
-            "has_showman": False, "used_jokers": {}, "banned_keys": set(),
-            "pool_flags": {}, "deck_enhancements": set(), "playing_card_count": 52,
-            "played_hand_types": set(), "shop_vouchers": set(), "used_vouchers": {},
-            "has_omen_globe": False, "edition_rate": 1.0,
-            "inflation": 0, "discount_percent": 0,
-            "booster_ante_scaling": False, "has_astronomer": False,
+            "has_showman": False,
+            "used_jokers": {},
+            "banned_keys": set(),
+            "pool_flags": {},
+            "deck_enhancements": set(),
+            "playing_card_count": 52,
+            "played_hand_types": set(),
+            "shop_vouchers": set(),
+            "used_vouchers": {},
+            "has_omen_globe": False,
+            "edition_rate": 1.0,
+            "inflation": 0,
+            "discount_percent": 0,
+            "booster_ante_scaling": False,
+            "has_astronomer": False,
         }
         # Run many times; without Omen Globe, no Spectral should appear
         all_tarot = True
@@ -471,12 +492,21 @@ class TestArcanaPack:
         """With Omen Globe (has_omen_globe=True), Spectrals can appear in Arcana packs."""
         key = self._arcana_pack_key("normal")
         gs = {
-            "has_showman": False, "used_jokers": {}, "banned_keys": set(),
-            "pool_flags": {}, "deck_enhancements": set(), "playing_card_count": 52,
-            "played_hand_types": set(), "shop_vouchers": set(), "used_vouchers": {},
-            "has_omen_globe": True, "edition_rate": 1.0,
-            "inflation": 0, "discount_percent": 0,
-            "booster_ante_scaling": False, "has_astronomer": False,
+            "has_showman": False,
+            "used_jokers": {},
+            "banned_keys": set(),
+            "pool_flags": {},
+            "deck_enhancements": set(),
+            "playing_card_count": 52,
+            "played_hand_types": set(),
+            "shop_vouchers": set(),
+            "used_vouchers": {},
+            "has_omen_globe": True,
+            "edition_rate": 1.0,
+            "inflation": 0,
+            "discount_percent": 0,
+            "booster_ante_scaling": False,
+            "has_astronomer": False,
         }
         # Run many times until a Spectral appears (20% chance per slot)
         found_spectral = False
@@ -517,12 +547,21 @@ class TestStandardPack:
         key = self._standard_pack_key()
         rng = PseudoRandom("STANDARD_BASIC")
         gs = {
-            "has_showman": False, "used_jokers": {}, "banned_keys": set(),
-            "pool_flags": {}, "deck_enhancements": set(), "playing_card_count": 52,
-            "played_hand_types": set(), "shop_vouchers": set(), "used_vouchers": {},
-            "has_omen_globe": False, "edition_rate": 1.0,
-            "inflation": 0, "discount_percent": 0,
-            "booster_ante_scaling": False, "has_astronomer": False,
+            "has_showman": False,
+            "used_jokers": {},
+            "banned_keys": set(),
+            "pool_flags": {},
+            "deck_enhancements": set(),
+            "playing_card_count": 52,
+            "played_hand_types": set(),
+            "shop_vouchers": set(),
+            "used_vouchers": {},
+            "has_omen_globe": False,
+            "edition_rate": 1.0,
+            "inflation": 0,
+            "discount_percent": 0,
+            "booster_ante_scaling": False,
+            "has_astronomer": False,
         }
         cards, choose = generate_pack_cards(key, rng, 1, gs)
         proto = BOOSTERS[key]
@@ -534,14 +573,24 @@ class TestStandardPack:
     def test_standard_pack_cards_have_valid_ranks_and_suits(self):
         key = self._standard_pack_key()
         from jackdaw.engine.data.enums import Rank, Suit
+
         rng = PseudoRandom("STANDARD_VALID")
         gs = {
-            "has_showman": False, "used_jokers": {}, "banned_keys": set(),
-            "pool_flags": {}, "deck_enhancements": set(), "playing_card_count": 52,
-            "played_hand_types": set(), "shop_vouchers": set(), "used_vouchers": {},
-            "has_omen_globe": False, "edition_rate": 1.0,
-            "inflation": 0, "discount_percent": 0,
-            "booster_ante_scaling": False, "has_astronomer": False,
+            "has_showman": False,
+            "used_jokers": {},
+            "banned_keys": set(),
+            "pool_flags": {},
+            "deck_enhancements": set(),
+            "playing_card_count": 52,
+            "played_hand_types": set(),
+            "shop_vouchers": set(),
+            "used_vouchers": {},
+            "has_omen_globe": False,
+            "edition_rate": 1.0,
+            "inflation": 0,
+            "discount_percent": 0,
+            "booster_ante_scaling": False,
+            "has_astronomer": False,
         }
         cards, _ = generate_pack_cards(key, rng, 1, gs)
         valid_suits = {s.value for s in Suit}
@@ -554,12 +603,21 @@ class TestStandardPack:
         """Over many runs, some Standard pack cards will have non-base enhancement."""
         key = self._standard_pack_key()
         gs = {
-            "has_showman": False, "used_jokers": {}, "banned_keys": set(),
-            "pool_flags": {}, "deck_enhancements": set(), "playing_card_count": 52,
-            "played_hand_types": set(), "shop_vouchers": set(), "used_vouchers": {},
-            "has_omen_globe": False, "edition_rate": 1.0,
-            "inflation": 0, "discount_percent": 0,
-            "booster_ante_scaling": False, "has_astronomer": False,
+            "has_showman": False,
+            "used_jokers": {},
+            "banned_keys": set(),
+            "pool_flags": {},
+            "deck_enhancements": set(),
+            "playing_card_count": 52,
+            "played_hand_types": set(),
+            "shop_vouchers": set(),
+            "used_vouchers": {},
+            "has_omen_globe": False,
+            "edition_rate": 1.0,
+            "inflation": 0,
+            "discount_percent": 0,
+            "booster_ante_scaling": False,
+            "has_astronomer": False,
         }
         enhanced = False
         for i in range(30):
@@ -577,12 +635,21 @@ class TestStandardPack:
         """Over many runs, some Standard pack cards will have seals."""
         key = self._standard_pack_key()
         gs = {
-            "has_showman": False, "used_jokers": {}, "banned_keys": set(),
-            "pool_flags": {}, "deck_enhancements": set(), "playing_card_count": 52,
-            "played_hand_types": set(), "shop_vouchers": set(), "used_vouchers": {},
-            "has_omen_globe": False, "edition_rate": 1.0,
-            "inflation": 0, "discount_percent": 0,
-            "booster_ante_scaling": False, "has_astronomer": False,
+            "has_showman": False,
+            "used_jokers": {},
+            "banned_keys": set(),
+            "pool_flags": {},
+            "deck_enhancements": set(),
+            "playing_card_count": 52,
+            "played_hand_types": set(),
+            "shop_vouchers": set(),
+            "used_vouchers": {},
+            "has_omen_globe": False,
+            "edition_rate": 1.0,
+            "inflation": 0,
+            "discount_percent": 0,
+            "booster_ante_scaling": False,
+            "has_astronomer": False,
         }
         sealed = False
         for i in range(50):
@@ -616,14 +683,23 @@ class TestCelestialPackTelescope:
         key = self._celestial_pack_key()
         rng = PseudoRandom("TELESCOPE_FLUSH")
         gs = {
-            "has_showman": False, "used_jokers": {}, "banned_keys": set(),
-            "pool_flags": {}, "deck_enhancements": set(), "playing_card_count": 52,
-            "played_hand_types": set(), "shop_vouchers": set(), "used_vouchers": {},
-            "has_omen_globe": False, "has_telescope": True,
+            "has_showman": False,
+            "used_jokers": {},
+            "banned_keys": set(),
+            "pool_flags": {},
+            "deck_enhancements": set(),
+            "playing_card_count": 52,
+            "played_hand_types": set(),
+            "shop_vouchers": set(),
+            "used_vouchers": {},
+            "has_omen_globe": False,
+            "has_telescope": True,
             "most_played_hand": "Flush",
             "edition_rate": 1.0,
-            "inflation": 0, "discount_percent": 0,
-            "booster_ante_scaling": False, "has_astronomer": False,
+            "inflation": 0,
+            "discount_percent": 0,
+            "booster_ante_scaling": False,
+            "has_astronomer": False,
         }
         cards, _ = generate_pack_cards(key, rng, 1, gs)
         # First card should be Jupiter (Flush planet)
@@ -636,14 +712,23 @@ class TestCelestialPackTelescope:
         key = self._celestial_pack_key()
         rng = PseudoRandom("TELESCOPE_PAIR")
         gs = {
-            "has_showman": False, "used_jokers": {}, "banned_keys": set(),
-            "pool_flags": {}, "deck_enhancements": set(), "playing_card_count": 52,
-            "played_hand_types": set(), "shop_vouchers": set(), "used_vouchers": {},
-            "has_omen_globe": False, "has_telescope": True,
+            "has_showman": False,
+            "used_jokers": {},
+            "banned_keys": set(),
+            "pool_flags": {},
+            "deck_enhancements": set(),
+            "playing_card_count": 52,
+            "played_hand_types": set(),
+            "shop_vouchers": set(),
+            "used_vouchers": {},
+            "has_omen_globe": False,
+            "has_telescope": True,
             "most_played_hand": "Pair",
             "edition_rate": 1.0,
-            "inflation": 0, "discount_percent": 0,
-            "booster_ante_scaling": False, "has_astronomer": False,
+            "inflation": 0,
+            "discount_percent": 0,
+            "booster_ante_scaling": False,
+            "has_astronomer": False,
         }
         cards, _ = generate_pack_cards(key, rng, 1, gs)
         assert cards[0].center_key == "c_mercury", (
@@ -654,13 +739,22 @@ class TestCelestialPackTelescope:
         """Without Telescope, first card is RNG-drawn (not forced to any hand type)."""
         key = self._celestial_pack_key()
         gs_base = {
-            "has_showman": False, "used_jokers": {}, "banned_keys": set(),
-            "pool_flags": {}, "deck_enhancements": set(), "playing_card_count": 52,
-            "played_hand_types": set(), "shop_vouchers": set(), "used_vouchers": {},
-            "has_omen_globe": False, "has_telescope": False,
+            "has_showman": False,
+            "used_jokers": {},
+            "banned_keys": set(),
+            "pool_flags": {},
+            "deck_enhancements": set(),
+            "playing_card_count": 52,
+            "played_hand_types": set(),
+            "shop_vouchers": set(),
+            "used_vouchers": {},
+            "has_omen_globe": False,
+            "has_telescope": False,
             "edition_rate": 1.0,
-            "inflation": 0, "discount_percent": 0,
-            "booster_ante_scaling": False, "has_astronomer": False,
+            "inflation": 0,
+            "discount_percent": 0,
+            "booster_ante_scaling": False,
+            "has_astronomer": False,
         }
         # Run enough times to confirm we DON'T always get c_jupiter for Flush
         planets_seen = set()
@@ -682,11 +776,19 @@ class TestResolveCreateDescriptors:
 
     def _base_gs(self) -> dict[str, Any]:
         return {
-            "has_showman": False, "used_jokers": {}, "banned_keys": set(),
-            "pool_flags": {}, "deck_enhancements": set(), "playing_card_count": 52,
-            "played_hand_types": set(), "shop_vouchers": set(), "used_vouchers": {},
-            "inflation": 0, "discount_percent": 0,
-            "booster_ante_scaling": False, "has_astronomer": False,
+            "has_showman": False,
+            "used_jokers": {},
+            "banned_keys": set(),
+            "pool_flags": {},
+            "deck_enhancements": set(),
+            "playing_card_count": 52,
+            "played_hand_types": set(),
+            "shop_vouchers": set(),
+            "used_vouchers": {},
+            "inflation": 0,
+            "discount_percent": 0,
+            "booster_ante_scaling": False,
+            "has_astronomer": False,
         }
 
     def test_high_priestess_creates_two_planets(self):
@@ -706,8 +808,7 @@ class TestResolveCreateDescriptors:
         rng = PseudoRandom("HP_RESOLVE")
         count = descriptor.get("count", 1)
         created = [
-            resolve_create_descriptor(descriptor, rng, 1, self._base_gs())
-            for _ in range(count)
+            resolve_create_descriptor(descriptor, rng, 1, self._base_gs()) for _ in range(count)
         ]
         assert len(created) == 2
         for planet_card in created:

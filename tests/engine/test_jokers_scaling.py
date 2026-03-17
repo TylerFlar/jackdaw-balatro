@@ -11,7 +11,7 @@ import pytest
 from jackdaw.engine.blind import Blind
 from jackdaw.engine.card import Card, reset_sort_id_counter
 from jackdaw.engine.hand_levels import HandLevels
-from jackdaw.engine.jokers import JokerContext, JokerResult, calculate_joker
+from jackdaw.engine.jokers import JokerContext, calculate_joker
 from jackdaw.engine.rng import PseudoRandom
 from jackdaw.engine.scoring import score_hand
 

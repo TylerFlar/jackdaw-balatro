@@ -24,6 +24,7 @@ def _reset_sort_ids():
 # CardBase
 # ============================================================================
 
+
 class TestCardBase:
     """CardBase: playing card identity with computed numeric values."""
 
@@ -66,6 +67,7 @@ class TestCardBase:
 # Card creation and sort_id
 # ============================================================================
 
+
 class TestCardCreation:
     def test_sort_id_auto_increments(self):
         c1, c2, c3 = Card(), Card(), Card()
@@ -92,6 +94,7 @@ class TestCardCreation:
 # ============================================================================
 # set_ability — string key API (primary interface)
 # ============================================================================
+
 
 class TestSetAbilityByKey:
     """set_ability(center_key: str) looks up P_CENTERS and populates ability."""
@@ -160,6 +163,7 @@ class TestSetAbilityByKey:
 # set_ability — special post-init fields (card.lua:308-337)
 # ============================================================================
 
+
 class TestPostInitFields:
     """Joker-specific fields set after the main ability assignment."""
 
@@ -199,6 +203,7 @@ class TestPostInitFields:
 # ============================================================================
 # Deep copy isolation
 # ============================================================================
+
 
 class TestDeepCopyIsolation:
     """Mutating one card's extra must not affect another card or the prototype."""
@@ -245,15 +250,22 @@ class TestDeepCopyIsolation:
 # set_ability — dict API (backward compat)
 # ============================================================================
 
+
 class TestSetAbilityByDict:
     """set_ability(dict) still works for custom/test centers."""
 
     def test_raw_dict(self):
         c = Card()
-        c.set_ability({
-            "key": "test_joker", "name": "Test", "set": "Joker",
-            "effect": "Mult", "config": {"mult": 7}, "cost": 3,
-        })
+        c.set_ability(
+            {
+                "key": "test_joker",
+                "name": "Test",
+                "set": "Joker",
+                "effect": "Mult",
+                "config": {"mult": 7},
+                "cost": 3,
+            }
+        )
         assert c.ability["name"] == "Test"
         assert c.ability["mult"] == 7
         assert c.center_key == "test_joker"
@@ -261,17 +273,22 @@ class TestSetAbilityByDict:
 
     def test_consumeable_config_ref(self):
         c = Card()
-        c.set_ability({
-            "key": "c_magician", "name": "The Magician", "set": "Tarot",
-            "config": {"mod_conv": "m_lucky", "max_highlighted": 2},
-            "consumeable": True,
-        })
+        c.set_ability(
+            {
+                "key": "c_magician",
+                "name": "The Magician",
+                "set": "Tarot",
+                "config": {"mod_conv": "m_lucky", "max_highlighted": 2},
+                "consumeable": True,
+            }
+        )
         assert c.ability["consumeable"]["mod_conv"] == "m_lucky"
 
 
 # ============================================================================
 # perma_bonus preservation
 # ============================================================================
+
 
 class TestPermaBonus:
     def test_preserved_across_set_ability(self):
@@ -296,6 +313,7 @@ class TestPermaBonus:
 # ============================================================================
 # Scoring methods
 # ============================================================================
+
 
 class TestIsFace:
     """Card.is_face() matching card.lua:964."""
@@ -463,6 +481,7 @@ class TestIsSuit:
     def test_suit_enum_input(self):
         """Accepts Suit enum as well as string."""
         from jackdaw.engine.data.enums import Suit
+
         c = Card()
         c.set_base("S_A", "Spades", "Ace")
         c.set_ability("c_base")
@@ -502,6 +521,7 @@ class TestScoringMethods:
 # Stickers
 # ============================================================================
 
+
 class TestStickers:
     def test_set_eternal(self):
         c = Card()
@@ -528,6 +548,7 @@ class TestStickers:
 # ============================================================================
 # set_cost
 # ============================================================================
+
 
 class TestSetCost:
     """Card.set_cost() matching card.lua:369."""
@@ -670,20 +691,30 @@ class TestSetCost:
     def test_astronomer_planet(self):
         """Astronomer makes planet cards cost 0."""
         c = Card()
-        c.set_ability({
-            "key": "c_pluto", "name": "Pluto", "set": "Planet",
-            "config": {"hand_type": "High Card"}, "cost": 3,
-        })
+        c.set_ability(
+            {
+                "key": "c_pluto",
+                "name": "Pluto",
+                "set": "Planet",
+                "config": {"hand_type": "High Card"},
+                "cost": 3,
+            }
+        )
         c.set_cost(has_astronomer=True)
         assert c.cost == 0
 
     def test_astronomer_celestial_booster(self):
         """Astronomer makes celestial boosters cost 0."""
         c = Card()
-        c.set_ability({
-            "key": "p_celestial_normal_1", "name": "Celestial Pack",
-            "set": "Booster", "config": {}, "cost": 4,
-        })
+        c.set_ability(
+            {
+                "key": "p_celestial_normal_1",
+                "name": "Celestial Pack",
+                "set": "Booster",
+                "config": {},
+                "cost": 4,
+            }
+        )
         c.set_cost(has_astronomer=True)
         assert c.cost == 0
 
@@ -708,10 +739,15 @@ class TestSetCost:
     def test_booster_ante_scaling(self):
         """Booster cost += ante - 1 when modifier active."""
         c = Card()
-        c.set_ability({
-            "key": "p_arcana_normal_1", "name": "Arcana Pack",
-            "set": "Booster", "config": {}, "cost": 4,
-        })
+        c.set_ability(
+            {
+                "key": "p_arcana_normal_1",
+                "name": "Arcana Pack",
+                "set": "Booster",
+                "config": {},
+                "cost": 4,
+            }
+        )
         c.set_cost(ante=5, booster_ante_scaling=True)
         # base formula: floor((4 + 0 + 0.5) * 100/100) = 4
         # then + (5 - 1) = 4 + 4 = 8

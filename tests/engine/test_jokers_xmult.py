@@ -21,9 +21,19 @@ def _reset():
 
 _SL = {"Hearts": "H", "Diamonds": "D", "Clubs": "C", "Spades": "S"}
 _RL = {
-    "2": "2", "3": "3", "4": "4", "5": "5", "6": "6", "7": "7",
-    "8": "8", "9": "9", "10": "T", "Jack": "J", "Queen": "Q",
-    "King": "K", "Ace": "A",
+    "2": "2",
+    "3": "3",
+    "4": "4",
+    "5": "5",
+    "6": "6",
+    "7": "7",
+    "8": "8",
+    "9": "9",
+    "10": "T",
+    "Jack": "J",
+    "Queen": "Q",
+    "King": "K",
+    "Ace": "A",
 }
 
 
@@ -44,6 +54,7 @@ def _joker(key: str, **ability_kw) -> Card:
 # ============================================================================
 # Campfire: +0.25 xMult per card sold, reset on boss
 # ============================================================================
+
 
 class TestCampfire:
     def _make(self):
@@ -96,6 +107,7 @@ class TestCampfire:
 # Hologram: +0.25 xMult per card added to deck
 # ============================================================================
 
+
 class TestHologram:
     def _make(self):
         return _joker("j_hologram", x_mult=1, extra=0.25)
@@ -117,6 +129,7 @@ class TestHologram:
 # ============================================================================
 # Constellation: +0.1 xMult per Planet card used
 # ============================================================================
+
 
 class TestConstellation:
     def _make(self):
@@ -156,6 +169,7 @@ class TestConstellation:
 # Glass Joker: +0.75 xMult per Glass Card destroyed
 # ============================================================================
 
+
 class TestGlassJoker:
     def _make(self):
         return _joker("j_glass", x_mult=1, extra=0.75)
@@ -186,6 +200,7 @@ class TestGlassJoker:
 # ============================================================================
 # Caino: +1.0 xMult per face card destroyed
 # ============================================================================
+
 
 class TestCaino:
     def _make(self):
@@ -239,6 +254,7 @@ class TestCaino:
 # Vampire: +0.1 xMult per enhancement stripped
 # ============================================================================
 
+
 class TestVampire:
     def _make(self):
         return _joker("j_vampire", x_mult=1, extra=0.1)
@@ -247,7 +263,8 @@ class TestVampire:
         j = self._make()
         bonus = _card("Hearts", "5", enhancement="m_bonus")
         ctx = JokerContext(
-            individual_hand_end=True, scoring_hand=[bonus],
+            individual_hand_end=True,
+            scoring_hand=[bonus],
         )
         calculate_joker(j, ctx)
         assert j.ability["x_mult"] == pytest.approx(1.1)
@@ -258,7 +275,8 @@ class TestVampire:
         bonus = _card("Hearts", "5", enhancement="m_bonus")
         mult_c = _card("Spades", "3", enhancement="m_mult")
         ctx = JokerContext(
-            individual_hand_end=True, scoring_hand=[bonus, mult_c],
+            individual_hand_end=True,
+            scoring_hand=[bonus, mult_c],
         )
         calculate_joker(j, ctx)
         assert j.ability["x_mult"] == pytest.approx(1.2)
@@ -267,7 +285,8 @@ class TestVampire:
         j = self._make()
         base = _card("Hearts", "5")
         ctx = JokerContext(
-            individual_hand_end=True, scoring_hand=[base],
+            individual_hand_end=True,
+            scoring_hand=[base],
         )
         calculate_joker(j, ctx)
         assert j.ability["x_mult"] == 1
@@ -278,7 +297,8 @@ class TestVampire:
         for _ in range(3):
             enhanced = _card("Hearts", "5", enhancement="m_bonus")
             ctx = JokerContext(
-                individual_hand_end=True, scoring_hand=[enhanced],
+                individual_hand_end=True,
+                scoring_hand=[enhanced],
             )
             calculate_joker(j, ctx)
         assert j.ability["x_mult"] == pytest.approx(1.3)
@@ -288,7 +308,8 @@ class TestVampire:
         bonus = _card("Hearts", "5", enhancement="m_bonus")
         bonus.debuff = True
         ctx = JokerContext(
-            individual_hand_end=True, scoring_hand=[bonus],
+            individual_hand_end=True,
+            scoring_hand=[bonus],
         )
         calculate_joker(j, ctx)
         assert j.ability["x_mult"] == 1
@@ -297,6 +318,7 @@ class TestVampire:
 # ============================================================================
 # Obelisk: +0.2 xMult per non-most-played hand, reset on most-played
 # ============================================================================
+
 
 class TestObelisk:
     def _make(self):
@@ -365,6 +387,7 @@ class TestObelisk:
 # Madness: +0.5 xMult per non-boss blind, signals joker destruction
 # ============================================================================
 
+
 class TestMadness:
     def _make(self):
         return _joker("j_madness", x_mult=1, extra=0.5)
@@ -390,6 +413,7 @@ class TestMadness:
 # ============================================================================
 # Hit the Road: +0.5 xMult per Jack discarded, reset at end of round
 # ============================================================================
+
 
 class TestHitTheRoad:
     def _make(self):
@@ -425,6 +449,7 @@ class TestHitTheRoad:
 # Throwback: xMult = 1 + 0.25 * total_blinds_skipped (formula-based)
 # ============================================================================
 
+
 class TestThrowback:
     def test_zero_skips(self):
         j = _joker("j_throwback", extra=0.25)
@@ -450,10 +475,13 @@ class TestThrowback:
 # Yorick: xMult +1 every 23 discards
 # ============================================================================
 
+
 class TestYorick:
     def _make(self):
         return _joker(
-            "j_yorick", x_mult=1, yorick_discards=23,
+            "j_yorick",
+            x_mult=1,
+            yorick_discards=23,
             extra={"xmult": 1, "discards": 23},
         )
 
@@ -490,6 +518,7 @@ class TestYorick:
 # Ceremonial Dagger: +2× right neighbor's sell_cost as mult
 # ============================================================================
 
+
 class TestCeremonialDagger:
     def _make(self):
         return _joker("j_ceremonial", mult=0)
@@ -500,7 +529,8 @@ class TestCeremonialDagger:
         target.sell_cost = 3
         jokers = [dagger, target]
         ctx = JokerContext(
-            setting_blind=True, jokers=jokers,
+            setting_blind=True,
+            jokers=jokers,
             blind=Blind.create("bl_small", ante=1),
         )
         result = calculate_joker(dagger, ctx)
@@ -512,7 +542,8 @@ class TestCeremonialDagger:
         dagger = self._make()
         jokers = [dagger]
         ctx = JokerContext(
-            setting_blind=True, jokers=jokers,
+            setting_blind=True,
+            jokers=jokers,
             blind=Blind.create("bl_small", ante=1),
         )
         assert calculate_joker(dagger, ctx) is None
@@ -524,7 +555,8 @@ class TestCeremonialDagger:
         target.eternal = True
         jokers = [dagger, target]
         ctx = JokerContext(
-            setting_blind=True, jokers=jokers,
+            setting_blind=True,
+            jokers=jokers,
             blind=Blind.create("bl_small", ante=1),
         )
         assert calculate_joker(dagger, ctx) is None
@@ -535,7 +567,8 @@ class TestCeremonialDagger:
         t1.sell_cost = 2
         jokers = [dagger, t1]
         ctx = JokerContext(
-            setting_blind=True, jokers=jokers,
+            setting_blind=True,
+            jokers=jokers,
             blind=Blind.create("bl_small", ante=1),
         )
         calculate_joker(dagger, ctx)
@@ -546,7 +579,8 @@ class TestCeremonialDagger:
         t2.sell_cost = 5
         jokers2 = [dagger, t2]
         ctx2 = JokerContext(
-            setting_blind=True, jokers=jokers2,
+            setting_blind=True,
+            jokers=jokers2,
             blind=Blind.create("bl_small", ante=1),
         )
         calculate_joker(dagger, ctx2)

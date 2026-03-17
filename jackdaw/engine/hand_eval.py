@@ -212,10 +212,7 @@ def find_joker(name: str, jokers: list[Card], *, non_debuff: bool = False) -> li
     Returns:
         List of matching (non-debuffed by default) joker Cards.
     """
-    return [
-        j for j in jokers
-        if j.ability.get("name") == name and (non_debuff or not j.debuff)
-    ]
+    return [j for j in jokers if j.ability.get("name") == name and (non_debuff or not j.debuff)]
 
 
 def get_hand_eval_flags(jokers: list[Card]) -> dict[str, bool]:

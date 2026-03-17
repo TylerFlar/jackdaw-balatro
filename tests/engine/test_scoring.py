@@ -17,9 +17,19 @@ def _reset():
 def _playing_card(suit: str, rank: str, enhancement: str = "c_base") -> Card:
     sl = {"Hearts": "H", "Diamonds": "D", "Clubs": "C", "Spades": "S"}
     rl = {
-        "2": "2", "3": "3", "4": "4", "5": "5", "6": "6", "7": "7",
-        "8": "8", "9": "9", "10": "T", "Jack": "J", "Queen": "Q",
-        "King": "K", "Ace": "A",
+        "2": "2",
+        "3": "3",
+        "4": "4",
+        "5": "5",
+        "6": "6",
+        "7": "7",
+        "8": "8",
+        "9": "9",
+        "10": "T",
+        "Jack": "J",
+        "Queen": "Q",
+        "King": "K",
+        "Ace": "A",
     }
     c = Card()
     c.set_base(f"{sl[suit]}_{rl[rank]}", suit, rank)
@@ -30,6 +40,7 @@ def _playing_card(suit: str, rank: str, enhancement: str = "c_base") -> Card:
 # ============================================================================
 # Played cards (cardarea="play")
 # ============================================================================
+
 
 class TestPlayedCards:
     """eval_card with cardarea='play' — scored playing cards."""
@@ -141,6 +152,7 @@ class TestPlayedCards:
 # Held-in-hand cards (cardarea="hand")
 # ============================================================================
 
+
 class TestHeldCards:
     """eval_card with cardarea='hand' — cards held but not played."""
 
@@ -169,6 +181,7 @@ class TestHeldCards:
 # ============================================================================
 # Repetition-only mode
 # ============================================================================
+
 
 class TestRepetitionOnly:
     """eval_card with repetition_only=True — only checks seals."""
@@ -217,6 +230,7 @@ class TestRepetitionOnly:
 # Edition-only mode (for joker area)
 # ============================================================================
 
+
 class TestEditionOnly:
     """eval_card with cardarea='jokers' and edition=True."""
 
@@ -264,6 +278,7 @@ class TestEditionOnly:
 # ============================================================================
 # Empty / default context
 # ============================================================================
+
 
 class TestDefaultContext:
     def test_no_context(self):

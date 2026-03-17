@@ -20,11 +20,8 @@ from __future__ import annotations
 import copy
 from typing import Any
 
-import pytest
-
 from jackdaw.engine.back import Back
 from jackdaw.engine.stakes import DEFAULT_STARTING_PARAMS, apply_stake_modifiers
-
 
 # ---------------------------------------------------------------------------
 # Helpers

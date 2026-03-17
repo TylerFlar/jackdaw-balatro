@@ -123,8 +123,7 @@ def generate_for_case(seed: str, ante: int, *, first_shop: bool) -> dict:
 
 def main() -> None:
     cases = [
-        generate_for_case(tc["seed"], tc["ante"], first_shop=tc["first_shop"])
-        for tc in TEST_CASES
+        generate_for_case(tc["seed"], tc["ante"], first_shop=tc["first_shop"]) for tc in TEST_CASES
     ]
 
     output = {

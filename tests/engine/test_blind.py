@@ -18,6 +18,7 @@ from jackdaw.engine.rng import PseudoRandom
 # Small Blind
 # ============================================================================
 
+
 class TestSmallBlind:
     def test_ante_1_scaling_1(self):
         b = Blind.create("bl_small", ante=1)
@@ -49,6 +50,7 @@ class TestSmallBlind:
 # Big Blind
 # ============================================================================
 
+
 class TestBigBlind:
     def test_ante_1_scaling_1(self):
         b = Blind.create("bl_big", ante=1)
@@ -68,6 +70,7 @@ class TestBigBlind:
 # ============================================================================
 # Boss Blinds
 # ============================================================================
+
 
 class TestBossBlind:
     def test_the_hook(self):
@@ -106,6 +109,7 @@ class TestBossBlind:
 # Chip target calculation across antes and scaling
 # ============================================================================
 
+
 class TestChipTargets:
     @pytest.mark.parametrize("ante", range(1, 9))
     def test_small_blind_all_antes_scaling_1(self, ante: int):
@@ -138,6 +142,7 @@ class TestChipTargets:
 # Plasma Deck (ante_scaling = 2.0)
 # ============================================================================
 
+
 class TestPlasmaScaling:
     def test_small_blind_plasma(self):
         b = Blind.create("bl_small", ante=1, ante_scaling=2.0)
@@ -156,6 +161,7 @@ class TestPlasmaScaling:
 # No blind reward (stake modifier)
 # ============================================================================
 
+
 class TestNoBlindReward:
     def test_small_blind_no_reward(self):
         b = Blind.create("bl_small", ante=1, no_blind_reward=True)
@@ -173,6 +179,7 @@ class TestNoBlindReward:
 # ============================================================================
 # Debuff config
 # ============================================================================
+
 
 class TestDebuffConfig:
     def test_suit_debuff(self):
@@ -209,6 +216,7 @@ class TestDebuffConfig:
 # Empty blind
 # ============================================================================
 
+
 class TestEmptyBlind:
     def test_empty(self):
         b = Blind.empty()
@@ -221,6 +229,7 @@ class TestEmptyBlind:
 # ============================================================================
 # Boss state initialization
 # ============================================================================
+
 
 class TestBossState:
     def test_initial_state(self):
@@ -247,12 +256,23 @@ class TestBossState:
 # debuff_card
 # ============================================================================
 
+
 def _card(suit: str, rank: str, enhancement: str = "c_base") -> Card:
     sl = {"Hearts": "H", "Diamonds": "D", "Clubs": "C", "Spades": "S"}
     rl = {
-        "2": "2", "3": "3", "4": "4", "5": "5", "6": "6", "7": "7",
-        "8": "8", "9": "9", "10": "T", "Jack": "J", "Queen": "Q",
-        "King": "K", "Ace": "A",
+        "2": "2",
+        "3": "3",
+        "4": "4",
+        "5": "5",
+        "6": "6",
+        "7": "7",
+        "8": "8",
+        "9": "9",
+        "10": "T",
+        "Jack": "J",
+        "Queen": "Q",
+        "King": "K",
+        "Ace": "A",
     }
     c = Card()
     c.set_base(f"{sl[suit]}_{rl[rank]}", suit, rank)
@@ -460,6 +480,7 @@ class TestDebuffCardClearsDebuff:
 # debuff_hand
 # ============================================================================
 
+
 class TestDebuffHandEye:
     """The Eye: each hand type can only be used once."""
 
@@ -548,11 +569,24 @@ class TestDebuffHandPsychic:
 class TestDebuffHandNonBlocking:
     """Bosses that don't block hands via debuff_hand."""
 
-    @pytest.mark.parametrize("key", [
-        "bl_hook", "bl_wall", "bl_flint", "bl_tooth", "bl_water",
-        "bl_needle", "bl_serpent", "bl_manacle", "bl_fish",
-        "bl_wheel", "bl_house", "bl_mark", "bl_pillar",
-    ])
+    @pytest.mark.parametrize(
+        "key",
+        [
+            "bl_hook",
+            "bl_wall",
+            "bl_flint",
+            "bl_tooth",
+            "bl_water",
+            "bl_needle",
+            "bl_serpent",
+            "bl_manacle",
+            "bl_fish",
+            "bl_wheel",
+            "bl_house",
+            "bl_mark",
+            "bl_pillar",
+        ],
+    )
     def test_non_blocking_bosses(self, key: str):
         b = Blind.create(key, ante=1)
         assert b.debuff_hand([], {}, "Pair") is False
@@ -565,6 +599,7 @@ class TestDebuffHandNonBlocking:
 # ============================================================================
 # modify_hand
 # ============================================================================
+
 
 class TestModifyHand:
     """Blind.modify_hand: The Flint halves chips and mult."""
@@ -686,6 +721,7 @@ class TestPressPlayOthers:
 # drawn_to_hand
 # ============================================================================
 
+
 class TestDrawnToHandBell:
     """Cerulean Bell: force-select a random card."""
 
@@ -713,6 +749,7 @@ class TestDrawnToHandCrimsonHeart:
         reset_sort_id_counter()
         b = Blind.create("bl_final_heart", ante=1)
         from jackdaw.engine.card_factory import create_joker
+
         jokers = [create_joker("j_joker"), create_joker("j_greedy_joker")]
         rng = PseudoRandom("TESTSEED")
         result = b.drawn_to_hand([], joker_cards=jokers, rng=rng)
@@ -725,6 +762,7 @@ class TestDrawnToHandCrimsonHeart:
 # ============================================================================
 # stay_flipped
 # ============================================================================
+
 
 class TestStayFlipped:
     def test_the_house_first_hand(self):
@@ -767,6 +805,7 @@ class TestStayFlipped:
 # ============================================================================
 # disable
 # ============================================================================
+
 
 class TestDisable:
     def test_sets_disabled(self):
@@ -822,6 +861,7 @@ class TestDisable:
 # ============================================================================
 # get_new_boss / get_ante_blinds
 # ============================================================================
+
 
 class TestGetNewBoss:
     """Boss blind selection matching common_events.lua:2338."""
@@ -900,9 +940,7 @@ class TestGetNewBoss:
         for _ in range(20):
             boss = get_new_boss(7, bosses_used, rng, win_ante=8)
             proto = ALL_BLINDS[boss]
-            assert not proto.boss.get("showdown"), (
-                f"{boss} is showdown but appeared at ante 7"
-            )
+            assert not proto.boss.get("showdown"), f"{boss} is showdown but appeared at ante 7"
 
     def test_banned_keys_excluded(self):
         bosses_used = {k: 0 for k in ALL_BLINDS if ALL_BLINDS[k].boss}

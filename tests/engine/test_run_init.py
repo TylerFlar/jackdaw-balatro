@@ -33,7 +33,6 @@ from jackdaw.engine.run_init import (
     start_round,
 )
 
-
 # ---------------------------------------------------------------------------
 # get_starting_params
 # ---------------------------------------------------------------------------
@@ -69,25 +68,63 @@ class TestInitGameObject:
     def test_top_level_keys(self):
         gs = init_game_object()
         expected = {
-            "won", "round_scores", "joker_usage", "consumeable_usage",
-            "hand_usage", "last_tarot_planet", "win_ante", "stake",
-            "modifiers", "starting_params", "banned_keys", "round",
-            "probabilities", "bosses_used", "pseudorandom",
-            "starting_deck_size", "ecto_minus", "pack_size", "skips",
-            "STOP_USE", "edition_rate", "joker_rate", "tarot_rate",
-            "planet_rate", "spectral_rate", "playing_card_rate",
-            "consumeable_buffer", "joker_buffer", "discount_percent",
-            "interest_cap", "interest_amount", "inflation",
-            "hands_played", "unused_discards", "perishable_rounds",
-            "rental_rate", "blind", "chips", "dollars", "max_jokers",
-            "bankrupt_at", "current_boss_streak", "base_reroll_cost",
-            "blind_on_deck", "sort", "previous_round", "tags",
-            "tag_tally", "pool_flags", "used_jokers", "used_vouchers",
-            "current_round", "round_resets", "round_bonus", "shop",
+            "won",
+            "round_scores",
+            "joker_usage",
+            "consumeable_usage",
+            "hand_usage",
+            "last_tarot_planet",
+            "win_ante",
+            "stake",
+            "modifiers",
+            "starting_params",
+            "banned_keys",
+            "round",
+            "probabilities",
+            "bosses_used",
+            "pseudorandom",
+            "starting_deck_size",
+            "ecto_minus",
+            "pack_size",
+            "skips",
+            "STOP_USE",
+            "edition_rate",
+            "joker_rate",
+            "tarot_rate",
+            "planet_rate",
+            "spectral_rate",
+            "playing_card_rate",
+            "consumeable_buffer",
+            "joker_buffer",
+            "discount_percent",
+            "interest_cap",
+            "interest_amount",
+            "inflation",
+            "hands_played",
+            "unused_discards",
+            "perishable_rounds",
+            "rental_rate",
+            "blind",
+            "chips",
+            "dollars",
+            "max_jokers",
+            "bankrupt_at",
+            "current_boss_streak",
+            "base_reroll_cost",
+            "blind_on_deck",
+            "sort",
+            "previous_round",
+            "tags",
+            "tag_tally",
+            "pool_flags",
+            "used_jokers",
+            "used_vouchers",
+            "current_round",
+            "round_resets",
+            "round_bonus",
+            "shop",
         }
-        assert expected.issubset(gs.keys()), (
-            f"Missing keys: {expected - gs.keys()}"
-        )
+        assert expected.issubset(gs.keys()), f"Missing keys: {expected - gs.keys()}"
 
     def test_defaults(self):
         gs = init_game_object()
@@ -338,19 +375,23 @@ class TestInitializeRunStructure:
 
     def test_rng_present(self, gs):
         from jackdaw.engine.rng import PseudoRandom
+
         assert isinstance(gs["rng"], PseudoRandom)
 
     def test_hand_levels_present(self, gs):
         from jackdaw.engine.hand_levels import HandLevels
+
         assert isinstance(gs["hand_levels"], HandLevels)
 
     def test_boss_is_valid(self, gs):
         from jackdaw.engine.data.prototypes import BLINDS
+
         boss = gs["round_resets"]["blind_choices"]["Boss"]
         assert boss in BLINDS
 
     def test_tags_are_valid(self, gs):
         from jackdaw.engine.data.prototypes import TAGS
+
         tags = gs["round_resets"]["blind_tags"]
         assert tags["Small"] in TAGS
         assert tags["Big"] in TAGS
@@ -436,6 +477,7 @@ class TestStartRound:
     def test_hand_levels_round_counts_reset(self):
         gs = initialize_run("b_red", 1, "START_ROUND")
         from jackdaw.engine.data.hands import HandType
+
         gs["hand_levels"].record_play(HandType.PAIR)
         assert gs["hand_levels"][HandType.PAIR].played_this_round == 1
         start_round(gs)
@@ -518,7 +560,7 @@ class TestFullChain:
 
         # Black Deck: -1 hand, +1 joker slot
         # Stake 8: -1 discard (from stake 5), all sticker flags
-        assert gs["current_round"]["hands_left"] == 3   # 4-1
+        assert gs["current_round"]["hands_left"] == 3  # 4-1
         assert gs["current_round"]["discards_left"] == 2  # 3-1
         assert gs["joker_slots"] == 6  # 5+1
         assert gs["modifiers"]["enable_eternals_in_shop"] is True

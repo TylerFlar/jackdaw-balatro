@@ -9,6 +9,7 @@ from jackdaw.engine.rng import PseudoRandom
 # Minimal RNG stub with scripted return values
 # ---------------------------------------------------------------------------
 
+
 class _RNG:
     """Minimal stub: returns pre-scripted values from random(), ignores key."""
 
@@ -24,6 +25,7 @@ class _RNG:
 # (rate=1.0, mod=1.0)
 # Thresholds: Neg >0.997, Poly >0.994, Holo >0.98, Foil >0.96
 # ---------------------------------------------------------------------------
+
 
 class TestNormalModeThresholds:
     """Verify each edition fires exactly at its boundary in normal mode."""
@@ -77,6 +79,7 @@ class TestNormalModeThresholds:
 # no_neg flag — Negative edition excluded
 # ---------------------------------------------------------------------------
 
+
 class TestNoNegFlag:
     """When no_neg=True, high rolls that would be Negative fall through to Poly."""
 
@@ -110,6 +113,7 @@ class TestNoNegFlag:
 # Guaranteed mode — ×25 multiplier
 # Thresholds: Neg >0.925, Poly >0.85, Holo >0.5, Foil >0.0
 # ---------------------------------------------------------------------------
+
 
 class TestGuaranteedMode:
     """guaranteed=True overrides rate/mod to give 50/35/7.5/7.5 distribution."""
@@ -163,6 +167,7 @@ class TestGuaranteedMode:
 # With rate=4: Foil >0.84, Holo >0.92, Poly >0.976
 # ---------------------------------------------------------------------------
 
+
 class TestRateParameter:
     """rate doubles edition chances for Foil/Holo/Poly but NOT Negative."""
 
@@ -213,6 +218,7 @@ class TestRateParameter:
 # mod parameter
 # ---------------------------------------------------------------------------
 
+
 class TestModParameter:
     """mod scales all thresholds including Negative."""
 
@@ -235,6 +241,7 @@ class TestModParameter:
 # Oracle test — real PseudoRandom seed
 # Verifies the function integrates correctly with the actual RNG
 # ---------------------------------------------------------------------------
+
 
 class TestOracleWithRealRng:
     """Integration test: verify poll_edition with a real PseudoRandom seed.
@@ -292,10 +299,7 @@ class TestOracleWithRealRng:
     def test_normal_mode_mostly_none(self):
         """With rate=1, ~96% of draws should be None over many trials."""
         rng = PseudoRandom("NORMAL_MODE_DIST")
-        none_count = sum(
-            1 for _ in range(1000)
-            if poll_edition("edi1sho", rng) is None
-        )
+        none_count = sum(1 for _ in range(1000) if poll_edition("edi1sho", rng) is None)
         # Expect ~960/1000; allow wide margin for small-sample variance
         assert none_count > 900, f"Expected ~960 Nones, got {none_count}"
 
@@ -304,12 +308,10 @@ class TestOracleWithRealRng:
         rng_r1 = PseudoRandom("RATE_COMPARE")
         rng_r4 = PseudoRandom("RATE_COMPARE")  # same seed, same stream
         editions_r1 = sum(
-            1 for _ in range(500)
-            if poll_edition("edi1sho", rng_r1, rate=1.0) is not None
+            1 for _ in range(500) if poll_edition("edi1sho", rng_r1, rate=1.0) is not None
         )
         editions_r4 = sum(
-            1 for _ in range(500)
-            if poll_edition("edi1sho", rng_r4, rate=4.0) is not None
+            1 for _ in range(500) if poll_edition("edi1sho", rng_r4, rate=4.0) is not None
         )
         # rate=4 has ~16% edition chance vs ~4% for rate=1
         assert editions_r4 > editions_r1, (

@@ -19,9 +19,19 @@ def _reset():
 def _playing_card(suit: str, rank: str, enhancement: str = "c_base") -> Card:
     sl = {"Hearts": "H", "Diamonds": "D", "Clubs": "C", "Spades": "S"}
     rl = {
-        "2": "2", "3": "3", "4": "4", "5": "5", "6": "6", "7": "7",
-        "8": "8", "9": "9", "10": "T", "Jack": "J", "Queen": "Q",
-        "King": "K", "Ace": "A",
+        "2": "2",
+        "3": "3",
+        "4": "4",
+        "5": "5",
+        "6": "6",
+        "7": "7",
+        "8": "8",
+        "9": "9",
+        "10": "T",
+        "Jack": "J",
+        "Queen": "Q",
+        "King": "K",
+        "Ace": "A",
     }
     c = Card()
     c.set_base(f"{sl[suit]}_{rl[rank]}", suit, rank)
@@ -32,6 +42,7 @@ def _playing_card(suit: str, rank: str, enhancement: str = "c_base") -> Card:
 # ============================================================================
 # get_chip_bonus
 # ============================================================================
+
 
 class TestGetChipBonus:
     def test_number_card(self):
@@ -85,6 +96,7 @@ class TestGetChipBonus:
 # get_chip_mult
 # ============================================================================
 
+
 class TestGetChipMult:
     def test_normal_card(self):
         c = _playing_card("Hearts", "5")
@@ -120,6 +132,7 @@ class TestGetChipMult:
 # get_chip_x_mult
 # ============================================================================
 
+
 class TestGetChipXMult:
     def test_normal_card(self):
         c = _playing_card("Hearts", "5")
@@ -151,6 +164,7 @@ class TestGetChipXMult:
 # get_chip_h_mult
 # ============================================================================
 
+
 class TestGetChipHMult:
     def test_normal_card(self):
         c = _playing_card("Hearts", "5")
@@ -166,6 +180,7 @@ class TestGetChipHMult:
 # ============================================================================
 # get_chip_h_x_mult
 # ============================================================================
+
 
 class TestGetChipHXMult:
     def test_normal_card(self):
@@ -186,6 +201,7 @@ class TestGetChipHXMult:
 # ============================================================================
 # get_edition
 # ============================================================================
+
 
 class TestGetEdition:
     def test_no_edition(self):
@@ -245,6 +261,7 @@ class TestGetEdition:
 # set_edition (updated to populate scoring values)
 # ============================================================================
 
+
 class TestSetEdition:
     def test_foil_populates_chips(self):
         c = Card()
@@ -289,6 +306,7 @@ class TestSetEdition:
 # get_p_dollars
 # ============================================================================
 
+
 class TestGetPDollars:
     def test_normal_card(self):
         c = _playing_card("Hearts", "5")
@@ -330,6 +348,7 @@ class TestGetPDollars:
 # ============================================================================
 # calculate_seal
 # ============================================================================
+
 
 class TestCalculateSeal:
     def test_red_seal_repetition(self):
@@ -376,6 +395,7 @@ class TestCalculateSeal:
 # ============================================================================
 # Combined scenarios
 # ============================================================================
+
 
 class TestCombinedScoring:
     def test_bonus_card_with_foil(self):

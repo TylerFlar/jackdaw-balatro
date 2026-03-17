@@ -59,8 +59,12 @@ def verify_outputs() -> None:
     """Print summary of extracted data files."""
     print("\n=== Verification ===")
     expected_files = [
-        "centers.json", "cards.json", "blinds.json",
-        "tags.json", "stakes.json", "seals.json",
+        "centers.json",
+        "cards.json",
+        "blinds.json",
+        "tags.json",
+        "stakes.json",
+        "seals.json",
     ]
 
     for fname in expected_files:

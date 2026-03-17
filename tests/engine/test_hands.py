@@ -68,8 +68,14 @@ class TestHandBaseData:
         ],
     )
     def test_base_values(
-        self, hand: HandType, s_chips: int, s_mult: int,
-        l_chips: int, l_mult: int, order: int, visible: bool,
+        self,
+        hand: HandType,
+        s_chips: int,
+        s_mult: int,
+        l_chips: int,
+        l_mult: int,
+        order: int,
+        visible: bool,
     ):
         d = HAND_BASE[hand]
         assert d.s_chips == s_chips

@@ -11,7 +11,7 @@ import pytest
 from jackdaw.engine.blind import Blind
 from jackdaw.engine.card import Card, reset_sort_id_counter
 from jackdaw.engine.hand_levels import HandLevels
-from jackdaw.engine.jokers import JokerContext, JokerResult, calculate_joker
+from jackdaw.engine.jokers import JokerContext, calculate_joker
 from jackdaw.engine.rng import PseudoRandom
 from jackdaw.engine.scoring import score_hand
 
@@ -23,9 +23,19 @@ def _reset():
 
 _SL = {"Hearts": "H", "Diamonds": "D", "Clubs": "C", "Spades": "S"}
 _RL = {
-    "2": "2", "3": "3", "4": "4", "5": "5", "6": "6", "7": "7",
-    "8": "8", "9": "9", "10": "T", "Jack": "J", "Queen": "Q",
-    "King": "K", "Ace": "A",
+    "2": "2",
+    "3": "3",
+    "4": "4",
+    "5": "5",
+    "6": "6",
+    "7": "7",
+    "8": "8",
+    "9": "9",
+    "10": "T",
+    "Jack": "J",
+    "Queen": "Q",
+    "King": "K",
+    "Ace": "A",
 }
 
 
@@ -51,6 +61,7 @@ def _small_blind() -> Blind:
 # Sock and Buskin: retrigger face cards
 # ============================================================================
 
+
 class TestSockAndBuskin:
     """j_sock_and_buskin: +1 retrigger for face cards scored."""
 
@@ -58,7 +69,9 @@ class TestSockAndBuskin:
         j = _joker("j_sock_and_buskin", extra=1)
         king = _card("Hearts", "King")
         ctx = JokerContext(
-            repetition=True, cardarea="play", other_card=king,
+            repetition=True,
+            cardarea="play",
+            other_card=king,
         )
         result = calculate_joker(j, ctx)
         assert result is not None
@@ -68,7 +81,9 @@ class TestSockAndBuskin:
         j = _joker("j_sock_and_buskin", extra=1)
         five = _card("Hearts", "5")
         ctx = JokerContext(
-            repetition=True, cardarea="play", other_card=five,
+            repetition=True,
+            cardarea="play",
+            other_card=five,
         )
         assert calculate_joker(j, ctx) is None
 
@@ -79,13 +94,19 @@ class TestSockAndBuskin:
         Total chips: 30 + 60 = 90, mult = 3. Score: 90 × 3 = 270.
         (Without retrigger: 30 + 30 = 60, score 180.)"""
         played = [
-            _card("Hearts", "King"), _card("Spades", "King"),
-            _card("Clubs", "King"), _card("Diamonds", "5"),
+            _card("Hearts", "King"),
+            _card("Spades", "King"),
+            _card("Clubs", "King"),
+            _card("Diamonds", "5"),
             _card("Hearts", "2"),
         ]
         j = _joker("j_sock_and_buskin", extra=1)
         result = score_hand(
-            played, [], [j], HandLevels(), _small_blind(),
+            played,
+            [],
+            [j],
+            HandLevels(),
+            _small_blind(),
             PseudoRandom("TEST"),
         )
         # 3 Kings score. Each King: 10 chips × 2 reps = 20 chips.
@@ -103,7 +124,11 @@ class TestSockAndBuskin:
         # Pareidolia needs to be a real joker that score_hand detects
         pareidolia.ability = {"name": "Pareidolia", "set": "Joker"}
         result = score_hand(
-            played, [], [sock, pareidolia], HandLevels(), _small_blind(),
+            played,
+            [],
+            [sock, pareidolia],
+            HandLevels(),
+            _small_blind(),
             PseudoRandom("TEST"),
         )
         # With Pareidolia, both 5s are "face cards" → retriggered
@@ -115,6 +140,7 @@ class TestSockAndBuskin:
 # Hanging Chad: +2 retriggers for FIRST scored card
 # ============================================================================
 
+
 class TestHangingChad:
     """j_hanging_chad: +2 retriggers for first scored card only."""
 
@@ -123,8 +149,10 @@ class TestHangingChad:
         first = _card("Hearts", "Ace")
         scoring = [first, _card("Spades", "Ace")]
         ctx = JokerContext(
-            repetition=True, cardarea="play",
-            other_card=first, scoring_hand=scoring,
+            repetition=True,
+            cardarea="play",
+            other_card=first,
+            scoring_hand=scoring,
         )
         result = calculate_joker(j, ctx)
         assert result is not None
@@ -136,8 +164,10 @@ class TestHangingChad:
         second = _card("Spades", "Ace")
         scoring = [first, second]
         ctx = JokerContext(
-            repetition=True, cardarea="play",
-            other_card=second, scoring_hand=scoring,
+            repetition=True,
+            cardarea="play",
+            other_card=second,
+            scoring_hand=scoring,
         )
         assert calculate_joker(j, ctx) is None
 
@@ -150,7 +180,11 @@ class TestHangingChad:
         played = [_card("Hearts", "Ace"), _card("Spades", "Ace")]
         j = _joker("j_hanging_chad", extra=2)
         result = score_hand(
-            played, [], [j], HandLevels(), _small_blind(),
+            played,
+            [],
+            [j],
+            HandLevels(),
+            _small_blind(),
             PseudoRandom("TEST"),
         )
         assert result.chips == 54.0
@@ -161,13 +195,15 @@ class TestHangingChad:
 # Dusk: retrigger all scored cards on last hand
 # ============================================================================
 
+
 class TestDusk:
     """j_dusk: +1 retrigger for all scored cards on last hand."""
 
     def test_unit_last_hand(self):
         j = _joker("j_dusk", extra=1)
         ctx = JokerContext(
-            repetition=True, cardarea="play",
+            repetition=True,
+            cardarea="play",
             other_card=_card("Hearts", "5"),
             hands_left=0,
         )
@@ -178,7 +214,8 @@ class TestDusk:
     def test_unit_not_last_hand(self):
         j = _joker("j_dusk", extra=1)
         ctx = JokerContext(
-            repetition=True, cardarea="play",
+            repetition=True,
+            cardarea="play",
             other_card=_card("Hearts", "5"),
             hands_left=2,
         )
@@ -191,7 +228,11 @@ class TestDusk:
         played = [_card("Hearts", "Ace"), _card("Spades", "Ace")]
         j = _joker("j_dusk", extra=1)
         result = score_hand(
-            played, [], [j], HandLevels(), _small_blind(),
+            played,
+            [],
+            [j],
+            HandLevels(),
+            _small_blind(),
             PseudoRandom("TEST"),
             game_state={"hands_left": 0},
         )
@@ -202,6 +243,7 @@ class TestDusk:
 # ============================================================================
 # Red Seal + Sock and Buskin: additive retriggers
 # ============================================================================
+
 
 class TestAdditiveRetriggers:
     """Red Seal (+1) + Sock and Buskin (+1) on face card = 3 total evals."""
@@ -219,7 +261,11 @@ class TestAdditiveRetriggers:
         played = [k1, k2]
         j = _joker("j_sock_and_buskin", extra=1)
         result = score_hand(
-            played, [], [j], HandLevels(), _small_blind(),
+            played,
+            [],
+            [j],
+            HandLevels(),
+            _small_blind(),
             PseudoRandom("TEST"),
         )
         # k1: Red Seal (+1 rep) + Sock (+1 rep, is face) = 3 total
@@ -232,13 +278,15 @@ class TestAdditiveRetriggers:
 # Seltzer: retrigger all, decrements, self-destructs
 # ============================================================================
 
+
 class TestSeltzer:
     """j_selzer: +1 retrigger for all cards. Decrements per hand."""
 
     def test_unit_always_retriggers(self):
         j = _joker("j_selzer", extra=10)
         ctx = JokerContext(
-            repetition=True, cardarea="play",
+            repetition=True,
+            cardarea="play",
             other_card=_card("Hearts", "5"),
         )
         result = calculate_joker(j, ctx)
@@ -273,7 +321,11 @@ class TestSeltzer:
         played = [_card("Hearts", "Ace"), _card("Spades", "Ace")]
         j = _joker("j_selzer", extra=10)
         result = score_hand(
-            played, [], [j], HandLevels(), _small_blind(),
+            played,
+            [],
+            [j],
+            HandLevels(),
+            _small_blind(),
             PseudoRandom("TEST"),
         )
         assert result.chips == 54.0
@@ -285,13 +337,15 @@ class TestSeltzer:
 # Mime: retrigger held cards
 # ============================================================================
 
+
 class TestMime:
     """j_mime: +1 retrigger for held cards."""
 
     def test_unit_held_card(self):
         j = _joker("j_mime", extra=1)
         ctx = JokerContext(
-            repetition=True, cardarea="hand",
+            repetition=True,
+            cardarea="hand",
             other_card=_card("Hearts", "5"),
         )
         result = calculate_joker(j, ctx)
@@ -301,7 +355,8 @@ class TestMime:
     def test_unit_play_area_no_effect(self):
         j = _joker("j_mime", extra=1)
         ctx = JokerContext(
-            repetition=True, cardarea="play",
+            repetition=True,
+            cardarea="play",
             other_card=_card("Hearts", "5"),
         )
         assert calculate_joker(j, ctx) is None
@@ -315,7 +370,11 @@ class TestMime:
         held = [_card("Clubs", "3", enhancement="m_steel")]
         j = _joker("j_mime", extra=1)
         result = score_hand(
-            played, held, [j], HandLevels(), _small_blind(),
+            played,
+            held,
+            [j],
+            HandLevels(),
+            _small_blind(),
             PseudoRandom("TEST"),
         )
         assert result.mult == pytest.approx(4.5)
@@ -334,7 +393,11 @@ class TestMime:
         ]
         j = _joker("j_mime", extra=1)
         result = score_hand(
-            played, held, [j], HandLevels(), _small_blind(),
+            played,
+            held,
+            [j],
+            HandLevels(),
+            _small_blind(),
             PseudoRandom("TEST"),
         )
         # 2 × 1.5^4 = 2 × 5.0625 = 10.125
@@ -346,6 +409,7 @@ class TestMime:
 # Hack (verify already implemented correctly in repetition context)
 # ============================================================================
 
+
 class TestHackRetrigger:
     """j_hack: verify retrigger works through pipeline."""
 
@@ -356,7 +420,11 @@ class TestHackRetrigger:
         played = [_card("Hearts", "3"), _card("Spades", "3")]
         j = _joker("j_hack", extra=1)
         result = score_hand(
-            played, [], [j], HandLevels(), _small_blind(),
+            played,
+            [],
+            [j],
+            HandLevels(),
+            _small_blind(),
             PseudoRandom("TEST"),
         )
         assert result.chips == 22.0
@@ -367,7 +435,11 @@ class TestHackRetrigger:
         played = [_card("Hearts", "6"), _card("Spades", "6")]
         j = _joker("j_hack", extra=1)
         result = score_hand(
-            played, [], [j], HandLevels(), _small_blind(),
+            played,
+            [],
+            [j],
+            HandLevels(),
+            _small_blind(),
             PseudoRandom("TEST"),
         )
         assert result.chips == 22.0  # 10 + 6 + 6 (no retrigger)

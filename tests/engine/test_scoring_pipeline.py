@@ -24,9 +24,19 @@ def _reset():
 def _card(suit: str, rank: str, enhancement: str = "c_base") -> Card:
     sl = {"Hearts": "H", "Diamonds": "D", "Clubs": "C", "Spades": "S"}
     rl = {
-        "2": "2", "3": "3", "4": "4", "5": "5", "6": "6", "7": "7",
-        "8": "8", "9": "9", "10": "T", "Jack": "J", "Queen": "Q",
-        "King": "K", "Ace": "A",
+        "2": "2",
+        "3": "3",
+        "4": "4",
+        "5": "5",
+        "6": "6",
+        "7": "7",
+        "8": "8",
+        "9": "9",
+        "10": "T",
+        "Jack": "J",
+        "Queen": "Q",
+        "King": "K",
+        "Ace": "A",
     }
     c = Card()
     c.set_base(f"{sl[suit]}_{rl[rank]}", suit, rank)
@@ -42,6 +52,7 @@ def _small_blind() -> Blind:
 # Basic scoring
 # ============================================================================
 
+
 class TestPairOfAces:
     """Plain pair of Aces, level 1.
 
@@ -56,7 +67,11 @@ class TestPairOfAces:
         played = [_card("Hearts", "Ace"), _card("Spades", "Ace")]
         levels = HandLevels()
         result = score_hand_base(
-            played, [], levels, _small_blind(), PseudoRandom("TEST"),
+            played,
+            [],
+            levels,
+            _small_blind(),
+            PseudoRandom("TEST"),
         )
         assert result.hand_type == "Pair"
         assert result.chips == 32.0  # 10 + 11 + 11
@@ -68,7 +83,11 @@ class TestPairOfAces:
         played = [_card("Hearts", "Ace"), _card("Spades", "Ace")]
         levels = HandLevels()
         result = score_hand_base(
-            played, [], levels, _small_blind(), PseudoRandom("TEST"),
+            played,
+            [],
+            levels,
+            _small_blind(),
+            PseudoRandom("TEST"),
         )
         assert len(result.scoring_cards) == 2
 
@@ -91,14 +110,20 @@ class TestFlushLevel3:
 
     def test_score(self):
         played = [
-            _card("Hearts", "2"), _card("Hearts", "5"),
-            _card("Hearts", "8"), _card("Hearts", "Jack"),
+            _card("Hearts", "2"),
+            _card("Hearts", "5"),
+            _card("Hearts", "8"),
+            _card("Hearts", "Jack"),
             _card("Hearts", "Ace"),
         ]
         levels = HandLevels()
         levels.level_up("Flush", amount=2)  # level 3
         result = score_hand_base(
-            played, [], levels, _small_blind(), PseudoRandom("TEST"),
+            played,
+            [],
+            levels,
+            _small_blind(),
+            PseudoRandom("TEST"),
         )
         assert result.hand_type == "Flush"
         # Base: 65 chips, 8 mult
@@ -112,20 +137,26 @@ class TestFlushLevel3:
 # Enhancement effects
 # ============================================================================
 
+
 class TestGlassCard:
     """Glass Card in scoring hand: x_mult = 2.0."""
 
     def test_glass_non_scoring_card_no_effect(self):
         """Glass Card not in scoring pair: x_mult does NOT apply."""
         played = [
-            _card("Hearts", "5"), _card("Spades", "5"),
+            _card("Hearts", "5"),
+            _card("Spades", "5"),
             _card("Clubs", "8"),
             _card("Diamonds", "Jack"),
             _card("Hearts", "Ace", enhancement="m_glass"),
         ]
         levels = HandLevels()
         result = score_hand_base(
-            played, [], levels, _small_blind(), PseudoRandom("TEST"),
+            played,
+            [],
+            levels,
+            _small_blind(),
+            PseudoRandom("TEST"),
         )
         # Pair of 5s scores. Glass Ace is NOT a scoring card → no x_mult.
         assert result.mult == 2.0  # unchanged
@@ -136,7 +167,11 @@ class TestGlassCard:
         played = [glass_5, _card("Spades", "5")]
         levels = HandLevels()
         result = score_hand_base(
-            played, [], levels, _small_blind(), PseudoRandom("TEST"),
+            played,
+            [],
+            levels,
+            _small_blind(),
+            PseudoRandom("TEST"),
         )
         # Pair L1: 10 chips, 2 mult
         # Card 1 (Glass 5): +5 chips, x2 mult
@@ -157,7 +192,11 @@ class TestMultCard:
         played = [mult_5, _card("Spades", "5")]
         levels = HandLevels()
         result = score_hand_base(
-            played, [], levels, _small_blind(), PseudoRandom("TEST"),
+            played,
+            [],
+            levels,
+            _small_blind(),
+            PseudoRandom("TEST"),
         )
         # Pair L1: 10 chips, 2 mult
         # Card 1 (Mult 5): +5 chips, +4 mult
@@ -177,7 +216,11 @@ class TestBonusCard:
         played = [bonus_5, _card("Spades", "5")]
         levels = HandLevels()
         result = score_hand_base(
-            played, [], levels, _small_blind(), PseudoRandom("TEST"),
+            played,
+            [],
+            levels,
+            _small_blind(),
+            PseudoRandom("TEST"),
         )
         # chips: 10 + (5+30) + 5 = 50
         assert result.chips == 50.0
@@ -188,6 +231,7 @@ class TestBonusCard:
 # Held card effects (Phase 8)
 # ============================================================================
 
+
 class TestSteelCard:
     """Steel Card in held cards: h_x_mult = 1.5."""
 
@@ -196,7 +240,11 @@ class TestSteelCard:
         held = [_card("Diamonds", "5", enhancement="m_steel")]
         levels = HandLevels()
         result = score_hand_base(
-            played, held, levels, _small_blind(), PseudoRandom("TEST"),
+            played,
+            held,
+            levels,
+            _small_blind(),
+            PseudoRandom("TEST"),
         )
         # Pair: 10 + 11 + 11 = 32 chips, 2 mult
         # Held Steel: mult *= 1.5 → 3.0
@@ -213,7 +261,11 @@ class TestSteelCard:
         ]
         levels = HandLevels()
         result = score_hand_base(
-            played, held, levels, _small_blind(), PseudoRandom("TEST"),
+            played,
+            held,
+            levels,
+            _small_blind(),
+            PseudoRandom("TEST"),
         )
         assert result.mult == pytest.approx(2.0 * 1.5 * 1.5)
 
@@ -221,6 +273,7 @@ class TestSteelCard:
 # ============================================================================
 # Edition effects
 # ============================================================================
+
 
 class TestEditions:
     def test_foil_on_scored_card(self):
@@ -230,7 +283,11 @@ class TestEditions:
         played = [c, _card("Spades", "Ace")]
         levels = HandLevels()
         result = score_hand_base(
-            played, [], levels, _small_blind(), PseudoRandom("TEST"),
+            played,
+            [],
+            levels,
+            _small_blind(),
+            PseudoRandom("TEST"),
         )
         # Pair: 10 base + 11 + 11 = 32 chips from cards
         # Foil edition: +50 chips on first Ace
@@ -245,7 +302,11 @@ class TestEditions:
         played = [c, _card("Spades", "Ace")]
         levels = HandLevels()
         result = score_hand_base(
-            played, [], levels, _small_blind(), PseudoRandom("TEST"),
+            played,
+            [],
+            levels,
+            _small_blind(),
+            PseudoRandom("TEST"),
         )
         # mult: 2 base + 10 holo = 12
         assert result.mult == 12.0
@@ -257,7 +318,11 @@ class TestEditions:
         played = [c, _card("Spades", "Ace")]
         levels = HandLevels()
         result = score_hand_base(
-            played, [], levels, _small_blind(), PseudoRandom("TEST"),
+            played,
+            [],
+            levels,
+            _small_blind(),
+            PseudoRandom("TEST"),
         )
         # mult: 2 base * 1.5 poly = 3.0
         assert result.mult == pytest.approx(3.0)
@@ -266,6 +331,7 @@ class TestEditions:
 # ============================================================================
 # Red Seal retrigger
 # ============================================================================
+
 
 class TestRedSealRetrigger:
     """Red Seal: card evaluated twice (base + 1 retrigger)."""
@@ -276,7 +342,11 @@ class TestRedSealRetrigger:
         played = [c, _card("Spades", "Ace")]
         levels = HandLevels()
         result = score_hand_base(
-            played, [], levels, _small_blind(), PseudoRandom("TEST"),
+            played,
+            [],
+            levels,
+            _small_blind(),
+            PseudoRandom("TEST"),
         )
         # Pair: 10 base
         # Red Seal Ace: 11 chips × 2 reps = 22
@@ -292,7 +362,11 @@ class TestRedSealRetrigger:
         played = [c, _card("Spades", "5")]
         levels = HandLevels()
         result = score_hand_base(
-            played, [], levels, _small_blind(), PseudoRandom("TEST"),
+            played,
+            [],
+            levels,
+            _small_blind(),
+            PseudoRandom("TEST"),
         )
         # Pair: 10 chips, 2 mult
         # Red Glass 5: rep 1: +5 chips, x2 mult → 4
@@ -312,7 +386,11 @@ class TestRedSealRetrigger:
         held = [steel]
         levels = HandLevels()
         result = score_hand_base(
-            played, held, levels, _small_blind(), PseudoRandom("TEST"),
+            played,
+            held,
+            levels,
+            _small_blind(),
+            PseudoRandom("TEST"),
         )
         # Pair: 32 chips, 2 mult
         # Held Steel+Red: 2 reps × x1.5 = 2 * 1.5 * 1.5 = 4.5
@@ -323,6 +401,7 @@ class TestRedSealRetrigger:
 # Boss blind effects
 # ============================================================================
 
+
 class TestFlintBlind:
     """The Flint: halves base chips and mult (Phase 6)."""
 
@@ -331,7 +410,11 @@ class TestFlintBlind:
         levels = HandLevels()
         blind = Blind.create("bl_flint", ante=1)
         result = score_hand_base(
-            played, [], levels, blind, PseudoRandom("TEST"),
+            played,
+            [],
+            levels,
+            blind,
+            PseudoRandom("TEST"),
         )
         # Pair: 10 chips, 2 mult
         # Flint halves: chips = floor(10*0.5+0.5) = 5, mult = max(floor(2*0.5+0.5),1) = 1
@@ -369,7 +452,11 @@ class TestDebuffedHand:
         levels = HandLevels()
         blind = Blind.create("bl_psychic", ante=1)
         result = score_hand_base(
-            played, [], levels, blind, PseudoRandom("TEST"),
+            played,
+            [],
+            levels,
+            blind,
+            PseudoRandom("TEST"),
         )
         assert result.debuffed is True
         assert result.total == 0
@@ -379,6 +466,7 @@ class TestDebuffedHand:
 # Gold Seal dollars
 # ============================================================================
 
+
 class TestDollars:
     def test_gold_seal(self):
         c = _card("Hearts", "Ace")
@@ -386,7 +474,11 @@ class TestDollars:
         played = [c, _card("Spades", "Ace")]
         levels = HandLevels()
         result = score_hand_base(
-            played, [], levels, _small_blind(), PseudoRandom("TEST"),
+            played,
+            [],
+            levels,
+            _small_blind(),
+            PseudoRandom("TEST"),
         )
         assert result.dollars_earned == 3
 
@@ -395,11 +487,16 @@ class TestDollars:
 # Empty hand
 # ============================================================================
 
+
 class TestEmptyHand:
     def test_no_cards(self):
         levels = HandLevels()
         result = score_hand_base(
-            [], [], levels, _small_blind(), PseudoRandom("TEST"),
+            [],
+            [],
+            levels,
+            _small_blind(),
+            PseudoRandom("TEST"),
         )
         assert result.hand_type == "NULL"
         assert result.total == 0
@@ -409,12 +506,17 @@ class TestEmptyHand:
 # Result structure
 # ============================================================================
 
+
 class TestResultStructure:
     def test_has_breakdown(self):
         played = [_card("Hearts", "Ace"), _card("Spades", "Ace")]
         levels = HandLevels()
         result = score_hand_base(
-            played, [], levels, _small_blind(), PseudoRandom("TEST"),
+            played,
+            [],
+            levels,
+            _small_blind(),
+            PseudoRandom("TEST"),
         )
         assert isinstance(result, ScoreResult)
         assert isinstance(result.breakdown, list)
@@ -424,6 +526,10 @@ class TestResultStructure:
         played = [_card("Hearts", "Ace"), _card("Spades", "Ace")]
         levels = HandLevels()
         result = score_hand_base(
-            played, [], levels, _small_blind(), PseudoRandom("TEST"),
+            played,
+            [],
+            levels,
+            _small_blind(),
+            PseudoRandom("TEST"),
         )
         assert any("Final" in line for line in result.breakdown)

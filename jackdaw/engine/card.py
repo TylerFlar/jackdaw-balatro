@@ -47,27 +47,56 @@ _FACE_NOMINAL: dict[str, float] = {
 }
 
 _RANK_NOMINAL: dict[str, int] = {
-    "2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8,
-    "9": 9, "10": 10, "Jack": 10, "Queen": 10, "King": 10, "Ace": 11,
+    "2": 2,
+    "3": 3,
+    "4": 4,
+    "5": 5,
+    "6": 6,
+    "7": 7,
+    "8": 8,
+    "9": 9,
+    "10": 10,
+    "Jack": 10,
+    "Queen": 10,
+    "King": 10,
+    "Ace": 11,
 }
 
 _RANK_ID: dict[str, int] = {
-    "2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8,
-    "9": 9, "10": 10, "Jack": 11, "Queen": 12, "King": 13, "Ace": 14,
+    "2": 2,
+    "3": 3,
+    "4": 4,
+    "5": 5,
+    "6": 6,
+    "7": 7,
+    "8": 8,
+    "9": 9,
+    "10": 10,
+    "Jack": 11,
+    "Queen": 12,
+    "King": 13,
+    "Ace": 14,
 }
 
 _SUIT_NOMINAL: dict[str, float] = {
-    "Diamonds": 0.01, "Clubs": 0.02, "Hearts": 0.03, "Spades": 0.04,
+    "Diamonds": 0.01,
+    "Clubs": 0.02,
+    "Hearts": 0.03,
+    "Spades": 0.04,
 }
 
 _SUIT_NOMINAL_ORIGINAL: dict[str, float] = {
-    "Diamonds": 0.001, "Clubs": 0.002, "Hearts": 0.003, "Spades": 0.004,
+    "Diamonds": 0.001,
+    "Clubs": 0.002,
+    "Hearts": 0.003,
+    "Spades": 0.004,
 }
 
 
 # ---------------------------------------------------------------------------
 # CardBase — playing card identity
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class CardBase:
@@ -132,6 +161,7 @@ def _resolve_center(key: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Card — the main object
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class Card:
@@ -298,9 +328,19 @@ class Card:
         rank_str = self.base.rank.value
         suit_letter = {"Hearts": "H", "Diamonds": "D", "Clubs": "C", "Spades": "S"}
         rank_letter = {
-            "2": "2", "3": "3", "4": "4", "5": "5", "6": "6", "7": "7",
-            "8": "8", "9": "9", "10": "T", "Jack": "J", "Queen": "Q",
-            "King": "K", "Ace": "A",
+            "2": "2",
+            "3": "3",
+            "4": "4",
+            "5": "5",
+            "6": "6",
+            "7": "7",
+            "8": "8",
+            "9": "9",
+            "10": "T",
+            "Jack": "J",
+            "Queen": "Q",
+            "King": "K",
+            "Ace": "A",
         }
         card_key = f"{suit_letter[new_suit]}_{rank_letter[rank_str]}"
         self.set_base(card_key, new_suit, rank_str)
@@ -316,9 +356,19 @@ class Card:
         suit_str = self.base.suit.value
         suit_letter = {"Hearts": "H", "Diamonds": "D", "Clubs": "C", "Spades": "S"}
         rank_letter = {
-            "2": "2", "3": "3", "4": "4", "5": "5", "6": "6", "7": "7",
-            "8": "8", "9": "9", "10": "T", "Jack": "J", "Queen": "Q",
-            "King": "K", "Ace": "A",
+            "2": "2",
+            "3": "3",
+            "4": "4",
+            "5": "5",
+            "6": "6",
+            "7": "7",
+            "8": "8",
+            "9": "9",
+            "10": "T",
+            "Jack": "J",
+            "Queen": "Q",
+            "King": "K",
+            "Ace": "A",
         }
         card_key = f"{suit_letter[suit_str]}_{rank_letter[new_rank]}"
         self.set_base(card_key, suit_str, new_rank)
@@ -406,10 +456,7 @@ class Card:
         # Base formula (card.lua:375)
         self.cost = max(
             1,
-            math.floor(
-                (self.base_cost + self.extra_cost + 0.5)
-                * (100 - discount_percent) / 100
-            ),
+            math.floor((self.base_cost + self.extra_cost + 0.5) * (100 - discount_percent) / 100),
         )
 
         # Booster ante scaling (card.lua:376)
@@ -704,8 +751,8 @@ class Card:
             game_state["interest_amount"] = game_state.get("interest_amount", 0) + amount
         if name == "Troubadour" and isinstance(extra, dict):
             game_state["hand_size"] = game_state.get("hand_size", 0) + extra.get("h_size", 0)
-            game_state["hands_per_round"] = (
-                game_state.get("hands_per_round", 0) + extra.get("h_plays", 0)
+            game_state["hands_per_round"] = game_state.get("hands_per_round", 0) + extra.get(
+                "h_plays", 0
             )
         if name == "Stuntman" and isinstance(extra, dict):
             game_state["hand_size"] = game_state.get("hand_size", 0) - extra.get("h_size", 0)
@@ -742,8 +789,8 @@ class Card:
             game_state["interest_amount"] = game_state.get("interest_amount", 0) - amount
         if name == "Troubadour" and isinstance(extra, dict):
             game_state["hand_size"] = game_state.get("hand_size", 0) - extra.get("h_size", 0)
-            game_state["hands_per_round"] = (
-                game_state.get("hands_per_round", 0) - extra.get("h_plays", 0)
+            game_state["hands_per_round"] = game_state.get("hands_per_round", 0) - extra.get(
+                "h_plays", 0
             )
         if name == "Stuntman" and isinstance(extra, dict):
             game_state["hand_size"] = game_state.get("hand_size", 0) + extra.get("h_size", 0)

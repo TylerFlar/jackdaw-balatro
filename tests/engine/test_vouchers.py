@@ -16,6 +16,7 @@ from jackdaw.engine.vouchers import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _gs(**kw) -> dict:
     """Minimal game_state with sensible defaults."""
     base = {
@@ -55,6 +56,7 @@ class _ControlledRng:
 # Prerequisites
 # ============================================================================
 
+
 class TestCheckVoucherPrerequisites:
     def test_voucher_with_no_requires_always_passes(self):
         # v_overstock_norm has no requires
@@ -65,21 +67,15 @@ class TestCheckVoucherPrerequisites:
         assert check_voucher_prerequisites("v_overstock_plus", {}) is False
 
     def test_requires_satisfied_returns_true(self):
-        assert check_voucher_prerequisites(
-            "v_overstock_plus", {"v_overstock_norm": True}
-        ) is True
+        assert check_voucher_prerequisites("v_overstock_plus", {"v_overstock_norm": True}) is True
 
     def test_liquidation_requires_clearance_sale(self):
         assert check_voucher_prerequisites("v_liquidation", {}) is False
-        assert check_voucher_prerequisites(
-            "v_liquidation", {"v_clearance_sale": True}
-        ) is True
+        assert check_voucher_prerequisites("v_liquidation", {"v_clearance_sale": True}) is True
 
     def test_nacho_tong_requires_grabber(self):
         assert check_voucher_prerequisites("v_nacho_tong", {}) is False
-        assert check_voucher_prerequisites(
-            "v_nacho_tong", {"v_grabber": True}
-        ) is True
+        assert check_voucher_prerequisites("v_nacho_tong", {"v_grabber": True}) is True
 
     def test_glow_up_requires_hone(self):
         assert check_voucher_prerequisites("v_glow_up", {}) is False
@@ -87,9 +83,7 @@ class TestCheckVoucherPrerequisites:
 
     def test_money_tree_requires_seed_money(self):
         assert check_voucher_prerequisites("v_money_tree", {}) is False
-        assert check_voucher_prerequisites(
-            "v_money_tree", {"v_seed_money": True}
-        ) is True
+        assert check_voucher_prerequisites("v_money_tree", {"v_seed_money": True}) is True
 
     def test_unknown_key_returns_false(self):
         assert check_voucher_prerequisites("v_nonexistent", {}) is False
@@ -100,14 +94,13 @@ class TestCheckVoucherPrerequisites:
 
     def test_retcon_requires_directors_cut(self):
         assert check_voucher_prerequisites("v_retcon", {}) is False
-        assert check_voucher_prerequisites(
-            "v_retcon", {"v_directors_cut": True}
-        ) is True
+        assert check_voucher_prerequisites("v_retcon", {"v_directors_cut": True}) is True
 
 
 # ============================================================================
 # Pool building
 # ============================================================================
+
 
 class TestGetAvailableVoucherPool:
     def test_no_used_vouchers_returns_all_unlocked(self):
@@ -139,11 +132,23 @@ class TestGetAvailableVoucherPool:
 
     def test_base_vouchers_are_always_available(self):
         pool = get_available_voucher_pool({})
-        base = ["v_overstock_norm", "v_grabber", "v_wasteful", "v_hone",
-                "v_clearance_sale", "v_crystal_ball", "v_seed_money",
-                "v_tarot_merchant", "v_planet_merchant", "v_magic_trick",
-                "v_paint_brush", "v_hieroglyph", "v_reroll_surplus",
-                "v_telescope", "v_blank"]
+        base = [
+            "v_overstock_norm",
+            "v_grabber",
+            "v_wasteful",
+            "v_hone",
+            "v_clearance_sale",
+            "v_crystal_ball",
+            "v_seed_money",
+            "v_tarot_merchant",
+            "v_planet_merchant",
+            "v_magic_trick",
+            "v_paint_brush",
+            "v_hieroglyph",
+            "v_reroll_surplus",
+            "v_telescope",
+            "v_blank",
+        ]
         for key in base:
             assert key in pool, f"{key} not in pool"
 
@@ -156,6 +161,7 @@ class TestGetAvailableVoucherPool:
 # ============================================================================
 # get_next_voucher_key
 # ============================================================================
+
 
 class TestGetNextVoucherKey:
     def test_returns_valid_voucher_key(self):
@@ -196,6 +202,7 @@ class TestGetNextVoucherKey:
     def test_deterministic_with_real_rng(self):
         """Same PseudoRandom seed produces same voucher twice."""
         from jackdaw.engine.rng import PseudoRandom
+
         rng1 = PseudoRandom("test_voucher_det")
         rng2 = PseudoRandom("test_voucher_det")
         used: dict[str, bool] = {}
@@ -207,6 +214,7 @@ class TestGetNextVoucherKey:
 # ============================================================================
 # apply_voucher — shop modifiers
 # ============================================================================
+
 
 class TestApplyVoucherShopModifiers:
     def test_overstock_norm_increases_shop_joker_max(self):
@@ -298,6 +306,7 @@ class TestApplyVoucherShopModifiers:
 # apply_voucher — economy
 # ============================================================================
 
+
 class TestApplyVoucherEconomy:
     def test_seed_money_sets_interest_cap_50(self):
         gs = _gs()
@@ -330,6 +339,7 @@ class TestApplyVoucherEconomy:
 # ============================================================================
 # apply_voucher — hands & discards
 # ============================================================================
+
 
 class TestApplyVoucherHandsDiscards:
     def test_grabber_increases_round_hands_by_1(self):
@@ -379,6 +389,7 @@ class TestApplyVoucherHandsDiscards:
 # apply_voucher — slots
 # ============================================================================
 
+
 class TestApplyVoucherSlots:
     def test_crystal_ball_increases_consumable_slots(self):
         gs = _gs()
@@ -400,6 +411,7 @@ class TestApplyVoucherSlots:
 # ============================================================================
 # apply_voucher — ante modifiers
 # ============================================================================
+
 
 class TestApplyVoucherAnteModifiers:
     def test_hieroglyph_reduces_ante(self):
@@ -446,6 +458,7 @@ class TestApplyVoucherAnteModifiers:
 # apply_voucher — boss blind rerolls
 # ============================================================================
 
+
 class TestApplyVoucherBossBlindRerolls:
     def test_directors_cut_enables_one_boss_blind_reroll(self):
         gs = _gs()
@@ -471,6 +484,7 @@ class TestApplyVoucherBossBlindRerolls:
 # ============================================================================
 # apply_voucher — passive / no-op vouchers
 # ============================================================================
+
 
 class TestApplyVoucherPassive:
     def test_blank_returns_empty_mutations(self):
@@ -503,6 +517,7 @@ class TestApplyVoucherPassive:
 # apply_voucher — mutations return value
 # ============================================================================
 
+
 class TestApplyVoucherMutations:
     def test_grabber_mutations_contain_hands(self):
         gs = _gs()
@@ -533,6 +548,7 @@ class TestApplyVoucherMutations:
 # All 32 vouchers are handled (no UnhandledVoucher regression)
 # ============================================================================
 
+
 class TestAllVouchersHandled:
     def test_apply_all_vouchers_does_not_raise(self):
         """Calling apply_voucher on every known key should not raise."""
@@ -546,15 +562,34 @@ class TestAllVouchersHandled:
     def test_all_voucher_keys_recognized(self):
         """No voucher in the data should be silently ignored (non-passive ones)."""
         non_passive = {
-            "v_overstock_norm", "v_overstock_plus", "v_clearance_sale",
-            "v_liquidation", "v_tarot_merchant", "v_tarot_tycoon",
-            "v_planet_merchant", "v_planet_tycoon", "v_hone", "v_glow_up",
-            "v_magic_trick", "v_illusion", "v_crystal_ball",
-            "v_seed_money", "v_money_tree", "v_reroll_surplus",
-            "v_reroll_glut", "v_grabber", "v_nacho_tong",
-            "v_wasteful", "v_recyclomancy", "v_paint_brush", "v_palette",
-            "v_antimatter", "v_hieroglyph", "v_petroglyph",
-            "v_directors_cut", "v_retcon",
+            "v_overstock_norm",
+            "v_overstock_plus",
+            "v_clearance_sale",
+            "v_liquidation",
+            "v_tarot_merchant",
+            "v_tarot_tycoon",
+            "v_planet_merchant",
+            "v_planet_tycoon",
+            "v_hone",
+            "v_glow_up",
+            "v_magic_trick",
+            "v_illusion",
+            "v_crystal_ball",
+            "v_seed_money",
+            "v_money_tree",
+            "v_reroll_surplus",
+            "v_reroll_glut",
+            "v_grabber",
+            "v_nacho_tong",
+            "v_wasteful",
+            "v_recyclomancy",
+            "v_paint_brush",
+            "v_palette",
+            "v_antimatter",
+            "v_hieroglyph",
+            "v_petroglyph",
+            "v_directors_cut",
+            "v_retcon",
         }
         for key in non_passive:
             gs = _gs()

@@ -22,9 +22,19 @@ def _reset():
 
 _SUIT_LETTER = {"Hearts": "H", "Diamonds": "D", "Clubs": "C", "Spades": "S"}
 _RANK_LETTER = {
-    "2": "2", "3": "3", "4": "4", "5": "5", "6": "6", "7": "7",
-    "8": "8", "9": "9", "10": "T", "Jack": "J", "Queen": "Q",
-    "King": "K", "Ace": "A",
+    "2": "2",
+    "3": "3",
+    "4": "4",
+    "5": "5",
+    "6": "6",
+    "7": "7",
+    "8": "8",
+    "9": "9",
+    "10": "T",
+    "Jack": "J",
+    "Queen": "Q",
+    "King": "K",
+    "Ace": "A",
 }
 
 
@@ -51,6 +61,7 @@ def _small_blind() -> Blind:
 # Basic joker effects
 # ============================================================================
 
+
 class TestJokerInPipeline:
     """j_joker adds +4 mult in Phase 9."""
 
@@ -61,7 +72,11 @@ class TestJokerInPipeline:
         played = [_card("Hearts", "Ace"), _card("Spades", "Ace")]
         j = _joker("j_joker", mult=4)
         result = score_hand(
-            played, [], [j], HandLevels(), _small_blind(),
+            played,
+            [],
+            [j],
+            HandLevels(),
+            _small_blind(),
             PseudoRandom("TEST"),
         )
         assert result.hand_type == "Pair"
@@ -73,7 +88,11 @@ class TestJokerInPipeline:
         """Without jokers, score_hand matches score_hand_base."""
         played = [_card("Hearts", "Ace"), _card("Spades", "Ace")]
         result = score_hand(
-            played, [], [], HandLevels(), _small_blind(),
+            played,
+            [],
+            [],
+            HandLevels(),
+            _small_blind(),
             PseudoRandom("TEST"),
         )
         assert result.total == 64  # 32 × 2
@@ -82,6 +101,7 @@ class TestJokerInPipeline:
 # ============================================================================
 # Per-card joker effects (individual context)
 # ============================================================================
+
 
 class TestSuitJokerPerCard:
     """j_lusty_joker adds +3 mult per Heart scored."""
@@ -92,13 +112,19 @@ class TestSuitJokerPerCard:
         j_lusty: +3 mult per Heart scored (5 Hearts) = +15 mult.
         Total: (35+36) chips, (4+15) mult = 71 × 19 = 1349."""
         played = [
-            _card("Hearts", "2"), _card("Hearts", "5"),
-            _card("Hearts", "8"), _card("Hearts", "Jack"),
+            _card("Hearts", "2"),
+            _card("Hearts", "5"),
+            _card("Hearts", "8"),
+            _card("Hearts", "Jack"),
             _card("Hearts", "Ace"),
         ]
         j = _joker("j_lusty_joker", extra={"s_mult": 3, "suit": "Hearts"})
         result = score_hand(
-            played, [], [j], HandLevels(), _small_blind(),
+            played,
+            [],
+            [j],
+            HandLevels(),
+            _small_blind(),
             PseudoRandom("TEST"),
         )
         assert result.hand_type == "Flush"
@@ -121,13 +147,19 @@ class TestMultipleSuitJokers:
             _card("Hearts", "5"),
         ]
         greedy = _joker(
-            "j_greedy_joker", extra={"s_mult": 3, "suit": "Diamonds"},
+            "j_greedy_joker",
+            extra={"s_mult": 3, "suit": "Diamonds"},
         )
         lusty = _joker(
-            "j_lusty_joker", extra={"s_mult": 3, "suit": "Hearts"},
+            "j_lusty_joker",
+            extra={"s_mult": 3, "suit": "Hearts"},
         )
         result = score_hand(
-            played, [], [greedy, lusty], HandLevels(), _small_blind(),
+            played,
+            [],
+            [greedy, lusty],
+            HandLevels(),
+            _small_blind(),
             PseudoRandom("TEST"),
         )
         assert result.mult == 8.0
@@ -137,6 +169,7 @@ class TestMultipleSuitJokers:
 # ============================================================================
 # xMult ordering — joker_main (Phase 9, left to right)
 # ============================================================================
+
 
 class TestXMultOrder:
     """Left-to-right joker ordering in Phase 9 matters for mixed add/multiply."""
@@ -148,12 +181,15 @@ class TestXMultOrder:
         Score: 32 × 12 = 384."""
         played = [_card("Spades", "Ace"), _card("Clubs", "Ace")]
         held = [_card("Spades", "5")]  # all black for Blackboard
-        ph_pair = {"Pair": [["p"]]}  # non-empty for Duo
 
         duo = _joker("j_duo", x_mult=2, type="Pair")
         bb = _joker("j_blackboard", extra=3)
         result = score_hand(
-            played, held, [duo, bb], HandLevels(), _small_blind(),
+            played,
+            held,
+            [duo, bb],
+            HandLevels(),
+            _small_blind(),
             PseudoRandom("TEST"),
         )
         assert result.mult == pytest.approx(12.0)
@@ -166,7 +202,11 @@ class TestXMultOrder:
         bb = _joker("j_blackboard", extra=3)
         duo = _joker("j_duo", x_mult=2, type="Pair")
         result = score_hand(
-            played, held, [bb, duo], HandLevels(), _small_blind(),
+            played,
+            held,
+            [bb, duo],
+            HandLevels(),
+            _small_blind(),
             PseudoRandom("TEST"),
         )
         assert result.mult == pytest.approx(12.0)
@@ -182,7 +222,11 @@ class TestXMultOrder:
         joker = _joker("j_joker", mult=4)
         bb = _joker("j_blackboard", extra=3)
         result = score_hand(
-            played, held, [joker, bb], HandLevels(), _small_blind(),
+            played,
+            held,
+            [joker, bb],
+            HandLevels(),
+            _small_blind(),
             PseudoRandom("TEST"),
         )
         assert result.mult == pytest.approx(18.0)
@@ -198,7 +242,11 @@ class TestXMultOrder:
         bb = _joker("j_blackboard", extra=3)
         joker = _joker("j_joker", mult=4)
         result = score_hand(
-            played, held, [bb, joker], HandLevels(), _small_blind(),
+            played,
+            held,
+            [bb, joker],
+            HandLevels(),
+            _small_blind(),
             PseudoRandom("TEST"),
         )
         assert result.mult == pytest.approx(10.0)
@@ -208,6 +256,7 @@ class TestXMultOrder:
 # ============================================================================
 # Blueprint copying
 # ============================================================================
+
 
 class TestBlueprintInPipeline:
     """Blueprint copies the joker to its right."""
@@ -220,7 +269,11 @@ class TestBlueprintInPipeline:
         bp = _joker("j_blueprint")
         joker = _joker("j_joker", mult=4)
         result = score_hand(
-            played, [], [bp, joker], HandLevels(), _small_blind(),
+            played,
+            [],
+            [bp, joker],
+            HandLevels(),
+            _small_blind(),
             PseudoRandom("TEST"),
         )
         assert result.mult == 10.0
@@ -230,6 +283,7 @@ class TestBlueprintInPipeline:
 # ============================================================================
 # Joker edition effects
 # ============================================================================
+
 
 class TestJokerEdition:
     """Joker editions apply in Phase 9: additive before, multiplicative after."""
@@ -243,7 +297,11 @@ class TestJokerEdition:
         j = _joker("j_joker", mult=4)
         j.set_edition({"foil": True})
         result = score_hand(
-            played, [], [j], HandLevels(), _small_blind(),
+            played,
+            [],
+            [j],
+            HandLevels(),
+            _small_blind(),
             PseudoRandom("TEST"),
         )
         assert result.chips == 82.0
@@ -259,7 +317,11 @@ class TestJokerEdition:
         j = _joker("j_joker", mult=4)
         j.set_edition({"polychrome": True})
         result = score_hand(
-            played, [], [j], HandLevels(), _small_blind(),
+            played,
+            [],
+            [j],
+            HandLevels(),
+            _small_blind(),
             PseudoRandom("TEST"),
         )
         assert result.mult == pytest.approx(9.0)
@@ -274,7 +336,11 @@ class TestJokerEdition:
         j = _joker("j_joker", mult=4)
         j.set_edition({"holo": True})
         result = score_hand(
-            played, [], [j], HandLevels(), _small_blind(),
+            played,
+            [],
+            [j],
+            HandLevels(),
+            _small_blind(),
             PseudoRandom("TEST"),
         )
         assert result.mult == 16.0
@@ -292,7 +358,11 @@ class TestJokerEdition:
         j2 = _joker("j_stuntman", extra={"chip_mod": 250, "h_size": 2})
         j2.set_edition({"polychrome": True})
         result = score_hand(
-            played, [], [j1, j2], HandLevels(), _small_blind(),
+            played,
+            [],
+            [j1, j2],
+            HandLevels(),
+            _small_blind(),
             PseudoRandom("TEST"),
         )
         assert result.chips == 332.0

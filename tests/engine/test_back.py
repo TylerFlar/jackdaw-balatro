@@ -159,44 +159,32 @@ class TestTriggerEffectPlasma:
     """Plasma Deck averages chips and mult in final_scoring_step."""
 
     def test_plasma_100_chips_20_mult_gives_60_each(self):
-        result = back("b_plasma").trigger_effect(
-            "final_scoring_step", chips=100.0, mult=20.0
-        )
+        result = back("b_plasma").trigger_effect("final_scoring_step", chips=100.0, mult=20.0)
         assert result == {"chips": 60, "mult": 60}
 
     def test_plasma_floors_odd_total(self):
         # 99 + 20 = 119 → floor(119/2) = 59
-        result = back("b_plasma").trigger_effect(
-            "final_scoring_step", chips=99.0, mult=20.0
-        )
+        result = back("b_plasma").trigger_effect("final_scoring_step", chips=99.0, mult=20.0)
         assert result == {"chips": 59, "mult": 59}
 
     def test_plasma_zero_total(self):
-        result = back("b_plasma").trigger_effect(
-            "final_scoring_step", chips=0.0, mult=0.0
-        )
+        result = back("b_plasma").trigger_effect("final_scoring_step", chips=0.0, mult=0.0)
         assert result == {"chips": 0, "mult": 0}
 
     def test_plasma_equal_chips_and_mult(self):
         # 50 + 50 = 100 → 50 each
-        result = back("b_plasma").trigger_effect(
-            "final_scoring_step", chips=50.0, mult=50.0
-        )
+        result = back("b_plasma").trigger_effect("final_scoring_step", chips=50.0, mult=50.0)
         assert result == {"chips": 50, "mult": 50}
 
     def test_plasma_large_values(self):
         # 10000 + 240 = 10240 → 5120 each
-        result = back("b_plasma").trigger_effect(
-            "final_scoring_step", chips=10000.0, mult=240.0
-        )
+        result = back("b_plasma").trigger_effect("final_scoring_step", chips=10000.0, mult=240.0)
         assert result == {"chips": 5120, "mult": 5120}
 
     def test_non_plasma_final_scoring_step_returns_none(self):
         for key in ("b_red", "b_blue", "b_black", "b_green", "b_anaglyph"):
             if key in BACKS:
-                result = back(key).trigger_effect(
-                    "final_scoring_step", chips=100.0, mult=20.0
-                )
+                result = back(key).trigger_effect("final_scoring_step", chips=100.0, mult=20.0)
                 assert result is None, f"{key} should return None for final_scoring_step"
 
 

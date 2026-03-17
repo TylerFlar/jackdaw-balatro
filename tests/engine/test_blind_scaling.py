@@ -68,14 +68,13 @@ class TestExponentialFormula:
     def test_matches_luajit(self, scaling: int, ante: int):
         expected = EXPONENTIAL_TRUTH[scaling][ante]
         actual = get_blind_amount(ante, scaling)
-        assert actual == expected, (
-            f"scaling={scaling} ante={ante}: {actual} != {expected}"
-        )
+        assert actual == expected, f"scaling={scaling} ante={ante}: {actual} != {expected}"
 
 
 # ============================================================================
 # Edge cases
 # ============================================================================
+
 
 class TestEdgeCases:
     def test_ante_0(self):
@@ -109,6 +108,7 @@ class TestEdgeCases:
 # Blind type multipliers
 # ============================================================================
 
+
 class TestBlindMult:
     def test_small_mult(self):
         assert BLIND_MULT["Small"] == 1.0
@@ -123,6 +123,7 @@ class TestBlindMult:
 # ============================================================================
 # get_blind_target (full chip target)
 # ============================================================================
+
 
 class TestGetBlindTarget:
     def test_small_blind_ante_1(self):

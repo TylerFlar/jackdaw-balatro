@@ -64,7 +64,7 @@ def get_blind_amount(ante: int, scaling: int = 1) -> int:
     # amount = amount - amount % (10 ^ floor(log10(amount) - 1))
     if amount > 0:
         digits = math.floor(math.log10(amount)) - 1
-        rounding = 10 ** digits
+        rounding = 10**digits
         amount = amount - amount % rounding
 
     return amount

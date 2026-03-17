@@ -112,11 +112,14 @@ def fixture() -> dict:
 class TestShopOracleFixture:
     """Validate populate_shop against pre-generated fixture for all test seeds."""
 
-    @pytest.mark.parametrize("case_idx,label", [
-        (0, "TESTSEED/ante1"),
-        (1, "TESTSEED/ante3"),
-        (2, "TUTORIAL/ante1"),
-    ])
+    @pytest.mark.parametrize(
+        "case_idx,label",
+        [
+            (0, "TESTSEED/ante1"),
+            (1, "TESTSEED/ante3"),
+            (2, "TUTORIAL/ante1"),
+        ],
+    )
     def test_voucher_matches_fixture(self, fixture, case_idx, label):
         case = fixture["cases"][case_idx]
         actual = run_shop(case["seed"], case["ante"], first_shop=case["first_shop"])
@@ -124,11 +127,14 @@ class TestShopOracleFixture:
             f"{label}: voucher {actual['voucher_key']!r} != {case['voucher']!r}"
         )
 
-    @pytest.mark.parametrize("case_idx,label", [
-        (0, "TESTSEED/ante1"),
-        (1, "TESTSEED/ante3"),
-        (2, "TUTORIAL/ante1"),
-    ])
+    @pytest.mark.parametrize(
+        "case_idx,label",
+        [
+            (0, "TESTSEED/ante1"),
+            (1, "TESTSEED/ante3"),
+            (2, "TUTORIAL/ante1"),
+        ],
+    )
     def test_joker_keys_match_fixture(self, fixture, case_idx, label):
         case = fixture["cases"][case_idx]
         actual = run_shop(case["seed"], case["ante"], first_shop=case["first_shop"])
@@ -137,11 +143,14 @@ class TestShopOracleFixture:
             f"{label}: joker keys {actual['joker_keys']} != {expected_keys}"
         )
 
-    @pytest.mark.parametrize("case_idx,label", [
-        (0, "TESTSEED/ante1"),
-        (1, "TESTSEED/ante3"),
-        (2, "TUTORIAL/ante1"),
-    ])
+    @pytest.mark.parametrize(
+        "case_idx,label",
+        [
+            (0, "TESTSEED/ante1"),
+            (1, "TESTSEED/ante3"),
+            (2, "TUTORIAL/ante1"),
+        ],
+    )
     def test_joker_stickers_match_fixture(self, fixture, case_idx, label):
         case = fixture["cases"][case_idx]
         actual = run_shop(case["seed"], case["ante"], first_shop=case["first_shop"])
@@ -156,11 +165,14 @@ class TestShopOracleFixture:
                 f"{label} joker[{i}]: rental mismatch"
             )
 
-    @pytest.mark.parametrize("case_idx,label", [
-        (0, "TESTSEED/ante1"),
-        (1, "TESTSEED/ante3"),
-        (2, "TUTORIAL/ante1"),
-    ])
+    @pytest.mark.parametrize(
+        "case_idx,label",
+        [
+            (0, "TESTSEED/ante1"),
+            (1, "TESTSEED/ante3"),
+            (2, "TUTORIAL/ante1"),
+        ],
+    )
     def test_booster_keys_match_fixture(self, fixture, case_idx, label):
         case = fixture["cases"][case_idx]
         actual = run_shop(case["seed"], case["ante"], first_shop=case["first_shop"])

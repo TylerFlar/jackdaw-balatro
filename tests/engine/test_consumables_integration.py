@@ -30,6 +30,7 @@ def _reset():
 # Shared helpers
 # ---------------------------------------------------------------------------
 
+
 def _c(suit_letter: str, rank_letter: str, enh: str = "c_base") -> Card:
     """Create a playing card from single-letter suit/rank codes.
 
@@ -37,9 +38,19 @@ def _c(suit_letter: str, rank_letter: str, enh: str = "c_base") -> Card:
     """
     suits = {"H": "Hearts", "D": "Diamonds", "C": "Clubs", "S": "Spades"}
     ranks = {
-        "2": "2", "3": "3", "4": "4", "5": "5", "6": "6", "7": "7",
-        "8": "8", "9": "9", "T": "10", "J": "Jack", "Q": "Queen",
-        "K": "King", "A": "Ace",
+        "2": "2",
+        "3": "3",
+        "4": "4",
+        "5": "5",
+        "6": "6",
+        "7": "7",
+        "8": "8",
+        "9": "9",
+        "T": "10",
+        "J": "Jack",
+        "Q": "Queen",
+        "K": "King",
+        "A": "Ace",
     }
     suit = suits[suit_letter]
     rank = ranks[rank_letter]
@@ -99,6 +110,7 @@ class _ControlledRng:
 # Helpers to apply ConsumableResult fields (mirrors the M12 state machine)
 # ---------------------------------------------------------------------------
 
+
 def _apply_result(result: ConsumableResult, hand_levels: HandLevels) -> None:
     """Apply level_up entries from a ConsumableResult to HandLevels."""
     for hand_type, amount in result.level_up or []:
@@ -121,6 +133,7 @@ def _apply_copy_card(source: Card, target: Card) -> None:
 # 1. Chariot → Steel Card → x1.5 held-in-hand mult
 # ============================================================================
 
+
 class TestChariotIntegration:
     """Use The Chariot on an Ace of Spades → becomes Steel Card.
     Score with Ace held in hand → verify x1.5 applies to mult.
@@ -129,9 +142,13 @@ class TestChariotIntegration:
     def test_chariot_produces_enhance_steel(self):
         ace = _c("S", "A")
         chariot = _consumable("c_chariot")
-        result = use_consumable(chariot, ConsumableContext(
-            card=chariot, highlighted=[ace],
-        ))
+        result = use_consumable(
+            chariot,
+            ConsumableContext(
+                card=chariot,
+                highlighted=[ace],
+            ),
+        )
         assert result is not None
         assert result.enhance == [(ace, "m_steel")]
 
@@ -139,9 +156,13 @@ class TestChariotIntegration:
         ace = _c("S", "A")
         chariot = _consumable("c_chariot")
 
-        result = use_consumable(chariot, ConsumableContext(
-            card=chariot, highlighted=[ace],
-        ))
+        result = use_consumable(
+            chariot,
+            ConsumableContext(
+                card=chariot,
+                highlighted=[ace],
+            ),
+        )
         # Apply the enhancement
         for card, enh_key in result.enhance:
             card.enhance(enh_key)
@@ -185,6 +206,7 @@ class TestChariotIntegration:
 # 2. Mercury (Planet) → Pair level 2 → leveled chips/mult
 # ============================================================================
 
+
 class TestMercuryIntegration:
     """Use Mercury to level Pair from 1→2.  Score a Pair and verify the
     leveled chips (25) and mult (3) apply.
@@ -192,9 +214,13 @@ class TestMercuryIntegration:
 
     def test_mercury_produces_level_up_pair(self):
         mercury = _consumable("c_mercury")
-        result = use_consumable(mercury, ConsumableContext(
-            card=mercury, game_state={},
-        ))
+        result = use_consumable(
+            mercury,
+            ConsumableContext(
+                card=mercury,
+                game_state={},
+            ),
+        )
         assert result is not None
         assert ("Pair", 1) in result.level_up
 
@@ -202,9 +228,13 @@ class TestMercuryIntegration:
         levels = HandLevels()
         mercury = _consumable("c_mercury")
 
-        result = use_consumable(mercury, ConsumableContext(
-            card=mercury, game_state={},
-        ))
+        result = use_consumable(
+            mercury,
+            ConsumableContext(
+                card=mercury,
+                game_state={},
+            ),
+        )
         _apply_result(result, levels)
 
         # Pair at level 2: chips = 10 + 15*(2-1) = 25, mult = 2 + 1*(2-1) = 3
@@ -221,7 +251,7 @@ class TestMercuryIntegration:
             rng=_rng(),
         )
         assert r.hand_type == "Pair"
-        assert r.chips == 35   # 25 + 5 + 5
+        assert r.chips == 35  # 25 + 5 + 5
         assert r.mult == 3
         assert r.total == 105  # 35 × 3
 
@@ -234,7 +264,7 @@ class TestMercuryIntegration:
             blind=_sb(),
             rng=_rng(),
         )
-        assert r.chips == 20   # 10 + 5 + 5
+        assert r.chips == 20  # 10 + 5 + 5
         assert r.mult == 2
         assert r.total == 40
 
@@ -242,6 +272,7 @@ class TestMercuryIntegration:
 # ============================================================================
 # 3. Black Hole → all 12 hands leveled
 # ============================================================================
+
 
 class TestBlackHoleIntegration:
     """Use Black Hole to level up all 12 hand types.  Verify each is at
@@ -264,20 +295,20 @@ class TestBlackHoleIntegration:
         """High Card level 2: chips=15, mult=2."""
         _, levels = self._use_black_hole()
         chips, mult = levels.get("High Card")
-        assert chips == 15   # 5 + 10*(2-1)
-        assert mult == 2     # 1 + 1*(2-1)
+        assert chips == 15  # 5 + 10*(2-1)
+        assert mult == 2  # 1 + 1*(2-1)
 
     def test_pair_leveled(self):
         _, levels = self._use_black_hole()
         chips, mult = levels.get("Pair")
-        assert chips == 25   # 10 + 15
-        assert mult == 3     # 2 + 1
+        assert chips == 25  # 10 + 15
+        assert mult == 3  # 2 + 1
 
     def test_full_house_leveled(self):
         _, levels = self._use_black_hole()
         chips, mult = levels.get("Full House")
-        assert chips == 65   # 40 + 25
-        assert mult == 6     # 4 + 2
+        assert chips == 65  # 40 + 25
+        assert mult == 6  # 4 + 2
 
     def test_score_high_card_after_black_hole(self):
         """High Card Ace after Black Hole: (15+11) × 2 = 52."""
@@ -290,7 +321,7 @@ class TestBlackHoleIntegration:
             rng=_rng(),
         )
         assert r.hand_type == "High Card"
-        assert r.chips == 26   # 15 + 11 (Ace nominal)
+        assert r.chips == 26  # 15 + 11 (Ace nominal)
         assert r.mult == 2
         assert r.total == 52
 
@@ -303,7 +334,7 @@ class TestBlackHoleIntegration:
             blind=_sb(),
             rng=_rng(),
         )
-        assert r.chips == 35   # 25 + 5 + 5
+        assert r.chips == 35  # 25 + 5 + 5
         assert r.mult == 3
         assert r.total == 105
 
@@ -311,6 +342,7 @@ class TestBlackHoleIntegration:
 # ============================================================================
 # 4. Strength on King → becomes Ace → chip value 11 not 10
 # ============================================================================
+
 
 class TestStrengthIntegration:
     """Use Strength tarot on a King of Spades → rank becomes Ace.
@@ -320,9 +352,13 @@ class TestStrengthIntegration:
     def test_strength_produces_change_rank_ace(self):
         king = _c("S", "K")
         strength = _consumable("c_strength")
-        result = use_consumable(strength, ConsumableContext(
-            card=strength, highlighted=[king],
-        ))
+        result = use_consumable(
+            strength,
+            ConsumableContext(
+                card=strength,
+                highlighted=[king],
+            ),
+        )
         assert result is not None
         # change_rank stores (card, new_rank_string)
         assert len(result.change_rank) == 1
@@ -335,9 +371,13 @@ class TestStrengthIntegration:
         assert king.base.nominal == 10  # King nominal = 10
 
         strength = _consumable("c_strength")
-        result = use_consumable(strength, ConsumableContext(
-            card=strength, highlighted=[king],
-        ))
+        result = use_consumable(
+            strength,
+            ConsumableContext(
+                card=strength,
+                highlighted=[king],
+            ),
+        )
         # Apply rank change
         for card, new_rank in result.change_rank:
             card.change_rank(new_rank)
@@ -367,13 +407,14 @@ class TestStrengthIntegration:
             blind=_sb(),
             rng=_rng(),
         )
-        assert r.chips == 15   # 5 + 10
+        assert r.chips == 15  # 5 + 10
         assert r.total == 15
 
 
 # ============================================================================
 # 5. Death: copy Polychrome Glass 7H onto plain 2C
 # ============================================================================
+
 
 class TestDeathIntegration:
     """Death tarot copies the rightmost card onto the other.
@@ -384,14 +425,18 @@ class TestDeathIntegration:
     """
 
     def test_death_copy_card_descriptor(self):
-        target = _c("C", "2")            # created first → lower sort_id
-        source = _c("H", "7", "m_glass") # created second → higher sort_id
+        target = _c("C", "2")  # created first → lower sort_id
+        source = _c("H", "7", "m_glass")  # created second → higher sort_id
         source.set_edition({"polychrome": True})
 
         death = _consumable("c_death")
-        result = use_consumable(death, ConsumableContext(
-            card=death, highlighted=[target, source],
-        ))
+        result = use_consumable(
+            death,
+            ConsumableContext(
+                card=death,
+                highlighted=[target, source],
+            ),
+        )
         assert result is not None
         assert result.copy_card is not None
         copied_source, copied_target = result.copy_card
@@ -404,9 +449,13 @@ class TestDeathIntegration:
         source.set_edition({"polychrome": True})
 
         death = _consumable("c_death")
-        result = use_consumable(death, ConsumableContext(
-            card=death, highlighted=[target, source],
-        ))
+        result = use_consumable(
+            death,
+            ConsumableContext(
+                card=death,
+                highlighted=[target, source],
+            ),
+        )
         # Apply the copy
         src, tgt = result.copy_card
         _apply_copy_card(src, tgt)
@@ -426,9 +475,13 @@ class TestDeathIntegration:
         source = _c("H", "7", "m_glass")
 
         death = _consumable("c_death")
-        result = use_consumable(death, ConsumableContext(
-            card=death, highlighted=[target, source],
-        ))
+        result = use_consumable(
+            death,
+            ConsumableContext(
+                card=death,
+                highlighted=[target, source],
+            ),
+        )
         _apply_copy_card(*result.copy_card)
 
         # Score the updated target (now Glass 7H): Glass x_mult = 2.0
@@ -450,6 +503,7 @@ class TestDeathIntegration:
 # 6. Hanged Man on 2 cards → destroyed, deck has 50 cards
 # ============================================================================
 
+
 class TestHangedManIntegration:
     """Use Hanged Man on 2 cards → consume destroys them.
     Deck (playing_cards) drops from 52 to 50.
@@ -468,11 +522,14 @@ class TestHangedManIntegration:
         deck = self._make_deck()
         card1, card2 = deck[0], deck[1]
         hanged = _consumable("c_hanged_man")
-        result = use_consumable(hanged, ConsumableContext(
-            card=hanged,
-            highlighted=[card1, card2],
-            playing_cards=deck,
-        ))
+        result = use_consumable(
+            hanged,
+            ConsumableContext(
+                card=hanged,
+                highlighted=[card1, card2],
+                playing_cards=deck,
+            ),
+        )
         assert result is not None
         assert result.destroy == [card1, card2]
 
@@ -482,11 +539,14 @@ class TestHangedManIntegration:
 
         card1, card2 = deck[5], deck[10]
         hanged = _consumable("c_hanged_man")
-        result = use_consumable(hanged, ConsumableContext(
-            card=hanged,
-            highlighted=[card1, card2],
-            playing_cards=deck,
-        ))
+        result = use_consumable(
+            hanged,
+            ConsumableContext(
+                card=hanged,
+                highlighted=[card1, card2],
+                playing_cards=deck,
+            ),
+        )
         # Apply: remove destroyed cards from playing_cards
         for card in result.destroy:
             deck.remove(card)
@@ -500,11 +560,14 @@ class TestHangedManIntegration:
         deck = self._make_deck()
         card = deck[3]
         hanged = _consumable("c_hanged_man")
-        result = use_consumable(hanged, ConsumableContext(
-            card=hanged,
-            highlighted=[card],
-            playing_cards=deck,
-        ))
+        result = use_consumable(
+            hanged,
+            ConsumableContext(
+                card=hanged,
+                highlighted=[card],
+                playing_cards=deck,
+            ),
+        )
         for c in result.destroy:
             deck.remove(c)
         assert len(deck) == 51
@@ -513,6 +576,7 @@ class TestHangedManIntegration:
 # ============================================================================
 # 7. Wheel of Fortune (mock RNG success) → joker gets edition → score
 # ============================================================================
+
 
 class TestWheelOfFortuneIntegration:
     """WoF with RNG scripted for success → joker gains Foil edition.
@@ -524,12 +588,15 @@ class TestWheelOfFortuneIntegration:
         j = _joker("j_joker")
         wof = _consumable("c_wheel_of_fortune")
         rng = _ControlledRng([0.1, 0.3])
-        result = use_consumable(wof, ConsumableContext(
-            card=wof,
-            jokers=[j],
-            rng=rng,
-            game_state={"probabilities_normal": 1},
-        ))
+        result = use_consumable(
+            wof,
+            ConsumableContext(
+                card=wof,
+                jokers=[j],
+                rng=rng,
+                game_state={"probabilities_normal": 1},
+            ),
+        )
         assert result is not None
         assert result.add_edition is not None
         assert result.add_edition["target"] is j
@@ -544,10 +611,15 @@ class TestWheelOfFortuneIntegration:
         j = _joker("j_joker")
         wof = _consumable("c_wheel_of_fortune")
         rng = _ControlledRng([0.1, 0.3])
-        result = use_consumable(wof, ConsumableContext(
-            card=wof, jokers=[j], rng=rng,
-            game_state={"probabilities_normal": 1},
-        ))
+        result = use_consumable(
+            wof,
+            ConsumableContext(
+                card=wof,
+                jokers=[j],
+                rng=rng,
+                game_state={"probabilities_normal": 1},
+            ),
+        )
         # Apply the edition to the joker
         j.set_edition(result.add_edition["edition"])
         assert j.edition is not None and j.edition.get("foil") is True
@@ -607,6 +679,7 @@ class TestWheelOfFortuneIntegration:
 # 8. v_grabber + v_nacho_tong → +2 hands per round
 # ============================================================================
 
+
 class TestVoucherHandsIntegration:
     """Apply Grabber then Nacho Tong → round_resets.hands goes from 4 to 6."""
 
@@ -645,6 +718,7 @@ class TestVoucherHandsIntegration:
 # 9. v_clearance_sale → all shop card costs reduced by 25%
 # ============================================================================
 
+
 class TestClearanceSaleIntegration:
     """Apply Clearance Sale voucher → discount_percent=25.
     Verify set_cost() with that discount reduces card costs by 25%.
@@ -675,7 +749,7 @@ class TestClearanceSaleIntegration:
         import math
 
         test_cases = [
-            ("j_joker", 2),       # base_cost=2 → floor(2.5*0.75)=1
+            ("j_joker", 2),  # base_cost=2 → floor(2.5*0.75)=1
             ("j_greedy_joker", 5),  # base_cost=5 → floor(5.5*0.75)=4
         ]
         for key, base_cost in test_cases:
@@ -691,7 +765,7 @@ class TestClearanceSaleIntegration:
         apply_voucher("v_liquidation", game_state)
 
         j = Card()
-        j.set_ability("j_greedy_joker")   # base_cost=5
+        j.set_ability("j_greedy_joker")  # base_cost=5
         j.set_cost(discount_percent=game_state["discount_percent"])
         # floor((5+0.5)*50/100) = floor(2.75) = 2
         assert j.cost == 2
@@ -700,6 +774,7 @@ class TestClearanceSaleIntegration:
 # ============================================================================
 # 10. Full round earnings: boss blind + Golden Joker + Cloud 9 + rental @ $23
 # ============================================================================
+
 
 class TestFullRoundEarnings:
     """Beat Big Blind with Golden Joker ($4) + Cloud 9 (3 nines, $3) + 1 rental
@@ -748,9 +823,9 @@ class TestFullRoundEarnings:
         assert result.blind_reward == 4
         assert result.unused_hands_bonus == 2
         assert result.unused_discards_bonus == 0
-        assert result.joker_dollars == 7    # Golden $4 + Cloud 9 $3
+        assert result.joker_dollars == 7  # Golden $4 + Cloud 9 $3
         assert result.rental_cost == 3
-        assert result.interest == 4         # min(20//5=4, 5) = 4
+        assert result.interest == 4  # min(20//5=4, 5) = 4
         assert result.total == 14
 
     def test_rental_before_interest(self):

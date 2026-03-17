@@ -23,6 +23,7 @@ def _reset():
 # Standard deck
 # ============================================================================
 
+
 class TestStandardDeck:
     def test_52_cards(self):
         rng = PseudoRandom("TESTSEED")
@@ -73,6 +74,7 @@ class TestStandardDeck:
 # Abandoned Deck
 # ============================================================================
 
+
 class TestAbandonedDeck:
     def test_40_cards(self):
         rng = PseudoRandom("TESTSEED")
@@ -104,6 +106,7 @@ class TestAbandonedDeck:
 # ============================================================================
 # Checkered Deck
 # ============================================================================
+
 
 class TestCheckeredDeck:
     def test_52_cards(self):
@@ -144,6 +147,7 @@ class TestCheckeredDeck:
 # ============================================================================
 # Erratic Deck
 # ============================================================================
+
 
 class TestErraticDeck:
     def test_52_cards(self):
@@ -186,6 +190,7 @@ class TestErraticDeck:
 # ============================================================================
 # Challenge filtering
 # ============================================================================
+
 
 class TestChallengeFiltering:
     def test_explicit_card_list(self):
@@ -263,6 +268,7 @@ class TestChallengeFiltering:
 # ============================================================================
 # Starting params override
 # ============================================================================
+
 
 class TestStartingParams:
     def test_no_faces_via_params(self):

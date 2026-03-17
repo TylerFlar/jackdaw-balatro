@@ -21,27 +21,55 @@ _DATA_DIR = Path(__file__).parent
 # ---------------------------------------------------------------------------
 
 _RANK_TO_ID: dict[str, int] = {
-    "2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8,
-    "9": 9, "10": 10, "Jack": 11, "Queen": 12, "King": 13, "Ace": 14,
+    "2": 2,
+    "3": 3,
+    "4": 4,
+    "5": 5,
+    "6": 6,
+    "7": 7,
+    "8": 8,
+    "9": 9,
+    "10": 10,
+    "Jack": 11,
+    "Queen": 12,
+    "King": 13,
+    "Ace": 14,
 }
 
 _RANK_TO_NOMINAL: dict[str, int] = {
-    "2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8,
-    "9": 9, "10": 10, "Jack": 10, "Queen": 10, "King": 10, "Ace": 11,
+    "2": 2,
+    "3": 3,
+    "4": 4,
+    "5": 5,
+    "6": 6,
+    "7": 7,
+    "8": 8,
+    "9": 9,
+    "10": 10,
+    "Jack": 10,
+    "Queen": 10,
+    "King": 10,
+    "Ace": 11,
 }
 
 _SUIT_NOMINAL: dict[str, float] = {
-    "Spades": 0.04, "Hearts": 0.03, "Clubs": 0.02, "Diamonds": 0.01,
+    "Spades": 0.04,
+    "Hearts": 0.03,
+    "Clubs": 0.02,
+    "Diamonds": 0.01,
 }
 
 _SUIT_IS_FACE: dict[str, bool] = {
-    "Jack": True, "Queen": True, "King": True,
+    "Jack": True,
+    "Queen": True,
+    "King": True,
 }
 
 
 # ---------------------------------------------------------------------------
 # Dataclasses
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class JokerProto:
@@ -236,6 +264,7 @@ class SealProto:
 # JSON loading helpers
 # ---------------------------------------------------------------------------
 
+
 def _load_json(filename: str) -> dict[str, Any]:
     with open(_DATA_DIR / filename) as f:
         return json.load(f)
@@ -256,19 +285,18 @@ def _get(d: dict, key: str, default: Any = None) -> Any:
 # Build lookup dicts
 # ---------------------------------------------------------------------------
 
-def _build_centers() -> (
-    tuple[
-        dict[str, JokerProto],
-        dict[str, TarotProto],
-        dict[str, PlanetProto],
-        dict[str, SpectralProto],
-        dict[str, VoucherProto],
-        dict[str, BackProto],
-        dict[str, BoosterProto],
-        dict[str, EnhancementProto],
-        dict[str, EditionProto],
-    ]
-):
+
+def _build_centers() -> tuple[
+    dict[str, JokerProto],
+    dict[str, TarotProto],
+    dict[str, PlanetProto],
+    dict[str, SpectralProto],
+    dict[str, VoucherProto],
+    dict[str, BackProto],
+    dict[str, BoosterProto],
+    dict[str, EnhancementProto],
+    dict[str, EditionProto],
+]:
     raw = _load_json("centers.json")
 
     jokers: dict[str, JokerProto] = {}
@@ -304,21 +332,30 @@ def _build_centers() -> (
             )
         elif s == "Tarot":
             tarots[key] = TarotProto(
-                key=key, name=d["name"], cost=d.get("cost", 3),
-                order=d.get("order", 0), effect=d.get("effect", ""),
+                key=key,
+                name=d["name"],
+                cost=d.get("cost", 3),
+                order=d.get("order", 0),
+                effect=d.get("effect", ""),
                 config=_get(d, "config", {}),
                 discovered=d.get("discovered", False),
             )
         elif s == "Planet":
             planets[key] = PlanetProto(
-                key=key, name=d["name"], cost=d.get("cost", 3),
-                order=d.get("order", 0), config=_get(d, "config", {}),
+                key=key,
+                name=d["name"],
+                cost=d.get("cost", 3),
+                order=d.get("order", 0),
+                config=_get(d, "config", {}),
                 discovered=d.get("discovered", False),
             )
         elif s == "Spectral":
             spectrals[key] = SpectralProto(
-                key=key, name=d["name"], cost=d.get("cost", 4),
-                order=d.get("order", 0), effect=d.get("effect", ""),
+                key=key,
+                name=d["name"],
+                cost=d.get("cost", 4),
+                order=d.get("order", 0),
+                effect=d.get("effect", ""),
                 config=_get(d, "config", {}),
                 hidden=d.get("hidden", False),
                 discovered=d.get("discovered", False),
@@ -328,15 +365,21 @@ def _build_centers() -> (
             if isinstance(req, str):
                 req = [req]
             vouchers[key] = VoucherProto(
-                key=key, name=d["name"], cost=d.get("cost", 10),
-                order=d.get("order", 0), config=_get(d, "config", {}),
-                requires=req, unlocked=d.get("unlocked", True),
+                key=key,
+                name=d["name"],
+                cost=d.get("cost", 10),
+                order=d.get("order", 0),
+                config=_get(d, "config", {}),
+                requires=req,
+                unlocked=d.get("unlocked", True),
                 discovered=d.get("discovered", False),
                 unlock_condition=d.get("unlock_condition"),
             )
         elif s == "Back":
             backs[key] = BackProto(
-                key=key, name=d["name"], order=d.get("order", 0),
+                key=key,
+                name=d["name"],
+                order=d.get("order", 0),
                 config=_get(d, "config", {}),
                 unlocked=d.get("unlocked", True),
                 discovered=d.get("discovered", False),
@@ -345,19 +388,28 @@ def _build_centers() -> (
             )
         elif s == "Booster":
             boosters[key] = BoosterProto(
-                key=key, name=d["name"], kind=d.get("kind", ""),
-                cost=d.get("cost", 4), order=d.get("order", 0),
-                weight=d.get("weight", 1), config=_get(d, "config", {}),
+                key=key,
+                name=d["name"],
+                kind=d.get("kind", ""),
+                cost=d.get("cost", 4),
+                order=d.get("order", 0),
+                weight=d.get("weight", 1),
+                config=_get(d, "config", {}),
                 discovered=d.get("discovered", False),
             )
         elif s == "Enhanced":
             enhancements[key] = EnhancementProto(
-                key=key, name=d["name"], order=d.get("order", 0),
-                effect=d.get("effect", ""), config=_get(d, "config", {}),
+                key=key,
+                name=d["name"],
+                order=d.get("order", 0),
+                effect=d.get("effect", ""),
+                config=_get(d, "config", {}),
             )
         elif s == "Edition":
             editions[key] = EditionProto(
-                key=key, name=d["name"], order=d.get("order", 0),
+                key=key,
+                name=d["name"],
+                order=d.get("order", 0),
                 config=_get(d, "config", {}),
             )
 
@@ -393,9 +445,13 @@ def _build_blinds() -> dict[str, BlindProto]:
         if isinstance(boss, list):
             boss = None
         result[key] = BlindProto(
-            key=key, name=d["name"], order=d.get("order", 0),
-            dollars=d.get("dollars", 0), mult=d.get("mult", 1),
-            debuff=debuff, boss=boss,
+            key=key,
+            name=d["name"],
+            order=d.get("order", 0),
+            dollars=d.get("dollars", 0),
+            mult=d.get("mult", 1),
+            debuff=debuff,
+            boss=boss,
             boss_colour=d.get("boss_colour"),
         )
     return result
@@ -406,7 +462,9 @@ def _build_tags() -> dict[str, TagProto]:
     result: dict[str, TagProto] = {}
     for key, d in raw.items():
         result[key] = TagProto(
-            key=key, name=d["name"], order=d.get("order", 0),
+            key=key,
+            name=d["name"],
+            order=d.get("order", 0),
             config=_get(d, "config", {}),
             min_ante=d.get("min_ante"),
             requires=d.get("requires"),
@@ -419,8 +477,11 @@ def _build_stakes() -> dict[str, StakeProto]:
     raw = _load_json("stakes.json")
     return {
         key: StakeProto(
-            key=key, name=d["name"], order=d.get("order", 0),
-            stake_level=d["stake_level"], unlocked=d.get("unlocked", False),
+            key=key,
+            name=d["name"],
+            order=d.get("order", 0),
+            stake_level=d["stake_level"],
+            unlocked=d.get("unlocked", False),
         )
         for key, d in raw.items()
     }
@@ -430,7 +491,8 @@ def _build_seals() -> dict[str, SealProto]:
     raw = _load_json("seals.json")
     return {
         key: SealProto(
-            key=key, order=d.get("order", 0),
+            key=key,
+            order=d.get("order", 0),
             discovered=d.get("discovered", False),
         )
         for key, d in raw.items()
@@ -503,6 +565,13 @@ SEALS: dict[str, SealProto] = _build_seals()
 
 JOKER_RARITY_POOLS: dict[int, list[str]] = _build_rarity_pools(JOKERS)
 CENTER_POOLS: dict[str, list[str]] = _build_center_pools(
-    JOKERS, TAROTS, PLANETS, SPECTRALS, VOUCHERS,
-    BACKS, BOOSTERS, ENHANCEMENTS, EDITIONS,
+    JOKERS,
+    TAROTS,
+    PLANETS,
+    SPECTRALS,
+    VOUCHERS,
+    BACKS,
+    BOOSTERS,
+    ENHANCEMENTS,
+    EDITIONS,
 )

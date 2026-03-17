@@ -112,16 +112,16 @@ _PACK_Q = struct.Struct("<Q")
 # Unrolled for performance (called millions of times during RL training).
 
 # Pre-computed high masks for each generator
-_HMASK0 = (_MASK64 << 1) & _MASK64   # 64-63 = 1
-_HMASK1 = (_MASK64 << 6) & _MASK64   # 64-58 = 6
-_HMASK2 = (_MASK64 << 9) & _MASK64   # 64-55 = 9
+_HMASK0 = (_MASK64 << 1) & _MASK64  # 64-63 = 1
+_HMASK1 = (_MASK64 << 6) & _MASK64  # 64-58 = 6
+_HMASK2 = (_MASK64 << 9) & _MASK64  # 64-55 = 9
 _HMASK3 = (_MASK64 << 17) & _MASK64  # 64-47 = 17
 
 # Min-bit thresholds (from 0x11090601 constant)
-_MIN0 = 1 << 1    # 2
-_MIN1 = 1 << 6    # 64
-_MIN2 = 1 << 9    # 512
-_MIN3 = 1 << 17   # 131072
+_MIN0 = 1 << 1  # 2
+_MIN1 = 1 << 6  # 64
+_MIN2 = 1 << 9  # 512
+_MIN3 = 1 << 17  # 131072
 
 # Seeding constants
 _PI = 3.14159265358979323846
@@ -218,6 +218,7 @@ def _luajit_random_int(state: list[int], a: int, b: int) -> int:
 # Module-level pure function — used standalone and by PseudoRandom
 # ---------------------------------------------------------------------------
 
+
 def pseudohash(s: str) -> float:
     """Hash a string to a float in [0, 1).
 
@@ -249,6 +250,7 @@ def _truncate_13(x: float) -> float:
 # ---------------------------------------------------------------------------
 # PseudoRandom — the stateful PRNG matching G.GAME.pseudorandom
 # ---------------------------------------------------------------------------
+
 
 class PseudoRandom:
     """Balatro-compatible stateful PRNG.
@@ -418,6 +420,7 @@ class PseudoRandom:
 # ---------------------------------------------------------------------------
 # Module-level convenience wrappers (backward compat with existing tests)
 # ---------------------------------------------------------------------------
+
 
 def pseudoseed(key: str, state: dict[str, float]) -> float:
     """Advance stream *key* in *state* dict — functional API.

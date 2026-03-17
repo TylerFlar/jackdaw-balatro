@@ -22,6 +22,7 @@ def _reset():
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _small_blind() -> Blind:
     """Small Blind at ante 1: $3 reward."""
     return Blind.create("bl_small", ante=1)
@@ -51,6 +52,7 @@ def _rental_joker() -> Card:
 # calculate_discard_cost
 # ---------------------------------------------------------------------------
 
+
 class TestCalculateDiscardCost:
     def test_no_modifier_returns_zero(self):
         assert calculate_discard_cost({}) == 0
@@ -71,6 +73,7 @@ class TestCalculateDiscardCost:
 # RoundEarnings dataclass
 # ---------------------------------------------------------------------------
 
+
 class TestRoundEarnings:
     def test_default_all_zero(self):
         e = RoundEarnings()
@@ -90,6 +93,7 @@ class TestRoundEarnings:
 # ---------------------------------------------------------------------------
 # Basic round — blind + hands + interest
 # ---------------------------------------------------------------------------
+
 
 class TestBasicRound:
     """Beat Small Blind with 2 unused hands, $12 in bank.
@@ -165,6 +169,7 @@ class TestBasicRound:
 # Green Deck — money per discard modifier
 # ---------------------------------------------------------------------------
 
+
 class TestGreenDeck:
     """Green Deck: money_per_discard=1. 3 unused hands × $1 + 2 unused discards × $1 = $5 bonus."""
 
@@ -220,6 +225,7 @@ class TestGreenDeck:
 # ---------------------------------------------------------------------------
 # Interest calculation
 # ---------------------------------------------------------------------------
+
 
 class TestInterest:
     """Interest = interest_amount × min(effective_money // 5, interest_cap // 5)."""
@@ -326,6 +332,7 @@ class TestInterest:
 # To the Moon — increased interest_amount
 # ---------------------------------------------------------------------------
 
+
 class TestToTheMoon:
     """To the Moon joker increases interest_amount by 1 per copy."""
 
@@ -372,6 +379,7 @@ class TestToTheMoon:
 # ---------------------------------------------------------------------------
 # Rental joker costs
 # ---------------------------------------------------------------------------
+
 
 class TestRentalJokers:
     """Rental jokers are deducted BEFORE interest is computed."""
@@ -475,6 +483,7 @@ class TestRentalJokers:
 # Joker dollar bonuses
 # ---------------------------------------------------------------------------
 
+
 class TestJokerDollars:
     """Joker end-of-round dollar bonuses via on_end_of_round."""
 
@@ -532,6 +541,7 @@ class TestJokerDollars:
 # ---------------------------------------------------------------------------
 # Combined scenario
 # ---------------------------------------------------------------------------
+
 
 class TestCombinedScenario:
     """Full scenario: blind + hands + interest + Golden Joker + Cloud 9."""

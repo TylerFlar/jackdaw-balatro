@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 # poll_edition — common_events.lua:2055
 # ---------------------------------------------------------------------------
 
+
 def poll_edition(
     key: str,
     rng: PseudoRandom,

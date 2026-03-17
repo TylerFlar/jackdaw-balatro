@@ -30,9 +30,8 @@ if TYPE_CHECKING:
 # Prerequisite checking
 # ---------------------------------------------------------------------------
 
-def check_voucher_prerequisites(
-    key: str, used_vouchers: dict[str, bool]
-) -> bool:
+
+def check_voucher_prerequisites(key: str, used_vouchers: dict[str, bool]) -> bool:
     """Return True if all prerequisites for *key* are satisfied.
 
     Mirrors the ``v.requires`` check inside ``get_current_pool``
@@ -47,6 +46,7 @@ def check_voucher_prerequisites(
 # ---------------------------------------------------------------------------
 # Pool building — mirrors get_current_pool for Vouchers
 # ---------------------------------------------------------------------------
+
 
 def get_available_voucher_pool(
     used_vouchers: dict[str, bool],
@@ -76,6 +76,7 @@ def get_available_voucher_pool(
 # ---------------------------------------------------------------------------
 # get_next_voucher_key — mirrors common_events.lua:1901
 # ---------------------------------------------------------------------------
+
 
 def get_next_voucher_key(
     rng: PseudoRandom,
@@ -117,6 +118,7 @@ def get_next_voucher_key(
 # ---------------------------------------------------------------------------
 # apply_voucher — mirrors Card:apply_to_run (card.lua:1880)
 # ---------------------------------------------------------------------------
+
 
 def apply_voucher(key: str, game_state: dict[str, Any]) -> dict[str, Any]:
     """Apply a voucher's permanent effect to *game_state* in-place.

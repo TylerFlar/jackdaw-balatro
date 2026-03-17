@@ -20,9 +20,19 @@ from jackdaw.engine.hand_eval import evaluate_hand, evaluate_poker_hand
 def _card(suit: str, rank: str, enhancement: str = "c_base") -> Card:
     sl = {"Hearts": "H", "Diamonds": "D", "Clubs": "C", "Spades": "S"}
     rl = {
-        "2": "2", "3": "3", "4": "4", "5": "5", "6": "6", "7": "7",
-        "8": "8", "9": "9", "10": "T", "Jack": "J", "Queen": "Q",
-        "King": "K", "Ace": "A",
+        "2": "2",
+        "3": "3",
+        "4": "4",
+        "5": "5",
+        "6": "6",
+        "7": "7",
+        "8": "8",
+        "9": "9",
+        "10": "T",
+        "Jack": "J",
+        "Queen": "Q",
+        "King": "K",
+        "Ace": "A",
     }
     c = Card()
     c.set_base(f"{sl[suit]}_{rl[rank]}", suit, rank)
@@ -61,8 +71,10 @@ class TestSingleHandPerformance:
         """evaluate_poker_hand on a single 5-card hand."""
         reset_sort_id_counter()
         hand = [
-            _card("Hearts", "5"), _card("Spades", "5"),
-            _card("Clubs", "King"), _card("Diamonds", "King"),
+            _card("Hearts", "5"),
+            _card("Spades", "5"),
+            _card("Clubs", "King"),
+            _card("Diamonds", "King"),
             _card("Hearts", "Ace"),
         ]
 
@@ -84,8 +96,10 @@ class TestSingleHandPerformance:
         """evaluate_hand (full pipeline) on a single 5-card hand."""
         reset_sort_id_counter()
         hand = [
-            _card("Hearts", "5"), _card("Spades", "5"),
-            _card("Clubs", "King"), _card("Diamonds", "King"),
+            _card("Hearts", "5"),
+            _card("Spades", "5"),
+            _card("Clubs", "King"),
+            _card("Diamonds", "King"),
             _card("Hearts", "Ace"),
         ]
 
@@ -183,10 +197,7 @@ class TestMonteCarloScale:
 
         total = n * len(subsets)
         rate = total / elapsed
-        print(
-            f"\n  Monte Carlo: {total:,} evaluations in {elapsed:.2f}s "
-            f"= {rate:,.0f} eval/sec"
-        )
+        print(f"\n  Monte Carlo: {total:,} evaluations in {elapsed:.2f}s = {rate:,.0f} eval/sec")
         assert elapsed < 30, f"Too slow: {elapsed:.1f}s (target < 30s)"
 
 
@@ -199,8 +210,10 @@ class TestBreakdown:
 
         reset_sort_id_counter()
         hand = [
-            _card("Hearts", "5"), _card("Spades", "5"),
-            _card("Clubs", "King"), _card("Diamonds", "King"),
+            _card("Hearts", "5"),
+            _card("Spades", "5"),
+            _card("Clubs", "King"),
+            _card("Diamonds", "King"),
             _card("Hearts", "Ace"),
         ]
 

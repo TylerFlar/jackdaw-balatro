@@ -13,6 +13,7 @@ from jackdaw.engine.hand_levels import HandLevels, HandState
 # Initialization
 # ============================================================================
 
+
 class TestInit:
     def test_all_12_types_present(self):
         levels = HandLevels()
@@ -46,6 +47,7 @@ class TestInit:
 # get (chips, mult)
 # ============================================================================
 
+
 class TestGet:
     def test_pair_level_1(self):
         levels = HandLevels()
@@ -73,6 +75,7 @@ class TestGet:
 # ============================================================================
 # Level up
 # ============================================================================
+
 
 class TestLevelUp:
     def test_pair_level_2(self):
@@ -154,6 +157,7 @@ class TestLevelUp:
 # Black Hole (level up all)
 # ============================================================================
 
+
 class TestBlackHole:
     def test_all_types_advance(self):
         levels = HandLevels()
@@ -189,6 +193,7 @@ class TestBlackHole:
 # ============================================================================
 # Play recording
 # ============================================================================
+
 
 class TestPlayRecording:
     def test_record_increments(self):
@@ -228,6 +233,7 @@ class TestPlayRecording:
 # Most played
 # ============================================================================
 
+
 class TestMostPlayed:
     def test_default_is_high_card(self):
         """No plays → most_played returns High Card."""
@@ -251,6 +257,7 @@ class TestMostPlayed:
 # ============================================================================
 # Dict-like access
 # ============================================================================
+
 
 class TestDictAccess:
     def test_getitem_by_enum(self):

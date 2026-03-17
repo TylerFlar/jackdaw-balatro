@@ -23,9 +23,19 @@ def _reset():
 
 _SL = {"Hearts": "H", "Diamonds": "D", "Clubs": "C", "Spades": "S"}
 _RL = {
-    "2": "2", "3": "3", "4": "4", "5": "5", "6": "6", "7": "7",
-    "8": "8", "9": "9", "10": "T", "Jack": "J", "Queen": "Q",
-    "King": "K", "Ace": "A",
+    "2": "2",
+    "3": "3",
+    "4": "4",
+    "5": "5",
+    "6": "6",
+    "7": "7",
+    "8": "8",
+    "9": "9",
+    "10": "T",
+    "Jack": "J",
+    "Queen": "Q",
+    "King": "K",
+    "Ace": "A",
 }
 
 
@@ -50,6 +60,7 @@ def _small_blind() -> Blind:
 # ============================================================================
 # Gros Michel: +15 mult, probabilistic self-destruction
 # ============================================================================
+
 
 class TestGrosMichel:
     def _make(self):
@@ -92,7 +103,11 @@ class TestGrosMichel:
         played = [_card("Hearts", "Ace"), _card("Spades", "Ace")]
         j = self._make()
         result = score_hand(
-            played, [], [j], HandLevels(), _small_blind(),
+            played,
+            [],
+            [j],
+            HandLevels(),
+            _small_blind(),
             PseudoRandom("TEST"),
         )
         # Pair: 32 chips, 2 mult. +15 mult → 17. Score: 32 × 17 = 544.
@@ -103,6 +118,7 @@ class TestGrosMichel:
 # ============================================================================
 # Cavendish: x3 mult, rare self-destruction
 # ============================================================================
+
 
 class TestCavendish:
     def _make(self):
@@ -142,6 +158,7 @@ class TestCavendish:
 # Chicot: disable boss blind (persists)
 # ============================================================================
 
+
 class TestChicot:
     def test_disables_boss_blind(self):
         j = _joker("j_chicot")
@@ -177,6 +194,7 @@ class TestChicot:
 # Luchador: sell to disable boss blind
 # ============================================================================
 
+
 class TestLuchador:
     def test_sell_during_boss(self):
         j = _joker("j_luchador")
@@ -204,6 +222,7 @@ class TestLuchador:
 # Burglar: +3 hands, 0 discards on setting_blind
 # ============================================================================
 
+
 class TestBurglar:
     def test_setting_blind(self):
         j = _joker("j_burglar", extra=3)
@@ -221,6 +240,7 @@ class TestBurglar:
 # ============================================================================
 # Midas Mask: convert face cards to Gold
 # ============================================================================
+
 
 class TestMidasMask:
     def test_converts_face_cards(self):
@@ -279,13 +299,19 @@ class TestMidasMask:
         Three of a Kind of Kings with Midas: Kings become Gold Cards.
         After conversion, Gold Cards give $3 per scored card."""
         played = [
-            _card("Hearts", "King"), _card("Spades", "King"),
-            _card("Clubs", "King"), _card("Diamonds", "5"),
+            _card("Hearts", "King"),
+            _card("Spades", "King"),
+            _card("Clubs", "King"),
+            _card("Diamonds", "5"),
             _card("Hearts", "2"),
         ]
         j = _joker("j_midas_mask")
         result = score_hand(
-            played, [], [j], HandLevels(), _small_blind(),
+            played,
+            [],
+            [j],
+            HandLevels(),
+            _small_blind(),
             PseudoRandom("TEST"),
         )
         # 3 Kings converted to Gold. Gold Card nominal is still 10 (King).
@@ -297,6 +323,7 @@ class TestMidasMask:
 # ============================================================================
 # Hiker: +5 permanent chip bonus per scored card
 # ============================================================================
+
 
 class TestHiker:
     def test_adds_perma_bonus(self):
@@ -312,7 +339,9 @@ class TestHiker:
         ace = _card("Hearts", "Ace")
         for _ in range(3):
             ctx = JokerContext(
-                individual=True, cardarea="play", other_card=ace,
+                individual=True,
+                cardarea="play",
+                other_card=ace,
             )
             calculate_joker(j, ctx)
         assert ace.ability["perma_bonus"] == 15
@@ -324,8 +353,12 @@ class TestHiker:
         j = _joker("j_hiker", extra=5)
 
         # First hand: perma_bonus added during scoring
-        r1 = score_hand(
-            played, [], [j], HandLevels(), _small_blind(),
+        score_hand(
+            played,
+            [],
+            [j],
+            HandLevels(),
+            _small_blind(),
             PseudoRandom("TEST"),
         )
         # Each Ace gets +5 perma_bonus during Phase 7
@@ -335,7 +368,11 @@ class TestHiker:
         # Second hand: perma_bonus is part of chip calculation
         reset_sort_id_counter()
         r2 = score_hand(
-            played, [], [j], HandLevels(), _small_blind(),
+            played,
+            [],
+            [j],
+            HandLevels(),
+            _small_blind(),
             PseudoRandom("TEST"),
         )
         # Pair: 10 base. Each Ace: 11 nominal + 5 old perma + 5 new perma = 21 chips.
@@ -350,7 +387,9 @@ class TestHiker:
         j = _joker("j_hiker", extra=5)
         ace = _card("Hearts", "Ace")
         ctx = JokerContext(
-            individual=True, cardarea="play", other_card=ace,
+            individual=True,
+            cardarea="play",
+            other_card=ace,
             blueprint=1,
         )
         calculate_joker(j, ctx)

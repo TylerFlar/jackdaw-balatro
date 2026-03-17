@@ -29,31 +29,52 @@ FLOAT_TOL = 1e-14
 # ============================================================================
 
 BOSS_POOL = {
-    "bl_hook": "bl_hook", "bl_ox": "bl_ox", "bl_wall": "bl_wall",
-    "bl_wheel": "bl_wheel", "bl_arm": "bl_arm", "bl_club": "bl_club",
-    "bl_fish": "bl_fish", "bl_psychic": "bl_psychic", "bl_goad": "bl_goad",
+    "bl_hook": "bl_hook",
+    "bl_ox": "bl_ox",
+    "bl_wall": "bl_wall",
+    "bl_wheel": "bl_wheel",
+    "bl_arm": "bl_arm",
+    "bl_club": "bl_club",
+    "bl_fish": "bl_fish",
+    "bl_psychic": "bl_psychic",
+    "bl_goad": "bl_goad",
     "bl_water": "bl_water",
 }
 
 TAG_POOL = {
-    "tag_uncommon": "tag_uncommon", "tag_rare": "tag_rare",
-    "tag_negative": "tag_negative", "tag_foil": "tag_foil",
-    "tag_holo": "tag_holo", "tag_polychrome": "tag_polychrome",
-    "tag_investment": "tag_investment", "tag_voucher": "tag_voucher",
-    "tag_boss": "tag_boss", "tag_standard": "tag_standard",
-    "tag_charm": "tag_charm", "tag_meteor": "tag_meteor",
-    "tag_buffoon": "tag_buffoon", "tag_handy": "tag_handy",
-    "tag_garbage": "tag_garbage", "tag_ethereal": "tag_ethereal",
-    "tag_coupon": "tag_coupon", "tag_double": "tag_double",
-    "tag_juggle": "tag_juggle", "tag_d6": "tag_d6",
+    "tag_uncommon": "tag_uncommon",
+    "tag_rare": "tag_rare",
+    "tag_negative": "tag_negative",
+    "tag_foil": "tag_foil",
+    "tag_holo": "tag_holo",
+    "tag_polychrome": "tag_polychrome",
+    "tag_investment": "tag_investment",
+    "tag_voucher": "tag_voucher",
+    "tag_boss": "tag_boss",
+    "tag_standard": "tag_standard",
+    "tag_charm": "tag_charm",
+    "tag_meteor": "tag_meteor",
+    "tag_buffoon": "tag_buffoon",
+    "tag_handy": "tag_handy",
+    "tag_garbage": "tag_garbage",
+    "tag_ethereal": "tag_ethereal",
+    "tag_coupon": "tag_coupon",
+    "tag_double": "tag_double",
+    "tag_juggle": "tag_juggle",
+    "tag_d6": "tag_d6",
 }
 
 JOKER_POOL = {
-    "j_joker": "j_joker", "j_greedy_joker": "j_greedy_joker",
-    "j_lusty_joker": "j_lusty_joker", "j_wrathful_joker": "j_wrathful_joker",
-    "j_jolly": "j_jolly", "j_zany": "j_zany",
-    "j_mad": "j_mad", "j_crazy": "j_crazy",
-    "j_half": "j_half", "j_stencil": "j_stencil",
+    "j_joker": "j_joker",
+    "j_greedy_joker": "j_greedy_joker",
+    "j_lusty_joker": "j_lusty_joker",
+    "j_wrathful_joker": "j_wrathful_joker",
+    "j_jolly": "j_jolly",
+    "j_zany": "j_zany",
+    "j_mad": "j_mad",
+    "j_crazy": "j_crazy",
+    "j_half": "j_half",
+    "j_stencil": "j_stencil",
 }
 
 
@@ -63,10 +84,58 @@ JOKER_POOL = {
 
 # Deck shuffle: pseudoseed('shuffle') → pseudoshuffle([1..52])
 EXPECTED_DECK = [
-    17, 21, 14, 36, 29, 31, 35, 41, 43, 34, 44, 4, 49, 50, 32, 26,
-    10, 42, 12, 27, 6, 19, 48, 52, 51, 38, 8, 20, 11, 1, 30, 37,
-    13, 25, 47, 22, 18, 24, 16, 2, 40, 39, 15, 28, 5, 45, 7, 3,
-    33, 9, 23, 46,
+    17,
+    21,
+    14,
+    36,
+    29,
+    31,
+    35,
+    41,
+    43,
+    34,
+    44,
+    4,
+    49,
+    50,
+    32,
+    26,
+    10,
+    42,
+    12,
+    27,
+    6,
+    19,
+    48,
+    52,
+    51,
+    38,
+    8,
+    20,
+    11,
+    1,
+    30,
+    37,
+    13,
+    25,
+    47,
+    22,
+    18,
+    24,
+    16,
+    2,
+    40,
+    39,
+    15,
+    28,
+    5,
+    45,
+    7,
+    3,
+    33,
+    9,
+    23,
+    46,
 ]
 
 # Boss blind: pseudorandom_element(BOSS_POOL, pseudoseed('boss'))
@@ -96,6 +165,7 @@ EXPECTED_BOSS_CALL2 = 0.58145745166482732
 # ============================================================================
 # Game sequence simulation
 # ============================================================================
+
 
 class TestGameSequence:
     """Simulate the first few RNG calls of a real Balatro run."""
@@ -203,13 +273,13 @@ class TestGameSequence:
         second call must still produce the expected value.
         """
         # Replay full sequence
-        prng.seed("shuffle")        # shuffle: call 1
-        prng.seed("boss")           # boss: call 1
-        prng.seed("Tag1")           # Tag1: call 1
-        prng.seed("Tag1")           # Tag1: call 2
+        prng.seed("shuffle")  # shuffle: call 1
+        prng.seed("boss")  # boss: call 1
+        prng.seed("Tag1")  # Tag1: call 1
+        prng.seed("Tag1")  # Tag1: call 2
 
         ante = 1
-        for _ in range(6):          # 3 shop + 3 reroll
+        for _ in range(6):  # 3 shop + 3 reroll
             prng.seed(f"cdt{ante}")
             prng.seed(f"rarity{ante}sho")
             prng.seed(f"Joker1sho{ante}")
@@ -267,6 +337,7 @@ class TestGameSequence:
 # ============================================================================
 # Performance benchmark
 # ============================================================================
+
 
 class TestPerformance:
     """Benchmark the RNG system for RL training viability."""

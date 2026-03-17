@@ -20,9 +20,19 @@ def _reset():
 
 
 _RANK_LETTER = {
-    "2": "2", "3": "3", "4": "4", "5": "5", "6": "6", "7": "7",
-    "8": "8", "9": "9", "10": "T", "Jack": "J", "Queen": "Q",
-    "King": "K", "Ace": "A",
+    "2": "2",
+    "3": "3",
+    "4": "4",
+    "5": "5",
+    "6": "6",
+    "7": "7",
+    "8": "8",
+    "9": "9",
+    "10": "T",
+    "Jack": "J",
+    "Queen": "Q",
+    "King": "K",
+    "Ace": "A",
 }
 
 
@@ -38,12 +48,21 @@ def _make_playing_card(suit: str, rank: str) -> Card:
 def _make_deck(n: int = 52) -> list[Card]:
     """Helper: create n cards with sequential sort_ids and bases."""
     suits = ["Hearts", "Diamonds", "Clubs", "Spades"]
-    ranks = ["2", "3", "4", "5", "6", "7", "8", "9", "10",
-             "Jack", "Queen", "King", "Ace"]
+    ranks = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "Jack", "Queen", "King", "Ace"]
     rank_letters = {
-        "2": "2", "3": "3", "4": "4", "5": "5", "6": "6",
-        "7": "7", "8": "8", "9": "9", "10": "T",
-        "Jack": "J", "Queen": "Q", "King": "K", "Ace": "A",
+        "2": "2",
+        "3": "3",
+        "4": "4",
+        "5": "5",
+        "6": "6",
+        "7": "7",
+        "8": "8",
+        "9": "9",
+        "10": "T",
+        "Jack": "J",
+        "Queen": "Q",
+        "King": "K",
+        "Ace": "A",
     }
     cards = []
     for suit in suits:
@@ -61,6 +80,7 @@ def _make_deck(n: int = 52) -> list[Card]:
 # ============================================================================
 # CardArea basics
 # ============================================================================
+
 
 class TestCardAreaBasics:
     def test_init(self):
@@ -144,6 +164,7 @@ class TestCardAreaBasics:
 # Highlighting
 # ============================================================================
 
+
 class TestHighlighting:
     def test_highlight_and_unhighlight(self):
         area = CardArea()
@@ -184,6 +205,7 @@ class TestHighlighting:
 # ============================================================================
 # draw_card
 # ============================================================================
+
 
 class TestDrawCard:
     def test_draw_from_deck_to_hand(self):
@@ -254,9 +276,11 @@ class TestDrawCard:
 # Shuffle
 # ============================================================================
 
+
 class TestShuffle:
     def test_deterministic_shuffle(self):
         """Same seed produces same card order."""
+
         def make_area():
             reset_sort_id_counter()
             area = CardArea(card_limit=52, area_type="deck")
@@ -312,6 +336,7 @@ class TestShuffle:
 # Sorting
 # ============================================================================
 
+
 class TestSort:
     def test_sort_by_value_descending(self):
         area = CardArea(card_limit=10, area_type="hand")
@@ -344,8 +369,7 @@ class TestSort:
 
     def test_sort_by_suit(self):
         area = CardArea(card_limit=10, area_type="hand")
-        for suit, rank in [("Diamonds", "5"), ("Spades", "5"),
-                           ("Hearts", "5"), ("Clubs", "5")]:
+        for suit, rank in [("Diamonds", "5"), ("Spades", "5"), ("Hearts", "5"), ("Clubs", "5")]:
             c = Card()
             c.set_base(f"{suit[0]}_5", suit, rank)
             c.set_ability({"name": "Default Base", "set": "Default", "config": {}})

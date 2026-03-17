@@ -123,6 +123,7 @@ PREDICT_SEED_TRUTH = [
 # pseudohash tests
 # ============================================================================
 
+
 class TestPseudohash:
     """pseudohash: string -> float."""
 
@@ -152,6 +153,7 @@ class TestPseudohash:
 # ============================================================================
 # PseudoRandom class tests
 # ============================================================================
+
 
 class TestPseudoRandomSeed:
     """PseudoRandom.seed(): stateful LCG per stream."""
@@ -326,7 +328,11 @@ class TestPseudoRandomElement:
 
     # LuaJIT ground truth: 5 calls on 'elem_str' stream with string-key dict
     EXPECTED_STR = [
-        ("alpha", 1), ("alpha", 1), ("gamma", 3), ("alpha", 1), ("gamma", 3),
+        ("alpha", 1),
+        ("alpha", 1),
+        ("gamma", 3),
+        ("alpha", 1),
+        ("gamma", 3),
     ]
 
     def test_string_key_dict_matches_luajit(self):
@@ -342,8 +348,11 @@ class TestPseudoRandomElement:
 
     # LuaJIT ground truth: sort_id dicts
     EXPECTED_SORTID = [
-        ("b_second", "second"), ("y_fourth", "fourth"), ("b_second", "second"),
-        ("a_first", "first"), ("y_fourth", "fourth"),
+        ("b_second", "second"),
+        ("y_fourth", "fourth"),
+        ("b_second", "second"),
+        ("a_first", "first"),
+        ("y_fourth", "fourth"),
     ]
 
     def test_sort_id_dict_matches_luajit(self):
@@ -367,7 +376,11 @@ class TestPseudoRandomElement:
 
     # LuaJIT ground truth: large dict (20 items)
     EXPECTED_LARGE = [
-        ("key_08", 8), ("key_15", 15), ("key_13", 13), ("key_12", 12), ("key_16", 16),
+        ("key_08", 8),
+        ("key_15", 15),
+        ("key_13", 13),
+        ("key_12", 12),
+        ("key_16", 16),
     ]
 
     def test_large_dict_matches_luajit(self):
@@ -390,7 +403,11 @@ class TestPseudoRandomElement:
 
     # LuaJIT ground truth: list input (Lua array with integer keys 1..N)
     EXPECTED_LIST = [
-        (4, "date"), (5, "elderberry"), (1, "apple"), (5, "elderberry"), (3, "cherry"),
+        (4, "date"),
+        (5, "elderberry"),
+        (1, "apple"),
+        (5, "elderberry"),
+        (3, "cherry"),
     ]
 
     def test_list_input_matches_luajit(self):
@@ -441,16 +458,62 @@ class TestPseudoRandomShuffle:
             sv = prng.seed("shuf_plain")
             lst = list(range(1, 11))
             prng.shuffle(lst, sv)
-            assert lst == expected, (
-                f"plain[{trial + 1}]: {lst} != {expected}"
-            )
+            assert lst == expected, f"plain[{trial + 1}]: {lst} != {expected}"
 
     # LuaJIT ground truth: 52-item deck shuffle
     EXPECTED_DECK52 = [
-        43, 19, 4, 45, 14, 3, 13, 52, 50, 7, 24, 33, 48, 20, 29,
-        41, 21, 26, 31, 37, 12, 25, 28, 40, 16, 1, 47, 5, 22, 42,
-        10, 46, 18, 23, 30, 15, 36, 8, 11, 39, 6, 35, 2, 38, 27,
-        34, 51, 17, 44, 32, 49, 9,
+        43,
+        19,
+        4,
+        45,
+        14,
+        3,
+        13,
+        52,
+        50,
+        7,
+        24,
+        33,
+        48,
+        20,
+        29,
+        41,
+        21,
+        26,
+        31,
+        37,
+        12,
+        25,
+        28,
+        40,
+        16,
+        1,
+        47,
+        5,
+        22,
+        42,
+        10,
+        46,
+        18,
+        23,
+        30,
+        15,
+        36,
+        8,
+        11,
+        39,
+        6,
+        35,
+        2,
+        38,
+        27,
+        34,
+        51,
+        17,
+        44,
+        32,
+        49,
+        9,
     ]
 
     def test_52_card_deck_matches_luajit(self):
@@ -477,9 +540,7 @@ class TestPseudoRandomShuffle:
         items = [Item(i) for i in range(10, 0, -1)]  # reversed
         prng.shuffle(items, sv)
         result = [x.val for x in items]
-        assert result == self.EXPECTED_SORTID, (
-            f"sortid_rev: {result} != {self.EXPECTED_SORTID}"
-        )
+        assert result == self.EXPECTED_SORTID, f"sortid_rev: {result} != {self.EXPECTED_SORTID}"
 
     def test_sort_id_presort_forward_input(self):
         """Items with sort_id in forward order produce same result as reversed."""
@@ -494,9 +555,7 @@ class TestPseudoRandomShuffle:
         items = [Item(i) for i in range(1, 11)]  # forward
         prng.shuffle(items, sv)
         result = [x.val for x in items]
-        assert result == self.EXPECTED_SORTID, (
-            f"sortid_fwd: {result} != {self.EXPECTED_SORTID}"
-        )
+        assert result == self.EXPECTED_SORTID, f"sortid_fwd: {result} != {self.EXPECTED_SORTID}"
 
     def test_sort_id_presort_random_input(self):
         """Items in arbitrary order still produce same result after pre-sort."""
@@ -583,6 +642,7 @@ class TestPseudoRandomStateManagement:
 # ============================================================================
 # Functional API wrappers (backward compat)
 # ============================================================================
+
 
 class TestFunctionalPseudoseed:
     """pseudoseed(): functional wrapper matching old API."""

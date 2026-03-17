@@ -26,9 +26,19 @@ def _reset():
 def _c(suit: str, rank: str, enh: str = "c_base") -> Card:
     sl = {"H": "Hearts", "D": "Diamonds", "C": "Clubs", "S": "Spades"}
     rl = {
-        "2": "2", "3": "3", "4": "4", "5": "5", "6": "6", "7": "7",
-        "8": "8", "9": "9", "T": "10", "J": "Jack", "Q": "Queen",
-        "K": "King", "A": "Ace",
+        "2": "2",
+        "3": "3",
+        "4": "4",
+        "5": "5",
+        "6": "6",
+        "7": "7",
+        "8": "8",
+        "9": "9",
+        "T": "10",
+        "J": "Jack",
+        "Q": "Queen",
+        "K": "King",
+        "A": "Ace",
     }
     suit_full = sl.get(suit, suit)
     rank_full = rl.get(rank, rank)
@@ -47,14 +57,18 @@ def _sb():
 
 def _score(played, held=None, blind=None, levels=None):
     return score_hand_base(
-        played, held or [], levels or HandLevels(),
-        blind or _sb(), PseudoRandom("INTEG"),
+        played,
+        held or [],
+        levels or HandLevels(),
+        blind or _sb(),
+        PseudoRandom("INTEG"),
     )
 
 
 # ============================================================================
 # 1. Every enhancement scored
 # ============================================================================
+
 
 class TestEnhancements:
     """Each enhancement's effect on a scoring Pair of 5s (base: 10 chips, 2 mult)."""
@@ -109,6 +123,7 @@ class TestEnhancements:
 # 2. Every edition scored
 # ============================================================================
 
+
 class TestEditions:
     def test_foil(self):
         """Foil: +50 chips from edition."""
@@ -138,6 +153,7 @@ class TestEditions:
 # ============================================================================
 # 3-6. Red Seal retrigger combinations
 # ============================================================================
+
 
 class TestRedSealRetrigger:
     def test_basic_retrigger(self):
@@ -186,6 +202,7 @@ class TestRedSealRetrigger:
 # 7. Enhancement + Edition stacking
 # ============================================================================
 
+
 class TestEnhancementEditionStack:
     def test_mult_card_with_holo(self):
         """Mult Card (+4 mult) + Holo (+10 mult) = +14 total on that card."""
@@ -215,6 +232,7 @@ class TestEnhancementEditionStack:
 # ============================================================================
 # 8. Boss blind interactions
 # ============================================================================
+
 
 class TestBossBlindScoring:
     def test_the_flint(self):
@@ -287,6 +305,7 @@ class TestBossBlindScoring:
 # 9. Debuffed cards in scoring hand
 # ============================================================================
 
+
 class TestDebuffedCards:
     def test_debuffed_card_no_chips(self):
         c = _c("H", "A")
@@ -322,6 +341,7 @@ class TestDebuffedCards:
 # 10. Performance
 # ============================================================================
 
+
 class TestPerformance:
     def test_scoring_throughput(self):
         """Score a typical 5-card hand many times."""
@@ -347,6 +367,7 @@ class TestPerformance:
 # Regression: specific numeric values
 # ============================================================================
 
+
 class TestRegressionValues:
     """Pin exact scores to catch any future rounding or ordering changes."""
 
@@ -361,10 +382,15 @@ class TestRegressionValues:
         assert r.total == 330
 
     def test_flush_glass(self):
-        r = _score([
-            _c("H", "2"), _c("H", "5"), _c("H", "8"),
-            _c("H", "J"), _c("H", "A", "m_glass"),
-        ])
+        r = _score(
+            [
+                _c("H", "2"),
+                _c("H", "5"),
+                _c("H", "8"),
+                _c("H", "J"),
+                _c("H", "A", "m_glass"),
+            ]
+        )
         assert r.total == 568
 
     def test_full_house_steel_held(self):

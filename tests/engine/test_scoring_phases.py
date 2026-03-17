@@ -22,9 +22,19 @@ def _reset():
 
 _SL = {"Hearts": "H", "Diamonds": "D", "Clubs": "C", "Spades": "S"}
 _RL = {
-    "2": "2", "3": "3", "4": "4", "5": "5", "6": "6", "7": "7",
-    "8": "8", "9": "9", "10": "T", "Jack": "J", "Queen": "Q",
-    "King": "K", "Ace": "A",
+    "2": "2",
+    "3": "3",
+    "4": "4",
+    "5": "5",
+    "6": "6",
+    "7": "7",
+    "8": "8",
+    "9": "9",
+    "10": "T",
+    "Jack": "J",
+    "Queen": "Q",
+    "King": "K",
+    "Ace": "A",
 }
 
 
@@ -50,6 +60,7 @@ def _small_blind() -> Blind:
 # Phase 10: Plasma Deck
 # ============================================================================
 
+
 class TestPlasmaDeck:
     def test_averages_chips_and_mult(self):
         """Plasma Deck: (chips + mult) / 2 for both.
@@ -58,8 +69,13 @@ class TestPlasmaDeck:
         Score: 17 × 17 = 289."""
         played = [_card("Hearts", "Ace"), _card("Spades", "Ace")]
         result = score_hand(
-            played, [], [], HandLevels(), _small_blind(),
-            PseudoRandom("TEST"), back_key="b_plasma",
+            played,
+            [],
+            [],
+            HandLevels(),
+            _small_blind(),
+            PseudoRandom("TEST"),
+            back_key="b_plasma",
         )
         assert result.chips == 17.0
         assert result.mult == 17.0
@@ -68,7 +84,11 @@ class TestPlasmaDeck:
     def test_non_plasma_no_effect(self):
         played = [_card("Hearts", "Ace"), _card("Spades", "Ace")]
         result = score_hand(
-            played, [], [], HandLevels(), _small_blind(),
+            played,
+            [],
+            [],
+            HandLevels(),
+            _small_blind(),
             PseudoRandom("TEST"),
         )
         assert result.chips == 32.0
@@ -81,8 +101,13 @@ class TestPlasmaDeck:
         played = [_card("Hearts", "Ace"), _card("Spades", "Ace")]
         j = _joker("j_joker", mult=4)
         result = score_hand(
-            played, [], [j], HandLevels(), _small_blind(),
-            PseudoRandom("TEST"), back_key="b_plasma",
+            played,
+            [],
+            [j],
+            HandLevels(),
+            _small_blind(),
+            PseudoRandom("TEST"),
+            back_key="b_plasma",
         )
         assert result.chips == 19.0
         assert result.mult == 19.0
@@ -93,6 +118,7 @@ class TestPlasmaDeck:
 # Phase 11: Glass Card destruction
 # ============================================================================
 
+
 class TestGlassCardDestruction:
     def test_glass_scores_x2_then_may_shatter(self):
         """Glass Card contributes x2 mult in Phase 7, then rolls in Phase 11.
@@ -102,7 +128,11 @@ class TestGlassCardDestruction:
         glass_5 = _card("Hearts", "5", enhancement="m_glass")
         played = [glass_5, _card("Spades", "5")]
         result = score_hand(
-            played, [], [], HandLevels(), _small_blind(),
+            played,
+            [],
+            [],
+            HandLevels(),
+            _small_blind(),
             PseudoRandom("TEST"),
         )
         assert result.total == 80  # Glass x2 applied regardless of shatter
@@ -114,7 +144,11 @@ class TestGlassCardDestruction:
         glass_5 = _card("Hearts", "5", enhancement="m_glass")
         played = [glass_5, _card("Spades", "5")]
         result = score_hand(
-            played, [], [], HandLevels(), _small_blind(),
+            played,
+            [],
+            [],
+            HandLevels(),
+            _small_blind(),
             PseudoRandom("SHATTER"),
             probabilities_normal=100.0,
         )
@@ -126,6 +160,7 @@ class TestGlassCardDestruction:
 # Phase 11: Caino reacts to Glass face card destruction
 # ============================================================================
 
+
 class TestCainoGlassInteraction:
     def test_caino_gains_xmult_from_shattered_face(self):
         """Glass King shatters → Caino gains +1 xMult.
@@ -134,12 +169,19 @@ class TestCainoGlassInteraction:
         Caino notified → caino_xmult += 1 → 2."""
         glass_king = _card("Hearts", "King", enhancement="m_glass")
         played = [
-            glass_king, _card("Spades", "King"), _card("Clubs", "King"),
-            _card("Diamonds", "5"), _card("Hearts", "2"),
+            glass_king,
+            _card("Spades", "King"),
+            _card("Clubs", "King"),
+            _card("Diamonds", "5"),
+            _card("Hearts", "2"),
         ]
         caino = _joker("j_caino", caino_xmult=1, extra=1)
         result = score_hand(
-            played, [], [caino], HandLevels(), _small_blind(),
+            played,
+            [],
+            [caino],
+            HandLevels(),
+            _small_blind(),
             PseudoRandom("SHATTER"),
             probabilities_normal=100.0,
         )
@@ -154,7 +196,11 @@ class TestCainoGlassInteraction:
         played = [glass_5, _card("Spades", "5")]
         glass_j = _joker("j_glass", x_mult=1, extra=0.75)
         result = score_hand(
-            played, [], [glass_j], HandLevels(), _small_blind(),
+            played,
+            [],
+            [glass_j],
+            HandLevels(),
+            _small_blind(),
             PseudoRandom("SHATTER"),
             probabilities_normal=100.0,
         )
@@ -166,13 +212,18 @@ class TestCainoGlassInteraction:
 # Phase 13: Ice Cream after-phase decay
 # ============================================================================
 
+
 class TestIceCreamInPipeline:
     def test_ice_cream_decays_after_scoring(self):
         """Ice Cream: +100 chips in Phase 9, then -5 in Phase 13."""
         played = [_card("Hearts", "Ace"), _card("Spades", "Ace")]
         ice = _joker("j_ice_cream", extra={"chips": 100, "chip_mod": 5})
         result = score_hand(
-            played, [], [ice], HandLevels(), _small_blind(),
+            played,
+            [],
+            [ice],
+            HandLevels(),
+            _small_blind(),
             PseudoRandom("TEST"),
         )
         # Phase 9: 32 + 100 = 132 chips, 2 mult. Score: 264.
@@ -185,7 +236,11 @@ class TestIceCreamInPipeline:
         played = [_card("Hearts", "Ace"), _card("Spades", "Ace")]
         ice = _joker("j_ice_cream", extra={"chips": 5, "chip_mod": 5})
         result = score_hand(
-            played, [], [ice], HandLevels(), _small_blind(),
+            played,
+            [],
+            [ice],
+            HandLevels(),
+            _small_blind(),
             PseudoRandom("TEST"),
         )
         assert ice in result.jokers_removed
@@ -195,6 +250,7 @@ class TestIceCreamInPipeline:
 # Phase 13: Mr. Bones save check
 # ============================================================================
 
+
 class TestMrBonesSave:
     def test_saves_losing_hand(self):
         """Mr. Bones saves when score < blind_chips and hands_left == 0.
@@ -203,7 +259,11 @@ class TestMrBonesSave:
         played = [_card("Hearts", "Ace"), _card("Spades", "Ace")]
         bones = _joker("j_mr_bones")
         result = score_hand(
-            played, [], [bones], HandLevels(), _small_blind(),
+            played,
+            [],
+            [bones],
+            HandLevels(),
+            _small_blind(),
             PseudoRandom("TEST"),
             blind_chips=300,
             game_state={"hands_left": 0},
@@ -217,7 +277,11 @@ class TestMrBonesSave:
         played = [_card("Hearts", "Ace"), _card("Spades", "Ace")]
         bones = _joker("j_mr_bones")
         result = score_hand(
-            played, [], [bones], HandLevels(), _small_blind(),
+            played,
+            [],
+            [bones],
+            HandLevels(),
+            _small_blind(),
             PseudoRandom("TEST"),
             blind_chips=50,
             game_state={"hands_left": 0},
@@ -230,7 +294,11 @@ class TestMrBonesSave:
         played = [_card("Hearts", "Ace"), _card("Spades", "Ace")]
         bones = _joker("j_mr_bones")
         result = score_hand(
-            played, [], [bones], HandLevels(), _small_blind(),
+            played,
+            [],
+            [bones],
+            HandLevels(),
+            _small_blind(),
             PseudoRandom("TEST"),
             blind_chips=300,
             game_state={"hands_left": 2},
@@ -241,6 +309,7 @@ class TestMrBonesSave:
 # ============================================================================
 # Full multi-phase integration
 # ============================================================================
+
 
 class TestFullPipelineIntegration:
     def test_five_jokers_with_retrigger_and_destruction(self):
@@ -265,7 +334,11 @@ class TestFullPipelineIntegration:
         ice = _joker("j_ice_cream", extra={"chips": 100, "chip_mod": 5})
 
         result = score_hand(
-            played, [], [joker, caino, ice], HandLevels(), _small_blind(),
+            played,
+            [],
+            [joker, caino, ice],
+            HandLevels(),
+            _small_blind(),
             PseudoRandom("TEST"),
         )
         # Glass Aces: each x2 mult → 2 × 2 × 2 = 8 after both
@@ -285,7 +358,11 @@ class TestFullPipelineIntegration:
         played = [_card("Hearts", "Ace"), _card("Spades", "Ace")]
         seltzer = _joker("j_selzer", extra=10)
         result = score_hand(
-            played, [], [seltzer], HandLevels(), _small_blind(),
+            played,
+            [],
+            [seltzer],
+            HandLevels(),
+            _small_blind(),
             PseudoRandom("TEST"),
         )
         assert result.total == 108

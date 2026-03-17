@@ -130,15 +130,13 @@ class CardArea:
         return len(self.cards)
 
     def __repr__(self) -> str:
-        return (
-            f"CardArea(type={self.type!r}, cards={len(self.cards)}, "
-            f"limit={self.card_limit})"
-        )
+        return f"CardArea(type={self.type!r}, cards={len(self.cards)}, limit={self.card_limit})"
 
 
 # ---------------------------------------------------------------------------
 # Sorting helpers (match Card:get_nominal in card.lua:950)
 # ---------------------------------------------------------------------------
+
 
 def _card_nominal(card: Card) -> float:
     """Sort key for rank-based sorting (``Card:get_nominal()``)."""
@@ -177,6 +175,7 @@ def _card_nominal_suit(card: Card) -> float:
 # ---------------------------------------------------------------------------
 # Standalone draw function
 # ---------------------------------------------------------------------------
+
 
 def draw_card(
     from_area: CardArea,

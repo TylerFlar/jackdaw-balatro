@@ -369,9 +369,7 @@ class Blind:
 
         if self.name == "Cerulean Bell" and rng and hand_cards:
             # Check if any card already has forced_selection
-            any_forced = any(
-                c.ability.get("forced_selection") for c in hand_cards
-            )
+            any_forced = any(c.ability.get("forced_selection") for c in hand_cards)
             if not any_forced:
                 _, idx = rng.element(
                     {i: c for i, c in enumerate(hand_cards)},
@@ -587,8 +585,11 @@ def get_ante_blinds(
     Returns ``{'Small': 'bl_small', 'Big': 'bl_big', 'Boss': <boss_key>}``.
     """
     boss_key = get_new_boss(
-        ante, bosses_used, rng,
-        win_ante=win_ante, banned_keys=banned_keys,
+        ante,
+        bosses_used,
+        rng,
+        win_ante=win_ante,
+        banned_keys=banned_keys,
     )
     return {
         "Small": "bl_small",

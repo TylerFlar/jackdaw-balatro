@@ -23,9 +23,19 @@ def _reset():
 
 _SL = {"Hearts": "H", "Diamonds": "D", "Clubs": "C", "Spades": "S"}
 _RL = {
-    "2": "2", "3": "3", "4": "4", "5": "5", "6": "6", "7": "7",
-    "8": "8", "9": "9", "10": "T", "Jack": "J", "Queen": "Q",
-    "King": "K", "Ace": "A",
+    "2": "2",
+    "3": "3",
+    "4": "4",
+    "5": "5",
+    "6": "6",
+    "7": "7",
+    "8": "8",
+    "9": "9",
+    "10": "T",
+    "Jack": "J",
+    "Queen": "Q",
+    "King": "K",
+    "Ace": "A",
 }
 
 
@@ -50,6 +60,7 @@ def _small_blind() -> Blind:
 # ============================================================================
 # Baseball Card: x1.5 mult if other_joker is Uncommon (rarity 2)
 # ============================================================================
+
 
 class TestBaseballCard:
     """j_baseball fires in other_joker context for Uncommon jokers."""
@@ -108,8 +119,12 @@ class TestBaseballCard:
         baseball = _joker("j_baseball", extra=1.5)  # rarity 3
 
         result = score_hand(
-            played, held, [blackboard, bull, card_sharp, baseball],
-            HandLevels(), _small_blind(), PseudoRandom("TEST"),
+            played,
+            held,
+            [blackboard, bull, card_sharp, baseball],
+            HandLevels(),
+            _small_blind(),
+            PseudoRandom("TEST"),
         )
         # Base: 32 chips, 2 mult
         # Blackboard x3 → 6, Baseball x1.5 → 9
@@ -126,8 +141,12 @@ class TestBaseballCard:
         baseball = _joker("j_baseball", extra=1.5)  # rarity 3
 
         result = score_hand(
-            played, [], [joker, baseball],
-            HandLevels(), _small_blind(), PseudoRandom("TEST"),
+            played,
+            [],
+            [joker, baseball],
+            HandLevels(),
+            _small_blind(),
+            PseudoRandom("TEST"),
         )
         # Base: 32, 2. j_joker +4 → 6. Baseball: no react to Common j_joker.
         assert result.mult == 6.0
@@ -141,8 +160,12 @@ class TestBaseballCard:
         baseball = _joker("j_baseball", extra=1.5)  # rarity 3
 
         result = score_hand(
-            played, [], [bp, joker, baseball],
-            HandLevels(), _small_blind(), PseudoRandom("TEST"),
+            played,
+            [],
+            [bp, joker, baseball],
+            HandLevels(),
+            _small_blind(),
+            PseudoRandom("TEST"),
         )
         # bp copies joker → +4 mult. joker → +4 mult. Total add: +8.
         # Baseball: bp is Rare (no), joker is Common (no), self (skip).
@@ -154,6 +177,7 @@ class TestBaseballCard:
 # ============================================================================
 # Swashbuckler: +mult = sum of all other jokers' sell values
 # ============================================================================
+
 
 class TestSwashbuckler:
     """j_swashbuckler: mult from other jokers' sell costs."""
@@ -196,8 +220,12 @@ class TestSwashbuckler:
         j2.sell_cost = 4
 
         result = score_hand(
-            played, [], [j1, swash, j2],
-            HandLevels(), _small_blind(), PseudoRandom("TEST"),
+            played,
+            [],
+            [j1, swash, j2],
+            HandLevels(),
+            _small_blind(),
+            PseudoRandom("TEST"),
         )
         # Base: 32 chips, 2 mult
         # j_joker: +4 mult → 6

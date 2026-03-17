@@ -35,6 +35,7 @@ from jackdaw.engine.data.prototypes import (
 # Count verification
 # ============================================================================
 
+
 class TestCounts:
     """Verify expected prototype counts per category."""
 
@@ -85,6 +86,7 @@ class TestCounts:
 # Joker rarity pool verification
 # ============================================================================
 
+
 class TestRarityPools:
     """Verify joker rarity distribution."""
 
@@ -124,6 +126,7 @@ class TestRarityPools:
 # ============================================================================
 # Spot-check specific prototypes
 # ============================================================================
+
 
 class TestJokerSpotChecks:
     """Verify specific joker prototypes match Lua source values."""
@@ -277,6 +280,7 @@ class TestBackSpotChecks:
 # Playing card verification
 # ============================================================================
 
+
 class TestPlayingCards:
     """Verify playing card computed fields."""
 
@@ -337,6 +341,7 @@ class TestPlayingCards:
 # Blind verification
 # ============================================================================
 
+
 class TestBlinds:
     """Verify blind prototypes."""
 
@@ -367,17 +372,13 @@ class TestBlinds:
         assert b.mult == 4
 
     def test_showdown_blinds(self):
-        showdowns = [
-            b for b in BLINDS.values()
-            if b.boss and b.boss.get("showdown")
-        ]
+        showdowns = [b for b in BLINDS.values() if b.boss and b.boss.get("showdown")]
         # Cerulean Bell, Verdant Leaf, Violet Vessel, Amber Acorn, Crimson Heart
         assert len(showdowns) == 5
 
     def test_suit_debuff_blinds(self):
         suit_blinds = [
-            b for b in BLINDS.values()
-            if isinstance(b.debuff, dict) and "suit" in b.debuff
+            b for b in BLINDS.values() if isinstance(b.debuff, dict) and "suit" in b.debuff
         ]
         # Club, Goad(Spades), Head(Hearts), Window(Diamonds)
         assert len(suit_blinds) == 4
@@ -386,6 +387,7 @@ class TestBlinds:
 # ============================================================================
 # Tag verification
 # ============================================================================
+
 
 class TestTags:
     """Verify tag prototypes."""
@@ -411,6 +413,7 @@ class TestTags:
 # Center pools
 # ============================================================================
 
+
 class TestCenterPools:
     """Verify derived center pool lookups."""
 
@@ -424,8 +427,14 @@ class TestCenterPools:
         for pool_name, keys in CENTER_POOLS.items():
             for key in keys:
                 found = (
-                    key in JOKERS or key in TAROTS or key in PLANETS
-                    or key in SPECTRALS or key in VOUCHERS or key in BACKS
-                    or key in BOOSTERS or key in ENHANCEMENTS or key in EDITIONS
+                    key in JOKERS
+                    or key in TAROTS
+                    or key in PLANETS
+                    or key in SPECTRALS
+                    or key in VOUCHERS
+                    or key in BACKS
+                    or key in BOOSTERS
+                    or key in ENHANCEMENTS
+                    or key in EDITIONS
                 )
                 assert found, f"{key} in pool {pool_name!r} not found in any dict"

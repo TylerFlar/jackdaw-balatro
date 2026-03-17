@@ -17,10 +17,9 @@ from __future__ import annotations
 
 import pytest
 
-from jackdaw.engine.data.hands import HAND_BASE, HandType
+from jackdaw.engine.data.hands import HandType
 from jackdaw.engine.rng import PseudoRandom
 from jackdaw.engine.tags import Tag, TagResult
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -256,16 +255,12 @@ class TestNewBlindChoiceWrongContext:
 
 class TestTagInvestment:
     def test_fires_on_boss_blind(self):
-        result = _tag("tag_investment").apply(
-            "eval", _gs(), last_blind_is_boss=True
-        )
+        result = _tag("tag_investment").apply("eval", _gs(), last_blind_is_boss=True)
         assert result is not None
         assert result.dollars == 25
 
     def test_silent_on_non_boss_blind(self):
-        result = _tag("tag_investment").apply(
-            "eval", _gs(), last_blind_is_boss=False
-        )
+        result = _tag("tag_investment").apply("eval", _gs(), last_blind_is_boss=False)
         assert result is None
 
     def test_silent_without_kwarg(self):
@@ -283,17 +278,13 @@ class TestTagInvestment:
 
 class TestTagDouble:
     def test_fires_when_different_tag_added(self):
-        result = _tag("tag_double").apply(
-            "tag_add", _gs(), added_tag_key="tag_economy"
-        )
+        result = _tag("tag_double").apply("tag_add", _gs(), added_tag_key="tag_economy")
         assert result is not None
         assert result.double is True
 
     def test_silent_when_double_tag_added(self):
         """Double Tag must not chain with itself."""
-        result = _tag("tag_double").apply(
-            "tag_add", _gs(), added_tag_key="tag_double"
-        )
+        result = _tag("tag_double").apply("tag_add", _gs(), added_tag_key="tag_double")
         assert result is None
 
     def test_silent_without_added_tag_kwarg(self):
@@ -422,24 +413,51 @@ class TestTagVoucher:
 class TestContextIsolation:
     """Each tag type returns None for every context it doesn't own."""
 
-    @pytest.mark.parametrize("ctx", ["eval", "tag_add", "round_start_bonus",
-                                      "store_joker_create", "shop_start",
-                                      "store_joker_modify", "shop_final_pass",
-                                      "voucher_add", "unknown_context"])
+    @pytest.mark.parametrize(
+        "ctx",
+        [
+            "eval",
+            "tag_add",
+            "round_start_bonus",
+            "store_joker_create",
+            "shop_start",
+            "store_joker_modify",
+            "shop_final_pass",
+            "voucher_add",
+            "unknown_context",
+        ],
+    )
     def test_economy_tag_ignores_other_contexts(self, ctx):
         assert _tag("tag_economy").apply(ctx, _gs()) is None
 
-    @pytest.mark.parametrize("ctx", ["immediate", "new_blind_choice", "tag_add",
-                                      "round_start_bonus", "store_joker_create",
-                                      "shop_start", "store_joker_modify",
-                                      "shop_final_pass", "voucher_add"])
+    @pytest.mark.parametrize(
+        "ctx",
+        [
+            "immediate",
+            "new_blind_choice",
+            "tag_add",
+            "round_start_bonus",
+            "store_joker_create",
+            "shop_start",
+            "store_joker_modify",
+            "shop_final_pass",
+            "voucher_add",
+        ],
+    )
     def test_investment_tag_ignores_non_eval(self, ctx):
         assert _tag("tag_investment").apply(ctx, _gs(), last_blind_is_boss=True) is None
 
     def test_unknown_context_always_none(self):
         for key in [
-            "tag_economy", "tag_boss", "tag_investment", "tag_double",
-            "tag_juggle", "tag_rare", "tag_d_six", "tag_foil", "tag_coupon",
+            "tag_economy",
+            "tag_boss",
+            "tag_investment",
+            "tag_double",
+            "tag_juggle",
+            "tag_rare",
+            "tag_d_six",
+            "tag_foil",
+            "tag_coupon",
             "tag_voucher",
         ]:
             assert _tag(key).apply("__unknown__", _gs()) is None, key

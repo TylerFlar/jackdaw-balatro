@@ -30,9 +30,19 @@ def _reset():
 
 _SL = {"Hearts": "H", "Diamonds": "D", "Clubs": "C", "Spades": "S"}
 _RL = {
-    "2": "2", "3": "3", "4": "4", "5": "5", "6": "6", "7": "7",
-    "8": "8", "9": "9", "10": "T", "Jack": "J", "Queen": "Q",
-    "King": "K", "Ace": "A",
+    "2": "2",
+    "3": "3",
+    "4": "4",
+    "5": "5",
+    "6": "6",
+    "7": "7",
+    "8": "8",
+    "9": "9",
+    "10": "T",
+    "Jack": "J",
+    "Queen": "Q",
+    "King": "K",
+    "Ace": "A",
 }
 
 
@@ -68,6 +78,7 @@ _TEST_KEY_2 = "c_test_spectral"
 @pytest.fixture(autouse=True)
 def _register_test_consumables():
     """Register test consumables before each test, clean up after."""
+
     @register_consumable(_TEST_KEY)
     def _test_handler(card: Card, ctx: ConsumableContext) -> ConsumableResult:
         return ConsumableResult(
@@ -87,6 +98,7 @@ def _register_test_consumables():
 # ============================================================================
 # Registry
 # ============================================================================
+
 
 class TestRegistry:
     def test_register_adds(self):
@@ -111,6 +123,7 @@ class TestRegistry:
 # ============================================================================
 # Dispatch
 # ============================================================================
+
 
 class TestDispatch:
     def test_dispatch_returns_result(self):
@@ -152,6 +165,7 @@ class TestDispatch:
 # ConsumableResult defaults
 # ============================================================================
 
+
 class TestConsumableResult:
     def test_defaults_all_none(self):
         r = ConsumableResult()
@@ -179,6 +193,7 @@ class TestConsumableResult:
 # can_use_consumable — global blockers
 # ============================================================================
 
+
 class TestCanUseGlobalBlockers:
     def test_cards_in_play_blocks(self):
         c = _consumable("c_hermit")
@@ -194,6 +209,7 @@ class TestCanUseGlobalBlockers:
 # ============================================================================
 # can_use_consumable — always usable
 # ============================================================================
+
 
 class TestCanUseAlwaysUsable:
     def test_hermit_always(self):
@@ -216,6 +232,7 @@ class TestCanUseAlwaysUsable:
 # can_use_consumable — planets
 # ============================================================================
 
+
 class TestCanUsePlanets:
     def test_mercury_always(self):
         c = _consumable("c_mercury")
@@ -232,6 +249,7 @@ class TestCanUsePlanets:
 # can_use_consumable — highlighted card requirements
 # ============================================================================
 
+
 class TestCanUseHighlighted:
     def test_chariot_needs_1(self):
         """Chariot: max_highlighted=1, needs exactly 1."""
@@ -239,9 +257,9 @@ class TestCanUseHighlighted:
         c.ability["consumeable"] = {"max_highlighted": 1, "mod_conv": "m_steel"}
         assert can_use_consumable(c, highlighted=[]) is False
         assert can_use_consumable(c, highlighted=[_card("Hearts", "5")]) is True
-        assert can_use_consumable(
-            c, highlighted=[_card("Hearts", "5"), _card("Spades", "3")]
-        ) is False
+        assert (
+            can_use_consumable(c, highlighted=[_card("Hearts", "5"), _card("Spades", "3")]) is False
+        )
 
     def test_empress_needs_1_or_2(self):
         """Empress: max_highlighted=2, min defaults to 1."""
@@ -249,26 +267,30 @@ class TestCanUseHighlighted:
         c.ability["consumeable"] = {"max_highlighted": 2, "mod_conv": "m_mult"}
         assert can_use_consumable(c, highlighted=[]) is False
         assert can_use_consumable(c, highlighted=[_card("Hearts", "5")]) is True
-        assert can_use_consumable(
-            c, highlighted=[_card("Hearts", "5"), _card("Spades", "3")]
-        ) is True
+        assert (
+            can_use_consumable(c, highlighted=[_card("Hearts", "5"), _card("Spades", "3")]) is True
+        )
 
     def test_death_needs_exactly_2(self):
         """Death: min_highlighted=2, max_highlighted=2."""
         c = _consumable("c_death")
         c.ability["consumeable"] = {
-            "max_highlighted": 2, "min_highlighted": 2, "mod_conv": "card",
+            "max_highlighted": 2,
+            "min_highlighted": 2,
+            "mod_conv": "card",
         }
         assert can_use_consumable(c, highlighted=[_card("Hearts", "5")]) is False
-        assert can_use_consumable(
-            c, highlighted=[_card("Hearts", "5"), _card("Spades", "3")]
-        ) is True
+        assert (
+            can_use_consumable(c, highlighted=[_card("Hearts", "5"), _card("Spades", "3")]) is True
+        )
 
     def test_star_needs_1_to_3(self):
         """Star: max_highlighted=3, suit conversion."""
         c = _consumable("c_star")
         c.ability["consumeable"] = {
-            "max_highlighted": 3, "suit_conv": "Diamonds", "mod_num": 3,
+            "max_highlighted": 3,
+            "suit_conv": "Diamonds",
+            "mod_num": 3,
         }
         assert can_use_consumable(c, highlighted=[]) is False
         assert can_use_consumable(c, highlighted=[_card("Hearts", "5")]) is True
@@ -280,19 +302,30 @@ class TestCanUseHighlighted:
 # can_use_consumable — slot requirements
 # ============================================================================
 
+
 class TestCanUseSlots:
     def test_emperor_needs_consumable_slot(self):
         c = _consumable("c_emperor")
         c.ability["consumeable"] = {"tarots": 2}
         # 1 consumable, limit 2 → 1 free slot
-        assert can_use_consumable(
-            c, consumables=[c], consumable_limit=2,
-        ) is True
+        assert (
+            can_use_consumable(
+                c,
+                consumables=[c],
+                consumable_limit=2,
+            )
+            is True
+        )
         # Using self frees slot: [c, other] with limit 2 → effective=1 < 2
         other = _consumable("c_foo")
-        assert can_use_consumable(
-            c, consumables=[c, other], consumable_limit=2,
-        ) is True
+        assert (
+            can_use_consumable(
+                c,
+                consumables=[c, other],
+                consumable_limit=2,
+            )
+            is True
+        )
 
     def test_emperor_no_slot(self):
         c = _consumable("c_emperor")
@@ -300,23 +333,34 @@ class TestCanUseSlots:
         other1 = _consumable("c_foo")
         other2 = _consumable("c_bar")
         # c not in consumables → no self-free, 2/2 full
-        assert can_use_consumable(
-            c, consumables=[other1, other2], consumable_limit=2,
-        ) is False
+        assert (
+            can_use_consumable(
+                c,
+                consumables=[other1, other2],
+                consumable_limit=2,
+            )
+            is False
+        )
 
     def test_judgement_needs_joker_slot(self):
         c = _consumable("c_judgement")
         c.ability["consumeable"] = {}
         assert can_use_consumable(c, jokers=[], joker_limit=5) is True
         jokers_5 = [_joker(f"j_{i}") for i in range(5)]
-        assert can_use_consumable(
-            c, jokers=jokers_5, joker_limit=5,
-        ) is False
+        assert (
+            can_use_consumable(
+                c,
+                jokers=jokers_5,
+                joker_limit=5,
+            )
+            is False
+        )
 
 
 # ============================================================================
 # can_use_consumable — eligible joker
 # ============================================================================
+
 
 class TestCanUseEligibleJoker:
     def test_wheel_needs_editionless_joker(self):
@@ -337,31 +381,46 @@ class TestCanUseEligibleJoker:
 # can_use_consumable — hand card requirements
 # ============================================================================
 
+
 class TestCanUseHandCards:
     def test_familiar_needs_more_than_1_card(self):
         c = _consumable("c_familiar")
         c.ability["consumeable"] = {"extra": 3, "remove_card": True}
-        assert can_use_consumable(
-            c, hand_cards=[_card("Hearts", "5")],
-        ) is False
-        assert can_use_consumable(
-            c, hand_cards=[_card("Hearts", "5"), _card("Spades", "3")],
-        ) is True
+        assert (
+            can_use_consumable(
+                c,
+                hand_cards=[_card("Hearts", "5")],
+            )
+            is False
+        )
+        assert (
+            can_use_consumable(
+                c,
+                hand_cards=[_card("Hearts", "5"), _card("Spades", "3")],
+            )
+            is True
+        )
 
     def test_immolate_needs_more_than_1(self):
         c = _consumable("c_immolate")
         c.ability["consumeable"] = {
-            "extra": {"destroy": 5, "dollars": 20}, "remove_card": True,
+            "extra": {"destroy": 5, "dollars": 20},
+            "remove_card": True,
         }
         assert can_use_consumable(c, hand_cards=[]) is False
-        assert can_use_consumable(
-            c, hand_cards=[_card("Hearts", "5"), _card("Spades", "3")],
-        ) is True
+        assert (
+            can_use_consumable(
+                c,
+                hand_cards=[_card("Hearts", "5"), _card("Spades", "3")],
+            )
+            is True
+        )
 
 
 # ============================================================================
 # can_use_consumable — Aura
 # ============================================================================
+
 
 class TestCanUseAura:
     def test_aura_1_card_no_edition(self):
@@ -387,26 +446,38 @@ class TestCanUseAura:
 # can_use_consumable — Fool needs last_tarot_planet
 # ============================================================================
 
+
 class TestCanUseFool:
     def test_fool_with_last_tarot(self):
         c = _consumable("c_fool")
         c.ability["consumeable"] = {}
-        assert can_use_consumable(
-            c, consumables=[c], consumable_limit=2,
-            game_state={"last_tarot_planet": "c_star"},
-        ) is True
+        assert (
+            can_use_consumable(
+                c,
+                consumables=[c],
+                consumable_limit=2,
+                game_state={"last_tarot_planet": "c_star"},
+            )
+            is True
+        )
 
     def test_fool_without_last_tarot(self):
         c = _consumable("c_fool")
         c.ability["consumeable"] = {}
-        assert can_use_consumable(
-            c, consumables=[c], consumable_limit=2,
-        ) is False
+        assert (
+            can_use_consumable(
+                c,
+                consumables=[c],
+                consumable_limit=2,
+            )
+            is False
+        )
 
 
 # ============================================================================
 # Enhancement tarots
 # ============================================================================
+
 
 class TestEnhancementTarots:
     """8 enhancement tarots: change card enhancement via Card.enhance()."""
@@ -470,6 +541,7 @@ class TestEnhancementTarots:
 # ============================================================================
 # Card.enhance() — preserves base, edition, seal, perma_bonus
 # ============================================================================
+
 
 class TestCardEnhance:
     """Card.enhance() changes enhancement but preserves identity."""
@@ -543,6 +615,7 @@ class TestCardEnhance:
 # Suit-change tarots
 # ============================================================================
 
+
 class TestSuitChangeTarots:
     def test_star_changes_to_diamonds(self):
         c = _consumable("c_star")
@@ -608,6 +681,7 @@ class TestCardChangeSuit:
 # ============================================================================
 # Strength (rank increment)
 # ============================================================================
+
 
 class TestStrength:
     def test_king_to_ace(self):
@@ -686,6 +760,7 @@ class TestCardChangeRank:
 # Death (copy rightmost onto others)
 # ============================================================================
 
+
 class TestDeath:
     def test_copy_right_to_left(self):
         c = _consumable("c_death")
@@ -693,7 +768,8 @@ class TestDeath:
         right = _card("Spades", "Ace")
         # right has higher sort_id (created second)
         result = use_consumable(
-            c, ConsumableContext(card=c, highlighted=[left, right]),
+            c,
+            ConsumableContext(card=c, highlighted=[left, right]),
         )
         assert result is not None
         assert result.copy_card is not None
@@ -709,7 +785,8 @@ class TestDeath:
         right.set_edition({"foil": True})
         right.set_seal("Gold")
         result = use_consumable(
-            c, ConsumableContext(card=c, highlighted=[left, right]),
+            c,
+            ConsumableContext(card=c, highlighted=[left, right]),
         )
         source, target = result.copy_card
         # Source is the Glass Foil Gold Seal Ace of Spades
@@ -726,12 +803,14 @@ class TestDeath:
 # Hanged Man (destroy)
 # ============================================================================
 
+
 class TestHangedMan:
     def test_destroys_highlighted(self):
         c = _consumable("c_hanged_man")
         cards = [_card("Hearts", "5"), _card("Spades", "King")]
         result = use_consumable(
-            c, ConsumableContext(card=c, highlighted=cards),
+            c,
+            ConsumableContext(card=c, highlighted=cards),
         )
         assert result is not None
         assert result.destroy is not None
@@ -743,7 +822,8 @@ class TestHangedMan:
         c = _consumable("c_hanged_man")
         card = _card("Hearts", "Ace")
         result = use_consumable(
-            c, ConsumableContext(card=c, highlighted=[card]),
+            c,
+            ConsumableContext(card=c, highlighted=[card]),
         )
         assert len(result.destroy) == 1
 
@@ -752,14 +832,19 @@ class TestHangedMan:
 # Economy tarots
 # ============================================================================
 
+
 class TestHermit:
     def test_gain_less_than_cap(self):
         """Hermit with $15 → gain $15 (under $20 cap)."""
         c = _consumable("c_hermit")
         c.set_ability("c_hermit")
-        result = use_consumable(c, ConsumableContext(
-            card=c, game_state={"dollars": 15},
-        ))
+        result = use_consumable(
+            c,
+            ConsumableContext(
+                card=c,
+                game_state={"dollars": 15},
+            ),
+        )
         assert result is not None
         assert result.dollars == 15
 
@@ -767,18 +852,26 @@ class TestHermit:
         """Hermit with $30 → gain $20 (capped)."""
         c = _consumable("c_hermit")
         c.set_ability("c_hermit")
-        result = use_consumable(c, ConsumableContext(
-            card=c, game_state={"dollars": 30},
-        ))
+        result = use_consumable(
+            c,
+            ConsumableContext(
+                card=c,
+                game_state={"dollars": 30},
+            ),
+        )
         assert result.dollars == 20
 
     def test_gain_zero_when_broke(self):
         """Hermit with $0 → gain $0."""
         c = _consumable("c_hermit")
         c.set_ability("c_hermit")
-        result = use_consumable(c, ConsumableContext(
-            card=c, game_state={"dollars": 0},
-        ))
+        result = use_consumable(
+            c,
+            ConsumableContext(
+                card=c,
+                game_state={"dollars": 0},
+            ),
+        )
         assert result.dollars == 0
 
     def test_no_game_state_defaults_to_zero(self):
@@ -799,9 +892,13 @@ class TestTemperance:
         j2.sell_cost = 3
         j3 = _joker("j_joker")
         j3.sell_cost = 4
-        result = use_consumable(c, ConsumableContext(
-            card=c, jokers=[j1, j2, j3],
-        ))
+        result = use_consumable(
+            c,
+            ConsumableContext(
+                card=c,
+                jokers=[j1, j2, j3],
+            ),
+        )
         assert result.dollars == 9
 
     def test_gain_capped_at_50(self):
@@ -814,7 +911,7 @@ class TestTemperance:
             j.sell_cost = 10
             jokers.append(j)
         result = use_consumable(c, ConsumableContext(card=c, jokers=jokers))
-        assert result.dollars == 50   # 60 capped to 50
+        assert result.dollars == 50  # 60 capped to 50
 
     def test_no_jokers_gains_zero(self):
         c = _consumable("c_temperance")
@@ -827,14 +924,19 @@ class TestTemperance:
 # Generation tarots
 # ============================================================================
 
+
 class TestFool:
     def test_creates_last_tarot_planet(self):
         """The Fool creates a copy of the last used Tarot/Planet."""
         c = _consumable("c_fool")
         c.set_ability("c_fool")
-        result = use_consumable(c, ConsumableContext(
-            card=c, game_state={"last_tarot_planet": "c_star"},
-        ))
+        result = use_consumable(
+            c,
+            ConsumableContext(
+                card=c,
+                game_state={"last_tarot_planet": "c_star"},
+            ),
+        )
         assert result is not None
         assert result.create is not None
         assert len(result.create) == 1
@@ -844,9 +946,13 @@ class TestFool:
     def test_no_last_tarot_returns_empty(self):
         c = _consumable("c_fool")
         c.set_ability("c_fool")
-        result = use_consumable(c, ConsumableContext(
-            card=c, game_state={},
-        ))
+        result = use_consumable(
+            c,
+            ConsumableContext(
+                card=c,
+                game_state={},
+            ),
+        )
         assert result is not None
         assert result.create is None
 
@@ -854,10 +960,15 @@ class TestFool:
         """can_use blocks Fool when last_tarot_planet is 'c_fool'."""
         c = _consumable("c_fool")
         c.ability["consumeable"] = {}
-        assert can_use_consumable(
-            c, consumables=[c], consumable_limit=2,
-            game_state={"last_tarot_planet": "c_fool"},
-        ) is False
+        assert (
+            can_use_consumable(
+                c,
+                consumables=[c],
+                consumable_limit=2,
+                game_state={"last_tarot_planet": "c_fool"},
+            )
+            is False
+        )
 
 
 class TestHighPriestess:
@@ -911,6 +1022,7 @@ class TestJudgement:
 # Wheel of Fortune
 # ============================================================================
 
+
 class _ControlledRng:
     """Minimal RNG stub with scripted return values for random() and seed()."""
 
@@ -946,10 +1058,15 @@ class TestWheelOfFortune:
         j = self._joker_with_sell("j_joker")
         # roll=0.1 (< 1/4), edition_poll=0.6 (> 0.5 → holo)
         rng = _ControlledRng([0.1, 0.6])
-        result = use_consumable(c, ConsumableContext(
-            card=c, jokers=[j], rng=rng,
-            game_state={"probabilities_normal": 1},
-        ))
+        result = use_consumable(
+            c,
+            ConsumableContext(
+                card=c,
+                jokers=[j],
+                rng=rng,
+                game_state={"probabilities_normal": 1},
+            ),
+        )
         assert result is not None
         assert result.add_edition is not None
         assert result.add_edition["target"] is j
@@ -960,11 +1077,16 @@ class TestWheelOfFortune:
         c = _consumable("c_wheel_of_fortune")
         c.set_ability("c_wheel_of_fortune")
         j = self._joker_with_sell("j_joker")
-        rng = _ControlledRng([0.9])   # 0.9 >= 0.25 → fail
-        result = use_consumable(c, ConsumableContext(
-            card=c, jokers=[j], rng=rng,
-            game_state={"probabilities_normal": 1},
-        ))
+        rng = _ControlledRng([0.9])  # 0.9 >= 0.25 → fail
+        result = use_consumable(
+            c,
+            ConsumableContext(
+                card=c,
+                jokers=[j],
+                rng=rng,
+                game_state={"probabilities_normal": 1},
+            ),
+        )
         assert result is not None
         assert result.add_edition is None
 
@@ -980,11 +1102,16 @@ class TestWheelOfFortune:
         c = _consumable("c_wheel_of_fortune")
         c.set_ability("c_wheel_of_fortune")
         j = self._joker_with_sell("j_joker")
-        rng = _ControlledRng([0.1, 0.3])   # roll passes, poll=0.3 → foil
-        result = use_consumable(c, ConsumableContext(
-            card=c, jokers=[j], rng=rng,
-            game_state={"probabilities_normal": 1},
-        ))
+        rng = _ControlledRng([0.1, 0.3])  # roll passes, poll=0.3 → foil
+        result = use_consumable(
+            c,
+            ConsumableContext(
+                card=c,
+                jokers=[j],
+                rng=rng,
+                game_state={"probabilities_normal": 1},
+            ),
+        )
         assert result.add_edition["edition"] == {"foil": True}
 
     def test_polychrome_edition(self):
@@ -992,11 +1119,16 @@ class TestWheelOfFortune:
         c = _consumable("c_wheel_of_fortune")
         c.set_ability("c_wheel_of_fortune")
         j = self._joker_with_sell("j_joker")
-        rng = _ControlledRng([0.1, 0.9])   # roll passes, poll=0.9 → polychrome
-        result = use_consumable(c, ConsumableContext(
-            card=c, jokers=[j], rng=rng,
-            game_state={"probabilities_normal": 1},
-        ))
+        rng = _ControlledRng([0.1, 0.9])  # roll passes, poll=0.9 → polychrome
+        result = use_consumable(
+            c,
+            ConsumableContext(
+                card=c,
+                jokers=[j],
+                rng=rng,
+                game_state={"probabilities_normal": 1},
+            ),
+        )
         assert result.add_edition["edition"] == {"polychrome": True}
 
     def test_no_negative_edition(self):
@@ -1006,10 +1138,15 @@ class TestWheelOfFortune:
         j = self._joker_with_sell("j_joker")
         # edition_poll=0.99 — would be negative if no_neg=False, but should → polychrome
         rng = _ControlledRng([0.1, 0.99])
-        result = use_consumable(c, ConsumableContext(
-            card=c, jokers=[j], rng=rng,
-            game_state={"probabilities_normal": 1},
-        ))
+        result = use_consumable(
+            c,
+            ConsumableContext(
+                card=c,
+                jokers=[j],
+                rng=rng,
+                game_state={"probabilities_normal": 1},
+            ),
+        )
         assert result.add_edition["edition"] == {"polychrome": True}
         assert "negative" not in result.add_edition["edition"]
 
@@ -1030,6 +1167,7 @@ class TestWheelOfFortune:
 # ============================================================================
 # Card.add_to_deck / Card.remove_from_deck
 # ============================================================================
+
 
 def _game_state(**kw) -> dict:
     """Minimal game_state with sensible defaults."""
@@ -1151,18 +1289,18 @@ class TestAddToDeck:
         j = _joker_card("j_troubadour")
         gs = _game_state()
         j.add_to_deck(gs)
-        assert gs["hand_size"] == 10         # +2 (extra.h_size=2)
-        assert gs["hands_per_round"] == 3    # +(-1) = 3 (extra.h_plays=-1)
+        assert gs["hand_size"] == 10  # +2 (extra.h_size=2)
+        assert gs["hands_per_round"] == 3  # +(-1) = 3 (extra.h_plays=-1)
         j.remove_from_deck(gs)
-        assert gs["hand_size"] == 8          # back to 8
-        assert gs["hands_per_round"] == 4    # back to 4
+        assert gs["hand_size"] == 8  # back to 8
+        assert gs["hands_per_round"] == 4  # back to 4
 
     def test_merry_andy_d_size(self):
         """Merry Andy: d_size +3, h_size -1."""
         j = _joker_card("j_merry_andy")
         gs = _game_state()
         j.add_to_deck(gs)
-        assert gs["discards"] == 6   # +3
+        assert gs["discards"] == 6  # +3
         assert gs["hand_size"] == 7  # -1
 
     def test_drunkard_d_size(self):
@@ -1193,6 +1331,7 @@ class TestAddToDeck:
 # Planet cards
 # ============================================================================
 
+
 def _planet(key: str) -> Card:
     c = Card()
     c.set_ability(key)
@@ -1216,8 +1355,8 @@ class TestPlanetLevelUp:
         for hand_type, amount in result.level_up:
             hl.level_up(hand_type, amount)
         chips, mult = hl.get("Pair")
-        assert chips == 25   # 10 + 15*1
-        assert mult == 3     # 2 + 1*1
+        assert chips == 25  # 10 + 15*1
+        assert mult == 3  # 2 + 1*1
 
     def test_pluto_levels_high_card(self):
         c = _planet("c_pluto")
@@ -1279,9 +1418,18 @@ class TestPlanetLevelUp:
         for key in _ALL_HAND_TYPES:
             pass  # _ALL_HAND_TYPES is hand-type strings, not keys
         planet_keys = [
-            "c_pluto", "c_mercury", "c_uranus", "c_venus", "c_saturn",
-            "c_jupiter", "c_earth", "c_mars", "c_neptune", "c_planet_x",
-            "c_ceres", "c_eris",
+            "c_pluto",
+            "c_mercury",
+            "c_uranus",
+            "c_venus",
+            "c_saturn",
+            "c_jupiter",
+            "c_earth",
+            "c_mars",
+            "c_neptune",
+            "c_planet_x",
+            "c_ceres",
+            "c_eris",
         ]
         for key in planet_keys:
             c = _planet(key)
@@ -1325,22 +1473,43 @@ class TestBlackHole:
 class TestPlanetUsageTracking:
     def test_mercury_increments_planet_count(self):
         c = _planet("c_mercury")
-        gs = {"consumable_usage_total": {"tarot": 0, "planet": 0, "spectral": 0,
-                                          "tarot_planet": 0, "all": 0}}
+        gs = {
+            "consumable_usage_total": {
+                "tarot": 0,
+                "planet": 0,
+                "spectral": 0,
+                "tarot_planet": 0,
+                "all": 0,
+            }
+        }
         use_consumable(c, ConsumableContext(card=c, game_state=gs))
         assert gs["consumable_usage_total"]["planet"] == 1
 
     def test_mercury_increments_all_count(self):
         c = _planet("c_mercury")
-        gs = {"consumable_usage_total": {"tarot": 0, "planet": 0, "spectral": 0,
-                                          "tarot_planet": 0, "all": 0}}
+        gs = {
+            "consumable_usage_total": {
+                "tarot": 0,
+                "planet": 0,
+                "spectral": 0,
+                "tarot_planet": 0,
+                "all": 0,
+            }
+        }
         use_consumable(c, ConsumableContext(card=c, game_state=gs))
         assert gs["consumable_usage_total"]["all"] == 1
 
     def test_mercury_increments_tarot_planet(self):
         c = _planet("c_mercury")
-        gs = {"consumable_usage_total": {"tarot": 0, "planet": 0, "spectral": 0,
-                                          "tarot_planet": 0, "all": 0}}
+        gs = {
+            "consumable_usage_total": {
+                "tarot": 0,
+                "planet": 0,
+                "spectral": 0,
+                "tarot_planet": 0,
+                "all": 0,
+            }
+        }
         use_consumable(c, ConsumableContext(card=c, game_state=gs))
         assert gs["consumable_usage_total"]["tarot_planet"] == 1
 
@@ -1351,8 +1520,15 @@ class TestPlanetUsageTracking:
         assert gs["last_tarot_planet"] == "c_jupiter"
 
     def test_usage_accumulates_across_uses(self):
-        gs = {"consumable_usage_total": {"tarot": 0, "planet": 0, "spectral": 0,
-                                          "tarot_planet": 0, "all": 0}}
+        gs = {
+            "consumable_usage_total": {
+                "tarot": 0,
+                "planet": 0,
+                "spectral": 0,
+                "tarot_planet": 0,
+                "all": 0,
+            }
+        }
         for key in ["c_mercury", "c_jupiter", "c_mars"]:
             c = _planet(key)
             use_consumable(c, ConsumableContext(card=c, game_state=gs))
@@ -1431,6 +1607,7 @@ class TestPlanetNotifyJokers:
 # Seal spectrals
 # ============================================================================
 
+
 class TestSealSpectrals:
     def test_deja_vu_adds_red_seal(self):
         c = _consumable("c_deja_vu")
@@ -1484,17 +1661,19 @@ class TestSealSpectrals:
             c = _consumable(key)
             c.set_ability(key)
             assert can_use_consumable(c, highlighted=[]) is False, f"{key} with 0"
-            assert can_use_consumable(
-                c, highlighted=[_card("Hearts", "5")]
-            ) is True, f"{key} with 1"
-            assert can_use_consumable(
-                c, highlighted=[_card("Hearts", "5"), _card("Spades", "3")]
-            ) is False, f"{key} with 2"
+            assert can_use_consumable(c, highlighted=[_card("Hearts", "5")]) is True, (
+                f"{key} with 1"
+            )
+            assert (
+                can_use_consumable(c, highlighted=[_card("Hearts", "5"), _card("Spades", "3")])
+                is False
+            ), f"{key} with 2"
 
 
 # ============================================================================
 # Cryptid
 # ============================================================================
+
 
 class TestCryptid:
     def _source(self) -> Card:
@@ -1566,9 +1745,7 @@ class TestCryptid:
         c = _consumable("c_cryptid")
         c.set_ability("c_cryptid")
         assert can_use_consumable(c, highlighted=[]) is False
-        assert can_use_consumable(
-            c, highlighted=[_card("Hearts", "5")]
-        ) is True
+        assert can_use_consumable(c, highlighted=[_card("Hearts", "5")]) is True
 
 
 # ============================================================================
@@ -1738,14 +1915,15 @@ class TestImmolate:
     def test_can_use_needs_more_than_1_card(self):
         c = _spectral("c_immolate")
         assert can_use_consumable(c, hand_cards=[_card("Hearts", "5")]) is False
-        assert can_use_consumable(
-            c, hand_cards=[_card("Hearts", "5"), _card("Spades", "3")]
-        ) is True
+        assert (
+            can_use_consumable(c, hand_cards=[_card("Hearts", "5"), _card("Spades", "3")]) is True
+        )
 
 
 # ============================================================================
 # Sigil and Ouija
 # ============================================================================
+
 
 class TestSigil:
     def test_changes_all_cards_to_same_suit(self):
@@ -1786,6 +1964,7 @@ class TestSigil:
     def test_deterministic_with_fixed_seed(self):
         """Same PseudoRandom seed produces the same suit twice."""
         from jackdaw.engine.rng import PseudoRandom
+
         c = _spectral("c_sigil")
         hand = _hand(3)
         rng1 = PseudoRandom("test_sigil_det")
@@ -1797,9 +1976,9 @@ class TestSigil:
     def test_can_use_needs_more_than_1_card(self):
         c = _spectral("c_sigil")
         assert can_use_consumable(c, hand_cards=[_card("Hearts", "5")]) is False
-        assert can_use_consumable(
-            c, hand_cards=[_card("Hearts", "5"), _card("Spades", "3")]
-        ) is True
+        assert (
+            can_use_consumable(c, hand_cards=[_card("Hearts", "5"), _card("Spades", "3")]) is True
+        )
 
 
 class TestOuija:
@@ -1819,8 +1998,7 @@ class TestOuija:
         rng = _ControlledRng()
         c = _spectral("c_ouija")
         result = use_consumable(c, ConsumableContext(card=c, hand_cards=_hand(3), rng=rng))
-        valid = {"2", "3", "4", "5", "6", "7", "8", "9", "10",
-                 "Jack", "Queen", "King", "Ace"}
+        valid = {"2", "3", "4", "5", "6", "7", "8", "9", "10", "Jack", "Queen", "King", "Ace"}
         for _, rank in result.change_rank:
             assert rank in valid
 
@@ -1849,14 +2027,15 @@ class TestOuija:
     def test_can_use_needs_more_than_1_card(self):
         c = _spectral("c_ouija")
         assert can_use_consumable(c, hand_cards=[_card("Hearts", "5")]) is False
-        assert can_use_consumable(
-            c, hand_cards=[_card("Hearts", "5"), _card("Spades", "3")]
-        ) is True
+        assert (
+            can_use_consumable(c, hand_cards=[_card("Hearts", "5"), _card("Spades", "3")]) is True
+        )
 
 
 # ============================================================================
 # Aura
 # ============================================================================
+
 
 class TestAura:
     def test_adds_edition_to_highlighted_card(self):
@@ -1928,6 +2107,7 @@ class TestAura:
 # Ectoplasm
 # ============================================================================
 
+
 class TestEctoplasm:
     def test_adds_negative_to_editionless_joker(self):
         rng = _ControlledRng()
@@ -1953,9 +2133,7 @@ class TestEctoplasm:
         joker_foil = _joker("j_foil")
         joker_foil.edition = {"foil": True}
         plain = _joker("j_plain")
-        result = use_consumable(
-            c, ConsumableContext(card=c, jokers=[joker_foil, plain], rng=rng)
-        )
+        result = use_consumable(c, ConsumableContext(card=c, jokers=[joker_foil, plain], rng=rng))
         assert result.add_edition["target"] is plain
 
     def test_no_result_without_eligible_joker(self):
@@ -1979,6 +2157,7 @@ class TestEctoplasm:
 # Hex
 # ============================================================================
 
+
 class TestHex:
     def test_adds_polychrome_to_chosen_joker(self):
         rng = _ControlledRng()
@@ -1997,9 +2176,7 @@ class TestHex:
         j1 = _joker("j_a")
         j2 = _joker("j_b")
         j3 = _joker("j_c")
-        result = use_consumable(
-            c, ConsumableContext(card=c, jokers=[j1, j2, j3], rng=rng)
-        )
+        result = use_consumable(c, ConsumableContext(card=c, jokers=[j1, j2, j3], rng=rng))
         assert result.destroy_jokers is not None
         assert j2 in result.destroy_jokers
         assert j3 in result.destroy_jokers
@@ -2011,9 +2188,7 @@ class TestHex:
         j1 = _joker("j_chosen")
         eternal = _joker("j_eternal")
         eternal.eternal = True
-        result = use_consumable(
-            c, ConsumableContext(card=c, jokers=[j1, eternal], rng=rng)
-        )
+        result = use_consumable(c, ConsumableContext(card=c, jokers=[j1, eternal], rng=rng))
         destroyed = result.destroy_jokers or []
         assert eternal not in destroyed
 
@@ -2036,6 +2211,7 @@ class TestHex:
 # ============================================================================
 # Wraith
 # ============================================================================
+
 
 class TestWraith:
     def test_creates_rare_joker(self):
@@ -2071,6 +2247,7 @@ class TestWraith:
 # Ankh
 # ============================================================================
 
+
 class TestAnkh:
     def test_duplicates_chosen_joker(self):
         """_ControlledRng picks first element → j1 is chosen and copied."""
@@ -2089,9 +2266,7 @@ class TestAnkh:
         j1 = _joker("j_chosen")
         j2 = _joker("j_other1")
         j3 = _joker("j_other2")
-        result = use_consumable(
-            c, ConsumableContext(card=c, jokers=[j1, j2, j3], rng=rng)
-        )
+        result = use_consumable(c, ConsumableContext(card=c, jokers=[j1, j2, j3], rng=rng))
         assert result.destroy_jokers is not None
         assert j2 in result.destroy_jokers
         assert j3 in result.destroy_jokers
@@ -2103,9 +2278,7 @@ class TestAnkh:
         j1 = _joker("j_chosen")
         eternal = _joker("j_eternal")
         eternal.eternal = True
-        result = use_consumable(
-            c, ConsumableContext(card=c, jokers=[j1, eternal], rng=rng)
-        )
+        result = use_consumable(c, ConsumableContext(card=c, jokers=[j1, eternal], rng=rng))
         destroyed = result.destroy_jokers or []
         assert eternal not in destroyed
 
@@ -2133,6 +2306,7 @@ class TestAnkh:
 # ============================================================================
 # Soul
 # ============================================================================
+
 
 class TestSoul:
     def test_creates_legendary_joker(self):

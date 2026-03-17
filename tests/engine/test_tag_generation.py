@@ -15,16 +15,14 @@ Coverage
 
 from __future__ import annotations
 
-import copy
 from typing import Any
 
 import pytest
 
 from jackdaw.engine.data.prototypes import BLINDS, TAGS, VOUCHERS
-from jackdaw.engine.pools import _FALLBACKS  # noqa: PLC2701  (internal, tested by name)
+from jackdaw.engine.pools import _FALLBACKS
 from jackdaw.engine.rng import PseudoRandom
 from jackdaw.engine.tags import assign_ante_blinds, generate_blind_tags
-
 
 # ---------------------------------------------------------------------------
 # Known-seed determinism
@@ -156,6 +154,7 @@ class TestGameStateMutation:
     def test_existing_bosses_used_respected(self):
         """Pre-loaded bosses_used steers boss selection toward least-used."""
         from jackdaw.engine.data.prototypes import BLINDS as _BLINDS
+
         # Mark every boss used once except bl_hook (usage = 0)
         bosses_used = {
             k: 1
@@ -190,20 +189,42 @@ class TestMinAnteFiltering:
         assert len(_MIN_ANTE_2_TAGS) > 0
         assert "tag_buffoon" in _MIN_ANTE_2_TAGS
 
-    @pytest.mark.parametrize("seed", [
-        "AAA", "BBB", "CCC", "DDD", "EEE",
-        "FFF", "GGG", "HHH", "III", "JJJ",
-    ])
+    @pytest.mark.parametrize(
+        "seed",
+        [
+            "AAA",
+            "BBB",
+            "CCC",
+            "DDD",
+            "EEE",
+            "FFF",
+            "GGG",
+            "HHH",
+            "III",
+            "JJJ",
+        ],
+    )
     def test_ante1_never_returns_min_ante2_tag_small(self, seed):
         result = generate_blind_tags(1, PseudoRandom(seed), {})
         assert result["Small"] not in _MIN_ANTE_2_TAGS, (
             f"seed={seed!r}: got {result['Small']!r} which requires min_ante>=2"
         )
 
-    @pytest.mark.parametrize("seed", [
-        "AAA", "BBB", "CCC", "DDD", "EEE",
-        "FFF", "GGG", "HHH", "III", "JJJ",
-    ])
+    @pytest.mark.parametrize(
+        "seed",
+        [
+            "AAA",
+            "BBB",
+            "CCC",
+            "DDD",
+            "EEE",
+            "FFF",
+            "GGG",
+            "HHH",
+            "III",
+            "JJJ",
+        ],
+    )
     def test_ante1_never_returns_min_ante2_tag_big(self, seed):
         result = generate_blind_tags(1, PseudoRandom(seed), {})
         assert result["Big"] not in _MIN_ANTE_2_TAGS, (
@@ -218,13 +239,14 @@ class TestMinAnteFiltering:
             seen.add(r["Small"])
             seen.add(r["Big"])
         assert seen & _MIN_ANTE_2_TAGS, (
-            f"No min_ante=2 tag appeared in 30 seeds at ante=2 — unexpected"
+            "No min_ante=2 tag appeared in 30 seeds at ante=2 — unexpected"
         )
 
     def test_ante1_tags_are_subset_of_unrestricted(self):
         """All returned tags must be from the ante-1-eligible set."""
         ante1_eligible = frozenset(
-            k for k, v in TAGS.items()
+            k
+            for k, v in TAGS.items()
             if (v.min_ante is None or v.min_ante <= 1)
             and not v.requires  # also skip requires-gated tags
         )
@@ -251,7 +273,6 @@ class TestRequiresGating:
 
     def test_tag_rare_can_appear_with_blueprint(self):
         """tag_rare is eligible when j_blueprint is in used_vouchers."""
-        from jackdaw.engine.pools import get_current_pool
 
         gs_with_blueprint = {"used_vouchers": {"j_blueprint"}}
         seen: set[str] = set()

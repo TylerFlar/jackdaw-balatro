@@ -24,9 +24,19 @@ FIXTURE_PATH = PROJECT_ROOT / "tests" / "fixtures" / "scoring_oracle.json"
 def _card(suit: str, rank: str, enhancement: str = "c_base") -> Card:
     sl = {"Hearts": "H", "Diamonds": "D", "Clubs": "C", "Spades": "S"}
     rl = {
-        "2": "2", "3": "3", "4": "4", "5": "5", "6": "6", "7": "7",
-        "8": "8", "9": "9", "10": "T", "Jack": "J", "Queen": "Q",
-        "King": "K", "Ace": "A",
+        "2": "2",
+        "3": "3",
+        "4": "4",
+        "5": "5",
+        "6": "6",
+        "7": "7",
+        "8": "8",
+        "9": "9",
+        "10": "T",
+        "Jack": "J",
+        "Queen": "Q",
+        "King": "K",
+        "Ace": "A",
     }
     c = Card()
     c.set_base(f"{sl[suit]}_{rl[rank]}", suit, rank)
@@ -38,11 +48,15 @@ def _card(suit: str, rank: str, enhancement: str = "c_base") -> Card:
 # Reproduce each Lua scenario in Python
 # ============================================================================
 
+
 def _run_pair_aces_basic():
     reset_sort_id_counter()
     played = [_card("Hearts", "Ace"), _card("Spades", "Ace")]
     return score_hand_base(
-        played, [], HandLevels(), Blind.create("bl_small", ante=1),
+        played,
+        [],
+        HandLevels(),
+        Blind.create("bl_small", ante=1),
         PseudoRandom("ORACLE"),
     )
 
@@ -51,10 +65,18 @@ def _run_three_kings_foil():
     reset_sort_id_counter()
     k1 = _card("Hearts", "King")
     k1.set_edition({"foil": True})
-    played = [k1, _card("Spades", "King"), _card("Clubs", "King"),
-              _card("Diamonds", "5"), _card("Hearts", "2")]
+    played = [
+        k1,
+        _card("Spades", "King"),
+        _card("Clubs", "King"),
+        _card("Diamonds", "5"),
+        _card("Hearts", "2"),
+    ]
     return score_hand_base(
-        played, [], HandLevels(), Blind.create("bl_small", ante=1),
+        played,
+        [],
+        HandLevels(),
+        Blind.create("bl_small", ante=1),
         PseudoRandom("ORACLE"),
     )
 
@@ -62,11 +84,17 @@ def _run_three_kings_foil():
 def _run_flush_glass():
     reset_sort_id_counter()
     played = [
-        _card("Hearts", "2"), _card("Hearts", "5"), _card("Hearts", "8"),
-        _card("Hearts", "Jack"), _card("Hearts", "Ace", enhancement="m_glass"),
+        _card("Hearts", "2"),
+        _card("Hearts", "5"),
+        _card("Hearts", "8"),
+        _card("Hearts", "Jack"),
+        _card("Hearts", "Ace", enhancement="m_glass"),
     ]
     return score_hand_base(
-        played, [], HandLevels(), Blind.create("bl_small", ante=1),
+        played,
+        [],
+        HandLevels(),
+        Blind.create("bl_small", ante=1),
         PseudoRandom("ORACLE"),
     )
 
@@ -74,13 +102,18 @@ def _run_flush_glass():
 def _run_full_house_steel_held():
     reset_sort_id_counter()
     played = [
-        _card("Hearts", "King"), _card("Spades", "King"),
-        _card("Clubs", "King"), _card("Diamonds", "5"),
+        _card("Hearts", "King"),
+        _card("Spades", "King"),
+        _card("Clubs", "King"),
+        _card("Diamonds", "5"),
         _card("Hearts", "5"),
     ]
     held = [_card("Clubs", "3", enhancement="m_steel")]
     return score_hand_base(
-        played, held, HandLevels(), Blind.create("bl_small", ante=1),
+        played,
+        held,
+        HandLevels(),
+        Blind.create("bl_small", ante=1),
         PseudoRandom("ORACLE"),
     )
 
@@ -91,7 +124,10 @@ def _run_pair_aces_red_seal():
     c.set_seal("Red")
     played = [c, _card("Spades", "Ace")]
     return score_hand_base(
-        played, [], HandLevels(), Blind.create("bl_small", ante=1),
+        played,
+        [],
+        HandLevels(),
+        Blind.create("bl_small", ante=1),
         PseudoRandom("ORACLE"),
     )
 
@@ -100,7 +136,10 @@ def _run_pair_aces_flint():
     reset_sort_id_counter()
     played = [_card("Hearts", "Ace"), _card("Spades", "Ace")]
     return score_hand_base(
-        played, [], HandLevels(), Blind.create("bl_flint", ante=1),
+        played,
+        [],
+        HandLevels(),
+        Blind.create("bl_flint", ante=1),
         PseudoRandom("ORACLE"),
     )
 
@@ -130,12 +169,17 @@ def _joker(center_key: str, **ability_kw) -> Card:
 
 # --- Joker scenarios (use score_hand) ---
 
+
 def _run_pair_aces_joker():
     reset_sort_id_counter()
     played = [_card("Hearts", "Ace"), _card("Spades", "Ace")]
     j = _joker("j_joker", mult=4)
     return score_hand(
-        played, [], [j], HandLevels(), Blind.create("bl_small", ante=1),
+        played,
+        [],
+        [j],
+        HandLevels(),
+        Blind.create("bl_small", ante=1),
         PseudoRandom("ORACLE"),
     )
 
@@ -143,12 +187,19 @@ def _run_pair_aces_joker():
 def _run_flush_hearts_lusty():
     reset_sort_id_counter()
     played = [
-        _card("Hearts", "2"), _card("Hearts", "5"), _card("Hearts", "8"),
-        _card("Hearts", "Jack"), _card("Hearts", "Ace"),
+        _card("Hearts", "2"),
+        _card("Hearts", "5"),
+        _card("Hearts", "8"),
+        _card("Hearts", "Jack"),
+        _card("Hearts", "Ace"),
     ]
     j = _joker("j_lusty_joker", extra={"s_mult": 3, "suit": "Hearts"})
     return score_hand(
-        played, [], [j], HandLevels(), Blind.create("bl_small", ante=1),
+        played,
+        [],
+        [j],
+        HandLevels(),
+        Blind.create("bl_small", ante=1),
         PseudoRandom("ORACLE"),
     )
 
@@ -156,13 +207,19 @@ def _run_flush_hearts_lusty():
 def _run_three_kings_scary_face():
     reset_sort_id_counter()
     played = [
-        _card("Hearts", "King"), _card("Spades", "King"),
-        _card("Clubs", "King"), _card("Diamonds", "5"),
+        _card("Hearts", "King"),
+        _card("Spades", "King"),
+        _card("Clubs", "King"),
+        _card("Diamonds", "5"),
         _card("Hearts", "2"),
     ]
     j = _joker("j_scary_face", extra=30)
     return score_hand(
-        played, [], [j], HandLevels(), Blind.create("bl_small", ante=1),
+        played,
+        [],
+        [j],
+        HandLevels(),
+        Blind.create("bl_small", ante=1),
         PseudoRandom("ORACLE"),
     )
 
@@ -170,13 +227,19 @@ def _run_three_kings_scary_face():
 def _run_full_house_jolly():
     reset_sort_id_counter()
     played = [
-        _card("Hearts", "King"), _card("Spades", "King"),
-        _card("Clubs", "King"), _card("Diamonds", "5"),
+        _card("Hearts", "King"),
+        _card("Spades", "King"),
+        _card("Clubs", "King"),
+        _card("Diamonds", "5"),
         _card("Hearts", "5"),
     ]
     j = _joker("j_jolly", t_mult=8, type="Pair")
     return score_hand(
-        played, [], [j], HandLevels(), Blind.create("bl_small", ante=1),
+        played,
+        [],
+        [j],
+        HandLevels(),
+        Blind.create("bl_small", ante=1),
         PseudoRandom("ORACLE"),
     )
 
@@ -186,7 +249,11 @@ def _run_pair_duo_xmult():
     played = [_card("Hearts", "Ace"), _card("Spades", "Ace")]
     j = _joker("j_duo", x_mult=2, type="Pair")
     return score_hand(
-        played, [], [j], HandLevels(), Blind.create("bl_small", ante=1),
+        played,
+        [],
+        [j],
+        HandLevels(),
+        Blind.create("bl_small", ante=1),
         PseudoRandom("ORACLE"),
     )
 
@@ -198,7 +265,11 @@ def _run_joker_then_blackboard():
     j1 = _joker("j_joker", mult=4)
     j2 = _joker("j_blackboard", extra=3)
     return score_hand(
-        played, held, [j1, j2], HandLevels(), Blind.create("bl_small", ante=1),
+        played,
+        held,
+        [j1, j2],
+        HandLevels(),
+        Blind.create("bl_small", ante=1),
         PseudoRandom("ORACLE"),
     )
 
@@ -210,7 +281,11 @@ def _run_blackboard_then_joker():
     j1 = _joker("j_blackboard", extra=3)
     j2 = _joker("j_joker", mult=4)
     return score_hand(
-        played, held, [j1, j2], HandLevels(), Blind.create("bl_small", ante=1),
+        played,
+        held,
+        [j1, j2],
+        HandLevels(),
+        Blind.create("bl_small", ante=1),
         PseudoRandom("ORACLE"),
     )
 
@@ -221,12 +296,17 @@ def _run_foil_joker():
     j = _joker("j_joker", mult=4)
     j.set_edition({"foil": True})
     return score_hand(
-        played, [], [j], HandLevels(), Blind.create("bl_small", ante=1),
+        played,
+        [],
+        [j],
+        HandLevels(),
+        Blind.create("bl_small", ante=1),
         PseudoRandom("ORACLE"),
     )
 
 
 # --- Complex joker interaction scenarios ---
+
 
 def _run_green_joker_4_hands():
     """Green Joker accumulates +1 per hand over 4 hands → mult=4."""
@@ -237,13 +317,21 @@ def _run_green_joker_4_hands():
         reset_sort_id_counter()
         score_hand(
             [_card("Hearts", "5"), _card("Spades", "5")],
-            [], [green], HandLevels(), blind, PseudoRandom("ORACLE"),
+            [],
+            [green],
+            HandLevels(),
+            blind,
+            PseudoRandom("ORACLE"),
         )
     # 4th hand: Green fires before (+1 → total 4), then joker_main returns 4
     reset_sort_id_counter()
     return score_hand(
         [_card("Hearts", "Ace"), _card("Spades", "Ace")],
-        [], [green], HandLevels(), blind, PseudoRandom("ORACLE"),
+        [],
+        [green],
+        HandLevels(),
+        blind,
+        PseudoRandom("ORACLE"),
     )
 
 
@@ -252,7 +340,10 @@ def _run_steel_joker_2_steel():
     j = _joker("j_steel_joker", extra=0.2)
     return score_hand(
         [_card("Hearts", "Ace"), _card("Spades", "Ace")],
-        [], [j], HandLevels(), Blind.create("bl_small", ante=1),
+        [],
+        [j],
+        HandLevels(),
+        Blind.create("bl_small", ante=1),
         PseudoRandom("ORACLE"),
         game_state={"steel_tally": 2},
     )
@@ -262,10 +353,17 @@ def _run_sock_buskin_3_kings():
     reset_sort_id_counter()
     j = _joker("j_sock_and_buskin", extra=1)
     return score_hand(
-        [_card("Hearts", "King"), _card("Spades", "King"),
-         _card("Clubs", "King"), _card("Diamonds", "5"),
-         _card("Hearts", "2")],
-        [], [j], HandLevels(), Blind.create("bl_small", ante=1),
+        [
+            _card("Hearts", "King"),
+            _card("Spades", "King"),
+            _card("Clubs", "King"),
+            _card("Diamonds", "5"),
+            _card("Hearts", "2"),
+        ],
+        [],
+        [j],
+        HandLevels(),
+        Blind.create("bl_small", ante=1),
         PseudoRandom("ORACLE"),
     )
 
@@ -277,7 +375,10 @@ def _run_red_seal_dusk_last_hand():
     j = _joker("j_dusk", extra=1)
     return score_hand(
         [red_ace, _card("Spades", "Ace")],
-        [], [j], HandLevels(), Blind.create("bl_small", ante=1),
+        [],
+        [j],
+        HandLevels(),
+        Blind.create("bl_small", ante=1),
         PseudoRandom("ORACLE"),
         game_state={"hands_left": 0},
     )
@@ -290,7 +391,10 @@ def _run_blueprint_green_joker():
     jokers = [bp, green]
     return score_hand(
         [_card("Hearts", "Ace"), _card("Spades", "Ace")],
-        [], jokers, HandLevels(), Blind.create("bl_small", ante=1),
+        [],
+        jokers,
+        HandLevels(),
+        Blind.create("bl_small", ante=1),
         PseudoRandom("ORACLE"),
     )
 
@@ -304,7 +408,9 @@ def _run_baseball_2_uncommon():
     return score_hand(
         [_card("Spades", "Ace"), _card("Clubs", "Ace")],
         [_card("Spades", "5")],
-        jokers, HandLevels(), Blind.create("bl_small", ante=1),
+        jokers,
+        HandLevels(),
+        Blind.create("bl_small", ante=1),
         PseudoRandom("ORACLE"),
         game_state={"steel_tally": 1},
     )
@@ -315,9 +421,17 @@ def _run_glass_king_caino():
     glass_king = _card("Hearts", "King", enhancement="m_glass")
     caino = _joker("j_caino", caino_xmult=1, extra=1)
     return score_hand(
-        [glass_king, _card("Spades", "King"), _card("Clubs", "King"),
-         _card("Diamonds", "5"), _card("Hearts", "2")],
-        [], [caino], HandLevels(), Blind.create("bl_small", ante=1),
+        [
+            glass_king,
+            _card("Spades", "King"),
+            _card("Clubs", "King"),
+            _card("Diamonds", "5"),
+            _card("Hearts", "2"),
+        ],
+        [],
+        [caino],
+        HandLevels(),
+        Blind.create("bl_small", ante=1),
         PseudoRandom("ORACLE"),
         probabilities_normal=100.0,  # force shatter
     )
@@ -328,7 +442,10 @@ def _run_ice_cream_hand1():
     ice = _joker("j_ice_cream", extra={"chips": 100, "chip_mod": 5})
     return score_hand(
         [_card("Hearts", "Ace"), _card("Spades", "Ace")],
-        [], [ice], HandLevels(), Blind.create("bl_small", ante=1),
+        [],
+        [ice],
+        HandLevels(),
+        Blind.create("bl_small", ante=1),
         PseudoRandom("ORACLE"),
     )
 
@@ -339,7 +456,10 @@ def _run_ice_cream_hand2():
     ice = _joker("j_ice_cream", extra={"chips": 95, "chip_mod": 5})
     return score_hand(
         [_card("Hearts", "Ace"), _card("Spades", "Ace")],
-        [], [ice], HandLevels(), Blind.create("bl_small", ante=1),
+        [],
+        [ice],
+        HandLevels(),
+        Blind.create("bl_small", ante=1),
         PseudoRandom("ORACLE"),
     )
 
@@ -376,6 +496,7 @@ RUNNERS = {
 # ============================================================================
 # Fixture-based cross-validation
 # ============================================================================
+
 
 class TestScoringOracle:
     """Validate Python scoring against Lua ground truth."""

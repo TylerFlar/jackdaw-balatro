@@ -24,10 +24,10 @@ import pytest
 from jackdaw.engine.challenges import CHALLENGES, apply_challenge, get_challenge
 from jackdaw.engine.run_init import init_game_object
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _fresh_gs() -> dict[str, Any]:
     """A minimal game_state suitable for apply_challenge."""
@@ -46,8 +46,16 @@ class TestChallengesData:
     @pytest.mark.parametrize("cid", list(CHALLENGES.keys()))
     def test_required_keys_present(self, cid):
         ch = CHALLENGES[cid]
-        for key in ("id", "name", "rules", "jokers", "consumeables",
-                     "vouchers", "deck", "restrictions"):
+        for key in (
+            "id",
+            "name",
+            "rules",
+            "jokers",
+            "consumeables",
+            "vouchers",
+            "deck",
+            "restrictions",
+        ):
             assert key in ch, f"{cid} missing key {key!r}"
 
     @pytest.mark.parametrize("cid", list(CHALLENGES.keys()))
@@ -120,8 +128,16 @@ class TestBannedKeys:
         gs = _fresh_gs()
         apply_challenge(CHALLENGES["c_jokerless_1"], gs)
         banned = gs["banned_keys"]
-        for tag in ("tag_rare", "tag_uncommon", "tag_holo", "tag_polychrome",
-                     "tag_negative", "tag_foil", "tag_buffoon", "tag_top_up"):
+        for tag in (
+            "tag_rare",
+            "tag_uncommon",
+            "tag_holo",
+            "tag_polychrome",
+            "tag_negative",
+            "tag_foil",
+            "tag_buffoon",
+            "tag_top_up",
+        ):
             assert banned.get(tag) is True, f"{tag} not banned"
 
     def test_jokerless_bans_blinds(self):
@@ -340,6 +356,7 @@ class TestStartingConsumables:
 class TestIntegrationWithInitializeRun:
     def test_omelette_through_initialize_run(self):
         from jackdaw.engine.run_init import initialize_run
+
         gs = initialize_run("b_red", 1, "OMELETTE_TEST", challenge=CHALLENGES["c_omelette_1"])
         # No reward flags set
         assert gs["modifiers"]["no_blind_reward"]["Small"] is True
@@ -350,6 +367,7 @@ class TestIntegrationWithInitializeRun:
 
     def test_jokerless_through_initialize_run(self):
         from jackdaw.engine.run_init import initialize_run
+
         gs = initialize_run("b_red", 1, "JOKERLESS_TEST", challenge=CHALLENGES["c_jokerless_1"])
         assert gs["joker_rate"] == 0
         assert gs["joker_slots"] == 0
@@ -357,6 +375,7 @@ class TestIntegrationWithInitializeRun:
 
     def test_golden_needle_through_initialize_run(self):
         from jackdaw.engine.run_init import initialize_run
+
         gs = initialize_run("b_red", 1, "GOLDEN_TEST", challenge=CHALLENGES["c_golden_needle_1"])
         # Red Deck +1 discard is overridden by challenge modifier discards=6
         assert gs["round_resets"]["discards"] == 6

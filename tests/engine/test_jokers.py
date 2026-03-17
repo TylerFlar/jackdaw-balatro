@@ -37,14 +37,27 @@ def _joker_card(center_key: str, *, debuff: bool = False, **ability_kw) -> Card:
 
 _SUIT_LETTER = {"Hearts": "H", "Diamonds": "D", "Clubs": "C", "Spades": "S"}
 _RANK_LETTER = {
-    "2": "2", "3": "3", "4": "4", "5": "5", "6": "6", "7": "7",
-    "8": "8", "9": "9", "10": "T", "Jack": "J", "Queen": "Q",
-    "King": "K", "Ace": "A",
+    "2": "2",
+    "3": "3",
+    "4": "4",
+    "5": "5",
+    "6": "6",
+    "7": "7",
+    "8": "8",
+    "9": "9",
+    "10": "T",
+    "Jack": "J",
+    "Queen": "Q",
+    "King": "K",
+    "Ace": "A",
 }
 
 
 def _playing_card(
-    suit: str, rank: str, *, enhancement: str = "c_base",
+    suit: str,
+    rank: str,
+    *,
+    enhancement: str = "c_base",
 ) -> Card:
     """Create a playing card with proper base/suit for is_suit checks."""
     c = Card()
@@ -70,6 +83,7 @@ _TEST_KEY_2 = "j_test_second"
 @pytest.fixture(autouse=True)
 def _register_test_jokers():
     """Register test jokers before each test, clean up after."""
+
     @register(_TEST_KEY)
     def _dummy(card: Card, ctx: JokerContext) -> JokerResult | None:
         if ctx.joker_main:
@@ -96,6 +110,7 @@ def _register_test_jokers():
 # Registry
 # ============================================================================
 
+
 class TestRegistry:
     def test_register_adds_to_registry(self):
         assert _TEST_KEY in _REGISTRY
@@ -108,6 +123,7 @@ class TestRegistry:
 
     def test_register_overwrites(self):
         """Re-registering the same key replaces the handler."""
+
         @register(_TEST_KEY)
         def _replacement(card: Card, ctx: JokerContext) -> JokerResult | None:
             if ctx.joker_main:
@@ -123,6 +139,7 @@ class TestRegistry:
 # ============================================================================
 # Dispatch
 # ============================================================================
+
 
 class TestDispatch:
     def test_joker_main_dispatch(self):
@@ -162,6 +179,7 @@ class TestDispatch:
 # Debuff handling
 # ============================================================================
 
+
 class TestDebuff:
     def test_debuffed_joker_returns_none(self):
         card = _joker_card(_TEST_KEY, debuff=True)
@@ -178,6 +196,7 @@ class TestDebuff:
 # Unregistered joker
 # ============================================================================
 
+
 class TestUnregistered:
     def test_unregistered_returns_none(self):
         card = _joker_card("j_nonexistent_joker")
@@ -188,6 +207,7 @@ class TestUnregistered:
 # ============================================================================
 # JokerResult defaults
 # ============================================================================
+
 
 class TestJokerResult:
     def test_default_values(self):
@@ -218,6 +238,7 @@ class TestJokerResult:
 # JokerContext defaults
 # ============================================================================
 
+
 class TestJokerContext:
     def test_default_all_false(self):
         ctx = JokerContext()
@@ -246,6 +267,7 @@ class TestJokerContext:
 # ============================================================================
 # Real joker handlers
 # ============================================================================
+
 
 class TestJokerHandler:
     """j_joker: +4 mult (default) in joker_main context."""
@@ -311,12 +333,8 @@ class TestMisprintHandler:
     def test_misprint_deterministic(self):
         """Same seed produces same roll."""
         card = _joker_card("j_misprint", extra={"min": 0, "max": 23})
-        r1 = calculate_joker(
-            card, JokerContext(joker_main=True, rng=PseudoRandom("SEED1"))
-        )
-        r2 = calculate_joker(
-            card, JokerContext(joker_main=True, rng=PseudoRandom("SEED1"))
-        )
+        r1 = calculate_joker(card, JokerContext(joker_main=True, rng=PseudoRandom("SEED1")))
+        r2 = calculate_joker(card, JokerContext(joker_main=True, rng=PseudoRandom("SEED1")))
         assert r1.mult_mod == r2.mult_mod
 
     def test_misprint_individual_returns_none(self):
@@ -330,12 +348,22 @@ class TestMisprintHandler:
 # Hand-type joker helpers
 # ============================================================================
 
+
 def _poker_hands_with(*types: str) -> dict[str, list]:
     """Build a poker_hands dict where listed types have a non-empty entry."""
     all_types = [
-        "Flush Five", "Flush House", "Five of a Kind", "Straight Flush",
-        "Four of a Kind", "Full House", "Flush", "Straight",
-        "Three of a Kind", "Two Pair", "Pair", "High Card",
+        "Flush Five",
+        "Flush House",
+        "Five of a Kind",
+        "Straight Flush",
+        "Four of a Kind",
+        "Full House",
+        "Flush",
+        "Straight",
+        "Three of a Kind",
+        "Two Pair",
+        "Pair",
+        "High Card",
     ]
     return {t: [["placeholder"]] if t in types else [] for t in all_types}
 
@@ -343,6 +371,7 @@ def _poker_hands_with(*types: str) -> dict[str, list]:
 # ============================================================================
 # Category B — poker_hands containment (t_mult jokers)
 # ============================================================================
+
 
 class TestJollyHandler:
     """j_jolly: +8 mult if hand CONTAINS a Pair (poker_hands check)."""
@@ -423,6 +452,7 @@ class TestDrollHandler:
 # Category B — poker_hands containment (t_chips jokers)
 # ============================================================================
 
+
 class TestSlyHandler:
     def test_sly_with_pair(self):
         card = _joker_card("j_sly", t_chips=50, type="Pair")
@@ -476,6 +506,7 @@ class TestCraftyHandler:
 # ============================================================================
 # Category B — poker_hands containment (xMult jokers)
 # ============================================================================
+
 
 class TestDuoHandler:
     """The Duo: x2 mult if hand contains Pair."""
@@ -542,6 +573,7 @@ class TestTribeHandler:
 # ============================================================================
 # scoring_name-based jokers
 # ============================================================================
+
 
 class TestSupernovaHandler:
     """Supernova: +mult = times this hand type played in the run."""
@@ -642,6 +674,7 @@ class TestCardSharpHandler:
 # Suit-conditional jokers (individual context, cardarea='play')
 # ============================================================================
 
+
 def _suit_ctx(other_card: Card, **kw) -> JokerContext:
     """Build an individual/play context with other_card."""
     return JokerContext(individual=True, cardarea="play", other_card=other_card, **kw)
@@ -652,7 +685,8 @@ class TestGreedyJoker:
 
     def test_diamond_triggers(self):
         joker = _joker_card(
-            "j_greedy_joker", extra={"s_mult": 3, "suit": "Diamonds"},
+            "j_greedy_joker",
+            extra={"s_mult": 3, "suit": "Diamonds"},
         )
         ctx = _suit_ctx(_playing_card("Diamonds", "Ace"))
         result = calculate_joker(joker, ctx)
@@ -661,7 +695,8 @@ class TestGreedyJoker:
 
     def test_spade_no_effect(self):
         joker = _joker_card(
-            "j_greedy_joker", extra={"s_mult": 3, "suit": "Diamonds"},
+            "j_greedy_joker",
+            extra={"s_mult": 3, "suit": "Diamonds"},
         )
         ctx = _suit_ctx(_playing_card("Spades", "Ace"))
         result = calculate_joker(joker, ctx)
@@ -670,7 +705,8 @@ class TestGreedyJoker:
     def test_wild_card_triggers(self):
         """Wild Card matches any suit → triggers."""
         joker = _joker_card(
-            "j_greedy_joker", extra={"s_mult": 3, "suit": "Diamonds"},
+            "j_greedy_joker",
+            extra={"s_mult": 3, "suit": "Diamonds"},
         )
         ctx = _suit_ctx(_wild_card("Hearts", "5"))
         result = calculate_joker(joker, ctx)
@@ -680,7 +716,8 @@ class TestGreedyJoker:
     def test_smeared_hearts_triggers(self):
         """Smeared: Hearts ↔ Diamonds interchangeable → Hearts triggers."""
         joker = _joker_card(
-            "j_greedy_joker", extra={"s_mult": 3, "suit": "Diamonds"},
+            "j_greedy_joker",
+            extra={"s_mult": 3, "suit": "Diamonds"},
         )
         ctx = _suit_ctx(_playing_card("Hearts", "5"), smeared=True)
         result = calculate_joker(joker, ctx)
@@ -690,7 +727,8 @@ class TestGreedyJoker:
     def test_smeared_clubs_no_effect(self):
         """Smeared: Clubs is black, Diamonds is red → no match."""
         joker = _joker_card(
-            "j_greedy_joker", extra={"s_mult": 3, "suit": "Diamonds"},
+            "j_greedy_joker",
+            extra={"s_mult": 3, "suit": "Diamonds"},
         )
         ctx = _suit_ctx(_playing_card("Clubs", "5"), smeared=True)
         result = calculate_joker(joker, ctx)
@@ -699,7 +737,8 @@ class TestGreedyJoker:
     def test_joker_main_context_no_effect(self):
         """Wrong context phase → None."""
         joker = _joker_card(
-            "j_greedy_joker", extra={"s_mult": 3, "suit": "Diamonds"},
+            "j_greedy_joker",
+            extra={"s_mult": 3, "suit": "Diamonds"},
         )
         ctx = JokerContext(
             joker_main=True,
@@ -714,7 +753,8 @@ class TestLustyJoker:
 
     def test_heart_triggers(self):
         joker = _joker_card(
-            "j_lusty_joker", extra={"s_mult": 3, "suit": "Hearts"},
+            "j_lusty_joker",
+            extra={"s_mult": 3, "suit": "Hearts"},
         )
         ctx = _suit_ctx(_playing_card("Hearts", "King"))
         result = calculate_joker(joker, ctx)
@@ -723,7 +763,8 @@ class TestLustyJoker:
 
     def test_diamond_no_effect(self):
         joker = _joker_card(
-            "j_lusty_joker", extra={"s_mult": 3, "suit": "Hearts"},
+            "j_lusty_joker",
+            extra={"s_mult": 3, "suit": "Hearts"},
         )
         ctx = _suit_ctx(_playing_card("Diamonds", "King"))
         result = calculate_joker(joker, ctx)
@@ -735,7 +776,8 @@ class TestWrathfulJoker:
 
     def test_spade_triggers(self):
         joker = _joker_card(
-            "j_wrathful_joker", extra={"s_mult": 3, "suit": "Spades"},
+            "j_wrathful_joker",
+            extra={"s_mult": 3, "suit": "Spades"},
         )
         ctx = _suit_ctx(_playing_card("Spades", "5"))
         result = calculate_joker(joker, ctx)
@@ -744,7 +786,8 @@ class TestWrathfulJoker:
 
     def test_club_no_effect(self):
         joker = _joker_card(
-            "j_wrathful_joker", extra={"s_mult": 3, "suit": "Spades"},
+            "j_wrathful_joker",
+            extra={"s_mult": 3, "suit": "Spades"},
         )
         ctx = _suit_ctx(_playing_card("Clubs", "5"))
         result = calculate_joker(joker, ctx)
@@ -756,7 +799,8 @@ class TestGluttenousJoker:
 
     def test_club_triggers(self):
         joker = _joker_card(
-            "j_gluttenous_joker", extra={"s_mult": 3, "suit": "Clubs"},
+            "j_gluttenous_joker",
+            extra={"s_mult": 3, "suit": "Clubs"},
         )
         ctx = _suit_ctx(_playing_card("Clubs", "Jack"))
         result = calculate_joker(joker, ctx)
@@ -765,7 +809,8 @@ class TestGluttenousJoker:
 
     def test_heart_no_effect(self):
         joker = _joker_card(
-            "j_gluttenous_joker", extra={"s_mult": 3, "suit": "Clubs"},
+            "j_gluttenous_joker",
+            extra={"s_mult": 3, "suit": "Clubs"},
         )
         ctx = _suit_ctx(_playing_card("Hearts", "Jack"))
         result = calculate_joker(joker, ctx)
@@ -774,7 +819,8 @@ class TestGluttenousJoker:
     def test_smeared_spade_triggers(self):
         """Smeared: Spades ↔ Clubs interchangeable."""
         joker = _joker_card(
-            "j_gluttenous_joker", extra={"s_mult": 3, "suit": "Clubs"},
+            "j_gluttenous_joker",
+            extra={"s_mult": 3, "suit": "Clubs"},
         )
         ctx = _suit_ctx(_playing_card("Spades", "5"), smeared=True)
         result = calculate_joker(joker, ctx)
@@ -848,7 +894,9 @@ class TestBloodstoneHandler:
         joker = _joker_card("j_bloodstone", extra={"odds": 2, "Xmult": 1.5})
         rng = PseudoRandom("BLOODTEST")
         ctx = _suit_ctx(
-            _playing_card("Hearts", "Ace"), rng=rng, probabilities_normal=1.0,
+            _playing_card("Hearts", "Ace"),
+            rng=rng,
+            probabilities_normal=1.0,
         )
         result = calculate_joker(joker, ctx)
         # With odds=2 and normal=1, probability is 0.5
@@ -866,7 +914,9 @@ class TestBloodstoneHandler:
         joker = _joker_card("j_bloodstone", extra={"odds": 2, "Xmult": 1.5})
         rng = PseudoRandom("BLOODTEST")
         ctx = _suit_ctx(
-            _playing_card("Spades", "Ace"), rng=rng, probabilities_normal=1.0,
+            _playing_card("Spades", "Ace"),
+            rng=rng,
+            probabilities_normal=1.0,
         )
         result = calculate_joker(joker, ctx)
         assert result is None
@@ -914,7 +964,8 @@ class TestAncientJoker:
     def test_matching_suit_triggers(self):
         joker = _joker_card("j_ancient", extra=1.5)
         ctx = _suit_ctx(
-            _playing_card("Spades", "King"), ancient_suit="Spades",
+            _playing_card("Spades", "King"),
+            ancient_suit="Spades",
         )
         result = calculate_joker(joker, ctx)
         assert result is not None
@@ -923,7 +974,8 @@ class TestAncientJoker:
     def test_non_matching_suit_no_effect(self):
         joker = _joker_card("j_ancient", extra=1.5)
         ctx = _suit_ctx(
-            _playing_card("Hearts", "King"), ancient_suit="Spades",
+            _playing_card("Hearts", "King"),
+            ancient_suit="Spades",
         )
         result = calculate_joker(joker, ctx)
         assert result is None
@@ -945,6 +997,7 @@ class TestAncientJoker:
 # ============================================================================
 # Rank-conditional jokers (individual context, cardarea='play')
 # ============================================================================
+
 
 class TestFibonacciHandler:
     """j_fibonacci: +8 mult for Ace/2/3/5/8."""
@@ -1291,6 +1344,7 @@ class TestIdolHandler:
 # Rank-conditional retrigger (repetition context)
 # ============================================================================
 
+
 class TestHackHandler:
     """j_hack: retrigger 2/3/4/5 cards."""
 
@@ -1351,6 +1405,7 @@ class TestHackHandler:
 # ============================================================================
 # Game-state-dependent jokers (joker_main context)
 # ============================================================================
+
 
 class TestHalfJoker:
     def test_three_cards_triggers(self):
@@ -1450,7 +1505,9 @@ class TestErosion:
     def test_ten_cards_below(self):
         joker = _joker_card("j_erosion", extra=4)
         ctx = JokerContext(
-            joker_main=True, starting_deck_size=52, playing_cards_count=42,
+            joker_main=True,
+            starting_deck_size=52,
+            playing_cards_count=42,
         )
         result = calculate_joker(joker, ctx)
         assert result is not None
@@ -1459,7 +1516,9 @@ class TestErosion:
     def test_full_deck_no_effect(self):
         joker = _joker_card("j_erosion", extra=4)
         ctx = JokerContext(
-            joker_main=True, starting_deck_size=52, playing_cards_count=52,
+            joker_main=True,
+            starting_deck_size=52,
+            playing_cards_count=52,
         )
         assert calculate_joker(joker, ctx) is None
 
@@ -1739,10 +1798,13 @@ class TestLoyaltyCard:
 # Held-card jokers (individual context, cardarea='hand')
 # ============================================================================
 
+
 def _held_ctx(other_card: Card, held_cards: list[Card] | None = None) -> JokerContext:
     return JokerContext(
-        individual=True, cardarea="hand",
-        other_card=other_card, held_cards=held_cards,
+        individual=True,
+        cardarea="hand",
+        other_card=other_card,
+        held_cards=held_cards,
     )
 
 
@@ -1828,6 +1890,7 @@ class TestBaron:
 # Scoring-phase economy jokers
 # ============================================================================
 
+
 def _gold_card(suit: str = "Hearts", rank: str = "5") -> Card:
     """Create a Gold Card (enhancement)."""
     return _playing_card(suit, rank, enhancement="m_gold")
@@ -1885,14 +1948,22 @@ class TestBusinessCard:
 
     def test_deterministic(self):
         joker = _joker_card("j_business", extra=2)
-        r1 = calculate_joker(joker, _suit_ctx(
-            _playing_card("Hearts", "Jack"),
-            rng=PseudoRandom("S1"), probabilities_normal=1.0,
-        ))
-        r2 = calculate_joker(joker, _suit_ctx(
-            _playing_card("Hearts", "Jack"),
-            rng=PseudoRandom("S1"), probabilities_normal=1.0,
-        ))
+        r1 = calculate_joker(
+            joker,
+            _suit_ctx(
+                _playing_card("Hearts", "Jack"),
+                rng=PseudoRandom("S1"),
+                probabilities_normal=1.0,
+            ),
+        )
+        r2 = calculate_joker(
+            joker,
+            _suit_ctx(
+                _playing_card("Hearts", "Jack"),
+                rng=PseudoRandom("S1"),
+                probabilities_normal=1.0,
+            ),
+        )
         assert (r1 is None) == (r2 is None)
 
 
@@ -1903,8 +1974,11 @@ class TestReservedParking:
         joker = _joker_card("j_reserved_parking", extra={"odds": 2, "dollars": 1})
         king = _playing_card("Hearts", "King")
         ctx = JokerContext(
-            individual=True, cardarea="hand", other_card=king,
-            rng=PseudoRandom("PARK"), probabilities_normal=1000.0,
+            individual=True,
+            cardarea="hand",
+            other_card=king,
+            rng=PseudoRandom("PARK"),
+            probabilities_normal=1000.0,
         )
         result = calculate_joker(joker, ctx)
         assert result is not None
@@ -1914,8 +1988,11 @@ class TestReservedParking:
         joker = _joker_card("j_reserved_parking", extra={"odds": 2, "dollars": 1})
         five = _playing_card("Hearts", "5")
         ctx = JokerContext(
-            individual=True, cardarea="hand", other_card=five,
-            rng=PseudoRandom("PARK"), probabilities_normal=1000.0,
+            individual=True,
+            cardarea="hand",
+            other_card=five,
+            rng=PseudoRandom("PARK"),
+            probabilities_normal=1000.0,
         )
         assert calculate_joker(joker, ctx) is None
 
@@ -1925,8 +2002,11 @@ class TestReservedParking:
         king = _playing_card("Hearts", "King")
         king.debuff = True
         ctx = JokerContext(
-            individual=True, cardarea="hand", other_card=king,
-            rng=PseudoRandom("PARK"), probabilities_normal=1000.0,
+            individual=True,
+            cardarea="hand",
+            other_card=king,
+            rng=PseudoRandom("PARK"),
+            probabilities_normal=1000.0,
         )
         assert calculate_joker(joker, ctx) is None
 
@@ -1934,6 +2014,7 @@ class TestReservedParking:
 # ============================================================================
 # Discard-phase economy jokers
 # ============================================================================
+
 
 class TestFaceless:
     """j_faceless: +$5 if ≥3 face cards discarded."""
@@ -1947,7 +2028,9 @@ class TestFaceless:
         ]
         # Fires on last card in full_hand
         ctx = JokerContext(
-            discard=True, other_card=discarded[-1], full_hand=discarded,
+            discard=True,
+            other_card=discarded[-1],
+            full_hand=discarded,
         )
         result = calculate_joker(joker, ctx)
         assert result is not None
@@ -1961,7 +2044,9 @@ class TestFaceless:
             _playing_card("Clubs", "5"),
         ]
         ctx = JokerContext(
-            discard=True, other_card=discarded[-1], full_hand=discarded,
+            discard=True,
+            other_card=discarded[-1],
+            full_hand=discarded,
         )
         assert calculate_joker(joker, ctx) is None
 
@@ -1974,7 +2059,9 @@ class TestFaceless:
             _playing_card("Clubs", "King"),
         ]
         ctx = JokerContext(
-            discard=True, other_card=discarded[0], full_hand=discarded,
+            discard=True,
+            other_card=discarded[0],
+            full_hand=discarded,
         )
         assert calculate_joker(joker, ctx) is None
 
@@ -1986,7 +2073,9 @@ class TestMail:
         joker = _joker_card("j_mail", extra=5)
         ace = _playing_card("Hearts", "Ace")
         ctx = JokerContext(
-            discard=True, other_card=ace, mail_card_id=14,
+            discard=True,
+            other_card=ace,
+            mail_card_id=14,
         )
         result = calculate_joker(joker, ctx)
         assert result is not None
@@ -1996,7 +2085,9 @@ class TestMail:
         joker = _joker_card("j_mail", extra=5)
         king = _playing_card("Hearts", "King")
         ctx = JokerContext(
-            discard=True, other_card=king, mail_card_id=14,
+            discard=True,
+            other_card=king,
+            mail_card_id=14,
         )
         assert calculate_joker(joker, ctx) is None
 
@@ -2005,7 +2096,9 @@ class TestMail:
         ace = _playing_card("Hearts", "Ace")
         ace.debuff = True
         ctx = JokerContext(
-            discard=True, other_card=ace, mail_card_id=14,
+            discard=True,
+            other_card=ace,
+            mail_card_id=14,
         )
         assert calculate_joker(joker, ctx) is None
 
@@ -2023,7 +2116,9 @@ class TestTrading:
         joker = _joker_card("j_trading", extra=3)
         card = _playing_card("Hearts", "5")
         ctx = JokerContext(
-            discard=True, full_hand=[card], discards_used=0,
+            discard=True,
+            full_hand=[card],
+            discards_used=0,
         )
         result = calculate_joker(joker, ctx)
         assert result is not None
@@ -2035,7 +2130,9 @@ class TestTrading:
         joker = _joker_card("j_trading", extra=3)
         cards = [_playing_card("Hearts", "5"), _playing_card("Spades", "3")]
         ctx = JokerContext(
-            discard=True, full_hand=cards, discards_used=0,
+            discard=True,
+            full_hand=cards,
+            discards_used=0,
         )
         assert calculate_joker(joker, ctx) is None
 
@@ -2043,7 +2140,9 @@ class TestTrading:
         joker = _joker_card("j_trading", extra=3)
         card = _playing_card("Hearts", "5")
         ctx = JokerContext(
-            discard=True, full_hand=[card], discards_used=1,
+            discard=True,
+            full_hand=[card],
+            discards_used=1,
         )
         assert calculate_joker(joker, ctx) is None
 
@@ -2051,6 +2150,7 @@ class TestTrading:
 # ============================================================================
 # Hand-type economy jokers (joker_main context)
 # ============================================================================
+
 
 class TestToDoList:
     """j_todo_list: +$4 if hand matches to_do_poker_hand."""
@@ -2088,11 +2188,13 @@ class TestToDoList:
 # Boss blind reaction
 # ============================================================================
 
+
 class TestMatador:
     """j_matador: +$8 when boss blind's debuff effect triggers."""
 
     def _make_blind(self, *, triggered: bool) -> object:
         from jackdaw.engine.blind import Blind
+
         b = Blind.create("bl_eye", ante=1)
         b.triggered = triggered
         return b
@@ -2138,6 +2240,7 @@ class TestMatador:
 # Blueprint and Brainstorm (copy/delegation)
 # ============================================================================
 
+
 class TestBlueprint:
     """j_blueprint: copies the joker to its right."""
 
@@ -2155,11 +2258,14 @@ class TestBlueprint:
         """Blueprint left of j_greedy_joker with Diamond scored → +3 mult."""
         bp = _joker_card("j_blueprint")
         greedy = _joker_card(
-            "j_greedy_joker", extra={"s_mult": 3, "suit": "Diamonds"},
+            "j_greedy_joker",
+            extra={"s_mult": 3, "suit": "Diamonds"},
         )
         jokers = [bp, greedy]
         ctx = JokerContext(
-            individual=True, cardarea="play", jokers=jokers,
+            individual=True,
+            cardarea="play",
+            jokers=jokers,
             other_card=_playing_card("Diamonds", "Ace"),
         )
         result = calculate_joker(bp, ctx)

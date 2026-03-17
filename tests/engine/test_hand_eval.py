@@ -33,9 +33,19 @@ def _card(suit: str, rank: str, enhancement: str = "c_base") -> Card:
     """Helper: create a playing card."""
     suit_letter = {"Hearts": "H", "Diamonds": "D", "Clubs": "C", "Spades": "S"}
     rank_letter = {
-        "2": "2", "3": "3", "4": "4", "5": "5", "6": "6", "7": "7",
-        "8": "8", "9": "9", "10": "T", "Jack": "J", "Queen": "Q",
-        "King": "K", "Ace": "A",
+        "2": "2",
+        "3": "3",
+        "4": "4",
+        "5": "5",
+        "6": "6",
+        "7": "7",
+        "8": "8",
+        "9": "9",
+        "10": "T",
+        "Jack": "J",
+        "Queen": "Q",
+        "King": "K",
+        "Ace": "A",
     }
     c = Card()
     key = f"{suit_letter[suit]}_{rank_letter[rank]}"
@@ -48,6 +58,7 @@ def _card(suit: str, rank: str, enhancement: str = "c_base") -> Card:
 # get_flush
 # ============================================================================
 
+
 class TestGetFlush:
     def test_five_hearts(self):
         hand = [_card("Hearts", r) for r in ["2", "5", "8", "Jack", "Ace"]]
@@ -57,8 +68,10 @@ class TestGetFlush:
 
     def test_four_hearts_no_flush(self):
         hand = [
-            _card("Hearts", "2"), _card("Hearts", "5"),
-            _card("Hearts", "8"), _card("Hearts", "Jack"),
+            _card("Hearts", "2"),
+            _card("Hearts", "5"),
+            _card("Hearts", "8"),
+            _card("Hearts", "Jack"),
             _card("Spades", "Ace"),
         ]
         result = get_flush(hand)
@@ -66,8 +79,10 @@ class TestGetFlush:
 
     def test_four_fingers_four_is_enough(self):
         hand = [
-            _card("Clubs", "3"), _card("Clubs", "7"),
-            _card("Clubs", "10"), _card("Clubs", "King"),
+            _card("Clubs", "3"),
+            _card("Clubs", "7"),
+            _card("Clubs", "10"),
+            _card("Clubs", "King"),
             _card("Hearts", "Ace"),
         ]
         result = get_flush(hand, four_fingers=True)
@@ -76,8 +91,10 @@ class TestGetFlush:
 
     def test_four_fingers_three_is_not_enough(self):
         hand = [
-            _card("Clubs", "3"), _card("Clubs", "7"),
-            _card("Clubs", "10"), _card("Hearts", "King"),
+            _card("Clubs", "3"),
+            _card("Clubs", "7"),
+            _card("Clubs", "10"),
+            _card("Hearts", "King"),
         ]
         result = get_flush(hand, four_fingers=True)
         assert result == []
@@ -90,8 +107,10 @@ class TestGetFlush:
     def test_wild_card_matches_all_suits(self):
         """Wild Card counts for every suit in flush detection."""
         hand = [
-            _card("Spades", "2"), _card("Spades", "5"),
-            _card("Spades", "8"), _card("Spades", "Jack"),
+            _card("Spades", "2"),
+            _card("Spades", "5"),
+            _card("Spades", "8"),
+            _card("Spades", "Jack"),
             _card("Hearts", "Ace", enhancement="m_wild"),  # Wild Card
         ]
         result = get_flush(hand)
@@ -101,8 +120,10 @@ class TestGetFlush:
     def test_stone_card_excluded(self):
         """Stone Cards are excluded from flush suit matching."""
         hand = [
-            _card("Hearts", "2"), _card("Hearts", "5"),
-            _card("Hearts", "8"), _card("Hearts", "Jack"),
+            _card("Hearts", "2"),
+            _card("Hearts", "5"),
+            _card("Hearts", "8"),
+            _card("Hearts", "Jack"),
             _card("Hearts", "Ace", enhancement="m_stone"),  # Stone
         ]
         result = get_flush(hand)
@@ -111,8 +132,10 @@ class TestGetFlush:
     def test_smeared_joker_red_suits(self):
         """Smeared: Hearts and Diamonds count as same suit."""
         hand = [
-            _card("Hearts", "2"), _card("Hearts", "5"),
-            _card("Diamonds", "8"), _card("Diamonds", "Jack"),
+            _card("Hearts", "2"),
+            _card("Hearts", "5"),
+            _card("Diamonds", "8"),
+            _card("Diamonds", "Jack"),
             _card("Hearts", "Ace"),
         ]
         # Without smeared: no flush (3H + 2D)
@@ -125,8 +148,10 @@ class TestGetFlush:
     def test_smeared_joker_black_suits(self):
         """Smeared: Spades and Clubs count as same suit."""
         hand = [
-            _card("Spades", "2"), _card("Clubs", "5"),
-            _card("Spades", "8"), _card("Clubs", "Jack"),
+            _card("Spades", "2"),
+            _card("Clubs", "5"),
+            _card("Spades", "8"),
+            _card("Clubs", "Jack"),
             _card("Spades", "Ace"),
         ]
         result = get_flush(hand, smeared=True)
@@ -148,6 +173,7 @@ class TestGetFlush:
 # get_straight
 # ============================================================================
 
+
 class TestGetStraight:
     def test_simple_straight(self):
         hand = [_card("Hearts", r) for r in ["3", "4", "5", "6", "7"]]
@@ -158,8 +184,10 @@ class TestGetStraight:
     def test_ace_high_straight(self):
         """10-J-Q-K-A is valid."""
         hand = [
-            _card("Hearts", "10"), _card("Spades", "Jack"),
-            _card("Clubs", "Queen"), _card("Diamonds", "King"),
+            _card("Hearts", "10"),
+            _card("Spades", "Jack"),
+            _card("Clubs", "Queen"),
+            _card("Diamonds", "King"),
             _card("Hearts", "Ace"),
         ]
         result = get_straight(hand)
@@ -168,8 +196,10 @@ class TestGetStraight:
     def test_ace_low_straight(self):
         """A-2-3-4-5 is valid (Ace wraps low)."""
         hand = [
-            _card("Hearts", "Ace"), _card("Spades", "2"),
-            _card("Clubs", "3"), _card("Diamonds", "4"),
+            _card("Hearts", "Ace"),
+            _card("Spades", "2"),
+            _card("Clubs", "3"),
+            _card("Diamonds", "4"),
             _card("Hearts", "5"),
         ]
         result = get_straight(hand)
@@ -178,8 +208,10 @@ class TestGetStraight:
     def test_no_wrap_around(self):
         """Q-K-A-2-3 is NOT valid (no wrapping)."""
         hand = [
-            _card("Hearts", "Queen"), _card("Spades", "King"),
-            _card("Clubs", "Ace"), _card("Diamonds", "2"),
+            _card("Hearts", "Queen"),
+            _card("Spades", "King"),
+            _card("Clubs", "Ace"),
+            _card("Diamonds", "2"),
             _card("Hearts", "3"),
         ]
         result = get_straight(hand)
@@ -187,8 +219,10 @@ class TestGetStraight:
 
     def test_pair_not_straight(self):
         hand = [
-            _card("Hearts", "5"), _card("Spades", "5"),
-            _card("Clubs", "6"), _card("Diamonds", "7"),
+            _card("Hearts", "5"),
+            _card("Spades", "5"),
+            _card("Clubs", "6"),
+            _card("Diamonds", "7"),
             _card("Hearts", "8"),
         ]
         result = get_straight(hand)
@@ -197,8 +231,10 @@ class TestGetStraight:
     def test_four_fingers(self):
         """Four Fingers: 4 consecutive ranks is enough."""
         hand = [
-            _card("Hearts", "4"), _card("Spades", "5"),
-            _card("Clubs", "6"), _card("Diamonds", "7"),
+            _card("Hearts", "4"),
+            _card("Spades", "5"),
+            _card("Clubs", "6"),
+            _card("Diamonds", "7"),
             _card("Hearts", "King"),  # not part of the straight
         ]
         result = get_straight(hand, four_fingers=True)
@@ -207,9 +243,11 @@ class TestGetStraight:
     def test_shortcut_one_gap(self):
         """Shortcut: one rank gap is allowed."""
         hand = [
-            _card("Hearts", "3"), _card("Spades", "4"),
+            _card("Hearts", "3"),
+            _card("Spades", "4"),
             # gap at 5
-            _card("Clubs", "6"), _card("Diamonds", "7"),
+            _card("Clubs", "6"),
+            _card("Diamonds", "7"),
             _card("Hearts", "8"),
         ]
         result = get_straight(hand, shortcut=True)
@@ -222,8 +260,10 @@ class TestGetStraight:
         is independent.  Straight length counts: 3→1, skip4, 5→2, skip6, 7→3, 8→4, 9→5.
         """
         hand = [
-            _card("Hearts", "3"), _card("Spades", "5"),
-            _card("Clubs", "7"), _card("Diamonds", "8"),
+            _card("Hearts", "3"),
+            _card("Spades", "5"),
+            _card("Clubs", "7"),
+            _card("Diamonds", "8"),
             _card("Hearts", "9"),
         ]
         result = get_straight(hand, shortcut=True)
@@ -234,7 +274,8 @@ class TestGetStraight:
         hand = [
             _card("Hearts", "3"),
             # gap at 4 AND 5
-            _card("Clubs", "6"), _card("Diamonds", "7"),
+            _card("Clubs", "6"),
+            _card("Diamonds", "7"),
             _card("Hearts", "8"),
         ]
         result = get_straight(hand, shortcut=True)
@@ -258,11 +299,14 @@ class TestGetStraight:
 # get_x_same
 # ============================================================================
 
+
 class TestGetXSame:
     def test_pair(self):
         hand = [
-            _card("Hearts", "5"), _card("Spades", "5"),
-            _card("Clubs", "8"), _card("Diamonds", "Jack"),
+            _card("Hearts", "5"),
+            _card("Spades", "5"),
+            _card("Clubs", "8"),
+            _card("Diamonds", "Jack"),
             _card("Hearts", "Ace"),
         ]
         result = get_x_same(2, hand)
@@ -272,8 +316,10 @@ class TestGetXSame:
 
     def test_two_pairs(self):
         hand = [
-            _card("Hearts", "5"), _card("Spades", "5"),
-            _card("Clubs", "Jack"), _card("Diamonds", "Jack"),
+            _card("Hearts", "5"),
+            _card("Spades", "5"),
+            _card("Clubs", "Jack"),
+            _card("Diamonds", "Jack"),
             _card("Hearts", "Ace"),
         ]
         result = get_x_same(2, hand)
@@ -284,8 +330,10 @@ class TestGetXSame:
 
     def test_three_of_a_kind(self):
         hand = [
-            _card("Hearts", "King"), _card("Spades", "King"),
-            _card("Clubs", "King"), _card("Diamonds", "5"),
+            _card("Hearts", "King"),
+            _card("Spades", "King"),
+            _card("Clubs", "King"),
+            _card("Diamonds", "5"),
             _card("Hearts", "2"),
         ]
         result = get_x_same(3, hand)
@@ -295,8 +343,10 @@ class TestGetXSame:
 
     def test_four_of_a_kind(self):
         hand = [
-            _card("Hearts", "7"), _card("Spades", "7"),
-            _card("Clubs", "7"), _card("Diamonds", "7"),
+            _card("Hearts", "7"),
+            _card("Spades", "7"),
+            _card("Clubs", "7"),
+            _card("Diamonds", "7"),
             _card("Hearts", "Ace"),
         ]
         result = get_x_same(4, hand)
@@ -306,8 +356,10 @@ class TestGetXSame:
     def test_five_of_a_kind(self):
         """Requires 5 cards of same rank (possible with Steel/Wild shenanigans)."""
         hand = [
-            _card("Hearts", "Ace"), _card("Spades", "Ace"),
-            _card("Clubs", "Ace"), _card("Diamonds", "Ace"),
+            _card("Hearts", "Ace"),
+            _card("Spades", "Ace"),
+            _card("Clubs", "Ace"),
+            _card("Diamonds", "Ace"),
             _card("Hearts", "Ace"),  # duplicate suit, happens with card generation
         ]
         result = get_x_same(5, hand)
@@ -315,8 +367,10 @@ class TestGetXSame:
 
     def test_no_match(self):
         hand = [
-            _card("Hearts", "2"), _card("Spades", "5"),
-            _card("Clubs", "8"), _card("Diamonds", "Jack"),
+            _card("Hearts", "2"),
+            _card("Spades", "5"),
+            _card("Clubs", "8"),
+            _card("Diamonds", "Jack"),
             _card("Hearts", "Ace"),
         ]
         assert get_x_same(2, hand) == []
@@ -324,8 +378,10 @@ class TestGetXSame:
     def test_descending_order(self):
         """Groups are returned highest rank first."""
         hand = [
-            _card("Hearts", "3"), _card("Spades", "3"),
-            _card("Clubs", "King"), _card("Diamonds", "King"),
+            _card("Hearts", "3"),
+            _card("Spades", "3"),
+            _card("Clubs", "King"),
+            _card("Diamonds", "King"),
             _card("Hearts", "7"),
         ]
         result = get_x_same(2, hand)
@@ -339,10 +395,12 @@ class TestGetXSame:
 # get_highest
 # ============================================================================
 
+
 class TestGetHighest:
     def test_single_highest(self):
         hand = [
-            _card("Hearts", "2"), _card("Spades", "King"),
+            _card("Hearts", "2"),
+            _card("Spades", "King"),
             _card("Clubs", "8"),
         ]
         result = get_highest(hand)
@@ -354,7 +412,8 @@ class TestGetHighest:
 
     def test_ace_is_highest(self):
         hand = [
-            _card("Hearts", "King"), _card("Spades", "Ace"),
+            _card("Hearts", "King"),
+            _card("Spades", "Ace"),
             _card("Clubs", "Queen"),
         ]
         result = get_highest(hand)
@@ -373,12 +432,15 @@ class TestGetHighest:
 # Edge cases and combinations
 # ============================================================================
 
+
 class TestEdgeCases:
     def test_straight_with_duplicate_ranks(self):
         """Duplicate ranks in a straight: all copies included in result."""
         hand = [
-            _card("Hearts", "5"), _card("Spades", "5"),
-            _card("Clubs", "6"), _card("Diamonds", "7"),
+            _card("Hearts", "5"),
+            _card("Spades", "5"),
+            _card("Clubs", "6"),
+            _card("Diamonds", "7"),
             _card("Hearts", "8"),
         ]
         # 5,5,6,7,8 — only 4 unique ranks, not a straight
@@ -388,7 +450,8 @@ class TestEdgeCases:
     def test_wild_plus_smeared_flush(self):
         """Wild Card + Smeared: Wild matches everything, smeared merges red/black."""
         hand = [
-            _card("Hearts", "2"), _card("Diamonds", "5"),
+            _card("Hearts", "2"),
+            _card("Diamonds", "5"),
             _card("Hearts", "8"),
             _card("Clubs", "Jack", enhancement="m_wild"),  # Wild
             _card("Diamonds", "Ace"),
@@ -403,13 +466,16 @@ class TestEdgeCases:
 # evaluate_poker_hand
 # ============================================================================
 
+
 class TestEvaluatePokerHand:
     """Master detection function returning all matching hands."""
 
     def test_high_card(self):
         hand = [
-            _card("Hearts", "2"), _card("Spades", "5"),
-            _card("Clubs", "8"), _card("Diamonds", "Jack"),
+            _card("Hearts", "2"),
+            _card("Spades", "5"),
+            _card("Clubs", "8"),
+            _card("Diamonds", "Jack"),
             _card("Hearts", "Ace"),
         ]
         results = evaluate_poker_hand(hand)
@@ -418,8 +484,10 @@ class TestEvaluatePokerHand:
 
     def test_pair(self):
         hand = [
-            _card("Hearts", "5"), _card("Spades", "5"),
-            _card("Clubs", "8"), _card("Diamonds", "Jack"),
+            _card("Hearts", "5"),
+            _card("Spades", "5"),
+            _card("Clubs", "8"),
+            _card("Diamonds", "Jack"),
             _card("Hearts", "Ace"),
         ]
         results = evaluate_poker_hand(hand)
@@ -428,8 +496,10 @@ class TestEvaluatePokerHand:
 
     def test_two_pair(self):
         hand = [
-            _card("Hearts", "5"), _card("Spades", "5"),
-            _card("Clubs", "Jack"), _card("Diamonds", "Jack"),
+            _card("Hearts", "5"),
+            _card("Spades", "5"),
+            _card("Clubs", "Jack"),
+            _card("Diamonds", "Jack"),
             _card("Hearts", "Ace"),
         ]
         results = evaluate_poker_hand(hand)
@@ -438,8 +508,10 @@ class TestEvaluatePokerHand:
 
     def test_three_of_a_kind(self):
         hand = [
-            _card("Hearts", "King"), _card("Spades", "King"),
-            _card("Clubs", "King"), _card("Diamonds", "5"),
+            _card("Hearts", "King"),
+            _card("Spades", "King"),
+            _card("Clubs", "King"),
+            _card("Diamonds", "5"),
             _card("Hearts", "2"),
         ]
         results = evaluate_poker_hand(hand)
@@ -448,8 +520,10 @@ class TestEvaluatePokerHand:
 
     def test_straight(self):
         hand = [
-            _card("Hearts", "4"), _card("Spades", "5"),
-            _card("Clubs", "6"), _card("Diamonds", "7"),
+            _card("Hearts", "4"),
+            _card("Spades", "5"),
+            _card("Clubs", "6"),
+            _card("Diamonds", "7"),
             _card("Hearts", "8"),
         ]
         results = evaluate_poker_hand(hand)
@@ -462,8 +536,10 @@ class TestEvaluatePokerHand:
 
     def test_full_house(self):
         hand = [
-            _card("Hearts", "King"), _card("Spades", "King"),
-            _card("Clubs", "King"), _card("Diamonds", "5"),
+            _card("Hearts", "King"),
+            _card("Spades", "King"),
+            _card("Clubs", "King"),
+            _card("Diamonds", "5"),
             _card("Hearts", "5"),
         ]
         results = evaluate_poker_hand(hand)
@@ -473,8 +549,10 @@ class TestEvaluatePokerHand:
 
     def test_four_of_a_kind(self):
         hand = [
-            _card("Hearts", "7"), _card("Spades", "7"),
-            _card("Clubs", "7"), _card("Diamonds", "7"),
+            _card("Hearts", "7"),
+            _card("Spades", "7"),
+            _card("Clubs", "7"),
+            _card("Diamonds", "7"),
             _card("Hearts", "Ace"),
         ]
         results = evaluate_poker_hand(hand)
@@ -484,8 +562,10 @@ class TestEvaluatePokerHand:
 
     def test_straight_flush(self):
         hand = [
-            _card("Hearts", "4"), _card("Hearts", "5"),
-            _card("Hearts", "6"), _card("Hearts", "7"),
+            _card("Hearts", "4"),
+            _card("Hearts", "5"),
+            _card("Hearts", "6"),
+            _card("Hearts", "7"),
             _card("Hearts", "8"),
         ]
         results = evaluate_poker_hand(hand)
@@ -495,8 +575,10 @@ class TestEvaluatePokerHand:
 
     def test_five_of_a_kind(self):
         hand = [
-            _card("Hearts", "Ace"), _card("Spades", "Ace"),
-            _card("Clubs", "Ace"), _card("Diamonds", "Ace"),
+            _card("Hearts", "Ace"),
+            _card("Spades", "Ace"),
+            _card("Clubs", "Ace"),
+            _card("Diamonds", "Ace"),
             _card("Hearts", "Ace"),
         ]
         results = evaluate_poker_hand(hand)
@@ -507,8 +589,10 @@ class TestEvaluatePokerHand:
 
     def test_flush_five(self):
         hand = [
-            _card("Hearts", "Ace"), _card("Hearts", "Ace"),
-            _card("Hearts", "Ace"), _card("Hearts", "Ace"),
+            _card("Hearts", "Ace"),
+            _card("Hearts", "Ace"),
+            _card("Hearts", "Ace"),
+            _card("Hearts", "Ace"),
             _card("Hearts", "Ace"),
         ]
         results = evaluate_poker_hand(hand)
@@ -518,8 +602,10 @@ class TestEvaluatePokerHand:
 
     def test_flush_house(self):
         hand = [
-            _card("Hearts", "King"), _card("Hearts", "King"),
-            _card("Hearts", "King"), _card("Hearts", "5"),
+            _card("Hearts", "King"),
+            _card("Hearts", "King"),
+            _card("Hearts", "King"),
+            _card("Hearts", "5"),
             _card("Hearts", "5"),
         ]
         results = evaluate_poker_hand(hand)
@@ -539,8 +625,10 @@ class TestDownwardPropagation:
 
     def test_five_of_a_kind_populates_four_three_pair(self):
         hand = [
-            _card("Hearts", "Ace"), _card("Spades", "Ace"),
-            _card("Clubs", "Ace"), _card("Diamonds", "Ace"),
+            _card("Hearts", "Ace"),
+            _card("Spades", "Ace"),
+            _card("Clubs", "Ace"),
+            _card("Diamonds", "Ace"),
             _card("Hearts", "Ace"),
         ]
         results = evaluate_poker_hand(hand)
@@ -551,8 +639,10 @@ class TestDownwardPropagation:
 
     def test_four_of_a_kind_populates_three_pair(self):
         hand = [
-            _card("Hearts", "7"), _card("Spades", "7"),
-            _card("Clubs", "7"), _card("Diamonds", "7"),
+            _card("Hearts", "7"),
+            _card("Spades", "7"),
+            _card("Clubs", "7"),
+            _card("Diamonds", "7"),
             _card("Hearts", "Ace"),
         ]
         results = evaluate_poker_hand(hand)
@@ -563,8 +653,10 @@ class TestDownwardPropagation:
 
     def test_three_of_a_kind_populates_pair(self):
         hand = [
-            _card("Hearts", "King"), _card("Spades", "King"),
-            _card("Clubs", "King"), _card("Diamonds", "5"),
+            _card("Hearts", "King"),
+            _card("Spades", "King"),
+            _card("Clubs", "King"),
+            _card("Diamonds", "5"),
             _card("Hearts", "2"),
         ]
         results = evaluate_poker_hand(hand)
@@ -574,8 +666,10 @@ class TestDownwardPropagation:
 
     def test_pair_does_not_propagate_up(self):
         hand = [
-            _card("Hearts", "5"), _card("Spades", "5"),
-            _card("Clubs", "8"), _card("Diamonds", "Jack"),
+            _card("Hearts", "5"),
+            _card("Spades", "5"),
+            _card("Clubs", "8"),
+            _card("Diamonds", "Jack"),
             _card("Hearts", "Ace"),
         ]
         results = evaluate_poker_hand(hand)
@@ -589,8 +683,10 @@ class TestGetBestHand:
     def test_full_house_over_flush(self):
         """Full House has higher priority than Flush — but both can coexist."""
         hand = [
-            _card("Hearts", "King"), _card("Hearts", "King"),
-            _card("Hearts", "King"), _card("Hearts", "5"),
+            _card("Hearts", "King"),
+            _card("Hearts", "King"),
+            _card("Hearts", "King"),
+            _card("Hearts", "5"),
             _card("Hearts", "5"),
         ]
         name, scoring, results = get_best_hand(hand)
@@ -601,8 +697,10 @@ class TestGetBestHand:
 
     def test_straight_flush_detected(self):
         hand = [
-            _card("Spades", "9"), _card("Spades", "10"),
-            _card("Spades", "Jack"), _card("Spades", "Queen"),
+            _card("Spades", "9"),
+            _card("Spades", "10"),
+            _card("Spades", "Jack"),
+            _card("Spades", "Queen"),
             _card("Spades", "King"),
         ]
         name, scoring, _ = get_best_hand(hand)
@@ -611,8 +709,10 @@ class TestGetBestHand:
 
     def test_high_card(self):
         hand = [
-            _card("Hearts", "2"), _card("Spades", "5"),
-            _card("Clubs", "8"), _card("Diamonds", "Jack"),
+            _card("Hearts", "2"),
+            _card("Spades", "5"),
+            _card("Clubs", "8"),
+            _card("Diamonds", "Jack"),
             _card("Hearts", "Ace"),
         ]
         name, scoring, _ = get_best_hand(hand)
@@ -630,8 +730,10 @@ class TestJokerFlags:
 
     def test_four_fingers_flush(self):
         hand = [
-            _card("Clubs", "3"), _card("Clubs", "7"),
-            _card("Clubs", "10"), _card("Clubs", "King"),
+            _card("Clubs", "3"),
+            _card("Clubs", "7"),
+            _card("Clubs", "10"),
+            _card("Clubs", "King"),
             _card("Hearts", "Ace"),
         ]
         name, _, _ = get_best_hand(hand, four_fingers=True)
@@ -639,8 +741,10 @@ class TestJokerFlags:
 
     def test_four_fingers_straight(self):
         hand = [
-            _card("Hearts", "4"), _card("Spades", "5"),
-            _card("Clubs", "6"), _card("Diamonds", "7"),
+            _card("Hearts", "4"),
+            _card("Spades", "5"),
+            _card("Clubs", "6"),
+            _card("Diamonds", "7"),
             _card("Hearts", "King"),
         ]
         name, _, _ = get_best_hand(hand, four_fingers=True)
@@ -648,8 +752,10 @@ class TestJokerFlags:
 
     def test_shortcut_straight(self):
         hand = [
-            _card("Hearts", "3"), _card("Spades", "4"),
-            _card("Clubs", "6"), _card("Diamonds", "7"),
+            _card("Hearts", "3"),
+            _card("Spades", "4"),
+            _card("Clubs", "6"),
+            _card("Diamonds", "7"),
             _card("Hearts", "8"),
         ]
         name, _, _ = get_best_hand(hand, shortcut=True)
@@ -657,8 +763,10 @@ class TestJokerFlags:
 
     def test_smeared_flush(self):
         hand = [
-            _card("Hearts", "2"), _card("Hearts", "5"),
-            _card("Diamonds", "8"), _card("Diamonds", "Jack"),
+            _card("Hearts", "2"),
+            _card("Hearts", "5"),
+            _card("Diamonds", "8"),
+            _card("Diamonds", "Jack"),
             _card("Hearts", "Ace"),
         ]
         name, _, _ = get_best_hand(hand, smeared=True)
@@ -666,8 +774,10 @@ class TestJokerFlags:
 
     def test_four_fingers_straight_flush(self):
         hand = [
-            _card("Hearts", "5"), _card("Hearts", "6"),
-            _card("Hearts", "7"), _card("Hearts", "8"),
+            _card("Hearts", "5"),
+            _card("Hearts", "6"),
+            _card("Hearts", "7"),
+            _card("Hearts", "8"),
             _card("Spades", "King"),
         ]
         name, _, _ = get_best_hand(hand, four_fingers=True)
@@ -677,6 +787,7 @@ class TestJokerFlags:
 # ============================================================================
 # find_joker
 # ============================================================================
+
 
 class TestFindJoker:
     """find_joker matches by ability.name, excludes debuffed by default."""
@@ -725,14 +836,18 @@ class TestFindJoker:
 # get_hand_eval_flags
 # ============================================================================
 
+
 class TestGetHandEvalFlags:
     """Extract modifier flags from active jokers."""
 
     def test_no_jokers(self):
         flags = get_hand_eval_flags([])
         assert flags == {
-            "four_fingers": False, "shortcut": False,
-            "smeared": False, "splash": False, "pareidolia": False,
+            "four_fingers": False,
+            "shortcut": False,
+            "smeared": False,
+            "splash": False,
+            "pareidolia": False,
         }
 
     def test_four_fingers(self):
@@ -804,8 +919,10 @@ class TestGetHandEvalFlags:
         flags = get_hand_eval_flags(jokers)
 
         hand = [
-            _card("Clubs", "3"), _card("Clubs", "7"),
-            _card("Clubs", "10"), _card("Clubs", "King"),
+            _card("Clubs", "3"),
+            _card("Clubs", "7"),
+            _card("Clubs", "10"),
+            _card("Clubs", "King"),
             _card("Hearts", "Ace"),
         ]
         # Without flags: no flush (only 4 clubs)
@@ -815,8 +932,7 @@ class TestGetHandEvalFlags:
         # With detection flags from jokers: flush detected
         # Filter to only the 3 flags evaluate_poker_hand accepts
         detect_flags = {
-            k: v for k, v in flags.items()
-            if k in ("four_fingers", "shortcut", "smeared")
+            k: v for k, v in flags.items() if k in ("four_fingers", "shortcut", "smeared")
         }
         name_yes, _, _ = get_best_hand(hand, **detect_flags)
         assert name_yes == "Flush"

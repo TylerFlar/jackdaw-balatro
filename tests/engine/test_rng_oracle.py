@@ -37,6 +37,7 @@ SEED_TOL = 1e-13  # pseudoseed: 13 decimal places (Lua truncation)
 # Fixture loading
 # ============================================================================
 
+
 def load_fixture() -> dict:
     """Load the pre-generated Lua oracle fixture."""
     with open(FIXTURE_PATH) as f:
@@ -81,6 +82,7 @@ def run_lua_oracle(seed: str, lua_path: str) -> dict:
 # MODE 1: Fixture-based tests (always run)
 # ============================================================================
 
+
 class TestFixtureOracle:
     """Validate Python RNG against pre-generated Lua fixture (TESTSEED)."""
 
@@ -97,9 +99,7 @@ class TestFixtureOracle:
     def test_hashed_seed(self, fixture):
         expected = fixture["hashed_seed"]
         actual = pseudohash("TESTSEED")
-        assert abs(actual - expected) < HASH_TOL, (
-            f"hashed_seed: {actual:.15f} != {expected:.15f}"
-        )
+        assert abs(actual - expected) < HASH_TOL, f"hashed_seed: {actual:.15f} != {expected:.15f}"
 
     def test_pseudohash_stream_keys(self, fixture):
         """Verify pseudohash(key + seed) for all stream keys."""
@@ -109,10 +109,19 @@ class TestFixtureOracle:
                 f"pseudohash({key}+TESTSEED): {actual:.15f} != {expected:.15f}"
             )
 
-    @pytest.mark.parametrize("stream_key", [
-        "boss", "shuffle", "lucky_mult", "rarity1",
-        "stdset1", "cdt1", "front1", "edition_generic",
-    ])
+    @pytest.mark.parametrize(
+        "stream_key",
+        [
+            "boss",
+            "shuffle",
+            "lucky_mult",
+            "rarity1",
+            "stdset1",
+            "cdt1",
+            "front1",
+            "edition_generic",
+        ],
+    )
     def test_pseudoseed_sequence(self, fixture, stream_key):
         """10 consecutive pseudoseed advances must match Lua for each stream."""
         prng = PseudoRandom("TESTSEED")
@@ -144,8 +153,7 @@ class TestFixtureOracle:
             expected = entry["result"]
             actual = prng.predict_seed(key, predict_with)
             assert abs(actual - expected) < SEED_TOL, (
-                f"predict_seed({key!r}, {predict_with!r}): "
-                f"{actual:.15f} != {expected:.15f}"
+                f"predict_seed({key!r}, {predict_with!r}): {actual:.15f} != {expected:.15f}"
             )
 
     def test_all_streams_independent(self, fixture):
@@ -179,6 +187,7 @@ class TestFixtureOracle:
 # MODE 2: Live Lua oracle (optional, skips if no Lua available)
 # ============================================================================
 
+
 class TestLiveLuaOracle:
     """Run the Lua oracle script live and validate against Python."""
 
@@ -202,10 +211,19 @@ class TestLiveLuaOracle:
         actual = pseudohash("TESTSEED")
         assert abs(actual - expected) < HASH_TOL
 
-    @pytest.mark.parametrize("stream_key", [
-        "boss", "shuffle", "lucky_mult", "rarity1",
-        "stdset1", "cdt1", "front1", "edition_generic",
-    ])
+    @pytest.mark.parametrize(
+        "stream_key",
+        [
+            "boss",
+            "shuffle",
+            "lucky_mult",
+            "rarity1",
+            "stdset1",
+            "cdt1",
+            "front1",
+            "edition_generic",
+        ],
+    )
     def test_pseudoseed_sequence(self, oracle_data, stream_key):
         """10 advances must match live Lua output."""
         prng = PseudoRandom("TESTSEED")
@@ -295,8 +313,7 @@ class TestFullPipelineOracle:
             result = prng.random(stream_key, min_val=1, max_val=10)
             expected = entry["int"]
             assert result == expected, (
-                f"stream={stream_key!r} call {entry['call']}: "
-                f"int {result} != {expected}"
+                f"stream={stream_key!r} call {entry['call']}: int {result} != {expected}"
             )
 
     def test_pseudoshuffle(self, pipeline):

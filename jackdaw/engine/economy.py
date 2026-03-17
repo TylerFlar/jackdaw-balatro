@@ -44,6 +44,7 @@ from jackdaw.engine.jokers import GameSnapshot, on_end_of_round
 # RoundEarnings — per-round cash-out descriptor
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class RoundEarnings:
     """Breakdown of money earned (and lost) at end of a round.
@@ -95,6 +96,7 @@ class RoundEarnings:
 # Discard cost helper (Golden Needle challenge)
 # ---------------------------------------------------------------------------
 
+
 def calculate_discard_cost(game_state: dict[str, Any]) -> int:
     """Return the dollar cost charged per discard action.
 
@@ -109,6 +111,7 @@ def calculate_discard_cost(game_state: dict[str, Any]) -> int:
 # ---------------------------------------------------------------------------
 # calculate_round_earnings
 # ---------------------------------------------------------------------------
+
 
 def calculate_round_earnings(
     blind: Blind,
@@ -169,11 +172,7 @@ def calculate_round_earnings(
     # calculate_rental() → ease_dollars(-G.GAME.rental_rate) per rental joker
     # Fires BEFORE evaluate_round; effective_money is used for interest.
     # ------------------------------------------------------------------
-    rental_cost = sum(
-        rental_rate
-        for j in jokers
-        if not j.debuff and j.ability.get("rental")
-    )
+    rental_cost = sum(rental_rate for j in jokers if not j.debuff and j.ability.get("rental"))
     effective_money = money - rental_cost
 
     # ------------------------------------------------------------------

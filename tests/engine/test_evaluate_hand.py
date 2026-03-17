@@ -19,9 +19,19 @@ def _card(suit: str, rank: str, enhancement: str = "c_base") -> Card:
     """Helper: create a playing card."""
     sl = {"Hearts": "H", "Diamonds": "D", "Clubs": "C", "Spades": "S"}
     rl = {
-        "2": "2", "3": "3", "4": "4", "5": "5", "6": "6", "7": "7",
-        "8": "8", "9": "9", "10": "T", "Jack": "J", "Queen": "Q",
-        "King": "K", "Ace": "A",
+        "2": "2",
+        "3": "3",
+        "4": "4",
+        "5": "5",
+        "6": "6",
+        "7": "7",
+        "8": "8",
+        "9": "9",
+        "10": "T",
+        "Jack": "J",
+        "Queen": "Q",
+        "King": "K",
+        "Ace": "A",
     }
     c = Card()
     c.set_base(f"{sl[suit]}_{rl[rank]}", suit, rank)
@@ -32,6 +42,7 @@ def _card(suit: str, rank: str, enhancement: str = "c_base") -> Card:
 # ============================================================================
 # Basic detection
 # ============================================================================
+
 
 class TestBasicDetection:
     def test_flush(self):
@@ -46,8 +57,10 @@ class TestBasicDetection:
     def test_full_house(self):
         _reset()
         hand = [
-            _card("Hearts", "King"), _card("Spades", "King"),
-            _card("Clubs", "King"), _card("Diamonds", "5"),
+            _card("Hearts", "King"),
+            _card("Spades", "King"),
+            _card("Clubs", "King"),
+            _card("Diamonds", "5"),
             _card("Hearts", "5"),
         ]
         result = evaluate_hand(hand)
@@ -57,7 +70,8 @@ class TestBasicDetection:
     def test_pair(self):
         _reset()
         hand = [
-            _card("Hearts", "5"), _card("Spades", "5"),
+            _card("Hearts", "5"),
+            _card("Spades", "5"),
             _card("Clubs", "8"),
         ]
         result = evaluate_hand(hand)
@@ -67,8 +81,10 @@ class TestBasicDetection:
     def test_high_card(self):
         _reset()
         hand = [
-            _card("Hearts", "2"), _card("Spades", "5"),
-            _card("Clubs", "8"), _card("Diamonds", "Jack"),
+            _card("Hearts", "2"),
+            _card("Spades", "5"),
+            _card("Clubs", "8"),
+            _card("Diamonds", "Jack"),
             _card("Hearts", "Ace"),
         ]
         result = evaluate_hand(hand)
@@ -78,8 +94,10 @@ class TestBasicDetection:
     def test_straight(self):
         _reset()
         hand = [
-            _card("Hearts", "4"), _card("Spades", "5"),
-            _card("Clubs", "6"), _card("Diamonds", "7"),
+            _card("Hearts", "4"),
+            _card("Spades", "5"),
+            _card("Clubs", "6"),
+            _card("Diamonds", "7"),
             _card("Hearts", "8"),
         ]
         result = evaluate_hand(hand)
@@ -88,8 +106,10 @@ class TestBasicDetection:
     def test_flush_five(self):
         _reset()
         hand = [
-            _card("Hearts", "Ace"), _card("Hearts", "Ace"),
-            _card("Hearts", "Ace"), _card("Hearts", "Ace"),
+            _card("Hearts", "Ace"),
+            _card("Hearts", "Ace"),
+            _card("Hearts", "Ace"),
+            _card("Hearts", "Ace"),
             _card("Hearts", "Ace"),
         ]
         result = evaluate_hand(hand)
@@ -105,13 +125,16 @@ class TestBasicDetection:
 # Joker modifiers
 # ============================================================================
 
+
 class TestJokerModifiers:
     def test_four_fingers_flush(self):
         """Four Fingers: 4 same-suit cards = Flush."""
         _reset()
         hand = [
-            _card("Clubs", "3"), _card("Clubs", "7"),
-            _card("Clubs", "10"), _card("Clubs", "King"),
+            _card("Clubs", "3"),
+            _card("Clubs", "7"),
+            _card("Clubs", "10"),
+            _card("Clubs", "King"),
             _card("Hearts", "Ace"),
         ]
         jokers = [create_joker("j_four_fingers")]
@@ -121,8 +144,10 @@ class TestJokerModifiers:
     def test_four_fingers_straight(self):
         _reset()
         hand = [
-            _card("Hearts", "4"), _card("Spades", "5"),
-            _card("Clubs", "6"), _card("Diamonds", "7"),
+            _card("Hearts", "4"),
+            _card("Spades", "5"),
+            _card("Clubs", "6"),
+            _card("Diamonds", "7"),
             _card("Hearts", "King"),
         ]
         jokers = [create_joker("j_four_fingers")]
@@ -133,8 +158,10 @@ class TestJokerModifiers:
         """Shortcut: gap at rank 4, 3-5-6-7-8 = Straight."""
         _reset()
         hand = [
-            _card("Hearts", "3"), _card("Spades", "5"),
-            _card("Clubs", "6"), _card("Diamonds", "7"),
+            _card("Hearts", "3"),
+            _card("Spades", "5"),
+            _card("Clubs", "6"),
+            _card("Diamonds", "7"),
             _card("Hearts", "8"),
         ]
         jokers = [create_joker("j_shortcut")]
@@ -145,8 +172,10 @@ class TestJokerModifiers:
         """Smeared: 3 Hearts + 2 Diamonds = Flush (all red)."""
         _reset()
         hand = [
-            _card("Hearts", "2"), _card("Hearts", "5"),
-            _card("Diamonds", "8"), _card("Diamonds", "Jack"),
+            _card("Hearts", "2"),
+            _card("Hearts", "5"),
+            _card("Diamonds", "8"),
+            _card("Diamonds", "Jack"),
             _card("Hearts", "Ace"),
         ]
         jokers = [create_joker("j_smeared")]
@@ -158,8 +187,10 @@ class TestJokerModifiers:
         """Splash: all 5 played cards become scoring cards, even High Card."""
         _reset()
         hand = [
-            _card("Hearts", "2"), _card("Spades", "5"),
-            _card("Clubs", "8"), _card("Diamonds", "Jack"),
+            _card("Hearts", "2"),
+            _card("Spades", "5"),
+            _card("Clubs", "8"),
+            _card("Diamonds", "Jack"),
             _card("Hearts", "Ace"),
         ]
         jokers = [create_joker("j_splash")]
@@ -173,8 +204,10 @@ class TestJokerModifiers:
         """Splash + Pair: pair cards score normally, rest added by Splash."""
         _reset()
         hand = [
-            _card("Hearts", "5"), _card("Spades", "5"),
-            _card("Clubs", "8"), _card("Diamonds", "Jack"),
+            _card("Hearts", "5"),
+            _card("Spades", "5"),
+            _card("Clubs", "8"),
+            _card("Diamonds", "Jack"),
             _card("Hearts", "Ace"),
         ]
         jokers = [create_joker("j_splash")]
@@ -186,8 +219,10 @@ class TestJokerModifiers:
         """Debuffed Four Fingers: does NOT enable 4-card flush."""
         _reset()
         hand = [
-            _card("Clubs", "3"), _card("Clubs", "7"),
-            _card("Clubs", "10"), _card("Clubs", "King"),
+            _card("Clubs", "3"),
+            _card("Clubs", "7"),
+            _card("Clubs", "10"),
+            _card("Clubs", "King"),
             _card("Hearts", "Ace"),
         ]
         ff = create_joker("j_four_fingers")
@@ -222,13 +257,16 @@ class TestJokerModifiers:
 # Stone Card augmentation
 # ============================================================================
 
+
 class TestStoneCardAugmentation:
     def test_stone_card_added_to_scoring(self):
         """Stone Card played as 5th card with Full House: included in scoring."""
         _reset()
         hand = [
-            _card("Hearts", "King"), _card("Spades", "King"),
-            _card("Clubs", "King"), _card("Diamonds", "5"),
+            _card("Hearts", "King"),
+            _card("Spades", "King"),
+            _card("Clubs", "King"),
+            _card("Diamonds", "5"),
             _card("Hearts", "3", enhancement="m_stone"),
         ]
         result = evaluate_hand(hand)
@@ -241,7 +279,8 @@ class TestStoneCardAugmentation:
         """Stone Card doesn't form pairs (get_id returns -1), but is added as a pure."""
         _reset()
         hand = [
-            _card("Hearts", "5"), _card("Spades", "5"),
+            _card("Hearts", "5"),
+            _card("Spades", "5"),
             _card("Clubs", "3", enhancement="m_stone"),
         ]
         result = evaluate_hand(hand)
@@ -254,13 +293,16 @@ class TestStoneCardAugmentation:
 # Scoring card ordering
 # ============================================================================
 
+
 class TestScoringOrder:
     def test_left_to_right(self):
         """Scoring cards should be in the same order as played_cards."""
         _reset()
         hand = [
-            _card("Hearts", "King"), _card("Spades", "King"),
-            _card("Clubs", "King"), _card("Diamonds", "5"),
+            _card("Hearts", "King"),
+            _card("Spades", "King"),
+            _card("Clubs", "King"),
+            _card("Diamonds", "5"),
             _card("Hearts", "5"),
         ]
         result = evaluate_hand(hand)
@@ -275,6 +317,7 @@ class TestScoringOrder:
 # ============================================================================
 # Result structure
 # ============================================================================
+
 
 class TestResultStructure:
     def test_all_fields_present(self):

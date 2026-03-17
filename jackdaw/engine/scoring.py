@@ -75,7 +75,8 @@ def eval_card(
             ret["chips"] = chips
 
         mult = card.get_chip_mult(
-            rng=rng, probabilities_normal=probabilities_normal,
+            rng=rng,
+            probabilities_normal=probabilities_normal,
         )
         if mult > 0:
             ret["mult"] = mult
@@ -85,7 +86,8 @@ def eval_card(
             ret["x_mult"] = x_mult
 
         p_dollars = card.get_p_dollars(
-            rng=rng, probabilities_normal=probabilities_normal,
+            rng=rng,
+            probabilities_normal=probabilities_normal,
         )
         if p_dollars > 0:
             ret["p_dollars"] = p_dollars
@@ -199,16 +201,27 @@ def score_hand_base(
 
     if hand_type == "NULL":
         return ScoreResult(
-            hand_type="NULL", scoring_cards=[], chips=0, mult=0,
-            total=0, dollars_earned=0, debuffed=False, breakdown=["No hand"],
+            hand_type="NULL",
+            scoring_cards=[],
+            chips=0,
+            mult=0,
+            total=0,
+            dollars_earned=0,
+            debuffed=False,
+            breakdown=["No hand"],
         )
 
     # === Phase 3: Boss blind debuff check ===
     debuffed = blind.debuff_hand(scoring_cards, poker_hands, hand_type)
     if debuffed:
         return ScoreResult(
-            hand_type=hand_type, scoring_cards=scoring_cards,
-            chips=0, mult=0, total=0, dollars_earned=0, debuffed=True,
+            hand_type=hand_type,
+            scoring_cards=scoring_cards,
+            chips=0,
+            mult=0,
+            total=0,
+            dollars_earned=0,
+            debuffed=True,
             breakdown=[f"Hand blocked by {blind.name}"],
         )
 
@@ -245,8 +258,10 @@ def score_hand_base(
 
         for _rep_idx in range(len(reps)):
             ev = eval_card(
-                card, {"cardarea": "play"},
-                rng=rng, probabilities_normal=probabilities_normal,
+                card,
+                {"cardarea": "play"},
+                rng=rng,
+                probabilities_normal=probabilities_normal,
             )
 
             # Apply effects in source order (state_events.lua:702-776)
@@ -277,8 +292,10 @@ def score_hand_base(
 
         for _rep_idx in range(len(reps)):
             ev = eval_card(
-                card, {"cardarea": "hand"},
-                rng=rng, probabilities_normal=probabilities_normal,
+                card,
+                {"cardarea": "hand"},
+                rng=rng,
+                probabilities_normal=probabilities_normal,
             )
 
             # Apply in source order (state_events.lua:845-862)
@@ -394,14 +411,8 @@ def score_hand(
         joker_count = len(jokers)  # fallback: count all
 
     # Check for meta-jokers
-    smeared = any(
-        j.ability.get("name") == "Smeared Joker" and not j.debuff
-        for j in jokers
-    )
-    pareidolia = any(
-        j.ability.get("name") == "Pareidolia" and not j.debuff
-        for j in jokers
-    )
+    smeared = any(j.ability.get("name") == "Smeared Joker" and not j.debuff for j in jokers)
+    pareidolia = any(j.ability.get("name") == "Pareidolia" and not j.debuff for j in jokers)
 
     # Build GameSnapshot once — shared across all JokerContext instances
     snapshot = GameSnapshot(
@@ -433,8 +444,14 @@ def score_hand(
 
     if hand_type == "NULL":
         return ScoreResult(
-            hand_type="NULL", scoring_cards=[], chips=0, mult=0,
-            total=0, dollars_earned=0, debuffed=False, breakdown=["No hand"],
+            hand_type="NULL",
+            scoring_cards=[],
+            chips=0,
+            mult=0,
+            total=0,
+            dollars_earned=0,
+            debuffed=False,
+            breakdown=["No hand"],
         )
 
     # === Phase 3: Boss blind debuff check ===
@@ -445,17 +462,26 @@ def score_hand(
             if joker.debuff:
                 continue
             ctx = JokerContext(
-                debuffed_hand=True, blind=blind, jokers=jokers,
-                full_hand=played_cards, scoring_hand=scoring_cards,
-                scoring_name=hand_type, poker_hands=poker_hands,
+                debuffed_hand=True,
+                blind=blind,
+                jokers=jokers,
+                full_hand=played_cards,
+                scoring_hand=scoring_cards,
+                scoring_name=hand_type,
+                poker_hands=poker_hands,
             )
             result = calculate_joker(joker, ctx)
             if result and result.dollars:
                 dollars += result.dollars
 
         return ScoreResult(
-            hand_type=hand_type, scoring_cards=scoring_cards,
-            chips=0, mult=0, total=0, dollars_earned=dollars, debuffed=True,
+            hand_type=hand_type,
+            scoring_cards=scoring_cards,
+            chips=0,
+            mult=0,
+            total=0,
+            dollars_earned=dollars,
+            debuffed=True,
             breakdown=[f"Hand blocked by {blind.name}"],
         )
 
@@ -504,9 +530,7 @@ def score_hand(
     if modified:
         mult = float(new_mult)
         hand_chips = float(new_chips)
-        breakdown.append(
-            f"Blind modify: {int(hand_chips)} chips, {int(mult)} mult"
-        )
+        breakdown.append(f"Blind modify: {int(hand_chips)} chips, {int(mult)} mult")
 
     # === Phase 7: Per scored card (with retriggers) ===
     for card in scoring_cards:
@@ -524,7 +548,9 @@ def score_hand(
             if joker.debuff:
                 continue
             rep_ctx = JokerContext(
-                repetition=True, cardarea="play", other_card=card,
+                repetition=True,
+                cardarea="play",
+                other_card=card,
                 **_shared,
             )
             rep_result = calculate_joker(joker, rep_ctx)
@@ -536,8 +562,10 @@ def score_hand(
         for _rep in reps:
             # Card's own effects
             ev = eval_card(
-                card, {"cardarea": "play"},
-                rng=rng, probabilities_normal=probabilities_normal,
+                card,
+                {"cardarea": "play"},
+                rng=rng,
+                probabilities_normal=probabilities_normal,
             )
             effects: list[dict[str, Any]] = [ev]
 
@@ -546,7 +574,9 @@ def score_hand(
                 if joker.debuff:
                     continue
                 ind_ctx = JokerContext(
-                    individual=True, cardarea="play", other_card=card,
+                    individual=True,
+                    cardarea="play",
+                    other_card=card,
                     **_shared,
                 )
                 ind_result = calculate_joker(joker, ind_ctx)
@@ -565,7 +595,10 @@ def score_hand(
                         effects.append(eff)
 
             hand_chips, mult, dollars = _apply_individual_joker_effects(
-                effects, hand_chips, mult, dollars,
+                effects,
+                hand_chips,
+                mult,
+                dollars,
             )
 
     # === Phase 8: Per held card (with retriggers) ===
@@ -584,7 +617,9 @@ def score_hand(
             if joker.debuff:
                 continue
             rep_ctx = JokerContext(
-                repetition=True, cardarea="hand", other_card=card,
+                repetition=True,
+                cardarea="hand",
+                other_card=card,
                 **_shared,
             )
             rep_result = calculate_joker(joker, rep_ctx)
@@ -595,8 +630,10 @@ def score_hand(
         # 8b-c: Each repetition
         for _rep in reps:
             ev = eval_card(
-                card, {"cardarea": "hand"},
-                rng=rng, probabilities_normal=probabilities_normal,
+                card,
+                {"cardarea": "hand"},
+                rng=rng,
+                probabilities_normal=probabilities_normal,
             )
             effects_h: list[dict[str, Any]] = [ev]
 
@@ -605,7 +642,9 @@ def score_hand(
                 if joker.debuff:
                     continue
                 ind_ctx = JokerContext(
-                    individual=True, cardarea="hand", other_card=card,
+                    individual=True,
+                    cardarea="hand",
+                    other_card=card,
                     **_shared,
                 )
                 ind_result = calculate_joker(joker, ind_ctx)
@@ -621,7 +660,9 @@ def score_hand(
                         effects_h.append(eff_h)
 
             mult, dollars = _apply_held_joker_effects(
-                effects_h, mult, dollars,
+                effects_h,
+                mult,
+                dollars,
             )
 
     # === Phase 8d: individual_hand_end (Vampire strip, Obelisk check) ===
@@ -679,6 +720,7 @@ def score_hand(
     # === Phase 10: Back trigger (final_scoring_step) ===
     if back_key:
         from jackdaw.engine.back import Back as _Back
+
         _back_effect = _Back(back_key).trigger_effect(
             "final_scoring_step", chips=hand_chips, mult=mult
         )
@@ -702,17 +744,15 @@ def score_hand(
             if joker.debuff:
                 continue
             dest_ctx = JokerContext(
-                destroying_card=sc, **_shared,
+                destroying_card=sc,
+                **_shared,
             )
             dest_result = calculate_joker(joker, dest_ctx)
             if dest_result and dest_result.remove:
                 destroyed = True
                 break
         # Glass Card self-shatter: 1 in (1/probabilities_normal * 4) chance
-        if (
-            not destroyed
-            and sc.ability.get("name") == "Glass Card"
-        ):
+        if not destroyed and sc.ability.get("name") == "Glass Card":
             if rng.random("glass") < probabilities_normal / 4:
                 destroyed = True
         if destroyed:
@@ -724,7 +764,8 @@ def score_hand(
             if joker.debuff:
                 continue
             dest_notify_ctx = JokerContext(
-                cards_destroyed=cards_destroyed, **_shared,
+                cards_destroyed=cards_destroyed,
+                **_shared,
             )
             calculate_joker(joker, dest_notify_ctx)
 
@@ -744,11 +785,7 @@ def score_hand(
 
     # Mr. Bones save check: if score < blind target and last hand
     saved = False
-    if (
-        blind_chips > 0
-        and total < blind_chips
-        and gs.get("hands_left", 0) == 0
-    ):
+    if blind_chips > 0 and total < blind_chips and gs.get("hands_left", 0) == 0:
         for joker in jokers:
             if joker.debuff:
                 continue

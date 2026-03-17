@@ -254,6 +254,14 @@ def initialize_run(
     if "reroll_discount" in mutations:
         sp["reroll_cost"] = max(0, sp["reroll_cost"] - mutations["reroll_discount"])
 
+    # Propagate deck-building flags from back config → starting_params
+    # so that build_deck can see them (it checks starting_params first).
+    back_config = back.config
+    if back_config.get("remove_faces"):
+        sp["no_faces"] = True
+    if back_config.get("randomize_rank_suit"):
+        sp["erratic_suits_and_ranks"] = True
+
     # Starting consumables (Magic Deck, Ghost Deck) — stored for caller to add
     starting_consumables: list[str] = mutations.get("starting_consumables", [])
     gs["starting_consumables"] = starting_consumables

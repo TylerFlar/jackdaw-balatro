@@ -35,9 +35,19 @@ def _joker(key: str, **ability_kw) -> Card:
 
 _SL = {"Hearts": "H", "Diamonds": "D", "Clubs": "C", "Spades": "S"}
 _RL = {
-    "2": "2", "3": "3", "4": "4", "5": "5", "6": "6", "7": "7",
-    "8": "8", "9": "9", "10": "T", "Jack": "J", "Queen": "Q",
-    "King": "K", "Ace": "A",
+    "2": "2",
+    "3": "3",
+    "4": "4",
+    "5": "5",
+    "6": "6",
+    "7": "7",
+    "8": "8",
+    "9": "9",
+    "10": "T",
+    "Jack": "J",
+    "Queen": "Q",
+    "King": "K",
+    "Ace": "A",
 }
 
 
@@ -51,6 +61,7 @@ def _card(suit: str, rank: str) -> Card:
 # ============================================================================
 # Golden Joker: +$4 per round
 # ============================================================================
+
 
 class TestGoldenJoker:
     def test_always_four_dollars(self):
@@ -73,6 +84,7 @@ class TestGoldenJoker:
 # Cloud 9: +$1 per 9-rank card in full deck
 # ============================================================================
 
+
 class TestCloud9:
     def test_three_nines(self):
         j = _joker("j_cloud_9", extra=1, nine_tally=3)
@@ -90,6 +102,7 @@ class TestCloud9:
 # ============================================================================
 # Rocket: +$1 base, +$2 after each boss beaten
 # ============================================================================
+
 
 class TestRocket:
     def test_base_dollars(self):
@@ -124,6 +137,7 @@ class TestRocket:
 # Satellite: +$1 per unique Planet type used
 # ============================================================================
 
+
 class TestSatellite:
     def test_three_planet_types(self):
         j = _joker("j_satellite", extra=1, planet_types_used=3)
@@ -137,6 +151,7 @@ class TestSatellite:
 # ============================================================================
 # Delayed Gratification: +$2 per discard remaining if none used
 # ============================================================================
+
 
 class TestDelayedGratification:
     def test_zero_used_three_remaining(self):
@@ -165,6 +180,7 @@ class TestDelayedGratification:
 # Egg: +$3 sell value per round
 # ============================================================================
 
+
 class TestEgg:
     def test_sell_value_increases(self):
         j = _joker("j_egg", extra=3)
@@ -186,6 +202,7 @@ class TestEgg:
 # ============================================================================
 # Gift Card: +$1 sell value to ALL jokers
 # ============================================================================
+
 
 class TestGiftCard:
     def test_all_jokers_increase(self):
@@ -221,6 +238,7 @@ class TestGiftCard:
 # Invisible Joker: counts rounds, duplicates on sell
 # ============================================================================
 
+
 class TestInvisible:
     def test_counts_rounds(self):
         j = _joker("j_invisible", extra=2, invis_rounds=0)
@@ -243,6 +261,7 @@ class TestInvisible:
 # Diet Cola: sell → create Double Tag
 # ============================================================================
 
+
 class TestDietCola:
     def test_sell_creates_tag(self):
         j = _joker("j_diet_cola")
@@ -255,6 +274,7 @@ class TestDietCola:
 # ============================================================================
 # Space Joker: 1/4 chance to level up hand
 # ============================================================================
+
 
 class TestSpaceJoker:
     def test_high_probability_levels_up(self):
@@ -287,6 +307,7 @@ class TestSpaceJoker:
 # on_end_of_round: orchestration
 # ============================================================================
 
+
 class TestOnEndOfRound:
     def test_multiple_dollar_jokers(self):
         golden = _joker("j_golden", extra=4)
@@ -299,7 +320,9 @@ class TestOnEndOfRound:
         gros = _joker("j_gros_michel", extra={"mult": 15, "odds": 6})
         game = GameSnapshot()
         result = on_end_of_round(
-            [gros], game, rng=PseudoRandom("GM"),
+            [gros],
+            game,
+            rng=PseudoRandom("GM"),
         )
         # Either removed or saved — verify structure
         if gros in result["jokers_removed"]:
