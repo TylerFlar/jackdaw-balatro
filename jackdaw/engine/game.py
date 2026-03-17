@@ -797,7 +797,20 @@ def _handle_sell_card(gs: dict[str, Any], area: str, idx: int) -> dict[str, Any]
 def _handle_use_consumable(
     gs: dict[str, Any], idx: int, targets: tuple[int, ...] | None
 ) -> dict[str, Any]:
-    """Use a consumable from the consumable area."""
+    """Use a consumable from the player's consumable slots.
+
+    Consumables can be used in BLIND_SELECT, SELECTING_HAND,
+    ROUND_EVAL, and SHOP phases.  The phase does NOT change after use.
+
+    Sequence:
+    1. Validate phase and index
+    2. Pop card from consumables
+    3. Use via ``_use_consumable_card`` (builds ConsumableContext,
+       calls handler, applies ConsumableResult mutations)
+    4. Fire ``using_consumeable`` joker context if the result
+       requests it (Constellation +xMult when Planet used)
+    5. Track usage stats (last_tarot_planet)
+    """
     _require_phase(gs, GamePhase.BLIND_SELECT, GamePhase.SELECTING_HAND,
                    GamePhase.ROUND_EVAL, GamePhase.SHOP)
 
@@ -807,6 +820,8 @@ def _handle_use_consumable(
 
     card = consumables.pop(idx)
     _use_consumable_card(gs, card, targets)
+
+    # Phase does NOT change — returns to whatever it was
     return gs
 
 
@@ -1379,6 +1394,12 @@ def _use_consumable_card(
     """Build a ConsumableContext and use a consumable card.
 
     Bridges the game_state dict with the ``use_consumable(card, ctx)`` API.
+
+    1. Build ConsumableContext from game_state + target_indices
+    2. Call handler → ConsumableResult
+    3. Apply all result mutations
+    4. Fire ``using_consumeable`` joker context if result requests it
+    5. Track usage (last_tarot_planet)
     """
     from jackdaw.engine.consumables import ConsumableContext, use_consumable
 
@@ -1399,63 +1420,201 @@ def _use_consumable_card(
     )
     result = use_consumable(card, ctx)
 
-    # Apply result side-effects
-    if result is not None:
-        _apply_consumable_result(gs, result)
+    if result is None:
+        return
+
+    # Apply all mutations
+    _apply_consumable_result(gs, result, card)
+
+    # Fire using_consumeable joker context (Constellation, etc.)
+    if getattr(result, "notify_jokers_consumeable", False):
+        from jackdaw.engine.jokers import GameSnapshot, JokerContext, calculate_joker
+
+        jokers: list = gs.get("jokers", [])
+        game_snap = GameSnapshot(
+            joker_count=len(jokers),
+            money=gs.get("dollars", 0),
+        )
+        for joker in list(jokers):
+            if getattr(joker, "debuff", False):
+                continue
+            jctx = JokerContext(
+                using_consumeable=True,
+                consumeable=card,
+                jokers=jokers,
+                game=game_snap,
+            )
+            calculate_joker(joker, jctx)
 
 
-def _apply_consumable_result(gs: dict[str, Any], result: Any) -> None:
-    """Apply a ConsumableResult's mutations to game_state."""
+def _apply_consumable_result(
+    gs: dict[str, Any], result: Any, card: Any = None,
+) -> None:
+    """Apply a ConsumableResult's mutations to game_state.
+
+    Handles all 14+ mutation types from ConsumableResult.
+    """
     # Track last_tarot_planet for The Fool
-    gs["last_tarot_planet"] = getattr(result, "last_tarot_planet", None) or gs.get("last_tarot_planet")
+    card_key = getattr(card, "center_key", None)
+    if card_key:
+        card_set = _get_card_set(card) if card else ""
+        if card_set in ("Tarot", "Planet"):
+            gs["last_tarot_planet"] = card_key
 
-    # Enhancement changes
+    # ---- Card modifications ----
+
+    # a. Enhancement
     if getattr(result, "enhance", None):
-        for card, enh_key in result.enhance:
-            card.set_ability(enh_key)
+        for target, enh_key in result.enhance:
+            if hasattr(target, "set_ability"):
+                target.set_ability(enh_key)
 
-    # Suit changes
+    # b. Suit changes
     if getattr(result, "change_suit", None):
-        for card, suit in result.change_suit:
-            if hasattr(card, "change_suit"):
-                card.change_suit(suit)
+        for target, suit in result.change_suit:
+            if hasattr(target, "change_suit"):
+                target.change_suit(suit)
 
-    # Rank changes
+    # c. Rank changes
     if getattr(result, "change_rank", None):
-        for card, delta in result.change_rank:
-            if hasattr(card, "change_rank"):
-                card.change_rank(delta)
+        for target, delta in result.change_rank:
+            if hasattr(target, "change_rank"):
+                target.change_rank(delta)
 
-    # Dollars
-    dollars = getattr(result, "dollars", 0)
-    if dollars:
-        gs["dollars"] = gs.get("dollars", 0) + dollars
+    # d. Copy card (Death)
+    if getattr(result, "copy_card", None):
+        source, target = result.copy_card
+        if hasattr(target, "copy_from"):
+            target.copy_from(source)
+        else:
+            # Manual copy: base, enhancement, edition, seal
+            if source.base and target.base:
+                target.set_base(
+                    source.card_key or "",
+                    source.base.suit.value,
+                    source.base.rank.value,
+                )
+            target.edition = source.edition
+            target.seal = source.seal
+            if hasattr(source, "center_key") and hasattr(target, "set_ability"):
+                target.set_ability(source.center_key)
 
-    # Level up hand type (Planet cards)
+    # e. Destroy playing cards
+    if getattr(result, "destroy", None):
+        deck: list = gs.get("deck", [])
+        hand: list = gs.get("hand", [])
+        for destroyed in result.destroy:
+            if destroyed in hand:
+                hand.remove(destroyed)
+            if destroyed in deck:
+                deck.remove(destroyed)
+
+    # f. Add seal
+    if getattr(result, "add_seal", None):
+        for target, seal_type in result.add_seal:
+            target.seal = seal_type
+
+    # g. Create cards (High Priestess, Emperor, Judgement, etc.)
+    if getattr(result, "create", None):
+        _resolve_create_descriptors(gs, result.create)
+
+    # ---- Economy ----
+
+    # h. Dollars
+    if getattr(result, "dollars", 0):
+        gs["dollars"] = gs.get("dollars", 0) + result.dollars
+
+    # i. Money set (Wraith → set to 0)
+    if getattr(result, "money_set", None) is not None:
+        gs["dollars"] = result.money_set
+
+    # ---- Hand levels ----
+
+    # j. Level up (Planet cards)
     if getattr(result, "level_up", None):
         hand_levels = gs.get("hand_levels")
         if hand_levels:
             for ht, amount in result.level_up:
                 hand_levels.level_up(ht, amount)
 
-    # Cards created
-    if getattr(result, "create_card", None):
-        for create in result.create_card:
-            ctype = create.get("type", "")
-            if ctype == "Joker":
-                gs.setdefault("jokers", []).append(create.get("card"))
-            elif ctype in ("Tarot", "Planet", "Spectral"):
-                gs.setdefault("consumables", []).append(create.get("card"))
+    # ---- Deck mutation ----
 
-    # Cards destroyed
-    if getattr(result, "destroy", None):
-        deck: list = gs.get("deck", [])
-        hand: list = gs.get("hand", [])
-        for card in result.destroy:
-            if card in deck:
-                deck.remove(card)
-            if card in hand:
-                hand.remove(card)
+    # k. Add playing cards to deck
+    if getattr(result, "add_to_deck", None):
+        deck_list: list = gs.setdefault("deck", [])
+        for card_spec in result.add_to_deck:
+            from jackdaw.engine.card import Card as _Card
+
+            new_card = _Card()
+            if "suit" in card_spec and "rank" in card_spec:
+                new_card.set_base(
+                    card_spec.get("key", ""),
+                    card_spec["suit"],
+                    card_spec["rank"],
+                )
+            if "enhancement" in card_spec:
+                new_card.set_ability(card_spec["enhancement"])
+            deck_list.append(new_card)
+
+    # ---- Joker effects ----
+
+    # l. Add edition (Wheel of Fortune, Aura)
+    if getattr(result, "add_edition", None):
+        ae = result.add_edition
+        target = ae.get("target")
+        edition = ae.get("edition")
+        if target and edition:
+            target.edition = edition
+
+    # m. Destroy jokers (Ankh: destroy all except one)
+    if getattr(result, "destroy_jokers", None):
+        jokers: list = gs.get("jokers", [])
+        for j in result.destroy_jokers:
+            if j in jokers:
+                jokers.remove(j)
+
+    # ---- Game state ----
+
+    # n. Hand size modification (Ectoplasm -1, Ouija -1)
+    if getattr(result, "hand_size_mod", 0):
+        gs["hand_size"] = gs.get("hand_size", 8) + result.hand_size_mod
+
+
+def _resolve_create_descriptors(
+    gs: dict[str, Any], descriptors: list[dict[str, Any]]
+) -> None:
+    """Resolve card creation descriptors from ConsumableResult.create.
+
+    Each descriptor is ``{'type': ..., 'count': ..., 'seed': ...,
+    'forced_key': ...}``.  Creates the actual Card objects and adds
+    them to the appropriate area.
+    """
+    from jackdaw.engine.card import Card as _Card
+
+    consumables: list = gs.setdefault("consumables", [])
+    consumable_limit = gs.get("consumable_slots", 2)
+
+    for desc in descriptors:
+        ctype = desc.get("type", "")
+        count = desc.get("count", 1)
+
+        for _ in range(count):
+            if ctype in ("Tarot", "Planet", "Spectral", "Tarot_Planet"):
+                if len(consumables) < consumable_limit:
+                    forced = desc.get("forced_key")
+                    key = forced or f"c_{'fool' if ctype == 'Tarot' else 'pluto'}"
+                    c = _Card(center_key=key)
+                    c.ability = {"set": ctype.split("_")[0], "effect": ""}
+                    consumables.append(c)
+            elif ctype == "Joker":
+                jokers: list = gs.setdefault("jokers", [])
+                joker_slots = gs.get("joker_slots", 5)
+                if len(jokers) < joker_slots:
+                    c = _Card(center_key="j_joker")
+                    c.ability = {
+                        "set": "Joker", "effect": "", "name": "Joker",
+                    }
+                    jokers.append(c)
 
 
 def _get_card_set(card: Any) -> str:

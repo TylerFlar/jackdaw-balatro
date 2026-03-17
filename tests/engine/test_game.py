@@ -1595,3 +1595,237 @@ class TestPackOpening:
         gs["pack_choices_remaining"] = 0
         with pytest.raises(IllegalActionError, match="No pack choices"):
             step(gs, PickPackCard(card_index=0))
+
+
+# ===========================================================================
+# UseConsumable tests
+# ===========================================================================
+
+
+def _make_consumable(key: str, set_name: str = "Tarot", **kw) -> Card:
+    """Create a consumable card for testing."""
+    c = Card(center_key=key, cost=0)
+    ability = {"set": set_name, "effect": ""}
+    ability.update(kw.pop("extra_ability", {}))
+    c.ability = ability
+    for k, v in kw.items():
+        setattr(c, k, v)
+    return c
+
+
+class TestUseConsumableChariot:
+    """Chariot (Steel Card enhancement) during SELECTING_HAND."""
+
+    def test_chariot_enhances_to_steel(self):
+        from jackdaw.engine.actions import UseConsumable
+
+        gs = _init_gs("CHARIOT_TEST")
+        step(gs, SelectBlind())
+        assert gs["phase"] == GamePhase.SELECTING_HAND
+        chariot = _make_consumable("c_chariot")
+        gs["consumables"] = [chariot]
+        target_card = gs["hand"][0]
+        step(gs, UseConsumable(card_index=0, target_indices=(0,)))
+        # Card should be enhanced to Steel
+        assert target_card.ability.get("effect") == "Steel Card" or \
+               target_card.ability.get("name") == "Steel Card"
+
+    def test_phase_stays_selecting_hand(self):
+        from jackdaw.engine.actions import UseConsumable
+
+        gs = _init_gs("CHARIOT_PHASE")
+        step(gs, SelectBlind())
+        chariot = _make_consumable("c_chariot")
+        gs["consumables"] = [chariot]
+        step(gs, UseConsumable(card_index=0, target_indices=(0,)))
+        assert gs["phase"] == GamePhase.SELECTING_HAND
+
+    def test_consumable_removed_after_use(self):
+        from jackdaw.engine.actions import UseConsumable
+
+        gs = _init_gs("CHARIOT_POP")
+        step(gs, SelectBlind())
+        chariot = _make_consumable("c_chariot")
+        gs["consumables"] = [chariot]
+        step(gs, UseConsumable(card_index=0, target_indices=(0,)))
+        assert chariot not in gs["consumables"]
+
+
+class TestUseConsumablePlanet:
+    """Mercury (Pair level-up) during SHOP."""
+
+    def test_mercury_levels_up_pair(self):
+        from jackdaw.engine.actions import UseConsumable
+        from jackdaw.engine.data.hands import HandType
+
+        gs = _setup_shop("MERCURY_TEST")
+        mercury = _make_consumable("c_mercury", set_name="Planet")
+        mercury.ability["consumeable"] = {"hand_type": "Pair"}
+        gs["consumables"] = [mercury]
+        hl = gs["hand_levels"]
+        level_before = hl[HandType.PAIR].level
+        step(gs, UseConsumable(card_index=0))
+        assert hl[HandType.PAIR].level == level_before + 1
+
+    def test_phase_stays_shop(self):
+        from jackdaw.engine.actions import UseConsumable
+
+        gs = _setup_shop("MERCURY_PHASE")
+        mercury = _make_consumable("c_mercury", set_name="Planet")
+        mercury.ability["consumeable"] = {"hand_type": "Pair"}
+        gs["consumables"] = [mercury]
+        step(gs, UseConsumable(card_index=0))
+        assert gs["phase"] == GamePhase.SHOP
+
+    def test_last_tarot_planet_tracked(self):
+        from jackdaw.engine.actions import UseConsumable
+
+        gs = _setup_shop("MERCURY_TRACK")
+        mercury = _make_consumable("c_mercury", set_name="Planet")
+        mercury.ability["consumeable"] = {"hand_type": "Pair"}
+        gs["consumables"] = [mercury]
+        step(gs, UseConsumable(card_index=0))
+        assert gs.get("last_tarot_planet") == "c_mercury"
+
+
+class TestUseConsumableDeath:
+    """Death: copy rightmost card onto left card."""
+
+    def test_death_copies_card(self):
+        from jackdaw.engine.actions import UseConsumable
+
+        gs = _init_gs("DEATH_TEST")
+        step(gs, SelectBlind())
+        death = _make_consumable("c_death")
+        gs["consumables"] = [death]
+        # Target two cards — Death copies rightmost (highest sort_id) onto other
+        card_a = gs["hand"][0]
+        card_b = gs["hand"][1]
+        # Determine which is rightmost by sort_id
+        if card_a.sort_id > card_b.sort_id:
+            source, target = card_a, card_b
+        else:
+            source, target = card_b, card_a
+        src_suit = source.base.suit.value
+        src_rank = source.base.rank.value
+        step(gs, UseConsumable(card_index=0, target_indices=(0, 1)))
+        # Target should now have source's properties
+        assert target.base.suit.value == src_suit
+        assert target.base.rank.value == src_rank
+
+
+class TestUseConsumableHangedMan:
+    """Hanged Man: destroy highlighted cards."""
+
+    def test_hanged_man_destroys_cards(self):
+        from jackdaw.engine.actions import UseConsumable
+
+        gs = _init_gs("HANGED_TEST")
+        step(gs, SelectBlind())
+        hanged = _make_consumable("c_hanged_man")
+        gs["consumables"] = [hanged]
+        target1 = gs["hand"][0]
+        target2 = gs["hand"][1]
+        initial_hand = len(gs["hand"])
+        step(gs, UseConsumable(card_index=0, target_indices=(0, 1)))
+        # Targets should be removed from hand
+        assert target1 not in gs["hand"]
+        assert target2 not in gs["hand"]
+        assert len(gs["hand"]) == initial_hand - 2
+
+
+class TestUseConsumableHighPriestess:
+    """High Priestess: create 2 Planet cards."""
+
+    def test_creates_planets(self):
+        from jackdaw.engine.actions import UseConsumable
+
+        gs = _setup_shop("PRIESTESS_TEST")
+        priestess = _make_consumable("c_high_priestess")
+        priestess.ability["consumeable"] = {"planets": 2}
+        gs["consumables"] = [priestess]
+        gs["consumable_slots"] = 5  # room for 2 new
+        initial_count = len(gs.get("consumables", []))
+        step(gs, UseConsumable(card_index=0))
+        # Should have created 2 planet cards in consumables
+        # (priestess removed, 2 added → net +1)
+        assert len(gs["consumables"]) >= initial_count + 1
+
+
+class TestUseConsumableWheelOfFortune:
+    """Wheel of Fortune: add edition to random joker (1-in-4 chance)."""
+
+    def test_wheel_on_editionless_joker(self):
+        from jackdaw.engine.actions import UseConsumable
+
+        gs = _setup_shop("WHEEL_TEST")
+        joker = _joker_card("j_joker")
+        joker.edition = None
+        gs["jokers"] = [joker]
+        wheel = _make_consumable("c_wheel_of_fortune")
+        wheel.ability["extra"] = 4  # 1-in-4 chance
+        gs["consumables"] = [wheel]
+        step(gs, UseConsumable(card_index=0))
+        # Either the joker got an edition or it didn't (RNG-dependent)
+        # Just verify the action didn't crash and wheel was consumed
+        assert wheel not in gs.get("consumables", [])
+
+
+class TestUseConsumableBlindSelect:
+    """Consumable usable in BLIND_SELECT phase."""
+
+    def test_use_in_blind_select(self):
+        from jackdaw.engine.actions import UseConsumable
+
+        gs = _init_gs("USE_BLIND_SEL")
+        assert gs["phase"] == GamePhase.BLIND_SELECT
+        mercury = _make_consumable("c_mercury", set_name="Planet")
+        mercury.ability["consumeable"] = {"hand_type": "Pair"}
+        gs["consumables"] = [mercury]
+        step(gs, UseConsumable(card_index=0))
+        assert gs["phase"] == GamePhase.BLIND_SELECT
+        assert len(gs["consumables"]) == 0
+
+
+class TestUseConsumableConstellationJoker:
+    """Constellation gains xMult when Planet is used."""
+
+    def test_constellation_notified(self):
+        from jackdaw.engine.actions import UseConsumable
+
+        gs = _setup_shop("CONSTELLATION")
+        constellation = _joker_card("j_constellation")
+        constellation.ability["x_mult"] = 1.0
+        constellation.ability["extra"] = 0.1
+        gs["jokers"] = [constellation]
+        mercury = _make_consumable("c_mercury", set_name="Planet")
+        mercury.ability["consumeable"] = {"hand_type": "Pair"}
+        gs["consumables"] = [mercury]
+        step(gs, UseConsumable(card_index=0))
+        # Constellation should have gained xMult
+        assert constellation.ability["x_mult"] > 1.0
+
+
+class TestUseConsumableHermit:
+    """Hermit: gain dollars equal to min(current, $20)."""
+
+    def test_hermit_doubles_money(self):
+        from jackdaw.engine.actions import UseConsumable
+
+        gs = _setup_shop("HERMIT_TEST")
+        gs["dollars"] = 15
+        hermit = _make_consumable("c_hermit")
+        hermit.ability["extra"] = 20
+        gs["consumables"] = [hermit]
+        step(gs, UseConsumable(card_index=0))
+        assert gs["dollars"] == 30  # 15 + min(15, 20)
+
+
+class TestUseConsumableInvalidIndex:
+    def test_invalid_index_raises(self):
+        from jackdaw.engine.actions import UseConsumable
+
+        gs = _setup_shop("USE_INVALID")
+        gs["consumables"] = []
+        with pytest.raises(IllegalActionError, match="Invalid consumable"):
+            step(gs, UseConsumable(card_index=0))
