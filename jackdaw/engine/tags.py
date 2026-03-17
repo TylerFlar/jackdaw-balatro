@@ -66,7 +66,7 @@ Public generators
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from jackdaw.engine.data.hands import HandType
@@ -230,9 +230,8 @@ class Tag:
                 # Select a random hand type — mirrors pseudorandom_element
                 # over the sorted hand list (sorted by order/sort_id in Lua)
                 from jackdaw.engine.data.hands import HAND_BASE
-                hands_by_order = sorted(
-                    HAND_BASE.keys(), key=lambda h: HAND_BASE[h].order
-                )
+
+                hands_by_order = sorted(HAND_BASE.keys(), key=lambda h: HAND_BASE[h].order)
                 idx = rng.random(seed_val, 1, len(hands_by_order))
                 chosen = hands_by_order[idx - 1]
                 levels = self.config["levels"]

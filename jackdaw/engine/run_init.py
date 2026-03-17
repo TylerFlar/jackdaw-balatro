@@ -20,6 +20,7 @@ from __future__ import annotations
 from typing import Any
 
 from jackdaw.engine.back import Back
+from jackdaw.engine.challenges import apply_challenge
 from jackdaw.engine.data.prototypes import BLINDS
 from jackdaw.engine.hand_levels import HandLevels
 from jackdaw.engine.rng import PseudoRandom
@@ -27,10 +28,10 @@ from jackdaw.engine.stakes import apply_stake_modifiers
 from jackdaw.engine.tags import assign_ante_blinds
 from jackdaw.engine.vouchers import apply_voucher
 
-
 # ---------------------------------------------------------------------------
 # Default starting parameters — misc_functions.lua:1868
 # ---------------------------------------------------------------------------
+
 
 def get_starting_params() -> dict[str, Any]:
     """Return default starting parameters matching ``get_starting_params()`` in Lua."""
@@ -52,15 +53,14 @@ def get_starting_params() -> dict[str, Any]:
 # init_game_object — game.lua:1862-2016
 # ---------------------------------------------------------------------------
 
+
 def init_game_object() -> dict[str, Any]:
     """Create the default ``G.GAME`` state.
 
     Matches ``Game:init_game_object()`` (game.lua:1862-2016).  Returns a
     dict with every field the game engine expects.
     """
-    bosses_used: dict[str, int] = {
-        k: 0 for k, v in BLINDS.items() if v.boss is not None
-    }
+    bosses_used: dict[str, int] = {k: 0 for k, v in BLINDS.items() if v.boss is not None}
 
     return {
         "won": False,
@@ -177,6 +177,7 @@ def init_game_object() -> dict[str, Any]:
 # initialize_run — game.lua:2018-2410
 # ---------------------------------------------------------------------------
 
+
 def initialize_run(
     back_key: str,
     stake: int,
@@ -261,7 +262,7 @@ def initialize_run(
     # -----------------------------------------------------------------------
     if challenge:
         gs["challenge"] = challenge.get("id")
-        _apply_challenge(challenge, gs)
+        apply_challenge(challenge, gs)
 
     # -----------------------------------------------------------------------
     # 6. Transfer starting_params → round_resets + dollars
@@ -337,6 +338,7 @@ def initialize_run(
 # start_round — state_events.lua:290-353
 # ---------------------------------------------------------------------------
 
+
 def start_round(game_state: dict[str, Any]) -> None:
     """Reset per-round state from ``round_resets``.
 
@@ -361,7 +363,8 @@ def start_round(game_state: dict[str, Any]) -> None:
     # Free rerolls (Chaos the Clown gives free rerolls; default 0)
     jokers = game_state.get("jokers", [])
     chaos_count = sum(
-        1 for j in jokers
+        1
+        for j in jokers
         if getattr(j, "center_key", None) == "j_chaos"
         or (isinstance(j, dict) and j.get("key") == "j_chaos")
     )
@@ -400,69 +403,8 @@ def start_round(game_state: dict[str, Any]) -> None:
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _apply_challenge(challenge: dict[str, Any], gs: dict[str, Any]) -> None:
-    """Apply challenge configuration to game_state (game.lua:2063-2148)."""
-    sp = gs["starting_params"]
 
-    # Starting jokers — stored for caller to instantiate
-    if "jokers" in challenge:
-        gs["challenge_jokers"] = challenge["jokers"]
-
-    # Starting consumables — appended to any from back
-    if "consumeables" in challenge:
-        existing = gs.get("starting_consumables", [])
-        gs["starting_consumables"] = existing + [
-            c["id"] for c in challenge["consumeables"]
-        ]
-
-    # Starting vouchers — mark as used and apply effects
-    if "vouchers" in challenge:
-        for v in challenge["vouchers"]:
-            v_key = v["id"]
-            gs["used_vouchers"][v_key] = True
-            apply_voucher(v_key, gs)
-
-    # Rule modifiers — override starting_params values
-    rules = challenge.get("rules", {})
-    if "modifiers" in rules:
-        for mod in rules["modifiers"]:
-            sp[mod["id"]] = mod["value"]
-
-    # Custom rules
-    if "custom" in rules:
-        mods = gs.setdefault("modifiers", {})
-        for rule in rules["custom"]:
-            rid = rule["id"]
-            rval = rule.get("value")
-            if rid == "no_reward":
-                nr = mods.setdefault("no_blind_reward", {})
-                nr["Small"] = True
-                nr["Big"] = True
-                nr["Boss"] = True
-            elif rid == "no_reward_specific":
-                nr = mods.setdefault("no_blind_reward", {})
-                nr[rval] = True
-            elif rval is not None:
-                mods[rid] = rval
-            elif rid == "no_shop_jokers":
-                gs["joker_rate"] = 0
-            else:
-                mods[rid] = True
-
-    # Restrictions — banned keys
-    restrictions = challenge.get("restrictions", {})
-    banned = gs["banned_keys"]
-    for category in ("banned_cards", "banned_tags", "banned_other"):
-        for entry in restrictions.get(category, []):
-            banned[entry["id"]] = True
-            if "ids" in entry:
-                for sub_id in entry["ids"]:
-                    banned[sub_id] = True
-
-
-def _shuffle_deck(
-    deck: list, rng: PseudoRandom, ante: int
-) -> None:
+def _shuffle_deck(deck: list, rng: PseudoRandom, ante: int) -> None:
     """In-place Fisher-Yates shuffle using the run RNG.
 
     Matches ``G.deck:shuffle()`` — uses ``pseudoseed('nr'..ante)``
@@ -565,5 +507,9 @@ def _calculate_reroll_cost(gs: dict[str, Any], *, skip_increment: bool = False) 
     if not skip_increment:
         cr["reroll_cost_increase"] += 1
 
-    base = rr.get("temp_reroll_cost") if rr.get("temp_reroll_cost") is not None else rr.get("reroll_cost", 5)
+    base = (
+        rr.get("temp_reroll_cost")
+        if rr.get("temp_reroll_cost") is not None
+        else rr.get("reroll_cost", 5)
+    )
     cr["reroll_cost"] = base + cr["reroll_cost_increase"]
