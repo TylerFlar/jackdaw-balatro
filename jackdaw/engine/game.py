@@ -472,6 +472,11 @@ def _handle_play_hand(
             for card in gs.get("hand", []):
                 blind.debuff_card(card, pareidolia=pareidolia)
 
+        # The Fish: flip newly drawn cards face-down
+        if getattr(blind, "name", "") == "The Fish" and getattr(blind, "prepped", False):
+            for card in gs.get("hand", []):
+                card.facing = "back"
+
     return gs
 
 
@@ -1216,6 +1221,29 @@ def _round_won(gs: dict[str, Any]) -> None:
         gs["dollars"] = gs.get("dollars", 0) + gold_seal_dollars
 
     # ------------------------------------------------------------------
+    # 3b. Blue Seal: create Planet for most-played hand type
+    # ------------------------------------------------------------------
+    hand_levels = gs.get("hand_levels")
+    consumables: list = gs.get("consumables", [])
+    consumable_limit = gs.get("consumable_slots", 2)
+    for c in hand:
+        if getattr(c, "seal", None) == "Blue" and not getattr(c, "debuff", False):
+            if len(consumables) < consumable_limit and hand_levels is not None:
+                most_played = hand_levels.most_played()
+                # Find the planet key for this hand type
+                from jackdaw.engine.consumables import _PLANET_HAND
+                planet_key = None
+                for pk, ht in _PLANET_HAND.items():
+                    if ht == most_played.value:
+                        planet_key = pk
+                        break
+                if planet_key:
+                    from jackdaw.engine.card import Card as _BSCard
+                    planet = _BSCard(center_key=planet_key)
+                    planet.ability = {"set": "Planet", "effect": ""}
+                    consumables.append(planet)
+
+    # ------------------------------------------------------------------
     # 4. Return all cards to deck
     # ------------------------------------------------------------------
     deck: list = gs.setdefault("deck", [])
@@ -1473,6 +1501,10 @@ def _apply_boss_blind_effects(gs: dict[str, Any], blind: Any) -> None:
     # The Mouth: reset only_hand
     elif name == "The Mouth":
         blind.only_hand = False
+
+    # The House / The Mark: flip cards face-down (blind.lua:200-203)
+    # Cards are flipped at draw_to_hand time, not set_blind time.
+    # We handle this in _draw_hand context by checking blind.name.
 
 
 # ---------------------------------------------------------------------------
@@ -1893,8 +1925,7 @@ def _press_play(
 ) -> None:
     """Fire boss blind press_play effects before scoring.
 
-    - The Hook: discard 2 random cards from hand
-    - The Tooth: lose $1 per card played
+    Mirrors ``Blind:press_play`` (blind.lua:464-502).
     """
     if getattr(blind, "disabled", False):
         return
@@ -1902,6 +1933,7 @@ def _press_play(
     name = getattr(blind, "name", "")
 
     if name == "The Hook":
+        # Discard 2 random cards from hand
         hand: list = gs.get("hand", [])
         discard_pile: list = gs.setdefault("discard_pile", [])
         for _ in range(min(2, len(hand))):
@@ -1912,8 +1944,19 @@ def _press_play(
                 discard_pile.append(target)
 
     elif name == "The Tooth":
-        cost = len(played)
-        gs["dollars"] = gs.get("dollars", 0) - cost
+        # Lose $1 per card played
+        gs["dollars"] = gs.get("dollars", 0) - len(played)
+
+    elif name == "The Fish":
+        # Flip all hand cards face-down after play (blind.lua:494-496)
+        blind.prepped = True
+
+    elif name == "Crimson Heart":
+        # Debuff a random joker each hand (blind.lua:488-493)
+        jokers: list = gs.get("jokers", [])
+        if jokers and rng:
+            blind.triggered = True
+            blind.prepped = True
 
 
 # ---------------------------------------------------------------------------
