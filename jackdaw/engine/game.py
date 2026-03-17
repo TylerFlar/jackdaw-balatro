@@ -35,6 +35,7 @@ from jackdaw.engine.actions import (
     PlayHand,
     Reroll,
     RedeemVoucher,
+    ReorderHand,
     ReorderJokers,
     SelectBlind,
     SellCard,
@@ -93,6 +94,8 @@ def step(game_state: dict[str, Any], action: Action) -> dict[str, Any]:
             return _handle_next_round(game_state)
         case SortHand(mode=mode):
             return _handle_sort_hand(game_state, mode)
+        case ReorderHand(new_order=order):
+            return _handle_reorder_hand(game_state, order)
         case ReorderJokers(new_order=order):
             return _handle_reorder_jokers(game_state, order)
         case _:
@@ -356,8 +359,11 @@ def _handle_play_hand(
     # ------------------------------------------------------------------
     # 2. Move cards from hand to play area
     # ------------------------------------------------------------------
+    # Preserve SELECTION ORDER (not hand position order).
+    # In Balatro, cards are placed left-to-right in click order.
+    # The first index in card_indices is the leftmost scored card.
     idx_set = set(indices)
-    played = [hand[i] for i in sorted(indices)]
+    played = [hand[i] for i in indices]
     held = [c for i, c in enumerate(hand) if i not in idx_set]
     gs["hand"] = held
 
@@ -1089,6 +1095,26 @@ def _handle_sort_hand(gs: dict[str, Any], mode: str) -> dict[str, Any]:
             getattr(c.base, "suit_nominal", 0) if c.base else 0,
             getattr(c.base, "id", 0) if c.base else 0,
         ))
+    return gs
+
+
+def _handle_reorder_hand(
+    gs: dict[str, Any], order: tuple[int, ...]
+) -> dict[str, Any]:
+    """Reorder cards in the player's hand.
+
+    Free action — no cost, doesn't consume hands or discards.
+    Left-to-right order affects scoring (Photograph, Hanging Chad).
+    """
+    _require_phase(gs, GamePhase.SELECTING_HAND)
+
+    hand: list = gs.get("hand", [])
+    if not order:
+        return gs  # marker action, no-op
+    if sorted(order) != list(range(len(hand))):
+        raise IllegalActionError("Invalid hand permutation")
+
+    gs["hand"] = [hand[i] for i in order]
     return gs
 
 

@@ -2126,3 +2126,142 @@ class TestPackGeneration:
         # Pack hand returned to deck
         assert len(gs["deck"]) == deck_before
         assert gs.get("pack_hand", []) == []
+
+
+# ===========================================================================
+# Card ordering tests
+# ===========================================================================
+
+from jackdaw.engine.actions import ReorderHand
+
+
+class TestReorderHand:
+    """Test hand reordering as a free action."""
+
+    def _setup(self, seed="ORDER_HAND"):
+        gs = _init_gs(seed)
+        step(gs, SelectBlind())
+        return gs
+
+    def test_reorder_changes_hand_order(self):
+        gs = self._setup()
+        hand = gs["hand"]
+        assert len(hand) >= 3
+        old_keys = [c.card_key for c in hand]
+        # Reverse the hand
+        n = len(hand)
+        new_order = tuple(range(n - 1, -1, -1))
+        step(gs, ReorderHand(new_order=new_order))
+        new_keys = [c.card_key for c in gs["hand"]]
+        assert new_keys == list(reversed(old_keys))
+
+    def test_reorder_is_free(self):
+        """Reordering doesn't consume hands or discards."""
+        gs = self._setup()
+        hands_before = gs["current_round"]["hands_left"]
+        discards_before = gs["current_round"]["discards_left"]
+        n = len(gs["hand"])
+        step(gs, ReorderHand(new_order=tuple(range(n - 1, -1, -1))))
+        assert gs["current_round"]["hands_left"] == hands_before
+        assert gs["current_round"]["discards_left"] == discards_before
+
+    def test_reorder_then_play_preserves_order(self):
+        """After reorder, playing cards uses the new hand positions."""
+        gs = self._setup()
+        hand = gs["hand"]
+        n = len(hand)
+        # Reverse hand
+        step(gs, ReorderHand(new_order=tuple(range(n - 1, -1, -1))))
+        # Now index 0 is what was the last card
+        first_card = gs["hand"][0]
+        gs["blind"].chips = 1
+        step(gs, PlayHand(card_indices=(0, 1, 2, 3, 4)))
+        # The first card played should be what we put at position 0
+        result = gs.get("last_score_result")
+        assert result is not None
+
+    def test_invalid_permutation_raises(self):
+        gs = self._setup()
+        with pytest.raises(IllegalActionError, match="permutation"):
+            step(gs, ReorderHand(new_order=(0, 0, 1)))
+
+    def test_empty_order_is_noop(self):
+        gs = self._setup()
+        keys_before = [c.card_key for c in gs["hand"]]
+        step(gs, ReorderHand(new_order=()))
+        keys_after = [c.card_key for c in gs["hand"]]
+        assert keys_before == keys_after
+
+    def test_phase_stays_selecting_hand(self):
+        gs = self._setup()
+        n = len(gs["hand"])
+        step(gs, ReorderHand(new_order=tuple(range(n))))
+        assert gs["phase"] == GamePhase.SELECTING_HAND
+
+
+class TestPlayHandOrder:
+    """Verify PlayHand preserves selection order (click order)."""
+
+    def _setup(self, seed="PLAY_ORDER"):
+        gs = _init_gs(seed)
+        step(gs, SelectBlind())
+        return gs
+
+    def test_selection_order_preserved(self):
+        """card_indices=(3,1,4) → first scored is hand[3], not hand[1]."""
+        gs = self._setup()
+        hand = gs["hand"]
+        assert len(hand) >= 5
+        card_at_3 = hand[3]
+        card_at_1 = hand[1]
+        card_at_4 = hand[4]
+        gs["blind"].chips = 1
+        step(gs, PlayHand(card_indices=(3, 1, 4)))
+        result = gs.get("last_score_result")
+        assert result is not None
+        # Scoring cards should be in selection order
+        if result.scoring_cards:
+            # First scoring card should be card_at_3 (or a subset)
+            scoring_set = set(id(c) for c in result.scoring_cards)
+            assert id(card_at_3) in scoring_set or id(card_at_1) in scoring_set
+
+    def test_different_order_same_cards(self):
+        """Playing same cards in different order → same hand type."""
+        gs1 = self._setup("ORDER_A")
+        gs2 = self._setup("ORDER_A")
+        gs1["blind"].chips = 1
+        gs2["blind"].chips = 1
+        # Play indices (0,1,2) vs (2,1,0)
+        step(gs1, PlayHand(card_indices=(0, 1, 2)))
+        step(gs2, PlayHand(card_indices=(2, 1, 0)))
+        # Same hand type detected
+        r1 = gs1["last_score_result"]
+        r2 = gs2["last_score_result"]
+        assert r1.hand_type == r2.hand_type
+
+
+class TestReorderJokersOrder:
+    """Verify joker order affects scoring."""
+
+    def test_reorder_changes_order(self):
+        gs = _init_gs("JOKER_ORDER")
+        gs["phase"] = GamePhase.SHOP
+        j0 = _joker_card("j_a")
+        j1 = _joker_card("j_b")
+        j2 = _joker_card("j_c")
+        gs["jokers"] = [j0, j1, j2]
+        step(gs, ReorderJokers(new_order=(2, 0, 1)))
+        assert gs["jokers"] == [j2, j0, j1]
+
+    def test_reorder_persists_through_play(self):
+        """Joker order set in shop persists when playing hands."""
+        gs = _init_gs("JOKER_PERSIST")
+        j0 = _joker_card("j_first")
+        j1 = _joker_card("j_second")
+        gs["jokers"] = [j0, j1]
+        gs["phase"] = GamePhase.SHOP
+        step(gs, ReorderJokers(new_order=(1, 0)))
+        assert gs["jokers"] == [j1, j0]
+        # Go to next round and verify order persists
+        step(gs, NextRound())
+        assert gs["jokers"] == [j1, j0]

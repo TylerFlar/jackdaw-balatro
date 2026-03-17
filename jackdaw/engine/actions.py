@@ -225,11 +225,27 @@ class SortHand:
 
 
 @dataclass(frozen=True)
+class ReorderHand:
+    """Reorder cards in the player's hand.
+
+    ``new_order`` is a tuple of 0-based hand card indices in the desired
+    order.  This is a free action — no cost, doesn't consume hands or
+    discards.  Left-to-right order affects which card is "first scored"
+    for jokers like Photograph and Hanging Chad.
+    """
+
+    new_order: tuple[int, ...]
+
+
+@dataclass(frozen=True)
 class ReorderJokers:
     """Reorder jokers by specifying a permutation of indices.
 
     ``new_order`` is a tuple of 0-based joker indices in the desired
     order (e.g. ``(2, 0, 1)`` moves the third joker to the front).
+    Left-to-right order affects Phase 9 scoring (additive before
+    multiplicative), Blueprint (copies right neighbor), Brainstorm
+    (copies leftmost), Ceremonial Dagger (destroys right neighbor).
     """
 
     new_order: tuple[int, ...]
@@ -256,6 +272,7 @@ Action = (
     | NextRound
     | CashOut
     | SortHand
+    | ReorderHand
     | ReorderJokers
 )
 
@@ -358,10 +375,11 @@ def _legal_selecting_hand(gs: dict[str, Any]) -> list[Action]:
     if hand and cr.get("discards_left", 0) > 0:
         actions.append(Discard(card_indices=()))
 
-    # Sort
+    # Sort and reorder
     if len(hand) > 1:
         actions.append(SortHand(mode="rank"))
         actions.append(SortHand(mode="suit"))
+        actions.append(ReorderHand(new_order=()))
 
     # Consumables usable during hand selection
     actions.extend(_usable_consumables(gs))
