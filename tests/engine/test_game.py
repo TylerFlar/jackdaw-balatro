@@ -745,3 +745,166 @@ class TestPlayHandDetailed:
         # If any jokers were removed, they shouldn't be in jokers list
         for removed in result.jokers_removed:
             assert removed not in gs.get("jokers", [])
+
+
+# ===========================================================================
+# Detailed Discard tests
+# ===========================================================================
+
+
+class TestDiscardDetailed:
+    """Tests for the full discard flow including joker contexts."""
+
+    def _setup(self, seed="DISC_DETAIL"):
+        gs = _init_gs(seed)
+        step(gs, SelectBlind())
+        return gs
+
+    def test_discards_left_decremented(self):
+        gs = self._setup()
+        initial = gs["current_round"]["discards_left"]
+        step(gs, Discard(card_indices=(0,)))
+        assert gs["current_round"]["discards_left"] == initial - 1
+
+    def test_discards_used_incremented(self):
+        gs = self._setup()
+        step(gs, Discard(card_indices=(0, 1)))
+        assert gs["current_round"]["discards_used"] == 1
+
+    def test_cards_moved_to_discard_pile(self):
+        gs = self._setup()
+        card0 = gs["hand"][0]
+        step(gs, Discard(card_indices=(0,)))
+        discard = gs.get("discard_pile", [])
+        assert card0 in discard
+
+    def test_three_cards_discarded_three_drawn(self):
+        """Discard 3 → hand replenished back to hand_size (if deck has cards)."""
+        gs = self._setup()
+        hand_size = gs.get("hand_size", 8)
+        step(gs, Discard(card_indices=(0, 1, 2)))
+        assert len(gs["hand"]) == hand_size
+
+    def test_hand_stays_selecting_hand(self):
+        gs = self._setup()
+        step(gs, Discard(card_indices=(0,)))
+        assert gs["phase"] == GamePhase.SELECTING_HAND
+
+    def test_no_discards_raises(self):
+        gs = self._setup()
+        gs["current_round"]["discards_left"] = 0
+        with pytest.raises(IllegalActionError, match="No discards"):
+            step(gs, Discard(card_indices=(0,)))
+
+    def test_index_out_of_range_raises(self):
+        gs = self._setup()
+        with pytest.raises(IllegalActionError, match="out of range"):
+            step(gs, Discard(card_indices=(99,)))
+
+    def test_discard_cost_deducted(self):
+        """Golden Needle challenge: discard_cost modifier deducts dollars."""
+        gs = self._setup()
+        gs["modifiers"]["discard_cost"] = 1
+        before = gs["dollars"]
+        step(gs, Discard(card_indices=(0,)))
+        assert gs["dollars"] <= before - 1
+
+    def test_cards_discarded_stat_tracked(self):
+        gs = self._setup()
+        step(gs, Discard(card_indices=(0, 1, 2)))
+        assert gs["round_scores"]["cards_discarded"] >= 3
+
+    def test_castle_joker_gains_chips(self):
+        """Castle: +3 chips per card matching castle_card suit."""
+        gs = self._setup("CASTLE_DISC")
+        castle = _joker_card("j_castle")
+        castle_suit = gs["current_round"]["castle_card"]["suit"]
+        castle.ability["castle_card_suit"] = castle_suit
+        castle.ability["extra"] = {"chips": 0, "chip_mod": 3}
+        gs["jokers"] = [castle]
+
+        # Find a card in hand matching the castle suit
+        matching_idx = None
+        for i, card in enumerate(gs["hand"]):
+            if card.base and card.base.suit.value == castle_suit:
+                matching_idx = i
+                break
+
+        if matching_idx is not None:
+            step(gs, Discard(card_indices=(matching_idx,)))
+            assert castle.ability["extra"]["chips"] >= 3
+
+    def test_green_joker_loses_mult(self):
+        """Green Joker: -1 mult per discard action."""
+        gs = self._setup("GREEN_DISC")
+        green = _joker_card("j_green_joker")
+        green.ability["mult"] = 5
+        green.ability["extra"] = {"hand_add": 1, "discard_sub": 1}
+        gs["jokers"] = [green]
+        step(gs, Discard(card_indices=(0,)))
+        assert green.ability["mult"] == 4
+
+    def test_ramen_loses_xmult(self):
+        """Ramen: -0.01 xMult per card discarded."""
+        gs = self._setup("RAMEN_DISC")
+        ramen = _joker_card("j_ramen")
+        ramen.ability["x_mult"] = 2.0
+        ramen.ability["extra"] = 0.01
+        gs["jokers"] = [ramen]
+        step(gs, Discard(card_indices=(0,)))
+        assert ramen.ability["x_mult"] < 2.0
+
+    def test_ramen_self_destructs_at_threshold(self):
+        """Ramen: self-destructs when xMult would drop to ≤ 1."""
+        gs = self._setup("RAMEN_DESTROY")
+        ramen = _joker_card("j_ramen")
+        ramen.ability["x_mult"] = 1.005
+        ramen.ability["extra"] = 0.01
+        gs["jokers"] = [ramen]
+        step(gs, Discard(card_indices=(0,)))
+        assert ramen not in gs["jokers"]
+
+    def test_burnt_joker_levels_up_hand(self):
+        """Burnt Joker: level up the hand type of discarded cards (first discard)."""
+        gs = self._setup("BURNT_DISC")
+        burnt = _joker_card("j_burnt")
+        gs["jokers"] = [burnt]
+        hl = gs["hand_levels"]
+        # Discard 2 cards — Burnt fires on first discard
+        from jackdaw.engine.hand_eval import evaluate_hand
+
+        cards_to_discard = gs["hand"][:2]
+        det = evaluate_hand(cards_to_discard)
+        if det.detected_hand and det.detected_hand != "NULL":
+            from jackdaw.engine.data.hands import HandType
+
+            ht = HandType(det.detected_hand)
+            level_before = hl[ht].level
+            step(gs, Discard(card_indices=(0, 1)))
+            assert hl[ht].level == level_before + 1
+
+    def test_purple_seal_creates_tarot(self):
+        """Discarding a Purple Seal card creates a Tarot consumable."""
+        gs = self._setup("PURPLE_DISC")
+        # Give the first hand card a Purple Seal
+        gs["hand"][0].seal = "Purple"
+        initial_cons = len(gs.get("consumables", []))
+        step(gs, Discard(card_indices=(0,)))
+        assert len(gs.get("consumables", [])) == initial_cons + 1
+
+    def test_empty_deck_fewer_drawn(self):
+        """When deck is empty, fewer cards drawn after discard."""
+        gs = self._setup("EMPTY_DECK_DISC")
+        # Empty the deck
+        gs["deck"] = []
+        hand_before = len(gs["hand"])
+        step(gs, Discard(card_indices=(0, 1)))
+        # Hand should have shrunk (2 discarded, 0 drawn)
+        assert len(gs["hand"]) == hand_before - 2
+
+    def test_multiple_discards_accumulate(self):
+        """Two discard actions: counters accumulate correctly."""
+        gs = self._setup("MULTI_DISC")
+        step(gs, Discard(card_indices=(0,)))
+        step(gs, Discard(card_indices=(0,)))
+        assert gs["current_round"]["discards_used"] == 2

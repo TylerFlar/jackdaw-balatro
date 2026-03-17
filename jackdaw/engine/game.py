@@ -460,7 +460,23 @@ def _handle_play_hand(
 def _handle_discard(
     gs: dict[str, Any], indices: tuple[int, ...]
 ) -> dict[str, Any]:
-    """Discard cards from the hand and draw replacements."""
+    """Discard highlighted cards, fire joker contexts, draw replacements.
+
+    Full sequence matching ``state_events.lua:379-448``:
+
+    1. Validate
+    2. Sort discarded cards (left-to-right by index)
+    3. Fire joker ``pre_discard`` context (Burnt Joker)
+    4. Per-card: fire seal effects (Purple Seal → Tarot) + joker ``discard``
+       context with ``other_card`` + ``full_hand``
+    5. Process side-effects (dollars, card destruction, joker mutations)
+    6. Discard cost (Golden Needle challenge)
+    7. Decrement discards_left, increment discards_used
+    8. Move surviving cards to discard pile
+    9. Draw replacements from deck
+    10. The Serpent: draw only 3 if not first action
+    11. Re-debuff drawn cards for boss blind
+    """
     _require_phase(gs, GamePhase.SELECTING_HAND)
 
     cr = gs["current_round"]
@@ -472,28 +488,195 @@ def _handle_discard(
         raise IllegalActionError("Must select at least 1 card")
     if len(indices) > 5:
         raise IllegalActionError("Cannot discard more than 5 cards")
+    if any(i < 0 or i >= len(hand) for i in indices):
+        raise IllegalActionError("Card index out of range")
 
-    # Discard cost (Golden Needle challenge)
+    # ------------------------------------------------------------------
+    # 2. Extract discarded cards in sorted order
+    # ------------------------------------------------------------------
+    idx_set = set(indices)
+    discarded = [hand[i] for i in sorted(indices)]
+    gs["hand"] = [c for i, c in enumerate(hand) if i not in idx_set]
+
+    # ------------------------------------------------------------------
+    # 3. Fire joker pre_discard context (Burnt Joker: level up hand)
+    # ------------------------------------------------------------------
+    from jackdaw.engine.jokers import GameSnapshot, JokerContext, calculate_joker
+
+    jokers: list = gs.get("jokers", [])
+    rng = gs.get("rng")
+    game_snap = _build_discard_snapshot(gs, jokers)
+
+    pre_discard_effects: list = []
+    for joker in jokers:
+        if getattr(joker, "debuff", False):
+            continue
+        ctx = JokerContext(
+            pre_discard=True,
+            full_hand=discarded,
+            jokers=jokers,
+            rng=rng,
+            game=game_snap,
+        )
+        result = calculate_joker(joker, ctx)
+        if result:
+            pre_discard_effects.append(result)
+
+    # Burnt Joker: level up the hand type of discarded cards
+    for eff in pre_discard_effects:
+        if eff.level_up:
+            hand_levels = gs.get("hand_levels")
+            if hand_levels is not None:
+                from jackdaw.engine.hand_eval import evaluate_hand
+
+                det = evaluate_hand(discarded)
+                if det.detected_hand and det.detected_hand != "NULL":
+                    hand_levels.level_up(det.detected_hand)
+
+    # ------------------------------------------------------------------
+    # 4. Per-card: seal effects + joker discard context
+    # ------------------------------------------------------------------
+    dollars_earned = 0
+    destroyed: list = []
+    jokers_to_remove: list = []
+
+    for card in discarded:
+        # Seal: Purple Seal → create Tarot
+        if getattr(card, "seal", None) == "Purple":
+            consumables: list = gs.setdefault("consumables", [])
+            consumable_limit = gs.get("consumable_slots", 2)
+            if len(consumables) < consumable_limit:
+                from jackdaw.engine.card import Card as _Card
+
+                tarot = _Card(center_key="c_fool")
+                tarot.ability = {"set": "Tarot", "effect": ""}
+                consumables.append(tarot)
+
+        # Fire joker discard context per card
+        card_destroyed = False
+        for joker in jokers:
+            if getattr(joker, "debuff", False):
+                continue
+            ctx = JokerContext(
+                discard=True,
+                other_card=card,
+                full_hand=discarded,
+                jokers=jokers,
+                rng=rng,
+                game=game_snap,
+            )
+            result = calculate_joker(joker, ctx)
+            if result:
+                dollars_earned += result.dollars
+                if result.level_up:
+                    # Burnt Joker: level up the discard hand type
+                    hl = gs.get("hand_levels")
+                    if hl is not None:
+                        from jackdaw.engine.hand_eval import evaluate_hand as _eval
+
+                        det = _eval(discarded)
+                        if det.detected_hand and det.detected_hand != "NULL":
+                            hl.level_up(det.detected_hand)
+                if result.remove:
+                    # Trading Card: destroy the discarded card
+                    if result.extra and result.extra.get("destroy"):
+                        card_destroyed = True
+                    else:
+                        # Ramen: self-destruct
+                        if joker not in jokers_to_remove:
+                            jokers_to_remove.append(joker)
+
+        if card_destroyed:
+            destroyed.append(card)
+
+    # ------------------------------------------------------------------
+    # 5. Process side-effects
+    # ------------------------------------------------------------------
+    if dollars_earned:
+        gs["dollars"] = gs.get("dollars", 0) + dollars_earned
+
+    for joker in jokers_to_remove:
+        if joker in jokers:
+            jokers.remove(joker)
+
+    # ------------------------------------------------------------------
+    # 6. Discard cost (Golden Needle challenge)
+    # ------------------------------------------------------------------
     discard_cost = gs.get("modifiers", {}).get("discard_cost", 0)
     if discard_cost > 0:
         gs["dollars"] = gs.get("dollars", 0) - discard_cost
 
-    # Remove discarded cards
-    discarded = [hand[i] for i in indices]
-    gs["hand"] = [c for i, c in enumerate(hand) if i not in set(indices)]
-
+    # ------------------------------------------------------------------
+    # 7. Decrement discards_left, increment discards_used
+    # ------------------------------------------------------------------
     cr["discards_left"] -= 1
     cr["discards_used"] += 1
-    gs["unused_discards"] = max(0, gs.get("unused_discards", 0) - 1)
 
-    # Track discards
-    discard_pile = gs.setdefault("discard_pile", [])
-    discard_pile.extend(discarded)
+    # ------------------------------------------------------------------
+    # 8. Move surviving cards to discard pile
+    # ------------------------------------------------------------------
+    surviving = [c for c in discarded if c not in destroyed]
+    discard_pile: list = gs.setdefault("discard_pile", [])
+    discard_pile.extend(surviving)
 
-    # Draw replacements
-    _draw_hand(gs)
+    # Track stat
+    gs["round_scores"] = gs.get("round_scores", {})
+    gs["round_scores"]["cards_discarded"] = (
+        gs["round_scores"].get("cards_discarded", 0) + len(discarded)
+    )
+
+    # ------------------------------------------------------------------
+    # 9-10. Draw replacements from deck
+    # ------------------------------------------------------------------
+    blind = gs.get("blind")
+    serpent = (
+        blind is not None
+        and getattr(blind, "name", "") == "The Serpent"
+        and not getattr(blind, "disabled", False)
+        and (cr.get("hands_played", 0) > 0 or cr.get("discards_used", 0) > 1)
+    )
+    if serpent:
+        # The Serpent: draw only 3 after first action
+        deck: list = gs.get("deck", [])
+        hand_out: list = gs.get("hand", [])
+        for _ in range(min(3, len(deck))):
+            if deck:
+                hand_out.append(deck.pop(0))
+    else:
+        _draw_hand(gs)
+
+    # ------------------------------------------------------------------
+    # 11. Re-debuff drawn cards for boss blind
+    # ------------------------------------------------------------------
+    if blind and getattr(blind, "boss", False) and not getattr(blind, "disabled", False):
+        pareidolia = any(
+            getattr(j, "center_key", None) == "j_pareidolia"
+            and not getattr(j, "debuff", False)
+            for j in jokers
+        )
+        for card in gs.get("hand", []):
+            blind.debuff_card(card, pareidolia=pareidolia)
 
     return gs
+
+
+def _build_discard_snapshot(
+    gs: dict[str, Any], jokers: list
+) -> Any:
+    """Build a GameSnapshot for discard context."""
+    from jackdaw.engine.jokers import GameSnapshot
+
+    cr = gs.get("current_round", {})
+    return GameSnapshot(
+        joker_count=len(jokers),
+        joker_slots=gs.get("joker_slots", 5),
+        money=gs.get("dollars", 0),
+        hands_left=cr.get("hands_left", 0),
+        discards_left=cr.get("discards_left", 0),
+        discards_used=cr.get("discards_used", 0),
+        mail_card_id=cr.get("mail_card", {}).get("id"),
+        skips=gs.get("skips", 0),
+    )
 
 
 def _handle_cash_out(gs: dict[str, Any]) -> dict[str, Any]:
