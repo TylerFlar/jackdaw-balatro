@@ -1957,3 +1957,171 @@ class TestShopOverstock:
         step(gs, PlayHand(card_indices=(0, 1, 2, 3, 4)))
         step(gs, CashOut())
         assert len(gs["shop_cards"]) == 3
+
+
+# ===========================================================================
+# Pack generation tests
+# ===========================================================================
+
+
+class TestPackGeneration:
+    """Verify packs generate real cards when opened."""
+
+    def _enter_shop(self, seed="PACK_GEN"):
+        gs = _init_gs(seed)
+        step(gs, SelectBlind())
+        gs["blind"].chips = 1
+        step(gs, PlayHand(card_indices=(0, 1, 2, 3, 4)))
+        step(gs, CashOut())
+        assert gs["phase"] == GamePhase.SHOP
+        return gs
+
+    def test_open_arcana_generates_tarot_cards(self):
+        from jackdaw.engine.actions import OpenBooster
+
+        gs = self._enter_shop("ARCANA_GEN")
+        # Find an arcana pack or force one
+        from jackdaw.engine.card import Card
+
+        arcana = Card(center_key="p_arcana_normal_1", cost=4)
+        arcana.ability = {"set": "Booster", "name": "Arcana Pack"}
+        gs["shop_boosters"] = [arcana]
+        gs["dollars"] = 20
+        step(gs, OpenBooster(card_index=0))
+        assert gs["phase"] == GamePhase.PACK_OPENING
+        assert len(gs["pack_cards"]) == 3  # arcana normal has extra=3
+        assert gs["pack_choices_remaining"] == 1
+        assert gs["pack_type"] == "Arcana"
+        # Cards should be Tarot/Spectral
+        for c in gs["pack_cards"]:
+            s = c.ability.get("set", "")
+            assert s in ("Tarot", "Spectral"), f"Expected Tarot/Spectral, got {s}"
+
+    def test_open_arcana_deals_hand(self):
+        from jackdaw.engine.actions import OpenBooster
+
+        gs = self._enter_shop("ARCANA_HAND")
+        from jackdaw.engine.card import Card
+
+        arcana = Card(center_key="p_arcana_normal_1", cost=4)
+        arcana.ability = {"set": "Booster", "name": "Arcana Pack"}
+        gs["shop_boosters"] = [arcana]
+        gs["dollars"] = 20
+        deck_before = len(gs["deck"])
+        step(gs, OpenBooster(card_index=0))
+        # Hand should have cards dealt from deck for targeting
+        assert len(gs.get("hand", [])) > 0
+        assert len(gs.get("pack_hand", [])) > 0
+
+    def test_open_buffoon_generates_jokers(self):
+        from jackdaw.engine.actions import OpenBooster
+
+        gs = self._enter_shop("BUFFOON_GEN")
+        from jackdaw.engine.card import Card
+
+        buffoon = Card(center_key="p_buffoon_normal_1", cost=4)
+        buffoon.ability = {"set": "Booster", "name": "Buffoon Pack"}
+        gs["shop_boosters"] = [buffoon]
+        gs["dollars"] = 20
+        step(gs, OpenBooster(card_index=0))
+        assert len(gs["pack_cards"]) == 2  # buffoon normal has extra=2
+        assert gs["pack_type"] == "Buffoon"
+        for c in gs["pack_cards"]:
+            assert c.ability.get("set") == "Joker"
+
+    def test_open_celestial_generates_planets(self):
+        from jackdaw.engine.actions import OpenBooster
+
+        gs = self._enter_shop("CELESTIAL_GEN")
+        from jackdaw.engine.card import Card
+
+        celestial = Card(center_key="p_celestial_normal_1", cost=4)
+        celestial.ability = {"set": "Booster", "name": "Celestial Pack"}
+        gs["shop_boosters"] = [celestial]
+        gs["dollars"] = 20
+        step(gs, OpenBooster(card_index=0))
+        assert len(gs["pack_cards"]) == 3  # celestial normal has extra=3
+        assert gs["pack_type"] == "Celestial"
+        for c in gs["pack_cards"]:
+            assert c.ability.get("set") == "Planet"
+
+    def test_open_standard_generates_playing_cards(self):
+        from jackdaw.engine.actions import OpenBooster
+
+        gs = self._enter_shop("STANDARD_GEN")
+        from jackdaw.engine.card import Card
+
+        standard = Card(center_key="p_standard_normal_1", cost=4)
+        standard.ability = {"set": "Booster", "name": "Standard Pack"}
+        gs["shop_boosters"] = [standard]
+        gs["dollars"] = 20
+        step(gs, OpenBooster(card_index=0))
+        assert len(gs["pack_cards"]) == 3  # standard normal has extra=3
+        assert gs["pack_type"] == "Standard"
+        for c in gs["pack_cards"]:
+            assert c.base is not None  # playing cards have a base
+
+    def test_pick_joker_from_buffoon_adds_to_slots(self):
+        from jackdaw.engine.actions import OpenBooster, PickPackCard
+
+        gs = self._enter_shop("PICK_JOKER")
+        from jackdaw.engine.card import Card
+
+        buffoon = Card(center_key="p_buffoon_normal_1", cost=4)
+        buffoon.ability = {"set": "Booster", "name": "Buffoon Pack"}
+        gs["shop_boosters"] = [buffoon]
+        gs["dollars"] = 20
+        step(gs, OpenBooster(card_index=0))
+        initial_jokers = len(gs.get("jokers", []))
+        step(gs, PickPackCard(card_index=0))
+        assert len(gs["jokers"]) == initial_jokers + 1
+        assert gs["phase"] == GamePhase.SHOP
+
+    def test_pick_playing_card_from_standard_adds_to_deck(self):
+        from jackdaw.engine.actions import OpenBooster, PickPackCard
+
+        gs = self._enter_shop("PICK_PLAYING")
+        from jackdaw.engine.card import Card
+
+        standard = Card(center_key="p_standard_normal_1", cost=4)
+        standard.ability = {"set": "Booster", "name": "Standard Pack"}
+        gs["shop_boosters"] = [standard]
+        gs["dollars"] = 20
+        initial_deck = len(gs["deck"])
+        step(gs, OpenBooster(card_index=0))
+        step(gs, PickPackCard(card_index=0))
+        assert len(gs["deck"]) == initial_deck + 1
+
+    def test_skip_pack_clears_cards(self):
+        from jackdaw.engine.actions import OpenBooster, SkipPack
+
+        gs = self._enter_shop("SKIP_PACK")
+        from jackdaw.engine.card import Card
+
+        arcana = Card(center_key="p_arcana_normal_1", cost=4)
+        arcana.ability = {"set": "Booster", "name": "Arcana Pack"}
+        gs["shop_boosters"] = [arcana]
+        gs["dollars"] = 20
+        step(gs, OpenBooster(card_index=0))
+        assert len(gs["pack_cards"]) > 0
+        step(gs, SkipPack())
+        assert gs["pack_cards"] == []
+        assert gs["phase"] == GamePhase.SHOP
+
+    def test_skip_arcana_returns_hand_to_deck(self):
+        from jackdaw.engine.actions import OpenBooster, SkipPack
+
+        gs = self._enter_shop("SKIP_ARCANA")
+        from jackdaw.engine.card import Card
+
+        arcana = Card(center_key="p_arcana_normal_1", cost=4)
+        arcana.ability = {"set": "Booster", "name": "Arcana Pack"}
+        gs["shop_boosters"] = [arcana]
+        gs["dollars"] = 20
+        deck_before = len(gs["deck"])
+        step(gs, OpenBooster(card_index=0))
+        hand_dealt = len(gs.get("pack_hand", []))
+        step(gs, SkipPack())
+        # Pack hand returned to deck
+        assert len(gs["deck"]) == deck_before
+        assert gs.get("pack_hand", []) == []

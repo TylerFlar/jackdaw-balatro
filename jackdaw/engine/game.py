@@ -862,7 +862,15 @@ def _handle_redeem_voucher(gs: dict[str, Any], idx: int) -> dict[str, Any]:
 
 
 def _handle_open_booster(gs: dict[str, Any], idx: int) -> dict[str, Any]:
-    """Open a booster pack — transition to PACK_OPENING phase."""
+    """Open a booster pack — generate cards and transition to PACK_OPENING.
+
+    1. Deduct cost, remove pack from shop
+    2. Generate pack cards via :func:`generate_pack_cards`
+    3. Set ``pack_cards``, ``pack_choices_remaining``, ``pack_type``
+    4. For Arcana/Spectral: deal hand from deck for targeting
+    5. Fire ``open_booster`` joker context (Hallucination)
+    6. Phase → PACK_OPENING
+    """
     _require_phase(gs, GamePhase.SHOP)
 
     boosters: list = gs.get("shop_boosters", [])
@@ -876,11 +884,44 @@ def _handle_open_booster(gs: dict[str, Any], idx: int) -> dict[str, Any]:
     gs["dollars"] -= pack.cost
     boosters.pop(idx)
 
-    # Store pack info for PACK_OPENING phase
-    # The actual card generation is done by the pack system
-    gs["pack_cards"] = gs.get("pack_cards", [])
-    gs["pack_choices_remaining"] = gs.get("pack_choices_remaining", 1)
+    # Generate pack cards
+    from jackdaw.engine.packs import generate_pack_cards
+    from jackdaw.engine.data.prototypes import BOOSTERS
+
+    pack_key = pack.center_key
+    rng = gs.get("rng")
+    ante = gs.get("round_resets", {}).get("ante", 1)
+
+    if rng and pack_key in BOOSTERS:
+        cards, choose = generate_pack_cards(pack_key, rng, ante, gs)
+        gs["pack_cards"] = cards
+        gs["pack_choices_remaining"] = choose
+        gs["pack_type"] = BOOSTERS[pack_key].kind
+    else:
+        gs["pack_cards"] = []
+        gs["pack_choices_remaining"] = 1
+        gs["pack_type"] = "Unknown"
+
     gs["shop_return_phase"] = GamePhase.SHOP
+
+    # For Arcana/Spectral packs: deal hand from deck for targeting
+    pack_kind = gs.get("pack_type", "")
+    if pack_kind in ("Arcana", "Spectral"):
+        deck: list = gs.get("deck", [])
+        hand: list = gs.get("hand", [])
+        hand_size = gs.get("hand_size", 8)
+        to_deal = min(len(deck), hand_size - len(hand))
+        pack_hand: list = []
+        for _ in range(to_deal):
+            if deck:
+                card = deck.pop(0)
+                pack_hand.append(card)
+        gs["pack_hand"] = pack_hand
+        # These cards serve as targets for Tarot/Spectral use
+        gs["hand"] = hand + pack_hand
+
+    # Fire open_booster joker context (Hallucination creates Tarot)
+    _fire_shop_joker_context(gs, open_booster=True)
 
     gs["phase"] = GamePhase.PACK_OPENING
     return gs
