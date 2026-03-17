@@ -454,3 +454,138 @@ class TestFullMiniGame:
         step(gs, SelectBlind())
         assert gs["phase"] == GamePhase.SELECTING_HAND
         assert gs["round_resets"]["blind_states"]["Big"] == "Current"
+
+
+# ===========================================================================
+# Detailed SelectBlind / SkipBlind tests
+# ===========================================================================
+
+
+class TestSelectBlindDetailed:
+    """Tests for the full setting_blind → boss effects → draw flow."""
+
+    def test_blind_chips_correct_at_ante1(self):
+        gs = _init_gs("CHIPS_TEST")
+        step(gs, SelectBlind())
+        # Small Blind at ante 1 with scaling 1: base=300, mult=1 → 300
+        assert gs["blind"].chips == 300
+
+    def test_hand_has_8_cards(self):
+        gs = _init_gs("HAND8")
+        step(gs, SelectBlind())
+        assert len(gs["hand"]) == 8
+
+    def test_deck_reduced_by_hand_size(self):
+        gs = _init_gs("DECK_REDUCED")
+        initial_deck = len(gs["deck"])
+        step(gs, SelectBlind())
+        assert len(gs["deck"]) == initial_deck - len(gs["hand"])
+
+    def test_cards_debuffed_by_boss(self):
+        """Select a Boss blind that debuffs cards (The Goad debuffs Spades)."""
+        gs = _init_gs("BOSS_DEBUFF")
+        # Skip to Boss
+        step(gs, SkipBlind())  # Small → Big
+        step(gs, SkipBlind())  # Big → Boss
+        # Force boss to bl_goad (debuffs Spades cards)
+        gs["round_resets"]["blind_choices"]["Boss"] = "bl_goad"
+        step(gs, SelectBlind())
+        # Spades cards in hand should be debuffed
+        debuffed = [c for c in gs["hand"] if c.debuff]
+        spades = [c for c in gs["hand"]
+                  if c.base and c.base.suit.value == "Spades"]
+        assert len(debuffed) == len(spades)
+        assert len(debuffed) > 0  # at least one Spades card in hand
+
+    def test_marble_joker_adds_stone_card(self):
+        """Marble Joker adds a Stone Card to deck on setting_blind."""
+        gs = _init_gs("MARBLE_TEST")
+        marble = _joker_card("j_marble")
+        gs["jokers"] = [marble]
+        initial_deck = len(gs["deck"])
+        step(gs, SelectBlind())
+        # Deck should have one more card (Stone Card added, then hand drawn)
+        total_cards = len(gs["deck"]) + len(gs["hand"])
+        assert total_cards == initial_deck + 1
+
+    def test_chicot_disables_boss(self):
+        """Chicot disables boss blind effect."""
+        gs = _init_gs("CHICOT_TEST")
+        chicot = _joker_card("j_chicot")
+        gs["jokers"] = [chicot]
+        # Skip to Boss
+        step(gs, SkipBlind())
+        step(gs, SkipBlind())
+        step(gs, SelectBlind())
+        assert gs["blind"].disabled is True
+
+    def test_the_water_zero_discards(self):
+        """The Water boss sets discards_left to 0."""
+        gs = _init_gs("WATER_TEST")
+        step(gs, SkipBlind())  # Small → Big
+        step(gs, SkipBlind())  # Big → Boss
+        gs["round_resets"]["blind_choices"]["Boss"] = "bl_water"
+        step(gs, SelectBlind())
+        assert gs["current_round"]["discards_left"] == 0
+
+    def test_the_needle_one_hand(self):
+        """The Needle boss reduces hands to 1."""
+        gs = _init_gs("NEEDLE_TEST")
+        step(gs, SkipBlind())
+        step(gs, SkipBlind())
+        gs["round_resets"]["blind_choices"]["Boss"] = "bl_needle"
+        step(gs, SelectBlind())
+        assert gs["current_round"]["hands_left"] == 1
+
+    def test_the_manacle_hand_size_reduced(self):
+        """The Manacle boss reduces hand_size by 1."""
+        gs = _init_gs("MANACLE_TEST")
+        step(gs, SkipBlind())
+        step(gs, SkipBlind())
+        gs["round_resets"]["blind_choices"]["Boss"] = "bl_manacle"
+        initial_size = gs["hand_size"]
+        step(gs, SelectBlind())
+        assert gs["hand_size"] == initial_size - 1
+        assert len(gs["hand"]) == initial_size - 1
+
+
+class TestSkipBlindDetailed:
+    """Tests for tag award + joker context on skip."""
+
+    def test_tag_awarded_on_skip(self):
+        gs = _init_gs("TAG_AWARD")
+        step(gs, SkipBlind())
+        awarded = gs.get("awarded_tags", [])
+        assert len(awarded) >= 1
+        assert awarded[0]["blind"] == "Small"
+
+    def test_economy_tag_gives_dollars(self):
+        """If the skip tag is tag_economy, dollars should increase."""
+        gs = _init_gs("TAG_ECON")
+        # Force the Small tag to be tag_economy
+        gs["round_resets"]["blind_tags"]["Small"] = "tag_economy"
+        initial_dollars = gs["dollars"]
+        step(gs, SkipBlind())
+        # Economy tag gives min(max, current_dollars) — should gain something
+        # if dollars > 0
+        if initial_dollars > 0:
+            assert gs["dollars"] > initial_dollars
+
+    def test_skip_then_select_boss_full_progression(self):
+        """Skip Small, skip Big, select Boss — full ante progression."""
+        gs = _init_gs("FULL_PROG")
+        # Skip Small
+        step(gs, SkipBlind())
+        assert gs["blind_on_deck"] == "Big"
+        assert gs["skips"] == 1
+
+        # Skip Big
+        step(gs, SkipBlind())
+        assert gs["blind_on_deck"] == "Boss"
+        assert gs["skips"] == 2
+
+        # Select Boss
+        step(gs, SelectBlind())
+        assert gs["phase"] == GamePhase.SELECTING_HAND
+        assert gs["blind"].boss is True
+        assert gs["round_resets"]["blind_states"]["Boss"] == "Current"

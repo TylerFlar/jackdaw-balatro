@@ -121,7 +121,21 @@ def _require_phase(gs: dict[str, Any], *phases: GamePhase) -> GamePhase:
 
 
 def _handle_select_blind(gs: dict[str, Any]) -> dict[str, Any]:
-    """Accept the current blind and start the round."""
+    """Accept the current blind and start the round.
+
+    Full sequence matching ``game.lua`` select_blind → ``blind.lua``
+    ``set_blind`` → ``state_events.lua`` ``new_round``:
+
+    1. Create Blind from blind_choices
+    2. Fire joker ``setting_blind`` context (Chicot, Madness, Burglar,
+       Marble Joker, Riff-raff, Cartomancer)
+    3. Process setting_blind side-effects
+    4. Apply boss blind set-time effects (Water, Needle, Manacle,
+       Amber Acorn) + debuff playing cards
+    5. Call ``start_round`` (reset counters, targeting cards)
+    6. Draw hand from deck
+    7. Set phase → SELECTING_HAND
+    """
     _require_phase(gs, GamePhase.BLIND_SELECT)
 
     from jackdaw.engine.blind import Blind
@@ -131,7 +145,9 @@ def _handle_select_blind(gs: dict[str, Any]) -> dict[str, Any]:
     rr = gs["round_resets"]
     blind_key = rr["blind_choices"].get(blind_on_deck, "bl_small")
 
-    # Create the active Blind
+    # ------------------------------------------------------------------
+    # 1. Create the active Blind
+    # ------------------------------------------------------------------
     ante = rr["ante"]
     scaling = gs.get("modifiers", {}).get("scaling", 1)
     ante_scaling = gs["starting_params"].get("ante_scaling", 1.0)
@@ -145,22 +161,73 @@ def _handle_select_blind(gs: dict[str, Any]) -> dict[str, Any]:
     )
     gs["blind"] = blind
     gs["chips"] = 0
-
-    # Update blind state
     rr["blind_states"][blind_on_deck] = "Current"
+    rr["blind"] = blind
 
-    # Start round (deal hands, reset counters)
+    # ------------------------------------------------------------------
+    # 2. Fire joker setting_blind context
+    # ------------------------------------------------------------------
+    jokers: list = gs.get("jokers", [])
+    setting_mutations = _fire_setting_blind(gs, jokers, blind)
+
+    # ------------------------------------------------------------------
+    # 3. Process setting_blind side-effects
+    # ------------------------------------------------------------------
+    _apply_setting_blind_mutations(gs, setting_mutations, jokers)
+
+    # ------------------------------------------------------------------
+    # 4. Start round (reset counters, targeting cards)
+    #    Must run BEFORE boss effects so that The Water/Needle/etc.
+    #    can decrement from the freshly-set values.
+    # ------------------------------------------------------------------
     start_round(gs)
 
-    # Draw hand from deck
-    _draw_hand(gs)
+    # ------------------------------------------------------------------
+    # 5. Boss blind set-time effects (blind.lua:157-209)
+    #    Fires after new_round in Lua (set_blind is called after new_round).
+    # ------------------------------------------------------------------
+    if blind.boss and not blind.disabled:
+        _apply_boss_blind_effects(gs, blind)
 
+    # Debuff playing cards based on boss blind
+    deck: list = gs.get("deck", [])
+    pareidolia = any(
+        getattr(j, "center_key", None) == "j_pareidolia"
+        and not getattr(j, "debuff", False)
+        for j in jokers
+    )
+    for card in deck:
+        blind.debuff_card(card, pareidolia=pareidolia)
+
+    # ------------------------------------------------------------------
+    # 6. Draw hand from deck
+    # ------------------------------------------------------------------
+    _draw_hand(gs)
+    # Debuff hand cards too (they were drawn from the deck)
+    for card in gs.get("hand", []):
+        blind.debuff_card(card, pareidolia=pareidolia)
+
+    # ------------------------------------------------------------------
+    # 7. Phase → SELECTING_HAND
+    # ------------------------------------------------------------------
     gs["phase"] = GamePhase.SELECTING_HAND
     return gs
 
 
 def _handle_skip_blind(gs: dict[str, Any]) -> dict[str, Any]:
-    """Skip the current blind (Small or Big) and advance."""
+    """Skip the current blind (Small or Big) and advance.
+
+    Full sequence matching ``button_callbacks.lua:2740-2775``:
+
+    1. Validate: not Boss
+    2. Increment skips
+    3. Award skip tag from ``blind_tags``
+    4. Fire tag ``apply('immediate')`` for immediate tags
+    5. Fire joker ``skip_blind`` context (Throwback tracking)
+    6. Advance ``blind_on_deck``: Small→Big, Big→Boss
+    7. Check Double Tag: if active, duplicate the just-awarded tag
+    8. Phase stays BLIND_SELECT
+    """
     _require_phase(gs, GamePhase.BLIND_SELECT)
 
     blind_on_deck = gs.get("blind_on_deck", "Small")
@@ -168,10 +235,60 @@ def _handle_skip_blind(gs: dict[str, Any]) -> dict[str, Any]:
         raise IllegalActionError("Cannot skip Boss blind")
 
     rr = gs["round_resets"]
-    rr["blind_states"][blind_on_deck] = "Skipped"
-    gs["skips"] = gs.get("skips", 0) + 1
 
-    # Advance to next blind
+    # ------------------------------------------------------------------
+    # 1-2. Increment skips
+    # ------------------------------------------------------------------
+    gs["skips"] = gs.get("skips", 0) + 1
+    rr["blind_states"][blind_on_deck] = "Skipped"
+
+    # ------------------------------------------------------------------
+    # 3. Award skip tag
+    # ------------------------------------------------------------------
+    blind_tags = rr.get("blind_tags", {})
+    tag_key = blind_tags.get(blind_on_deck)
+    awarded_tags: list[dict[str, Any]] = gs.setdefault("awarded_tags", [])
+
+    if tag_key:
+        from jackdaw.engine.tags import Tag
+
+        tag = Tag(tag_key)
+        tag_result = tag.apply("immediate", gs, rng=gs.get("rng"))
+
+        awarded_tags.append({
+            "key": tag_key,
+            "result": tag_result,
+            "blind": blind_on_deck,
+        })
+
+        # Apply immediate tag effects
+        if tag_result is not None:
+            if tag_result.dollars:
+                gs["dollars"] = gs.get("dollars", 0) + tag_result.dollars
+
+    # ------------------------------------------------------------------
+    # 4. Fire joker skip_blind context
+    # ------------------------------------------------------------------
+    from jackdaw.engine.jokers import GameSnapshot, JokerContext, calculate_joker
+
+    jokers: list = gs.get("jokers", [])
+    game_snap = GameSnapshot(
+        joker_count=len(jokers),
+        money=gs.get("dollars", 0),
+        skips=gs.get("skips", 0),
+    )
+    for joker in jokers:
+        if not getattr(joker, "debuff", False):
+            ctx = JokerContext(
+                skip_blind=True,
+                jokers=jokers,
+                game=game_snap,
+            )
+            calculate_joker(joker, ctx)
+
+    # ------------------------------------------------------------------
+    # 5. Advance blind_on_deck
+    # ------------------------------------------------------------------
     if blind_on_deck == "Small":
         gs["blind_on_deck"] = "Big"
         rr["blind_states"]["Big"] = "Select"
@@ -179,7 +296,12 @@ def _handle_skip_blind(gs: dict[str, Any]) -> dict[str, Any]:
         gs["blind_on_deck"] = "Boss"
         rr["blind_states"]["Boss"] = "Select"
 
-    # Phase stays BLIND_SELECT for next blind choice
+    # ------------------------------------------------------------------
+    # 6. Double Tag check
+    # ------------------------------------------------------------------
+    if tag_key:
+        _check_double_tag(gs, tag_key)
+
     gs["phase"] = GamePhase.BLIND_SELECT
     return gs
 
@@ -655,3 +777,207 @@ def _advance_ante(gs: dict[str, Any]) -> None:
         ante_result = assign_ante_blinds(rr["ante"], rng, gs)
         rr["blind_choices"]["Boss"] = ante_result["blind_choices"]["Boss"]
         gs["current_round"]["voucher"] = ante_result["voucher"]
+
+
+# ---------------------------------------------------------------------------
+# setting_blind joker context
+# ---------------------------------------------------------------------------
+
+
+def _fire_setting_blind(
+    gs: dict[str, Any],
+    jokers: list,
+    blind: Any,
+) -> list[dict[str, Any]]:
+    """Fire ``setting_blind`` on all jokers and collect mutations.
+
+    Returns a list of side-effect dicts from JokerResult.extra.
+    """
+    from jackdaw.engine.jokers import GameSnapshot, JokerContext, calculate_joker
+
+    game_snap = GameSnapshot(
+        joker_count=len(jokers),
+        joker_slots=gs.get("joker_slots", 5),
+        money=gs.get("dollars", 0),
+    )
+
+    mutations: list[dict[str, Any]] = []
+    for joker in jokers:
+        if getattr(joker, "debuff", False):
+            continue
+        ctx = JokerContext(
+            setting_blind=True,
+            blind=blind,
+            jokers=jokers,
+            game=game_snap,
+        )
+        result = calculate_joker(joker, ctx)
+        if result and result.extra:
+            mutations.append(result.extra)
+
+    return mutations
+
+
+def _apply_setting_blind_mutations(
+    gs: dict[str, Any],
+    mutations: list[dict[str, Any]],
+    jokers: list,
+) -> None:
+    """Process side-effects from setting_blind jokers."""
+    rng = gs.get("rng")
+
+    for mut in mutations:
+        # Chicot / Luchador: disable blind
+        if mut.get("disable_blind"):
+            blind = gs.get("blind")
+            if blind:
+                blind.disabled = True
+                # Un-debuff all playing cards
+                for card in gs.get("deck", []):
+                    card.debuff = False
+
+        # Madness: destroy random joker (not self)
+        if mut.get("destroy_random_joker") and len(jokers) > 1:
+            if rng:
+                # Pick a random non-self joker to destroy
+                import random
+
+                candidates = [j for j in jokers if j is not jokers[0]]
+                if candidates:
+                    seed_val = rng.seed("madness")
+                    target, _ = rng.element(candidates, seed_val)
+                    jokers.remove(target)
+
+        # Burglar: set hands / remove discards
+        if "set_hands" in mut:
+            cr = gs.get("current_round", {})
+            cr["hands_left"] = cr.get("hands_left", 0) + mut["set_hands"]
+        if "set_discards" in mut:
+            cr = gs.get("current_round", {})
+            cr["discards_left"] = mut["set_discards"]
+
+        # Marble Joker / Certificate / Riff-raff / Cartomancer: create cards
+        if "create" in mut:
+            create = mut["create"]
+            ctype = create.get("type", "")
+            if ctype == "playing_card":
+                # Marble Joker: add Stone Card; Certificate: add card with seal
+                deck: list = gs.setdefault("deck", [])
+                from jackdaw.engine.card import Card
+
+                c = Card()
+                enhancement = create.get("enhancement")
+                if enhancement:
+                    c.ability = {"effect": enhancement, "set": "Enhanced"}
+                if create.get("seal"):
+                    c.seal = "Gold"  # Certificate default
+                deck.append(c)
+            elif ctype == "Joker":
+                # Riff-raff: create Common jokers
+                count = create.get("count", 1)
+                for _ in range(count):
+                    from jackdaw.engine.card import Card as _Card
+
+                    j = _Card(center_key="j_joker")
+                    j.ability = {"set": "Joker", "effect": "", "name": "Joker"}
+                    jokers.append(j)
+            elif ctype == "Tarot":
+                # Cartomancer: create Tarot
+                consumables: list = gs.setdefault("consumables", [])
+                from jackdaw.engine.card import Card as _Card2
+
+                t = _Card2(center_key="c_fool")
+                t.ability = {"set": "Tarot", "effect": ""}
+                consumables.append(t)
+
+
+# ---------------------------------------------------------------------------
+# Boss blind set-time effects
+# ---------------------------------------------------------------------------
+
+
+def _apply_boss_blind_effects(gs: dict[str, Any], blind: Any) -> None:
+    """Apply boss blind effects at set-time (blind.lua:157-209).
+
+    These are one-time mutations that happen when the blind is set,
+    before the round starts.
+    """
+    cr = gs.get("current_round", {})
+    name = getattr(blind, "name", "")
+
+    # The Water: remove all discards
+    if name == "The Water":
+        current_discards = cr.get("discards_left", 0)
+        blind.discards_sub = current_discards
+        cr["discards_left"] = 0
+
+    # The Needle: reduce to 1 hand
+    elif name == "The Needle":
+        rr = gs.get("round_resets", {})
+        current_hands = rr.get("hands", 4)
+        blind.hands_sub = current_hands - 1
+        cr["hands_left"] = max(1, cr.get("hands_left", current_hands) - blind.hands_sub)
+
+    # The Manacle: -1 hand size
+    elif name == "The Manacle":
+        gs["hand_size"] = gs.get("hand_size", 8) - 1
+
+    # Amber Acorn: shuffle jokers (flip + randomize order)
+    elif name == "Amber Acorn":
+        jokers: list = gs.get("jokers", [])
+        if jokers:
+            for j in jokers:
+                j.facing = "back"
+            rng = gs.get("rng")
+            if rng and len(jokers) > 1:
+                seed_val = rng.seed("aajk")
+                rng.shuffle(jokers, seed_val)
+
+    # The Eye: reset hand tracking
+    elif name == "The Eye":
+        blind.hands = {ht: False for ht in [
+            "Flush Five", "Flush House", "Five of a Kind",
+            "Straight Flush", "Four of a Kind", "Full House",
+            "Flush", "Straight", "Three of a Kind",
+            "Two Pair", "Pair", "High Card",
+        ]}
+
+    # The Mouth: reset only_hand
+    elif name == "The Mouth":
+        blind.only_hand = False
+
+
+# ---------------------------------------------------------------------------
+# Double Tag check
+# ---------------------------------------------------------------------------
+
+
+def _check_double_tag(gs: dict[str, Any], awarded_tag_key: str) -> None:
+    """If player has a Double Tag active, duplicate the just-awarded tag."""
+    tags: list = gs.get("tags", [])
+    if not tags:
+        return
+
+    # Check if any active tag is tag_double
+    from jackdaw.engine.tags import Tag
+
+    for i, tag_entry in enumerate(tags):
+        tag_key = tag_entry if isinstance(tag_entry, str) else getattr(tag_entry, "key", "")
+        if tag_key == "tag_double" and awarded_tag_key != "tag_double":
+            # Fire the duplicate
+            dup_tag = Tag(awarded_tag_key)
+            dup_result = dup_tag.apply("immediate", gs, rng=gs.get("rng"))
+
+            awarded_tags: list = gs.setdefault("awarded_tags", [])
+            awarded_tags.append({
+                "key": awarded_tag_key,
+                "result": dup_result,
+                "blind": "double",
+            })
+
+            if dup_result and dup_result.dollars:
+                gs["dollars"] = gs.get("dollars", 0) + dup_result.dollars
+
+            # Remove the Double Tag (consumed)
+            tags.pop(i)
+            break
