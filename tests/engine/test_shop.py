@@ -630,10 +630,10 @@ class TestPopulateShopDeterminism:
         assert [c.center_key for c in r1["boosters"]] == [c.center_key for c in r2["boosters"]]
 
     def test_known_seed_joker_names(self):
-        """PS_KNOWN → Banner, Mail-In Rebate (verified against engine output)."""
+        """PS_KNOWN → Chaos the Clown, Mail-In Rebate (verified against engine output)."""
         result = populate_shop(PseudoRandom("SHOPTEST"), 1, _base_gs())
         names = [c.ability.get("name") for c in result["jokers"]]
-        assert names == ["Banner", "Mail-In Rebate"]
+        assert names == ["Chaos the Clown", "Mail-In Rebate"]
 
     def test_known_seed_booster_first_is_buffoon(self):
         result = populate_shop(PseudoRandom("SHOPTEST"), 1, _base_gs())

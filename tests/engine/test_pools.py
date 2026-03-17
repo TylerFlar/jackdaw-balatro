@@ -419,18 +419,18 @@ class TestTagPool:
         assert "tag_buffoon" in pool
         assert "tag_handy" in pool
 
-    def test_tag_requires_voucher_excluded_without_voucher(self):
-        # tag_rare requires j_blueprint (a joker, treated as requires key)
+    def test_tag_requires_excluded_without_discovered(self):
+        # tag_rare requires j_blueprint — undiscovered by default
         pool, _ = get_current_pool("Tag", _RNG([]), ante=1)
         assert "tag_rare" not in pool
 
-    def test_tag_requires_voucher_included_with_voucher(self):
-        pool, _ = get_current_pool("Tag", _RNG([]), ante=2, used_vouchers={"j_blueprint"})
+    def test_tag_requires_included_with_discovered(self):
+        pool, _ = get_current_pool("Tag", _RNG([]), ante=2, discovered={"j_blueprint"})
         assert "tag_rare" in pool
 
     def test_tag_foil_requires_edition(self):
         pool_without, _ = get_current_pool("Tag", _RNG([]), ante=2)
-        pool_with, _ = get_current_pool("Tag", _RNG([]), ante=2, used_vouchers={"e_foil"})
+        pool_with, _ = get_current_pool("Tag", _RNG([]), ante=2, discovered={"e_foil"})
         assert "tag_foil" not in pool_without
         assert "tag_foil" in pool_with
 
@@ -620,16 +620,19 @@ class TestSelectFromPoolResample:
         pool, pk = get_current_pool("Joker", rng, ante=1, rarity=1, banned_keys={normal_key})
         result = select_from_pool(pool, rng, pk, ante=1)
 
-        # Reproduce: advance initial seed, then manually try _resample1, _resample2, …
+        # Reproduce: advance initial seed, then manually try resamples.
+        # full_key = pool_key + append + str(ante) = pk_m + "" + "1"
+        # Lua resample starts at it=2: full_key + "_resample" + str(it)
         rng_m = PseudoRandom("RESAMPLE_STREAM")
         pool_m, pk_m = get_current_pool("Joker", rng_m, ante=1, rarity=1, banned_keys={normal_key})
+        full_key = pk_m + "1"  # pool_key + append("") + str(ante=1)
         # Initial draw (hits UNAVAILABLE)
-        sv0 = rng_m.seed(pk_m + "1")
+        sv0 = rng_m.seed(full_key)
         rng_m.element(pool_m, sv0)  # consume / discard
-        # Try resamples until we find a valid key
+        # Try resamples (Lua starts it=2)
         manual_result = UNAVAILABLE
-        for i in range(1, 21):
-            sv = rng_m.seed(pk_m + "_resample" + str(i))
+        for it in range(2, 22):
+            sv = rng_m.seed(full_key + "_resample" + str(it))
             v, _ = rng_m.element(pool_m, sv)
             if v != UNAVAILABLE:
                 manual_result = v

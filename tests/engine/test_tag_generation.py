@@ -62,12 +62,12 @@ class TestAssignAnteBlindsKnownSeed:
     def test_determinism_check_seed_ante1(self):
         #   PseudoRandom("DETERMINISM_CHECK"), ante=1
         #   boss = bl_club, voucher = v_blank
-        #   small = tag_economy, big = tag_coupon
+        #   small = tag_boss, big = tag_coupon
         rng = PseudoRandom("DETERMINISM_CHECK")
         result = assign_ante_blinds(1, rng, {})
         assert result["blind_choices"]["Boss"] == "bl_club"
         assert result["voucher"] == "v_blank"
-        assert result["blind_tags"]["Small"] == "tag_economy"
+        assert result["blind_tags"]["Small"] == "tag_boss"
         assert result["blind_tags"]["Big"] == "tag_coupon"
 
     def test_same_seed_always_same_result(self):
@@ -272,15 +272,14 @@ class TestRequiresGating:
         assert "tag_rare" not in seen
 
     def test_tag_rare_can_appear_with_blueprint(self):
-        """tag_rare is eligible when j_blueprint is in used_vouchers."""
-
-        gs_with_blueprint = {"used_vouchers": {"j_blueprint"}}
+        """tag_rare is eligible when j_blueprint is discovered."""
+        gs_with_blueprint = {"discovered": {"j_blueprint"}}
         seen: set[str] = set()
         for i in range(40):
             r = generate_blind_tags(1, PseudoRandom(f"RARE{i}"), gs_with_blueprint)
             seen.add(r["Small"])
             seen.add(r["Big"])
-        assert "tag_rare" in seen, "tag_rare should appear when j_blueprint unlocked"
+        assert "tag_rare" in seen, "tag_rare should appear when j_blueprint discovered"
 
 
 # ---------------------------------------------------------------------------

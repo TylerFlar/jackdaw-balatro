@@ -58,6 +58,7 @@ def get_current_pool(
     playing_card_count: int = 52,
     played_hand_types: set[str] | None = None,
     shop_vouchers: set[str] | None = None,
+    discovered: set[str] | None = None,
 ) -> tuple[list[str], str]:
     """Return ``(pool, seed_key)`` for the given pool type.
 
@@ -150,6 +151,7 @@ def get_current_pool(
             deck_enhancements=deck_enhancements,
             played_hand_types=played_hand_types,
             shop_vouchers=shop_vouchers,
+            discovered=discovered,
         )
         result.append(entry)
 
@@ -277,18 +279,23 @@ def select_from_pool(
         The selected center key, or the fallback key for this pool type if
         every resample attempt also hits ``UNAVAILABLE``.
     """
-    # Initial draw: stream key matches Lua's pseudoseed(_pool_key) where
-    # _pool_key already encodes pool_type + append; we add ante for
-    # per-ante stream independence.
-    seed_val = rng.seed(pool_key + append + str(ante))
+    # The full seed key matches Lua's _pool_key which is
+    # pool_type + append + str(ante) (returned by get_current_pool at
+    # common_events.lua:2052).  E.g. 'Tag1', 'Joker1sho1', 'Voucher1'.
+    full_key = pool_key + append + str(ante)
+
+    # Initial draw: pseudoseed(full_key)
+    seed_val = rng.seed(full_key)
     value, _ = rng.element(pool, seed_val)
 
     if value != UNAVAILABLE:
         return value
 
-    # Resample loop (up to _MAX_RESAMPLES attempts)
-    for i in range(1, _MAX_RESAMPLES + 1):
-        seed_val = rng.seed(pool_key + "_resample" + str(i))
+    # Resample loop (up to _MAX_RESAMPLES attempts).
+    # Lua starts it=1, increments BEFORE use: first resample is it=2.
+    # Key: _pool_key..'_resample'..it  (e.g. 'Tag1_resample2')
+    for it in range(2, _MAX_RESAMPLES + 2):
+        seed_val = rng.seed(full_key + "_resample" + str(it))
         value, _ = rng.element(pool, seed_val)
         if value != UNAVAILABLE:
             return value
@@ -349,6 +356,7 @@ def _filter_key(
     deck_enhancements: set[str],
     played_hand_types: set[str],
     shop_vouchers: set[str],
+    discovered: set[str] | None = None,
 ) -> str:
     """Return *key* if it passes all filters, otherwise ``UNAVAILABLE``."""
 
@@ -379,7 +387,7 @@ def _filter_key(
         return _filter_planet(key=key, played_hand_types=played_hand_types)
 
     if pool_type == "Tag":
-        return _filter_tag(key=key, ante=ante, used_vouchers=used_vouchers)
+        return _filter_tag(key=key, ante=ante, used_vouchers=used_vouchers, discovered=discovered)
 
     # Tarot / Enhanced / unknown → no extra filtering beyond banned_keys
     return key
@@ -497,7 +505,13 @@ def _filter_planet(*, key: str, played_hand_types: set[str]) -> str:
     return key
 
 
-def _filter_tag(*, key: str, ante: int, used_vouchers: set[str]) -> str:
+def _filter_tag(
+    *,
+    key: str,
+    ante: int,
+    used_vouchers: set[str],
+    discovered: set[str] | None = None,
+) -> str:
     proto = TAGS.get(key)
     if proto is None:
         return UNAVAILABLE
@@ -506,8 +520,15 @@ def _filter_tag(*, key: str, ante: int, used_vouchers: set[str]) -> str:
     if proto.min_ante is not None and ante < proto.min_ante:
         return UNAVAILABLE
 
-    # requires: a specific voucher must be purchased
-    if proto.requires and proto.requires not in used_vouchers:
-        return UNAVAILABLE
+    # requires: in Lua, this checks G.P_CENTERS[v.requires].discovered —
+    # whether the item has been SEEN in a previous run, not purchased.
+    # If discovered is None, all items are treated as undiscovered
+    # (matching a fresh profile).  Pass discovered={"all"} to treat
+    # all items as discovered.
+    if proto.requires:
+        if discovered is None:
+            return UNAVAILABLE
+        if "all" not in discovered and proto.requires not in discovered:
+            return UNAVAILABLE
 
     return key
