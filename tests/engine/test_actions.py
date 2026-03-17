@@ -35,7 +35,9 @@ from jackdaw.engine.actions import (
     SkipPack,
     SortHand,
     UseConsumable,
+    get_legal_actions,
 )
+from jackdaw.engine.card import Card
 
 
 # ---------------------------------------------------------------------------
@@ -250,3 +252,438 @@ class TestActionUnion:
         """isinstance works with PEP 604 union on Python 3.10+."""
         assert isinstance(PlayHand(card_indices=(0,)), PlayHand)
         assert isinstance(CashOut(), CashOut)
+
+
+# ===========================================================================
+# get_legal_actions
+# ===========================================================================
+
+
+def _card(key: str = "c_base", cost: int = 0, **kw) -> Card:
+    """Quick Card factory for testing."""
+    c = Card(center_key=key, cost=cost)
+    c.ability = kw.pop("ability", {"set": "", "effect": ""})
+    for k, v in kw.items():
+        setattr(c, k, v)
+    return c
+
+
+def _joker_card(key: str = "j_joker", cost: int = 5, **kw) -> Card:
+    c = Card(center_key=key, cost=cost)
+    c.ability = {"set": "Joker", "effect": "", "name": key}
+    for k, v in kw.items():
+        setattr(c, k, v)
+    return c
+
+
+# ---------------------------------------------------------------------------
+# BLIND_SELECT
+# ---------------------------------------------------------------------------
+
+
+class TestLegalBlindSelect:
+    def test_small_blind_select_and_skip(self):
+        gs = {"phase": GamePhase.BLIND_SELECT, "blind_on_deck": "Small"}
+        actions = get_legal_actions(gs)
+        types = {type(a) for a in actions}
+        assert SelectBlind in types
+        assert SkipBlind in types
+
+    def test_big_blind_select_and_skip(self):
+        gs = {"phase": GamePhase.BLIND_SELECT, "blind_on_deck": "Big"}
+        actions = get_legal_actions(gs)
+        types = {type(a) for a in actions}
+        assert SelectBlind in types
+        assert SkipBlind in types
+
+    def test_boss_blind_no_skip(self):
+        gs = {"phase": GamePhase.BLIND_SELECT, "blind_on_deck": "Boss"}
+        actions = get_legal_actions(gs)
+        types = {type(a) for a in actions}
+        assert SelectBlind in types
+        assert SkipBlind not in types
+
+
+# ---------------------------------------------------------------------------
+# SELECTING_HAND
+# ---------------------------------------------------------------------------
+
+
+class TestLegalSelectingHand:
+    def test_play_and_discard_available(self):
+        hand = [_card() for _ in range(8)]
+        gs = {
+            "phase": GamePhase.SELECTING_HAND,
+            "current_round": {"hands_left": 3, "discards_left": 2},
+            "hand": hand,
+            "jokers": [],
+            "consumables": [],
+        }
+        actions = get_legal_actions(gs)
+        types = {type(a) for a in actions}
+        assert PlayHand in types
+        assert Discard in types
+
+    def test_no_hands_left_no_play(self):
+        gs = {
+            "phase": GamePhase.SELECTING_HAND,
+            "current_round": {"hands_left": 0, "discards_left": 2},
+            "hand": [_card()],
+            "jokers": [],
+            "consumables": [],
+        }
+        actions = get_legal_actions(gs)
+        types = {type(a) for a in actions}
+        assert PlayHand not in types
+        assert Discard in types
+
+    def test_no_discards_left_no_discard(self):
+        gs = {
+            "phase": GamePhase.SELECTING_HAND,
+            "current_round": {"hands_left": 3, "discards_left": 0},
+            "hand": [_card()],
+            "jokers": [],
+            "consumables": [],
+        }
+        actions = get_legal_actions(gs)
+        types = {type(a) for a in actions}
+        assert PlayHand in types
+        assert Discard not in types
+
+    def test_empty_hand_nothing(self):
+        gs = {
+            "phase": GamePhase.SELECTING_HAND,
+            "current_round": {"hands_left": 3, "discards_left": 2},
+            "hand": [],
+            "jokers": [],
+            "consumables": [],
+        }
+        actions = get_legal_actions(gs)
+        types = {type(a) for a in actions}
+        assert PlayHand not in types
+        assert Discard not in types
+
+    def test_sort_available_with_multiple_cards(self):
+        gs = {
+            "phase": GamePhase.SELECTING_HAND,
+            "current_round": {"hands_left": 1, "discards_left": 0},
+            "hand": [_card(), _card()],
+            "jokers": [],
+            "consumables": [],
+        }
+        actions = get_legal_actions(gs)
+        sort_actions = [a for a in actions if isinstance(a, SortHand)]
+        assert len(sort_actions) == 2
+        modes = {a.mode for a in sort_actions}
+        assert modes == {"rank", "suit"}
+
+    def test_reorder_jokers_with_multiple(self):
+        gs = {
+            "phase": GamePhase.SELECTING_HAND,
+            "current_round": {"hands_left": 1, "discards_left": 0},
+            "hand": [_card()],
+            "jokers": [_joker_card(), _joker_card()],
+            "consumables": [],
+        }
+        actions = get_legal_actions(gs)
+        assert any(isinstance(a, ReorderJokers) for a in actions)
+
+
+# ---------------------------------------------------------------------------
+# SHOP
+# ---------------------------------------------------------------------------
+
+
+class TestLegalShop:
+    def test_buy_affordable_joker(self):
+        joker = _joker_card(cost=5)
+        gs = {
+            "phase": GamePhase.SHOP,
+            "dollars": 10,
+            "jokers": [],
+            "joker_slots": 5,
+            "consumables": [],
+            "consumable_slots": 2,
+            "shop_cards": [joker],
+            "shop_vouchers": [],
+            "shop_boosters": [],
+            "current_round": {"reroll_cost": 5, "free_rerolls": 0},
+        }
+        actions = get_legal_actions(gs)
+        buys = [a for a in actions if isinstance(a, BuyCard)]
+        assert len(buys) == 1
+        assert buys[0].shop_index == 0
+
+    def test_cannot_buy_too_expensive(self):
+        joker = _joker_card(cost=15)
+        gs = {
+            "phase": GamePhase.SHOP,
+            "dollars": 10,
+            "jokers": [],
+            "joker_slots": 5,
+            "consumables": [],
+            "consumable_slots": 2,
+            "shop_cards": [joker],
+            "shop_vouchers": [],
+            "shop_boosters": [],
+            "current_round": {"reroll_cost": 5, "free_rerolls": 0},
+        }
+        actions = get_legal_actions(gs)
+        buys = [a for a in actions if isinstance(a, BuyCard)]
+        assert len(buys) == 0
+
+    def test_full_joker_slots_blocks_buy(self):
+        shop_joker = _joker_card(cost=3)
+        owned = [_joker_card() for _ in range(5)]
+        gs = {
+            "phase": GamePhase.SHOP,
+            "dollars": 20,
+            "jokers": owned,
+            "joker_slots": 5,
+            "consumables": [],
+            "consumable_slots": 2,
+            "shop_cards": [shop_joker],
+            "shop_vouchers": [],
+            "shop_boosters": [],
+            "current_round": {"reroll_cost": 5, "free_rerolls": 0},
+        }
+        actions = get_legal_actions(gs)
+        buys = [a for a in actions if isinstance(a, BuyCard)]
+        assert len(buys) == 0
+
+    def test_negative_edition_bypasses_slot_limit(self):
+        shop_joker = _joker_card(cost=3, edition={"negative": True})
+        owned = [_joker_card() for _ in range(5)]
+        gs = {
+            "phase": GamePhase.SHOP,
+            "dollars": 20,
+            "jokers": owned,
+            "joker_slots": 5,
+            "consumables": [],
+            "consumable_slots": 2,
+            "shop_cards": [shop_joker],
+            "shop_vouchers": [],
+            "shop_boosters": [],
+            "current_round": {"reroll_cost": 5, "free_rerolls": 0},
+        }
+        actions = get_legal_actions(gs)
+        buys = [a for a in actions if isinstance(a, BuyCard)]
+        assert len(buys) == 1
+
+    def test_sell_non_eternal_joker(self):
+        gs = {
+            "phase": GamePhase.SHOP,
+            "dollars": 0,
+            "jokers": [_joker_card(eternal=False)],
+            "joker_slots": 5,
+            "consumables": [],
+            "consumable_slots": 2,
+            "shop_cards": [],
+            "shop_vouchers": [],
+            "shop_boosters": [],
+            "current_round": {"reroll_cost": 5, "free_rerolls": 0},
+        }
+        actions = get_legal_actions(gs)
+        sells = [a for a in actions if isinstance(a, SellCard) and a.area == "jokers"]
+        assert len(sells) == 1
+
+    def test_eternal_joker_not_sellable(self):
+        gs = {
+            "phase": GamePhase.SHOP,
+            "dollars": 0,
+            "jokers": [_joker_card(eternal=True)],
+            "joker_slots": 5,
+            "consumables": [],
+            "consumable_slots": 2,
+            "shop_cards": [],
+            "shop_vouchers": [],
+            "shop_boosters": [],
+            "current_round": {"reroll_cost": 5, "free_rerolls": 0},
+        }
+        actions = get_legal_actions(gs)
+        sells = [a for a in actions if isinstance(a, SellCard) and a.area == "jokers"]
+        assert len(sells) == 0
+
+    def test_reroll_affordable(self):
+        gs = {
+            "phase": GamePhase.SHOP,
+            "dollars": 5,
+            "jokers": [],
+            "joker_slots": 5,
+            "consumables": [],
+            "consumable_slots": 2,
+            "shop_cards": [],
+            "shop_vouchers": [],
+            "shop_boosters": [],
+            "current_round": {"reroll_cost": 5, "free_rerolls": 0},
+        }
+        actions = get_legal_actions(gs)
+        assert any(isinstance(a, Reroll) for a in actions)
+
+    def test_reroll_too_expensive(self):
+        gs = {
+            "phase": GamePhase.SHOP,
+            "dollars": 2,
+            "jokers": [],
+            "joker_slots": 5,
+            "consumables": [],
+            "consumable_slots": 2,
+            "shop_cards": [],
+            "shop_vouchers": [],
+            "shop_boosters": [],
+            "current_round": {"reroll_cost": 5, "free_rerolls": 0},
+        }
+        actions = get_legal_actions(gs)
+        assert not any(isinstance(a, Reroll) for a in actions)
+
+    def test_free_reroll_available(self):
+        gs = {
+            "phase": GamePhase.SHOP,
+            "dollars": 0,
+            "jokers": [],
+            "joker_slots": 5,
+            "consumables": [],
+            "consumable_slots": 2,
+            "shop_cards": [],
+            "shop_vouchers": [],
+            "shop_boosters": [],
+            "current_round": {"reroll_cost": 5, "free_rerolls": 1},
+        }
+        actions = get_legal_actions(gs)
+        assert any(isinstance(a, Reroll) for a in actions)
+
+    def test_next_round_always_available(self):
+        gs = {
+            "phase": GamePhase.SHOP,
+            "dollars": 0,
+            "jokers": [],
+            "joker_slots": 5,
+            "consumables": [],
+            "consumable_slots": 2,
+            "shop_cards": [],
+            "shop_vouchers": [],
+            "shop_boosters": [],
+            "current_round": {"reroll_cost": 5, "free_rerolls": 0},
+        }
+        actions = get_legal_actions(gs)
+        assert any(isinstance(a, NextRound) for a in actions)
+
+    def test_buy_voucher(self):
+        voucher = _card("v_grabber", cost=10, ability={"set": "Voucher"})
+        gs = {
+            "phase": GamePhase.SHOP,
+            "dollars": 10,
+            "jokers": [],
+            "joker_slots": 5,
+            "consumables": [],
+            "consumable_slots": 2,
+            "shop_cards": [],
+            "shop_vouchers": [voucher],
+            "shop_boosters": [],
+            "current_round": {"reroll_cost": 5, "free_rerolls": 0},
+        }
+        actions = get_legal_actions(gs)
+        redeems = [a for a in actions if isinstance(a, RedeemVoucher)]
+        assert len(redeems) == 1
+
+    def test_open_booster(self):
+        pack = _card("p_arcana_normal_1", cost=4, ability={"set": "Booster"})
+        gs = {
+            "phase": GamePhase.SHOP,
+            "dollars": 5,
+            "jokers": [],
+            "joker_slots": 5,
+            "consumables": [],
+            "consumable_slots": 2,
+            "shop_cards": [],
+            "shop_vouchers": [],
+            "shop_boosters": [pack],
+            "current_round": {"reroll_cost": 5, "free_rerolls": 0},
+        }
+        actions = get_legal_actions(gs)
+        opens = [a for a in actions if isinstance(a, OpenBooster)]
+        assert len(opens) == 1
+
+
+# ---------------------------------------------------------------------------
+# PACK_OPENING
+# ---------------------------------------------------------------------------
+
+
+class TestLegalPackOpening:
+    def test_pick_and_skip(self):
+        gs = {
+            "phase": GamePhase.PACK_OPENING,
+            "pack_cards": [_card(), _card(), _card()],
+            "pack_choices_remaining": 1,
+        }
+        actions = get_legal_actions(gs)
+        picks = [a for a in actions if isinstance(a, PickPackCard)]
+        assert len(picks) == 3
+        assert any(isinstance(a, SkipPack) for a in actions)
+
+    def test_no_choices_remaining(self):
+        gs = {
+            "phase": GamePhase.PACK_OPENING,
+            "pack_cards": [_card(), _card()],
+            "pack_choices_remaining": 0,
+        }
+        actions = get_legal_actions(gs)
+        picks = [a for a in actions if isinstance(a, PickPackCard)]
+        assert len(picks) == 0
+        assert any(isinstance(a, SkipPack) for a in actions)
+
+
+# ---------------------------------------------------------------------------
+# ROUND_EVAL
+# ---------------------------------------------------------------------------
+
+
+class TestLegalRoundEval:
+    def test_cashout(self):
+        gs = {"phase": GamePhase.ROUND_EVAL, "consumables": []}
+        actions = get_legal_actions(gs)
+        assert any(isinstance(a, CashOut) for a in actions)
+
+
+# ---------------------------------------------------------------------------
+# GAME_OVER
+# ---------------------------------------------------------------------------
+
+
+class TestLegalGameOver:
+    def test_empty(self):
+        gs = {"phase": GamePhase.GAME_OVER}
+        assert get_legal_actions(gs) == []
+
+
+# ---------------------------------------------------------------------------
+# Edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestLegalEdgeCases:
+    def test_no_phase_returns_empty(self):
+        assert get_legal_actions({}) == []
+
+    def test_string_phase_works(self):
+        gs = {"phase": "game_over"}
+        assert get_legal_actions(gs) == []
+
+    def test_sell_consumable_in_shop(self):
+        tarot = _card("c_fool", ability={"set": "Tarot"})
+        gs = {
+            "phase": GamePhase.SHOP,
+            "dollars": 0,
+            "jokers": [],
+            "joker_slots": 5,
+            "consumables": [tarot],
+            "consumable_slots": 2,
+            "shop_cards": [],
+            "shop_vouchers": [],
+            "shop_boosters": [],
+            "current_round": {"reroll_cost": 5, "free_rerolls": 0},
+        }
+        actions = get_legal_actions(gs)
+        sells = [a for a in actions if isinstance(a, SellCard) and a.area == "consumables"]
+        assert len(sells) == 1

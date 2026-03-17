@@ -33,6 +33,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from jackdaw.engine.card import Card
 
 
 # ---------------------------------------------------------------------------
@@ -247,3 +251,237 @@ Action = (
     | SortHand
     | ReorderJokers
 )
+
+
+# ---------------------------------------------------------------------------
+# Legal action generation
+# ---------------------------------------------------------------------------
+
+
+def get_legal_actions(game_state: dict[str, Any]) -> list[Action]:
+    """Return every valid action from the current game state.
+
+    The SELECTING_HAND phase has a combinatorial action space —
+    ``PlayHand`` and ``Discard`` each admit up to C(n, 5) card
+    subsets.  This function does **not** enumerate every possible
+    subset.  Instead it returns *marker* actions with empty
+    ``card_indices``, signalling that play/discard is legal.
+    The Gym env (M13) will handle subset enumeration or
+    parameterised action spaces.
+
+    Parameters
+    ----------
+    game_state:
+        The full runtime state dict.  Must include:
+
+        * ``phase`` (:class:`GamePhase`) — current game phase.
+        * ``current_round`` (dict) — ``hands_left``, ``discards_left``,
+          ``reroll_cost``, ``free_rerolls``.
+        * ``dollars`` (int) — current bank balance.
+        * ``round_resets`` (dict) — ``blind_states`` dict.
+        * ``blind_on_deck`` (str | None) — ``"Small"``/``"Big"``/``"Boss"``.
+        * ``hand`` (list[Card]) — cards in the player's hand.
+        * ``jokers`` (list[Card]) — active joker cards.
+        * ``consumables`` (list[Card]) — owned consumable cards.
+        * ``joker_slots`` (int) — max joker capacity.
+        * ``consumable_slots`` (int) — max consumable capacity.
+        * ``shop_cards`` (list[Card]) — buyable cards in shop.
+        * ``shop_vouchers`` (list[Card]) — buyable vouchers.
+        * ``shop_boosters`` (list[Card]) — buyable booster packs.
+        * ``pack_cards`` (list[Card]) — cards in an opened pack.
+        * ``pack_choices_remaining`` (int) — picks left in pack.
+
+    Returns
+    -------
+    list[Action]
+        All legal actions.  Empty for ``GAME_OVER``.
+    """
+    phase = game_state.get("phase")
+    if phase is None:
+        return []
+
+    if isinstance(phase, str):
+        phase = GamePhase(phase)
+
+    if phase == GamePhase.GAME_OVER:
+        return []
+    if phase == GamePhase.BLIND_SELECT:
+        return _legal_blind_select(game_state)
+    if phase == GamePhase.SELECTING_HAND:
+        return _legal_selecting_hand(game_state)
+    if phase == GamePhase.ROUND_EVAL:
+        return _legal_round_eval(game_state)
+    if phase == GamePhase.SHOP:
+        return _legal_shop(game_state)
+    if phase == GamePhase.PACK_OPENING:
+        return _legal_pack_opening(game_state)
+    return []
+
+
+# ---------------------------------------------------------------------------
+# Per-phase helpers
+# ---------------------------------------------------------------------------
+
+
+def _legal_blind_select(gs: dict[str, Any]) -> list[Action]:
+    actions: list[Action] = []
+    blind_on_deck = gs.get("blind_on_deck", "Small")
+
+    actions.append(SelectBlind())
+
+    # Can skip Small and Big, but not Boss
+    if blind_on_deck in ("Small", "Big"):
+        actions.append(SkipBlind())
+
+    # Consumables usable during blind select
+    actions.extend(_usable_consumables(gs))
+    return actions
+
+
+def _legal_selecting_hand(gs: dict[str, Any]) -> list[Action]:
+    actions: list[Action] = []
+    cr = gs.get("current_round", {})
+    hand: list[Card] = gs.get("hand", [])
+
+    # PlayHand: marker action — at least 1 card in hand + hands remaining
+    if hand and cr.get("hands_left", 0) > 0:
+        actions.append(PlayHand(card_indices=()))
+
+    # Discard: marker action — at least 1 card in hand + discards remaining
+    if hand and cr.get("discards_left", 0) > 0:
+        actions.append(Discard(card_indices=()))
+
+    # Sort
+    if len(hand) > 1:
+        actions.append(SortHand(mode="rank"))
+        actions.append(SortHand(mode="suit"))
+
+    # Consumables usable during hand selection
+    actions.extend(_usable_consumables(gs))
+
+    # Reorder jokers
+    jokers: list[Card] = gs.get("jokers", [])
+    if len(jokers) > 1:
+        actions.append(ReorderJokers(new_order=()))
+
+    return actions
+
+
+def _legal_round_eval(gs: dict[str, Any]) -> list[Action]:
+    actions: list[Action] = [CashOut()]
+    actions.extend(_usable_consumables(gs))
+    return actions
+
+
+def _legal_shop(gs: dict[str, Any]) -> list[Action]:
+    actions: list[Action] = []
+    dollars: int = gs.get("dollars", 0)
+    jokers: list[Card] = gs.get("jokers", [])
+    joker_slots: int = gs.get("joker_slots", 5)
+    consumables: list[Card] = gs.get("consumables", [])
+    consumable_slots: int = gs.get("consumable_slots", 2)
+
+    # Buy cards from shop
+    shop_cards: list[Card] = gs.get("shop_cards", [])
+    for i, card in enumerate(shop_cards):
+        if card.cost > dollars:
+            continue
+        # Check slot availability
+        card_set = card.ability.get("set", "") if isinstance(card.ability, dict) else ""
+        if card_set == "Joker":
+            is_negative = (
+                isinstance(card.edition, dict) and card.edition.get("negative")
+            )
+            if len(jokers) >= joker_slots and not is_negative:
+                continue
+        elif card_set in ("Tarot", "Planet", "Spectral"):
+            if len(consumables) >= consumable_slots:
+                # BuyAndUse is still possible for immediately-usable consumables
+                actions.append(BuyAndUse(shop_index=i))
+                continue
+        actions.append(BuyCard(shop_index=i))
+
+    # Sell jokers (non-eternal)
+    for i, joker in enumerate(jokers):
+        if not joker.eternal:
+            actions.append(SellCard(area="jokers", card_index=i))
+
+    # Sell consumables
+    for i in range(len(consumables)):
+        actions.append(SellCard(area="consumables", card_index=i))
+
+    # Use owned consumables
+    actions.extend(_usable_consumables(gs))
+
+    # Redeem vouchers
+    shop_vouchers: list[Card] = gs.get("shop_vouchers", [])
+    for i, voucher in enumerate(shop_vouchers):
+        if voucher.cost <= dollars:
+            actions.append(RedeemVoucher(card_index=i))
+
+    # Open boosters
+    shop_boosters: list[Card] = gs.get("shop_boosters", [])
+    for i, booster in enumerate(shop_boosters):
+        if booster.cost <= dollars:
+            actions.append(OpenBooster(card_index=i))
+
+    # Reroll
+    cr = gs.get("current_round", {})
+    reroll_cost = cr.get("reroll_cost", 5)
+    free_rerolls = cr.get("free_rerolls", 0)
+    if free_rerolls > 0 or dollars >= reroll_cost:
+        actions.append(Reroll())
+
+    # Next round (always available in shop)
+    actions.append(NextRound())
+
+    # Reorder jokers
+    if len(jokers) > 1:
+        actions.append(ReorderJokers(new_order=()))
+
+    return actions
+
+
+def _legal_pack_opening(gs: dict[str, Any]) -> list[Action]:
+    actions: list[Action] = []
+    pack_cards: list[Card] = gs.get("pack_cards", [])
+    remaining: int = gs.get("pack_choices_remaining", 0)
+
+    if remaining > 0:
+        for i in range(len(pack_cards)):
+            actions.append(PickPackCard(card_index=i))
+
+    actions.append(SkipPack())
+    return actions
+
+
+# ---------------------------------------------------------------------------
+# Consumable usability helper
+# ---------------------------------------------------------------------------
+
+
+def _usable_consumables(gs: dict[str, Any]) -> list[Action]:
+    """Return UseConsumable actions for each usable owned consumable."""
+    consumables: list[Card] = gs.get("consumables", [])
+    if not consumables:
+        return []
+
+    from jackdaw.engine.consumables import can_use_consumable
+
+    actions: list[Action] = []
+    hand: list[Card] = gs.get("hand", [])
+    jokers: list[Card] = gs.get("jokers", [])
+    joker_limit: int = gs.get("joker_slots", 5)
+    consumable_limit: int = gs.get("consumable_slots", 2)
+
+    for i, card in enumerate(consumables):
+        if can_use_consumable(
+            card,
+            hand_cards=hand,
+            jokers=jokers,
+            consumables=consumables,
+            consumable_limit=consumable_limit,
+            joker_limit=joker_limit,
+        ):
+            actions.append(UseConsumable(card_index=i))
+    return actions
