@@ -38,7 +38,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 # Default starting parameters (White Stake / base run).
 # These match the values in ``G.GAME.starting_params`` at game start.
 DEFAULT_STARTING_PARAMS: dict[str, int] = {

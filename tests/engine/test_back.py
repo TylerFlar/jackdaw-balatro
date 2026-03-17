@@ -10,11 +10,8 @@ Coverage
 
 from __future__ import annotations
 
-import pytest
-
 from jackdaw.engine.back import Back
 from jackdaw.engine.data.prototypes import BACKS
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -245,9 +242,8 @@ class TestScoringPhase10Integration:
 
     def _make_minimal_scoring_fixtures(self):
         """Return minimal objects needed to call score_hand."""
-        from jackdaw.engine.card import Card
-        from jackdaw.engine.card_factory import create_playing_card
         from jackdaw.engine.blind import Blind
+        from jackdaw.engine.card_factory import create_playing_card
         from jackdaw.engine.data.enums import Rank, Suit
         from jackdaw.engine.hand_levels import HandLevels
         from jackdaw.engine.rng import PseudoRandom
