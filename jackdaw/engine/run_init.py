@@ -24,6 +24,7 @@ from jackdaw.engine.challenges import apply_challenge
 from jackdaw.engine.data.prototypes import BLINDS
 from jackdaw.engine.hand_levels import HandLevels
 from jackdaw.engine.rng import PseudoRandom
+from jackdaw.engine.round_lifecycle import reset_round_targets
 from jackdaw.engine.stakes import apply_stake_modifiers
 from jackdaw.engine.tags import assign_ante_blinds
 from jackdaw.engine.vouchers import apply_voucher
@@ -324,7 +325,7 @@ def initialize_run(
     # -----------------------------------------------------------------------
     # 12. Reset targeting cards
     # -----------------------------------------------------------------------
-    _reset_targeting_cards(gs, deck, rng)
+    reset_round_targets(rng, gs["round_resets"]["ante"], gs)
 
     # -----------------------------------------------------------------------
     # HandLevels (not in Lua start_run but needed for scoring)
@@ -393,10 +394,9 @@ def start_round(game_state: dict[str, Any]) -> None:
         hand_levels.reset_round_counts()
 
     # Reset targeting cards
-    deck = game_state.get("deck", [])
     rng: PseudoRandom | None = game_state.get("rng")
-    if rng is not None and deck:
-        _reset_targeting_cards(game_state, deck, rng)
+    if rng is not None:
+        reset_round_targets(rng, game_state["round_resets"]["ante"], game_state)
 
 
 # ---------------------------------------------------------------------------
@@ -412,81 +412,6 @@ def _shuffle_deck(deck: list, rng: PseudoRandom, ante: int) -> None:
     """
     seed_val = rng.seed("nr" + str(ante))
     rng.shuffle(deck, seed_val)
-
-
-def _reset_targeting_cards(
-    gs: dict[str, Any],
-    deck: list,
-    rng: PseudoRandom,
-) -> None:
-    """Reset idol, mail, ancient, and castle targeting cards.
-
-    Mirrors ``common_events.lua:2271-2324``.  Each function picks a random
-    non-Stone card from the deck.
-    """
-    ante = gs["round_resets"]["ante"]
-    cr = gs["current_round"]
-
-    # Filter out Stone cards
-    valid_cards = [c for c in deck if _card_effect(c) != "Stone Card"]
-
-    # --- Idol card (rank + suit) ---
-    cr["idol_card"] = {"suit": "Spades", "rank": "Ace"}
-    if valid_cards:
-        seed_val = rng.seed("idol" + str(ante))
-        idol, _ = rng.element(valid_cards, seed_val)
-        cr["idol_card"]["rank"] = _card_rank_str(idol)
-        cr["idol_card"]["suit"] = _card_suit_str(idol)
-
-    # --- Mail card (rank only) ---
-    cr["mail_card"] = {"rank": "Ace"}
-    if valid_cards:
-        seed_val = rng.seed("mail" + str(ante))
-        mail, _ = rng.element(valid_cards, seed_val)
-        cr["mail_card"]["rank"] = _card_rank_str(mail)
-
-    # --- Ancient card (suit, different from current) ---
-    old_suit = cr.get("ancient_card", {}).get("suit")
-    cr["ancient_card"] = {"suit": "Spades"}
-    suits = ["Spades", "Hearts", "Clubs", "Diamonds"]
-    if old_suit is None:
-        # First run: game.lua:2387 sets suit to nil before reset
-        ancient_suits = suits
-    else:
-        ancient_suits = [s for s in suits if s != old_suit]
-    seed_val = rng.seed("anc" + str(ante))
-    chosen_suit, _ = rng.element(ancient_suits, seed_val)
-    cr["ancient_card"]["suit"] = chosen_suit
-
-    # --- Castle card (suit) ---
-    cr["castle_card"] = {"suit": "Spades"}
-    if valid_cards:
-        seed_val = rng.seed("cas" + str(ante))
-        castle, _ = rng.element(valid_cards, seed_val)
-        cr["castle_card"]["suit"] = _card_suit_str(castle)
-
-
-def _card_effect(card: Any) -> str:
-    """Get the enhancement effect string from a Card object or dict."""
-    if hasattr(card, "ability"):
-        return getattr(card.ability, "effect", "") or ""
-    if isinstance(card, dict):
-        return card.get("effect", "")
-    return ""
-
-
-def _card_rank_str(card: Any) -> str:
-    """Get the rank display string from a Card object."""
-    if hasattr(card, "base") and card.base is not None:
-        return card.base.rank.value if hasattr(card.base.rank, "value") else str(card.base.rank)
-    return "Ace"
-
-
-def _card_suit_str(card: Any) -> str:
-    """Get the suit display string from a Card object."""
-    if hasattr(card, "base") and card.base is not None:
-        return card.base.suit.value if hasattr(card.base.suit, "value") else str(card.base.suit)
-    return "Spades"
 
 
 def _calculate_reroll_cost(gs: dict[str, Any], *, skip_increment: bool = False) -> None:
