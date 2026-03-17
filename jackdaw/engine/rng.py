@@ -394,9 +394,10 @@ class PseudoRandom:
         elif lst and isinstance(lst[0], dict) and "sort_id" in lst[0]:
             lst.sort(key=lambda x: x.get("sort_id", 1))
 
-        # Backward Fisher-Yates: for i = #list, 2, -1 do j = random(i)
+        # Backward Fisher-Yates: for i = #list, 2, -1 do j = math.random(i)
+        # Lua math.random(i) returns [1, i]; we convert to 0-based [0, i-1]
         for i in range(len(lst) - 1, 0, -1):
-            j = _luajit_random_int(tw_state, 1, i + 1) - 1  # convert 1-based to 0-based
+            j = _luajit_random_int(tw_state, 1, i + 1) - 1  # random(i+1) gives [1,i+1], -1 → [0,i]
             lst[i], lst[j] = lst[j], lst[i]
 
     # -- state management ---------------------------------------------------

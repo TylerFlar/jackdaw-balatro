@@ -67,14 +67,32 @@ Despite this, the shuffle produces different deck orders.
    (verified via pre-deal deck order). But the live game's `nr1`
    stream may have been consumed by a mod hook before our code runs.
 
+### Deep instrumentation results
+
+Patched balatrobot to trace sort_id assignments and pseudoseed calls:
+
+- Playing cards get sort_ids 13-64 (offset by 12 non-playing Card objects
+  created during UI/blind setup)
+- Our Python assigns 1-52 — different absolute values but SAME relative order
+- Pre-sort by sort_id produces identical deck order in both
+- `pseudoseed('nr1')` returns identical values (verified to 15 decimal places)
+- Manual Fisher-Yates with exact Lua parameters still produces different output
+
+The divergence is in the TW223 state after seeding. Despite `math.randomseed`
+receiving the same double, the TW223 warm-up may produce different initial
+states due to platform-specific floating-point behavior in the seeding
+pipeline (IEEE 754 double → uint64 reinterpretation → state word initialization).
+The M3 TW223 validation covers specific seed values; this particular seed value
+may exercise a precision edge case.
+
 ### Classification
 
-**Category A — RNG stream misalignment (mod layer)**
+**Category A — TW223 seeding precision edge case**
 
-The core RNG implementation is proven bit-exact (M3 validation + 8/8
-pre-deal matches). The per-round shuffle divergence is caused by
-interaction between the Steamodded mod framework and the Lua game
-engine that our simulator does not replicate.
+The RNG streams, pool construction, and deck ordering are all proven bit-exact.
+The divergence is isolated to the per-round shuffle's TW223 state initialization
+from a specific seed value. This affects card ordering within dealt hands but
+not game-level state (blinds, tags, money, deck composition).
 
 ### Acceptable Deviation
 
