@@ -309,7 +309,24 @@ def _handle_skip_blind(gs: dict[str, Any]) -> dict[str, Any]:
 def _handle_play_hand(
     gs: dict[str, Any], indices: tuple[int, ...]
 ) -> dict[str, Any]:
-    """Play cards from the hand, score them, and check if blind is beaten."""
+    """Play cards from the hand, score them, and check if blind is beaten.
+
+    Full sequence matching ``state_events.lua`` play_cards_from_highlighted
+    → evaluate_play:
+
+    1. Validate indices
+    2. Move cards from hand to play area (preserve index order)
+    3. Decrement hands_left, increment hands_played
+    4. Update per-card stats (times_played, played_this_ante)
+    5. Fire ``Blind:press_play`` (The Hook, The Tooth)
+    6. Call ``score_hand`` (full 14-phase pipeline)
+    7. Process scoring side-effects (dollars, card destruction,
+       joker removal)
+    8. Move surviving played cards to discard pile
+    9. Record hand type in hand_levels
+    10. Determine next phase: won / continue / game over
+    11. If continuing: draw cards, re-debuff for boss
+    """
     _require_phase(gs, GamePhase.SELECTING_HAND)
 
     cr = gs["current_round"]
@@ -321,16 +338,47 @@ def _handle_play_hand(
         raise IllegalActionError("Must select at least 1 card")
     if len(indices) > 5:
         raise IllegalActionError("Cannot play more than 5 cards")
+    if any(i < 0 or i >= len(hand) for i in indices):
+        raise IllegalActionError("Card index out of range")
 
-    # Extract played cards (sorted descending so removal doesn't shift indices)
-    played = [hand[i] for i in indices]
-    held = [c for i, c in enumerate(hand) if i not in set(indices)]
+    # ------------------------------------------------------------------
+    # 2. Move cards from hand to play area
+    # ------------------------------------------------------------------
+    idx_set = set(indices)
+    played = [hand[i] for i in sorted(indices)]
+    held = [c for i, c in enumerate(hand) if i not in idx_set]
+    gs["hand"] = held
 
-    # Score the hand
-    from jackdaw.engine.scoring import score_hand
+    # ------------------------------------------------------------------
+    # 3. Decrement hands_left, increment hands_played
+    # ------------------------------------------------------------------
+    cr["hands_left"] -= 1
+    cr["hands_played"] += 1
+    gs["hands_played"] = gs.get("hands_played", 0) + 1
 
+    # ------------------------------------------------------------------
+    # 4. Per-card stats
+    # ------------------------------------------------------------------
+    for card in played:
+        base = getattr(card, "base", None)
+        if base is not None:
+            base.times_played = getattr(base, "times_played", 0) + 1
+        ability = getattr(card, "ability", None)
+        if isinstance(ability, dict):
+            ability["played_this_ante"] = True
+
+    # ------------------------------------------------------------------
+    # 5. Blind:press_play (blind.lua:464)
+    # ------------------------------------------------------------------
     blind = gs["blind"]
     rng = gs.get("rng")
+    _press_play(gs, blind, played, rng)
+
+    # ------------------------------------------------------------------
+    # 6. Score the hand (full 14-phase pipeline)
+    # ------------------------------------------------------------------
+    from jackdaw.engine.scoring import score_hand
+
     jokers = gs.get("jokers", [])
     hand_levels = gs.get("hand_levels")
 
@@ -347,38 +395,64 @@ def _handle_play_hand(
         blind_chips=blind.chips,
     )
 
+    # ------------------------------------------------------------------
+    # 7. Process scoring side-effects
+    # ------------------------------------------------------------------
     # Accumulate chips
-    total_score = math.floor(result.chips * result.mult)
-    gs["chips"] = gs.get("chips", 0) + total_score
+    gs["chips"] = gs.get("chips", 0) + result.total
     gs["last_score_result"] = result
 
-    # Track hand usage
-    cr["hands_left"] -= 1
-    cr["hands_played"] += 1
-    gs["hands_played"] = gs.get("hands_played", 0) + 1
+    # Dollars from scoring (Gold Seal, Lucky Card, joker economy)
+    if result.dollars_earned:
+        gs["dollars"] = gs.get("dollars", 0) + result.dollars_earned
 
-    if hand_levels is not None:
+    # Joker self-destruction (Ice Cream, Popcorn, etc.)
+    for removed in result.jokers_removed:
+        if removed in jokers:
+            jokers.remove(removed)
+
+    # Playing card destruction (Glass shatter, etc.)
+    destroyed_set = set(id(c) for c in result.cards_destroyed)
+    played = [c for c in played if id(c) not in destroyed_set]
+
+    # ------------------------------------------------------------------
+    # 8. Move surviving played cards to discard pile
+    # ------------------------------------------------------------------
+    discard_pile: list = gs.setdefault("discard_pile", [])
+    discard_pile.extend(played)
+
+    # ------------------------------------------------------------------
+    # 9. Record hand type
+    # ------------------------------------------------------------------
+    if hand_levels is not None and result.hand_type != "NULL":
         hand_levels.record_play(result.hand_type)
 
-    # Remove played cards from hand, add to discard area
-    gs["hand"] = held
-    played_cards_area = gs.setdefault("played_cards_area", [])
-    played_cards_area.extend(played)
-
-    # Check if blind is beaten
+    # ------------------------------------------------------------------
+    # 10. Determine next phase
+    # ------------------------------------------------------------------
     if gs["chips"] >= blind.chips:
         _round_won(gs)
     elif cr["hands_left"] <= 0:
-        # No hands left and blind not beaten → game over
         if not result.saved:
             gs["phase"] = GamePhase.GAME_OVER
             gs["won"] = False
         else:
-            # Mr. Bones saved — continue with 0 hands (special case)
             _round_won(gs)
     else:
-        # More hands available — draw back up and stay in SELECTING_HAND
+        # ------------------------------------------------------------------
+        # 11. More hands — draw cards and stay in SELECTING_HAND
+        # ------------------------------------------------------------------
         _draw_hand(gs)
+
+        # Re-debuff hand cards for boss blind (new cards from deck)
+        if blind.boss and not blind.disabled:
+            pareidolia = any(
+                getattr(j, "center_key", None) == "j_pareidolia"
+                and not getattr(j, "debuff", False)
+                for j in jokers
+            )
+            for card in gs.get("hand", []):
+                blind.debuff_card(card, pareidolia=pareidolia)
 
     return gs
 
@@ -945,6 +1019,42 @@ def _apply_boss_blind_effects(gs: dict[str, Any], blind: Any) -> None:
     # The Mouth: reset only_hand
     elif name == "The Mouth":
         blind.only_hand = False
+
+
+# ---------------------------------------------------------------------------
+# Blind:press_play — blind.lua:464
+# ---------------------------------------------------------------------------
+
+
+def _press_play(
+    gs: dict[str, Any],
+    blind: Any,
+    played: list,
+    rng: Any,
+) -> None:
+    """Fire boss blind press_play effects before scoring.
+
+    - The Hook: discard 2 random cards from hand
+    - The Tooth: lose $1 per card played
+    """
+    if getattr(blind, "disabled", False):
+        return
+
+    name = getattr(blind, "name", "")
+
+    if name == "The Hook":
+        hand: list = gs.get("hand", [])
+        discard_pile: list = gs.setdefault("discard_pile", [])
+        for _ in range(min(2, len(hand))):
+            if hand and rng:
+                seed_val = rng.seed("hook")
+                target, _ = rng.element(hand, seed_val)
+                hand.remove(target)
+                discard_pile.append(target)
+
+    elif name == "The Tooth":
+        cost = len(played)
+        gs["dollars"] = gs.get("dollars", 0) - cost
 
 
 # ---------------------------------------------------------------------------
