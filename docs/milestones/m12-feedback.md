@@ -21,14 +21,31 @@ Runs are short because both agents lose quickly at ante 1 without jokers. With s
 - **Boss blind at ante 8 = win**: correctly sets `won=True` and game terminates at SHOP.
 - **Perishable debuff persistence**: correctly preserved through un-debuff pass (blind debuffs clear, perishable debuffs permanent).
 
-## 4. Discrepancy rate against balatrobot
+## 4. Discrepancy rate against balatrobot (TESTED)
 
-Not yet tested with live balatrobot. The validator framework is implemented (`jackdaw/engine/validator.py` + `scripts/validate_run.py` with `--mock` mode). Mock validation shows 0 discrepancies (by construction). Live testing requires the bridge module connection.
+Validated live against coder/balatrobot v1.4.1 on 5 seeded runs:
 
-The RNG system (M3) was already validated bit-exact against Lua, so the core determinism should hold. The main risk areas for discrepancies are:
-- Shop card generation (not yet in the step loop)
-- Pack card generation (placeholder)
-- Card creation side-effects (Marble Joker, Riff-raff create simplified cards)
+| Field | Match rate | Notes |
+|-------|-----------|-------|
+| money | 5/5 | Perfect |
+| ante | 5/5 | Perfect |
+| deck_size | 5/5 | Perfect |
+| boss | 5/5 | `'boss'` RNG stream is bit-exact |
+| small_tag | 1/5 | Tag pool RNG stream order differs |
+| big_tag | 2/5 | Same cause as small_tag |
+| deck_order | 0/5 | Shuffle stream diverged |
+
+**Root cause**: The voucher selection (`'Voucher'` stream) and/or tag
+pool selection (`'Tag'` stream) consume RNG in a different order than
+the Lua source, causing downstream streams (shuffle, targeting cards)
+to diverge.  Boss selection matches because `'boss'` is an independent
+stream consumed first.
+
+**Fix path**: The `select_from_pool` function appends
+`pool_key + append + str(ante)` as the seed key, but the Lua source
+uses `pseudoseed(_pool_key)` where `_pool_key = pool_type` without
+the ante suffix for some pool types.  The seed key construction in
+`pools.py` needs auditing against `common_events.lua:2128`.
 
 ## 5. Which action handlers were most complex to implement?
 
