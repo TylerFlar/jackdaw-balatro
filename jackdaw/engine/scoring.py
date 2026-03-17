@@ -676,15 +676,20 @@ def score_hand(
         if edition and "x_mult_mod" in edition:
             mult *= edition["x_mult_mod"]
 
-    # === Phase 10: Plasma Deck (back trigger) ===
-    if back_key == "b_plasma":
-        total_cm = hand_chips + mult
-        hand_chips = math.floor(total_cm / 2)
-        mult = math.floor(total_cm / 2)
-        breakdown.append(
-            f"Plasma: ({int(hand_chips + mult)}) / 2 -> {int(hand_chips)} chips,"
-            f" {int(mult)} mult"
+    # === Phase 10: Back trigger (final_scoring_step) ===
+    if back_key:
+        from jackdaw.engine.back import Back as _Back
+        _back_effect = _Back(back_key).trigger_effect(
+            "final_scoring_step", chips=hand_chips, mult=mult
         )
+        if _back_effect:
+            prev_chips, prev_mult = hand_chips, mult
+            hand_chips = _back_effect["chips"]
+            mult = _back_effect["mult"]
+            breakdown.append(
+                f"Plasma: ({int(prev_chips + prev_mult)}) / 2"
+                f" -> {int(hand_chips)} chips, {int(mult)} mult"
+            )
 
     # === Phase 11: Card destruction ===
     cards_destroyed: list[Card] = []
