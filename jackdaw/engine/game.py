@@ -680,12 +680,21 @@ def _build_discard_snapshot(
 
 
 def _handle_cash_out(gs: dict[str, Any]) -> dict[str, Any]:
-    """Accept round earnings and proceed to the shop."""
+    """Accept round earnings and proceed to the shop.
+
+    1. Apply round earnings to dollars
+    2. Track previous_round.dollars for next-round interest display
+    3. Reset current_round economy fields
+    4. Phase → SHOP
+    """
     _require_phase(gs, GamePhase.ROUND_EVAL)
 
     earnings = gs.get("round_earnings")
     if earnings:
         gs["dollars"] = gs.get("dollars", 0) + earnings.total
+
+    # Track previous round info
+    gs["previous_round"] = {"dollars": gs.get("dollars", 0)}
 
     gs["phase"] = GamePhase.SHOP
     return gs
@@ -966,34 +975,69 @@ def _draw_hand(gs: dict[str, Any]) -> None:
 
 
 def _round_won(gs: dict[str, Any]) -> None:
-    """Handle winning a round — transition to ROUND_EVAL."""
+    """Handle winning a round — transition to ROUND_EVAL.
+
+    Full sequence matching ``state_events.lua:87-120``:
+
+    1. Fire joker ``end_of_round`` context (economy + scaling)
+    2. Process perishable/rental (round_lifecycle)
+    3. Gold Seal: +$3 per held card with Gold Seal
+    4. Return all cards to deck (hand + played + discard)
+    5. Un-debuff all playing cards (blind debuffs don't persist)
+    6. Track unused discards (for Garbage Tag)
+    7. Mark blind as Defeated
+    8. Advance blind progression (Small→Big, Big→Boss)
+    9. Boss beaten: check win condition, advance ante
+    10. Calculate round earnings
+    11. Phase → ROUND_EVAL
+    """
     from jackdaw.engine.economy import calculate_round_earnings
+    from jackdaw.engine.round_lifecycle import process_round_end_cards
 
     cr = gs["current_round"]
     blind = gs["blind"]
     jokers = gs.get("jokers", [])
     rng = gs.get("rng")
 
-    # Calculate earnings
-    earnings = calculate_round_earnings(
-        blind=blind,
-        hands_left=cr["hands_left"],
-        discards_left=cr["discards_left"],
+    # ------------------------------------------------------------------
+    # 1. Fire joker end_of_round context
+    # ------------------------------------------------------------------
+    from jackdaw.engine.jokers import on_end_of_round, GameSnapshot
+
+    game_snap = GameSnapshot(
         money=gs.get("dollars", 0),
-        jokers=jokers,
-        game_state=gs,
-        rng=rng,
+        hands_left=cr.get("hands_left", 0),
+        discards_left=cr.get("discards_left", 0),
+        joker_count=len(jokers),
     )
-    gs["round_earnings"] = earnings
+    eor = on_end_of_round(jokers, game_snap, rng)
+    # Apply joker end-of-round dollars
+    gs["dollars"] = gs.get("dollars", 0) + eor.get("dollars_earned", 0)
+    # Remove self-destructed jokers (Popcorn, Turtle Bean, etc.)
+    for removed_joker in eor.get("jokers_removed", []):
+        if removed_joker in jokers:
+            jokers.remove(removed_joker)
 
-    # Process perishable/rental
-    from jackdaw.engine.round_lifecycle import process_round_end_cards
-
+    # ------------------------------------------------------------------
+    # 2. Process perishable/rental
+    # ------------------------------------------------------------------
     process_round_end_cards(jokers, gs)
 
-    # Return played cards and hand to deck
-    deck: list = gs.setdefault("deck", [])
+    # ------------------------------------------------------------------
+    # 3. Gold Seal: +$3 per held card with Gold Seal in hand
+    # ------------------------------------------------------------------
     hand: list = gs.get("hand", [])
+    gold_seal_dollars = sum(
+        3 for c in hand
+        if getattr(c, "seal", None) == "Gold" and not getattr(c, "debuff", False)
+    )
+    if gold_seal_dollars:
+        gs["dollars"] = gs.get("dollars", 0) + gold_seal_dollars
+
+    # ------------------------------------------------------------------
+    # 4. Return all cards to deck
+    # ------------------------------------------------------------------
+    deck: list = gs.setdefault("deck", [])
     played: list = gs.get("played_cards_area", [])
     discarded: list = gs.get("discard_pile", [])
     deck.extend(hand)
@@ -1003,18 +1047,64 @@ def _round_won(gs: dict[str, Any]) -> None:
     gs["played_cards_area"] = []
     gs["discard_pile"] = []
 
-    # Track unused discards for tag calculations
-    gs["unused_discards"] = cr["discards_left"]
+    # ------------------------------------------------------------------
+    # 5. Un-debuff all playing cards (blind debuffs don't persist)
+    # ------------------------------------------------------------------
+    for card in deck:
+        # Only clear blind-applied debuffs; perishable debuffs are permanent
+        if getattr(card, "debuff", False):
+            if not (getattr(card, "perishable", False) and getattr(card, "perish_tally", 1) <= 0):
+                card.debuff = False
 
-    # Update blind state
+    # ------------------------------------------------------------------
+    # 6. Track unused discards (for Garbage Tag)
+    # ------------------------------------------------------------------
+    gs["unused_discards"] = cr.get("discards_left", 0)
+
+    # ------------------------------------------------------------------
+    # 7. Mark blind as Defeated
+    # ------------------------------------------------------------------
     rr = gs["round_resets"]
     blind_on_deck = gs.get("blind_on_deck", "Small")
     rr["blind_states"][blind_on_deck] = "Defeated"
+    gs["round"] = gs.get("round", 0) + 1
 
-    # Check for game won (Boss blind of final ante)
-    if blind_on_deck == "Boss" and rr["ante"] >= gs.get("win_ante", 8):
-        gs["won"] = True
+    # ------------------------------------------------------------------
+    # 8-9. Advance blind progression
+    # ------------------------------------------------------------------
+    if blind_on_deck == "Small":
+        gs["blind_on_deck"] = "Big"
+    elif blind_on_deck == "Big":
+        gs["blind_on_deck"] = "Boss"
+    elif blind_on_deck == "Boss":
+        # Boss beaten — check win, advance ante
+        if rr["ante"] >= gs.get("win_ante", 8):
+            gs["won"] = True
+        _advance_ante(gs)
+        gs["blind_on_deck"] = "Small"
 
+    # The Manacle: restore hand size after boss defeat
+    if blind_on_deck == "Boss" and getattr(blind, "name", "") == "The Manacle":
+        if not getattr(blind, "disabled", False):
+            gs["hand_size"] = gs.get("hand_size", 7) + 1
+
+    # ------------------------------------------------------------------
+    # 10. Calculate round earnings (for cash-out screen)
+    # ------------------------------------------------------------------
+    earnings = calculate_round_earnings(
+        blind=blind,
+        hands_left=cr.get("hands_left", 0),
+        discards_left=cr.get("discards_left", 0),
+        money=gs.get("dollars", 0),
+        jokers=jokers,
+        game_state=gs,
+        rng=rng,
+    )
+    gs["round_earnings"] = earnings
+
+    # ------------------------------------------------------------------
+    # 11. Phase → ROUND_EVAL
+    # ------------------------------------------------------------------
     gs["phase"] = GamePhase.ROUND_EVAL
 
 
