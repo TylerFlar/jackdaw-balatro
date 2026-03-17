@@ -59,6 +59,7 @@ def get_current_pool(
     played_hand_types: set[str] | None = None,
     shop_vouchers: set[str] | None = None,
     discovered: set[str] | None = None,
+    profile_unlocked: set[str] | None = None,
 ) -> tuple[list[str], str]:
     """Return ``(pool, seed_key)`` for the given pool type.
 
@@ -152,6 +153,7 @@ def get_current_pool(
             played_hand_types=played_hand_types,
             shop_vouchers=shop_vouchers,
             discovered=discovered,
+            profile_unlocked=profile_unlocked,
         )
         result.append(entry)
 
@@ -357,12 +359,26 @@ def _filter_key(
     played_hand_types: set[str],
     shop_vouchers: set[str],
     discovered: set[str] | None = None,
+    profile_unlocked: set[str] | None = None,
 ) -> str:
     """Return *key* if it passes all filters, otherwise ``UNAVAILABLE``."""
 
     # --- Universal: banned keys ---
     if key in banned_keys:
         return UNAVAILABLE
+
+    # --- Universal: unlock check (common_events.lua:1988) ---
+    # Items with unlocked=false are excluded unless they're in the
+    # profile_unlocked set or are legendary (rarity 4).
+    if profile_unlocked is not None:
+        from jackdaw.engine.profile import _get_locked_items
+
+        locked = _get_locked_items()
+        if key in locked and key not in profile_unlocked:
+            # Legendary jokers bypass the unlock check
+            proto = JOKERS.get(key)
+            if not (proto and proto.rarity == 4):
+                return UNAVAILABLE
 
     if pool_type == "Joker":
         return _filter_joker(
