@@ -401,10 +401,9 @@ def start_round(game_state: dict[str, Any]) -> None:
     if hand_levels is not None:
         hand_levels.reset_round_counts()
 
-    # Reset targeting cards
-    rng: PseudoRandom | None = game_state.get("rng")
-    if rng is not None:
-        reset_round_targets(rng, game_state["round_resets"]["ante"], game_state)
+    # NOTE: targeting cards are NOT reset in new_round (per-round start).
+    # They are reset in start_run (once) and end_round (between blinds).
+    # See state_events.lua:270-276 (end_round) and game.lua:2385 (start_run).
 
 
 # ---------------------------------------------------------------------------

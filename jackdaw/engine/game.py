@@ -184,7 +184,8 @@ def _handle_select_blind(gs: dict[str, Any]) -> dict[str, Any]:
 
     # ------------------------------------------------------------------
     # 5. Boss blind set-time effects (blind.lua:157-209)
-    #    Fires after new_round in Lua (set_blind is called after new_round).
+    #    In Lua, set_blind fires inside new_round BEFORE the shuffle.
+    #    Order: set_blind → joker setting_blind → shuffle → draw.
     # ------------------------------------------------------------------
     if blind.boss and not blind.disabled:
         _apply_boss_blind_effects(gs, blind)
@@ -200,7 +201,18 @@ def _handle_select_blind(gs: dict[str, Any]) -> dict[str, Any]:
         blind.debuff_card(card, pareidolia=pareidolia)
 
     # ------------------------------------------------------------------
-    # 6. Draw hand from deck
+    # 6. Per-round deck shuffle (state_events.lua:344)
+    #    Fires AFTER set_blind and joker setting_blind context,
+    #    BEFORE draw_to_hand.  Key: 'nr' + str(ante).
+    # ------------------------------------------------------------------
+    rng = gs.get("rng")
+    if rng:
+        deck_list: list = gs.get("deck", [])
+        nr_seed = rng.seed("nr" + str(ante))
+        rng.shuffle(deck_list, nr_seed)
+
+    # ------------------------------------------------------------------
+    # 7. Draw hand from deck
     # ------------------------------------------------------------------
     _draw_hand(gs)
     # Debuff hand cards too (they were drawn from the deck)
