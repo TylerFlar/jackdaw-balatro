@@ -6,7 +6,7 @@
       "seed": "TESTSEED",
       "ante": 1,
       "first_shop": true,
-      "voucher": "v_blank",
+      "voucher": "v_crystal_ball",
       "jokers": [
         {
           "center_key": "j_jolly",
@@ -33,7 +33,7 @@
       "seed": "TESTSEED",
       "ante": 3,
       "first_shop": false,
-      "voucher": "v_blank",
+      "voucher": "v_magic_trick",
       "jokers": [
         {
           "center_key": "j_lusty_joker",
@@ -61,7 +61,7 @@
       "seed": "TUTORIAL",
       "ante": 1,
       "first_shop": true,
-      "voucher": "v_planet_merchant",
+      "voucher": "v_hieroglyph",
       "jokers": [
         {
           "center_key": "c_star",

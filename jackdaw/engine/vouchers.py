@@ -84,6 +84,7 @@ def get_next_voucher_key(
     in_shop: list[str] | None = None,
     *,
     from_tag: bool = False,
+    ante: int = 1,
 ) -> str | None:
     """Select the next voucher key for the shop using the RNG stream.
 
@@ -94,13 +95,21 @@ def get_next_voucher_key(
     3. Resample with ``pool_key + '_resample' + str(it)`` if first draw is
        somehow unavailable (defensive; pool is pre-filtered here).
 
+    The seed key for the normal path is ``'Voucher' + str(ante)`` (e.g.
+    ``'Voucher1'`` at ante 1), matching ``get_current_pool``'s return at
+    ``common_events.lua:2052``.  For tag-triggered vouchers, the key is
+    ``'Voucher_fromtag'`` (no ante).
+
     Returns ``None`` if the eligible pool is empty.
     """
     pool = get_available_voucher_pool(used_vouchers, in_shop)
     if not pool:
         return None
 
-    pool_key = "Voucher_fromtag" if from_tag else "Voucher"
+    if from_tag:
+        pool_key = "Voucher_fromtag"
+    else:
+        pool_key = "Voucher" + str(ante)
     seed = rng.seed(pool_key)
     result, _ = rng.element(pool, seed)
 

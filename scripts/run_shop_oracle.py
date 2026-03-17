@@ -74,8 +74,8 @@ def generate_for_case(seed: str, ante: int, *, first_shop: bool) -> dict:
     """
     rng = PseudoRandom(seed)
 
-    # Step 1: determine voucher key (advances 'Voucher' stream)
-    voucher_key = get_next_voucher_key(rng, used_vouchers={}, in_shop=[])
+    # Step 1: determine voucher key (advances 'Voucher{ante}' stream)
+    voucher_key = get_next_voucher_key(rng, used_vouchers={}, in_shop=[], ante=ante)
 
     # Step 2: build game state
     game_state: dict = {

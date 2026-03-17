@@ -78,7 +78,7 @@ def _build_game_state(
 def run_shop(seed: str, ante: int, *, first_shop: bool) -> dict:
     """Run the same pipeline as the oracle generator."""
     rng = PseudoRandom(seed)
-    voucher_key = get_next_voucher_key(rng, used_vouchers={}, in_shop=[])
+    voucher_key = get_next_voucher_key(rng, used_vouchers={}, in_shop=[], ante=ante)
     gs = _build_game_state(first_shop=first_shop, voucher_key=voucher_key)
     result = populate_shop(rng, ante, gs)
     return {

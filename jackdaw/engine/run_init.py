@@ -415,10 +415,15 @@ def start_round(game_state: dict[str, Any]) -> None:
 def _shuffle_deck(deck: list, rng: PseudoRandom, ante: int) -> None:
     """In-place Fisher-Yates shuffle using the run RNG.
 
-    Matches ``G.deck:shuffle()`` — uses ``pseudoseed('nr'..ante)``
-    for the round-start shuffle at run init (game.lua:2383).
+    **Initial run shuffle** (game.lua:2383) calls ``self.deck:shuffle()``
+    with NO argument, which defaults to ``pseudoseed('shuffle')``.
+
+    **Per-round shuffle** (state_events.lua:344) calls
+    ``G.deck:shuffle('nr'..ante)`` = ``pseudoseed('nr1')``.
+
+    This function is called for the initial shuffle — uses ``'shuffle'``.
     """
-    seed_val = rng.seed("nr" + str(ante))
+    seed_val = rng.seed("shuffle")
     rng.shuffle(deck, seed_val)
 
 

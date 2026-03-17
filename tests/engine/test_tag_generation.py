@@ -36,7 +36,7 @@ class TestAssignAnteBlindsKnownSeed:
     # order: Boss(seed='boss') → Voucher(seed='Voucher') → Tag×2(seed='Tag{ante}')
     #
     #   PseudoRandom("TUTORIAL"), ante=1
-    #   boss = bl_hook, voucher = v_planet_merchant
+    #   boss = bl_hook, voucher = v_hieroglyph
     #   small = tag_skip, big = tag_boss
 
     def test_tutorial_ante1_boss(self):
@@ -47,7 +47,7 @@ class TestAssignAnteBlindsKnownSeed:
     def test_tutorial_ante1_voucher(self):
         rng = PseudoRandom("TUTORIAL")
         result = assign_ante_blinds(1, rng, {})
-        assert result["voucher"] == "v_planet_merchant"
+        assert result["voucher"] == "v_hieroglyph"
 
     def test_tutorial_ante1_small_tag(self):
         rng = PseudoRandom("TUTORIAL")
@@ -61,12 +61,12 @@ class TestAssignAnteBlindsKnownSeed:
 
     def test_determinism_check_seed_ante1(self):
         #   PseudoRandom("DETERMINISM_CHECK"), ante=1
-        #   boss = bl_club, voucher = v_wasteful
+        #   boss = bl_club, voucher = v_blank
         #   small = tag_economy, big = tag_coupon
         rng = PseudoRandom("DETERMINISM_CHECK")
         result = assign_ante_blinds(1, rng, {})
         assert result["blind_choices"]["Boss"] == "bl_club"
-        assert result["voucher"] == "v_wasteful"
+        assert result["voucher"] == "v_blank"
         assert result["blind_tags"]["Small"] == "tag_economy"
         assert result["blind_tags"]["Big"] == "tag_coupon"
 

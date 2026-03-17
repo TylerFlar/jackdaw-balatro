@@ -43,11 +43,11 @@ class TestRedDeckStake1:
         gs = self._gs()
         first5 = [(c.base.rank.value, c.base.suit.value) for c in gs["deck"][:5]]
         assert first5 == [
-            ("6", "Spades"),
-            ("8", "Spades"),
-            ("7", "Clubs"),
-            ("4", "Diamonds"),
-            ("2", "Hearts"),
+            ("5", "Diamonds"),
+            ("9", "Diamonds"),
+            ("2", "Diamonds"),
+            ("Jack", "Hearts"),
+            ("4", "Hearts"),
         ]
 
     def test_boss_blind_selected(self):
@@ -66,7 +66,7 @@ class TestRedDeckStake1:
     def test_voucher_selected(self):
         gs = self._gs()
         voucher = gs["current_round"]["voucher"]
-        assert voucher == "v_blank"
+        assert voucher == "v_crystal_ball"
         assert voucher in VOUCHERS
 
     def test_no_stake_modifiers(self):
@@ -295,7 +295,7 @@ class TestRNGConsumptionChain:
         """
         gs = initialize_run("b_red", 1, self.SEED)
         assert gs["round_resets"]["blind_choices"]["Boss"] == "bl_head"
-        assert gs["current_round"]["voucher"] == "v_blank"
+        assert gs["current_round"]["voucher"] == "v_crystal_ball"
         assert gs["round_resets"]["blind_tags"]["Small"] == "tag_economy"
         assert gs["round_resets"]["blind_tags"]["Big"] == "tag_investment"
 

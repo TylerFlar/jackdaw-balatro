@@ -473,7 +473,7 @@ def assign_ante_blinds(
     boss = get_new_boss(ante, bosses_used, rng)
 
     # 2. Voucher
-    voucher = get_next_voucher_key(rng, used_v_dict)
+    voucher = get_next_voucher_key(rng, used_v_dict, ante=ante)
 
     # 3-4. Tags (Small then Big)
     small = pick_card_from_pool("Tag", rng, ante, used_vouchers=used_vouchers)
