@@ -1,0 +1,168 @@
+{
+  "cases": [
+    {
+      "seed": "SHOP_A",
+      "ante": 1,
+      "voucher": "v_hieroglyph",
+      "jokers": [
+        {
+          "key": "j_clever",
+          "cost": 4,
+          "set": "Joker"
+        },
+        {
+          "key": "j_devious",
+          "cost": 4,
+          "set": "Joker"
+        }
+      ],
+      "booster_count": 2
+    },
+    {
+      "seed": "SHOP_A",
+      "ante": 2,
+      "voucher": "v_paint_brush",
+      "jokers": [
+        {
+          "key": "j_credit_card",
+          "cost": 1,
+          "set": "Joker"
+        },
+        {
+          "key": "c_venus",
+          "cost": 3,
+          "set": "Planet"
+        }
+      ],
+      "booster_count": 2
+    },
+    {
+      "seed": "SHOP_A",
+      "ante": 3,
+      "voucher": "v_crystal_ball",
+      "jokers": [
+        {
+          "key": "j_joker",
+          "cost": 2,
+          "set": "Joker",
+          "eternal": true
+        },
+        {
+          "key": "j_gluttenous_joker",
+          "cost": 5,
+          "set": "Joker"
+        }
+      ],
+      "booster_count": 2
+    },
+    {
+      "seed": "SHOP_B",
+      "ante": 1,
+      "voucher": "v_blank",
+      "jokers": [
+        {
+          "key": "c_jupiter",
+          "cost": 3,
+          "set": "Planet"
+        },
+        {
+          "key": "j_red_card",
+          "cost": 1,
+          "set": "Joker"
+        }
+      ],
+      "booster_count": 2
+    },
+    {
+      "seed": "SHOP_B",
+      "ante": 2,
+      "voucher": "v_reroll_surplus",
+      "jokers": [
+        {
+          "key": "j_juggler",
+          "cost": 4,
+          "set": "Joker"
+        },
+        {
+          "key": "c_fool",
+          "cost": 3,
+          "set": "Tarot"
+        }
+      ],
+      "booster_count": 2
+    },
+    {
+      "seed": "SHOP_B",
+      "ante": 3,
+      "voucher": "v_telescope",
+      "jokers": [
+        {
+          "key": "c_pluto",
+          "cost": 3,
+          "set": "Planet"
+        },
+        {
+          "key": "c_earth",
+          "cost": 3,
+          "set": "Planet"
+        }
+      ],
+      "booster_count": 2
+    },
+    {
+      "seed": "SHOP_C",
+      "ante": 1,
+      "voucher": "v_hieroglyph",
+      "jokers": [
+        {
+          "key": "j_ceremonial",
+          "cost": 6,
+          "set": "Joker",
+          "eternal": true
+        },
+        {
+          "key": "j_business",
+          "cost": 4,
+          "set": "Joker"
+        }
+      ],
+      "booster_count": 2
+    },
+    {
+      "seed": "SHOP_C",
+      "ante": 2,
+      "voucher": "v_overstock_norm",
+      "jokers": [
+        {
+          "key": "c_fool",
+          "cost": 3,
+          "set": "Tarot"
+        },
+        {
+          "key": "c_eris",
+          "cost": 3,
+          "set": "Planet"
+        }
+      ],
+      "booster_count": 2
+    },
+    {
+      "seed": "SHOP_C",
+      "ante": 3,
+      "voucher": "v_tarot_merchant",
+      "jokers": [
+        {
+          "key": "c_jupiter",
+          "cost": 3,
+          "set": "Planet"
+        },
+        {
+          "key": "j_delayed_grat",
+          "cost": 1,
+          "set": "Joker"
+        }
+      ],
+      "booster_count": 2
+    }
+  ]
+}
