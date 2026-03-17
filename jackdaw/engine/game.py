@@ -701,7 +701,14 @@ def _handle_cash_out(gs: dict[str, Any]) -> dict[str, Any]:
 
 
 def _handle_buy_card(gs: dict[str, Any], idx: int) -> dict[str, Any]:
-    """Purchase a card from the shop."""
+    """Purchase a card from the shop.
+
+    After buying:
+    - Joker: add to jokers area, mark in used_jokers
+    - Consumable: add to consumables area
+    - Playing card: add to deck, fire ``playing_card_added`` joker context
+    - Fire ``buying_card`` on all jokers
+    """
     _require_phase(gs, GamePhase.SHOP)
 
     shop_cards: list = gs.get("shop_cards", [])
@@ -714,16 +721,28 @@ def _handle_buy_card(gs: dict[str, Any], idx: int) -> dict[str, Any]:
 
     gs["dollars"] -= card.cost
     shop_cards.pop(idx)
+    gs["current_round"]["jokers_purchased"] = (
+        gs.get("current_round", {}).get("jokers_purchased", 0) + 1
+    )
 
     # Place card in appropriate area
-    card_set = card.ability.get("set", "") if isinstance(card.ability, dict) else ""
+    card_set = _get_card_set(card)
+    added_playing_card = False
     if card_set == "Joker":
         gs.setdefault("jokers", []).append(card)
+        gs.setdefault("used_jokers", {})[card.center_key] = True
     elif card_set in ("Tarot", "Planet", "Spectral"):
         gs.setdefault("consumables", []).append(card)
     else:
-        # Playing card → add to deck
         gs.setdefault("deck", []).append(card)
+        added_playing_card = True
+
+    # Fire buying_card joker context
+    _fire_shop_joker_context(gs, buying_card=True)
+
+    # Fire playing_card_added if a playing card was bought
+    if added_playing_card:
+        _fire_shop_joker_context(gs, playing_card_added=True, cards=[card])
 
     return gs
 
@@ -745,7 +764,6 @@ def _handle_buy_and_use(
     gs["dollars"] -= card.cost
     shop_cards.pop(idx)
 
-    # Use immediately (consumable effect)
     from jackdaw.engine.consumables import use_consumable
 
     use_consumable(card, game_state=gs, target_indices=targets)
@@ -753,7 +771,12 @@ def _handle_buy_and_use(
 
 
 def _handle_sell_card(gs: dict[str, Any], area: str, idx: int) -> dict[str, Any]:
-    """Sell a card for its sell value."""
+    """Sell a card for its sell value.
+
+    After selling:
+    - Fire ``selling_card`` on all jokers (Campfire +xMult)
+    - If joker sold itself: fire ``selling_self``
+    """
     _require_phase(gs, GamePhase.SHOP)
 
     cards: list = gs.get(area, [])
@@ -766,6 +789,10 @@ def _handle_sell_card(gs: dict[str, Any], area: str, idx: int) -> dict[str, Any]
 
     gs["dollars"] = gs.get("dollars", 0) + card.sell_cost
     cards.pop(idx)
+
+    # Fire selling_card joker context (Campfire +xMult per card sold)
+    _fire_shop_joker_context(gs, selling_card=True)
+
     return gs
 
 
@@ -876,7 +903,12 @@ def _handle_skip_pack(gs: dict[str, Any]) -> dict[str, Any]:
 
 
 def _handle_reroll(gs: dict[str, Any]) -> dict[str, Any]:
-    """Reroll the shop."""
+    """Reroll the shop.
+
+    After rerolling:
+    - Fire ``reroll_shop`` on all jokers (Flash Card +mult)
+    - Track times_rerolled stat
+    """
     _require_phase(gs, GamePhase.SHOP)
 
     cr = gs.get("current_round", {})
@@ -894,31 +926,41 @@ def _handle_reroll(gs: dict[str, Any]) -> dict[str, Any]:
     cr["reroll_cost_increase"] = cr.get("reroll_cost_increase", 0) + 1
     cr["reroll_cost"] = gs.get("base_reroll_cost", 5) + cr["reroll_cost_increase"]
 
-    # Actual shop regeneration would happen here
-    # (shop card pool generation is handled by the shop module)
+    # Track stat
+    gs.setdefault("round_scores", {})
+    gs["round_scores"]["times_rerolled"] = (
+        gs["round_scores"].get("times_rerolled", 0) + 1
+    )
+
+    # Fire reroll_shop joker context (Flash Card +mult)
+    _fire_shop_joker_context(gs, reroll_shop=True)
 
     return gs
 
 
 def _handle_next_round(gs: dict[str, Any]) -> dict[str, Any]:
-    """Leave the shop and proceed to the next blind."""
+    """Leave the shop and proceed to the next blind.
+
+    Before leaving:
+    - Fire ``ending_shop`` on all jokers (Perkeo copies consumable)
+    - Process Perkeo side-effects
+    """
     _require_phase(gs, GamePhase.SHOP)
+
+    # Fire ending_shop joker context (Perkeo)
+    mutations = _fire_shop_joker_context(gs, ending_shop=True)
+    _apply_shop_mutations(gs, mutations)
 
     rr = gs["round_resets"]
     blind_on_deck = gs.get("blind_on_deck", "Small")
 
-    if blind_on_deck == "Boss" and rr["blind_states"].get("Boss") == "Defeated":
-        # Boss defeated → advance ante
-        _advance_ante(gs)
-        gs["blind_on_deck"] = "Small"
+    # Set next blind to Select
+    if blind_on_deck == "Small":
+        rr["blind_states"]["Small"] = "Select"
+    elif blind_on_deck == "Big":
+        rr["blind_states"]["Big"] = "Select"
     else:
-        # Set next blind to Select
-        if blind_on_deck == "Small":
-            rr["blind_states"]["Small"] = "Select"
-        elif blind_on_deck == "Big":
-            rr["blind_states"]["Big"] = "Select"
-        else:
-            rr["blind_states"]["Boss"] = "Select"
+        rr["blind_states"]["Boss"] = "Select"
 
     gs["phase"] = GamePhase.BLIND_SELECT
     return gs
@@ -1292,6 +1334,89 @@ def _apply_boss_blind_effects(gs: dict[str, Any], blind: Any) -> None:
     # The Mouth: reset only_hand
     elif name == "The Mouth":
         blind.only_hand = False
+
+
+# ---------------------------------------------------------------------------
+# Shop joker context helpers
+# ---------------------------------------------------------------------------
+
+
+def _get_card_set(card: Any) -> str:
+    """Get the set name from a Card's ability dict."""
+    ability = getattr(card, "ability", None)
+    if isinstance(ability, dict):
+        return ability.get("set", "")
+    return ""
+
+
+def _fire_shop_joker_context(
+    gs: dict[str, Any], **context_flags: Any
+) -> list[dict[str, Any]]:
+    """Fire a joker context during shop phase and return mutations.
+
+    Accepts keyword arguments matching :class:`JokerContext` flags
+    (e.g. ``buying_card=True``, ``reroll_shop=True``).
+    """
+    from jackdaw.engine.jokers import GameSnapshot, JokerContext, calculate_joker
+
+    jokers: list = gs.get("jokers", [])
+    if not jokers:
+        return []
+
+    game_snap = GameSnapshot(
+        joker_count=len(jokers),
+        joker_slots=gs.get("joker_slots", 5),
+        money=gs.get("dollars", 0),
+    )
+
+    # Extract 'cards' from flags if present (for playing_card_added)
+    cards_arg = context_flags.pop("cards", None)
+
+    mutations: list[dict[str, Any]] = []
+    for joker in list(jokers):  # copy to allow mutation during iteration
+        if getattr(joker, "debuff", False):
+            continue
+        ctx = JokerContext(
+            jokers=jokers,
+            game=game_snap,
+            rng=gs.get("rng"),
+            **context_flags,
+        )
+        if cards_arg is not None:
+            ctx.cards = cards_arg
+        result = calculate_joker(joker, ctx)
+        if result and result.extra:
+            mutations.append(result.extra)
+
+    return mutations
+
+
+def _apply_shop_mutations(
+    gs: dict[str, Any],
+    mutations: list[dict[str, Any]],
+) -> None:
+    """Process side-effect dicts from shop joker contexts.
+
+    Handles Perkeo's consumable_copy creation.
+    """
+    for mut in mutations:
+        if "create" in mut:
+            create = mut["create"]
+            ctype = create.get("type", "")
+
+            if ctype == "consumable_copy":
+                # Perkeo: copy a random consumable with Negative edition
+                consumables: list = gs.get("consumables", [])
+                if consumables:
+                    rng = gs.get("rng")
+                    if rng:
+                        import copy
+
+                        seed_val = rng.seed("perkeo")
+                        original, _ = rng.element(consumables, seed_val)
+                        duplicate = copy.copy(original)
+                        duplicate.edition = {"negative": True}
+                        consumables.append(duplicate)
 
 
 # ---------------------------------------------------------------------------

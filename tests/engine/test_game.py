@@ -1179,3 +1179,306 @@ class TestFullAnteProgression:
         assert gs["phase"] == GamePhase.BLIND_SELECT
         assert gs["round_resets"]["ante"] == 2
         assert gs["blind_on_deck"] == "Small"
+
+
+# ===========================================================================
+# Detailed shop action tests
+# ===========================================================================
+
+
+def _setup_shop(seed="SHOP_TEST"):
+    """Set up a game state in the SHOP phase after beating Small Blind."""
+    gs = _init_gs(seed)
+    step(gs, SelectBlind())
+    gs["blind"].chips = 1
+    step(gs, PlayHand(card_indices=(0, 1, 2, 3, 4)))
+    step(gs, CashOut())
+    assert gs["phase"] == GamePhase.SHOP
+    return gs
+
+
+class TestBuyCardDetailed:
+    def test_buy_joker_added_to_jokers(self):
+        gs = _setup_shop("BUY_JOKER")
+        shop_joker = _joker_card("j_banner", cost=5, sell_cost=3)
+        gs["shop_cards"] = [shop_joker]
+        gs["dollars"] = 10
+        from jackdaw.engine.actions import BuyCard
+
+        step(gs, BuyCard(shop_index=0))
+        assert shop_joker in gs["jokers"]
+        assert gs["dollars"] == 5
+
+    def test_buy_joker_marks_used(self):
+        gs = _setup_shop("BUY_USED")
+        shop_joker = _joker_card("j_banner", cost=3)
+        gs["shop_cards"] = [shop_joker]
+        gs["dollars"] = 10
+        from jackdaw.engine.actions import BuyCard
+
+        step(gs, BuyCard(shop_index=0))
+        assert gs["used_jokers"].get("j_banner") is True
+
+    def test_buy_consumable_added_to_consumables(self):
+        gs = _setup_shop("BUY_CONS")
+        tarot = Card(center_key="c_strength", cost=4)
+        tarot.ability = {"set": "Tarot", "effect": ""}
+        gs["shop_cards"] = [tarot]
+        gs["dollars"] = 10
+        from jackdaw.engine.actions import BuyCard
+
+        step(gs, BuyCard(shop_index=0))
+        assert tarot in gs["consumables"]
+
+    def test_buy_playing_card_added_to_deck(self):
+        gs = _setup_shop("BUY_PLAY")
+        playing = Card(center_key="c_base", cost=1)
+        playing.ability = {"set": "Default", "effect": ""}
+        gs["shop_cards"] = [playing]
+        gs["dollars"] = 10
+        initial_deck = len(gs["deck"])
+        from jackdaw.engine.actions import BuyCard
+
+        step(gs, BuyCard(shop_index=0))
+        assert len(gs["deck"]) == initial_deck + 1
+
+    def test_buy_negative_joker_when_slots_full(self):
+        """Negative edition joker can be bought even with full slots."""
+        gs = _setup_shop("BUY_NEG")
+        gs["joker_slots"] = 2
+        gs["jokers"] = [_joker_card("j_a"), _joker_card("j_b")]
+        neg_joker = _joker_card("j_c", cost=5)
+        neg_joker.edition = {"negative": True}
+        gs["shop_cards"] = [neg_joker]
+        gs["dollars"] = 10
+        from jackdaw.engine.actions import BuyCard
+
+        step(gs, BuyCard(shop_index=0))
+        assert neg_joker in gs["jokers"]
+        assert len(gs["jokers"]) == 3
+
+    def test_buy_too_expensive_raises(self):
+        gs = _setup_shop("BUY_BROKE")
+        expensive = _joker_card(cost=100)
+        gs["shop_cards"] = [expensive]
+        gs["dollars"] = 5
+        from jackdaw.engine.actions import BuyCard
+
+        with pytest.raises(IllegalActionError, match="Cannot afford"):
+            step(gs, BuyCard(shop_index=0))
+
+    def test_buy_fires_campfire_on_hologram(self):
+        """Hologram gains xMult when a playing card is added to deck."""
+        gs = _setup_shop("BUY_HOLO")
+        holo = _joker_card("j_hologram")
+        holo.ability["x_mult"] = 1.0
+        holo.ability["extra"] = 0.25
+        gs["jokers"] = [holo]
+        playing = Card(center_key="c_base", cost=1)
+        playing.ability = {"set": "Default", "effect": ""}
+        gs["shop_cards"] = [playing]
+        gs["dollars"] = 10
+        from jackdaw.engine.actions import BuyCard
+
+        step(gs, BuyCard(shop_index=0))
+        # Hologram should have gained xMult
+        assert holo.ability["x_mult"] > 1.0
+
+
+class TestSellCardDetailed:
+    def test_sell_joker_dollars_increase(self):
+        gs = _setup_shop("SELL_J")
+        joker = _joker_card(sell_cost=5)
+        gs["jokers"] = [joker]
+        before = gs["dollars"]
+        step(gs, SellCard(area="jokers", card_index=0))
+        assert gs["dollars"] == before + 5
+        assert joker not in gs["jokers"]
+
+    def test_sell_consumable(self):
+        gs = _setup_shop("SELL_C")
+        tarot = Card(center_key="c_fool", cost=3, sell_cost=2)
+        tarot.ability = {"set": "Tarot"}
+        gs["consumables"] = [tarot]
+        before = gs["dollars"]
+        step(gs, SellCard(area="consumables", card_index=0))
+        assert gs["dollars"] == before + 2
+
+    def test_sell_eternal_raises(self):
+        gs = _setup_shop("SELL_E")
+        eternal = _joker_card(eternal=True)
+        gs["jokers"] = [eternal]
+        with pytest.raises(IllegalActionError, match="eternal"):
+            step(gs, SellCard(area="jokers", card_index=0))
+
+    def test_sell_fires_campfire(self):
+        """Campfire gains +0.25 xMult when any card is sold."""
+        gs = _setup_shop("SELL_CAMP")
+        campfire = _joker_card("j_campfire")
+        campfire.ability["x_mult"] = 1.0
+        campfire.ability["extra"] = 0.25
+        victim = _joker_card("j_victim", sell_cost=2)
+        gs["jokers"] = [campfire, victim]
+        step(gs, SellCard(area="jokers", card_index=1))
+        assert campfire.ability["x_mult"] == 1.25
+
+
+class TestRedeemVoucherDetailed:
+    def test_redeem_voucher_effect_applied(self):
+        gs = _setup_shop("REDEEM_V")
+        voucher = Card(center_key="v_grabber", cost=10)
+        voucher.ability = {"set": "Voucher"}
+        gs["shop_vouchers"] = [voucher]
+        gs["dollars"] = 15
+        from jackdaw.engine.actions import RedeemVoucher
+
+        step(gs, RedeemVoucher(card_index=0))
+        assert gs["used_vouchers"].get("v_grabber") is True
+        assert gs["dollars"] == 5
+        assert len(gs["shop_vouchers"]) == 0
+
+    def test_redeem_voucher_too_expensive(self):
+        gs = _setup_shop("REDEEM_BROKE")
+        voucher = Card(center_key="v_grabber", cost=10)
+        voucher.ability = {"set": "Voucher"}
+        gs["shop_vouchers"] = [voucher]
+        gs["dollars"] = 5
+        from jackdaw.engine.actions import RedeemVoucher
+
+        with pytest.raises(IllegalActionError, match="Cannot afford"):
+            step(gs, RedeemVoucher(card_index=0))
+
+
+class TestRerollDetailed:
+    def test_reroll_deducts_cost(self):
+        gs = _setup_shop("REROLL_COST")
+        gs["dollars"] = 15
+        gs["current_round"]["reroll_cost"] = 5
+        gs["current_round"]["free_rerolls"] = 0
+        step(gs, Reroll())
+        assert gs["dollars"] == 10
+
+    def test_reroll_cost_increases(self):
+        gs = _setup_shop("REROLL_INC")
+        gs["dollars"] = 20
+        gs["current_round"]["reroll_cost"] = 5
+        gs["current_round"]["free_rerolls"] = 0
+        step(gs, Reroll())
+        assert gs["current_round"]["reroll_cost"] > 5
+
+    def test_reroll_free(self):
+        gs = _setup_shop("REROLL_FREE")
+        gs["dollars"] = 0
+        gs["current_round"]["free_rerolls"] = 2
+        step(gs, Reroll())
+        assert gs["dollars"] == 0
+        assert gs["current_round"]["free_rerolls"] == 1
+
+    def test_reroll_tracks_stat(self):
+        gs = _setup_shop("REROLL_STAT")
+        gs["dollars"] = 10
+        gs["current_round"]["reroll_cost"] = 5
+        gs["current_round"]["free_rerolls"] = 0
+        step(gs, Reroll())
+        assert gs["round_scores"]["times_rerolled"] >= 1
+
+    def test_reroll_fires_flash_card(self):
+        """Flash Card gains +2 mult per reroll."""
+        gs = _setup_shop("REROLL_FLASH")
+        flash = _joker_card("j_flash")
+        flash.ability["mult"] = 0
+        flash.ability["extra"] = 2
+        gs["jokers"] = [flash]
+        gs["dollars"] = 10
+        gs["current_round"]["reroll_cost"] = 5
+        gs["current_round"]["free_rerolls"] = 0
+        step(gs, Reroll())
+        assert flash.ability["mult"] == 2
+
+
+class TestOpenBoosterDetailed:
+    def test_open_booster_transitions_to_pack(self):
+        gs = _setup_shop("OPEN_PACK")
+        pack = Card(center_key="p_arcana_normal_1", cost=4)
+        pack.ability = {"set": "Booster", "name": "Arcana Pack"}
+        gs["shop_boosters"] = [pack]
+        gs["dollars"] = 10
+        from jackdaw.engine.actions import OpenBooster
+
+        step(gs, OpenBooster(card_index=0))
+        assert gs["phase"] == GamePhase.PACK_OPENING
+
+    def test_open_booster_deducts_cost(self):
+        gs = _setup_shop("OPEN_COST")
+        pack = Card(center_key="p_arcana_normal_1", cost=4)
+        pack.ability = {"set": "Booster", "name": "Arcana Pack"}
+        gs["shop_boosters"] = [pack]
+        gs["dollars"] = 10
+        from jackdaw.engine.actions import OpenBooster
+
+        step(gs, OpenBooster(card_index=0))
+        assert gs["dollars"] == 6
+
+
+class TestNextRoundDetailed:
+    def test_next_round_transitions_to_blind_select(self):
+        gs = _setup_shop("NEXT_ROUND")
+        step(gs, NextRound())
+        assert gs["phase"] == GamePhase.BLIND_SELECT
+
+    def test_next_round_with_perkeo(self):
+        """Perkeo copies a random consumable when leaving shop."""
+        gs = _setup_shop("PERKEO")
+        perkeo = _joker_card("j_perkeo")
+        gs["jokers"] = [perkeo]
+        tarot = Card(center_key="c_strength")
+        tarot.ability = {"set": "Tarot", "effect": ""}
+        gs["consumables"] = [tarot]
+        step(gs, NextRound())
+        # Perkeo should have created a Negative copy
+        assert len(gs["consumables"]) == 2
+        copy = gs["consumables"][1]
+        assert copy.edition == {"negative": True}
+
+
+class TestPackOpening:
+    def _setup_pack(self, seed="PACK_TEST"):
+        gs = _setup_shop(seed)
+        pack = Card(center_key="p_arcana_normal_1", cost=4)
+        pack.ability = {"set": "Booster", "name": "Arcana Pack"}
+        gs["shop_boosters"] = [pack]
+        gs["dollars"] = 10
+        from jackdaw.engine.actions import OpenBooster
+
+        step(gs, OpenBooster(card_index=0))
+        # Manually set pack cards for testing
+        tarot1 = Card(center_key="c_magician", cost=0)
+        tarot1.ability = {"set": "Tarot", "effect": ""}
+        tarot2 = Card(center_key="c_empress", cost=0)
+        tarot2.ability = {"set": "Tarot", "effect": ""}
+        gs["pack_cards"] = [tarot1, tarot2]
+        gs["pack_choices_remaining"] = 1
+        return gs
+
+    def test_pick_card_adds_to_consumables(self):
+        from jackdaw.engine.actions import PickPackCard
+
+        gs = self._setup_pack()
+        card = gs["pack_cards"][0]
+        step(gs, PickPackCard(card_index=0))
+        assert card in gs["consumables"]
+
+    def test_pick_returns_to_shop_when_done(self):
+        from jackdaw.engine.actions import PickPackCard
+
+        gs = self._setup_pack()
+        step(gs, PickPackCard(card_index=0))
+        assert gs["phase"] == GamePhase.SHOP
+
+    def test_skip_pack_returns_to_shop(self):
+        from jackdaw.engine.actions import SkipPack
+
+        gs = self._setup_pack()
+        step(gs, SkipPack())
+        assert gs["phase"] == GamePhase.SHOP
+        assert gs["pack_cards"] == []
