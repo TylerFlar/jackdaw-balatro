@@ -1829,3 +1829,131 @@ class TestUseConsumableInvalidIndex:
         gs["consumables"] = []
         with pytest.raises(IllegalActionError, match="Invalid consumable"):
             step(gs, UseConsumable(card_index=0))
+
+
+# ===========================================================================
+# Shop population tests
+# ===========================================================================
+
+
+class TestShopPopulation:
+    """Verify shop is auto-populated on cash_out and cleared on next_round."""
+
+    def _beat_and_cash_out(self, seed="SHOP_POP"):
+        gs = _init_gs(seed)
+        step(gs, SelectBlind())
+        gs["blind"].chips = 1
+        step(gs, PlayHand(card_indices=(0, 1, 2, 3, 4)))
+        assert gs["phase"] == GamePhase.ROUND_EVAL
+        step(gs, CashOut())
+        assert gs["phase"] == GamePhase.SHOP
+        return gs
+
+    def test_shop_has_joker_cards(self):
+        gs = self._beat_and_cash_out("POP_JOKERS")
+        shop_cards = gs.get("shop_cards", [])
+        joker_max = gs.get("shop", {}).get("joker_max", 2)
+        assert len(shop_cards) == joker_max
+
+    def test_shop_has_voucher(self):
+        gs = self._beat_and_cash_out("POP_VOUCHER")
+        vouchers = gs.get("shop_vouchers", [])
+        assert len(vouchers) == 1
+        assert vouchers[0].center_key.startswith("v_")
+
+    def test_shop_has_two_boosters(self):
+        gs = self._beat_and_cash_out("POP_BOOSTERS")
+        boosters = gs.get("shop_boosters", [])
+        assert len(boosters) == 2
+
+    def test_shop_cards_have_costs(self):
+        gs = self._beat_and_cash_out("POP_COSTS")
+        for card in gs.get("shop_cards", []):
+            assert card.cost > 0, f"{card.center_key} has cost 0"
+
+    def test_shop_cards_valid_types(self):
+        gs = self._beat_and_cash_out("POP_TYPES")
+        for card in gs.get("shop_cards", []):
+            card_set = card.ability.get("set", "")
+            assert card_set in ("Joker", "Tarot", "Planet", "Spectral", "Enhanced", "Default"), (
+                f"Unexpected card set: {card_set} for {card.center_key}"
+            )
+
+    def test_first_shop_has_buffoon_pack(self):
+        """First shop of a run should have a Buffoon pack (guaranteed)."""
+        gs = self._beat_and_cash_out("POP_BUFFOON")
+        boosters = gs.get("shop_boosters", [])
+        booster_keys = [b.center_key for b in boosters]
+        has_buffoon = any("buffoon" in k for k in booster_keys)
+        assert has_buffoon, f"No Buffoon pack in first shop: {booster_keys}"
+
+
+class TestShopReroll:
+    """Verify reroll regenerates shop cards."""
+
+    def _setup_shop_with_cards(self, seed="REROLL_TEST"):
+        gs = _init_gs(seed)
+        step(gs, SelectBlind())
+        gs["blind"].chips = 1
+        step(gs, PlayHand(card_indices=(0, 1, 2, 3, 4)))
+        step(gs, CashOut())
+        return gs
+
+    def test_reroll_changes_shop_cards(self):
+        gs = self._setup_shop_with_cards()
+        gs["dollars"] = 20
+        old_keys = [c.center_key for c in gs.get("shop_cards", [])]
+        step(gs, Reroll())
+        new_keys = [c.center_key for c in gs.get("shop_cards", [])]
+        # New cards should exist and have same count
+        assert len(new_keys) == len(old_keys)
+        # Cards may or may not differ (RNG), but the list should be regenerated
+
+    def test_reroll_preserves_voucher_and_boosters(self):
+        gs = self._setup_shop_with_cards()
+        gs["dollars"] = 20
+        voucher_before = [v.center_key for v in gs.get("shop_vouchers", [])]
+        boosters_before = [b.center_key for b in gs.get("shop_boosters", [])]
+        step(gs, Reroll())
+        voucher_after = [v.center_key for v in gs.get("shop_vouchers", [])]
+        boosters_after = [b.center_key for b in gs.get("shop_boosters", [])]
+        # Voucher and boosters should NOT change on reroll
+        assert voucher_after == voucher_before
+        assert boosters_after == boosters_before
+
+    def test_reroll_count_matches_joker_max(self):
+        gs = self._setup_shop_with_cards()
+        gs["dollars"] = 20
+        step(gs, Reroll())
+        joker_max = gs.get("shop", {}).get("joker_max", 2)
+        assert len(gs["shop_cards"]) == joker_max
+
+
+class TestShopClearOnNextRound:
+    """Verify shop is cleared when leaving."""
+
+    def test_next_round_clears_shop(self):
+        gs = _init_gs("CLEAR_SHOP")
+        step(gs, SelectBlind())
+        gs["blind"].chips = 1
+        step(gs, PlayHand(card_indices=(0, 1, 2, 3, 4)))
+        step(gs, CashOut())
+        assert len(gs["shop_cards"]) > 0
+        step(gs, NextRound())
+        assert gs["shop_cards"] == []
+        assert gs["shop_vouchers"] == []
+        assert gs["shop_boosters"] == []
+
+
+class TestShopOverstock:
+    """Overstock voucher adds +1 joker_max → shop has 3 cards."""
+
+    def test_overstock_increases_shop_size(self):
+        gs = _init_gs("OVERSTOCK")
+        # Apply Overstock voucher effect
+        gs["shop"]["joker_max"] = 3
+        step(gs, SelectBlind())
+        gs["blind"].chips = 1
+        step(gs, PlayHand(card_indices=(0, 1, 2, 3, 4)))
+        step(gs, CashOut())
+        assert len(gs["shop_cards"]) == 3

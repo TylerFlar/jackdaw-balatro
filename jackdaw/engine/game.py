@@ -695,8 +695,8 @@ def _handle_cash_out(gs: dict[str, Any]) -> dict[str, Any]:
     """Accept round earnings and proceed to the shop.
 
     1. Apply round earnings to dollars
-    2. Track previous_round.dollars for next-round interest display
-    3. Reset current_round economy fields
+    2. Track previous_round.dollars
+    3. Populate shop (jokers, voucher, boosters)
     4. Phase → SHOP
     """
     _require_phase(gs, GamePhase.ROUND_EVAL)
@@ -705,8 +705,10 @@ def _handle_cash_out(gs: dict[str, Any]) -> dict[str, Any]:
     if earnings:
         gs["dollars"] = gs.get("dollars", 0) + earnings.total
 
-    # Track previous round info
     gs["previous_round"] = {"dollars": gs.get("dollars", 0)}
+
+    # Populate shop
+    _populate_shop(gs)
 
     gs["phase"] = GamePhase.SHOP
     return gs
@@ -989,6 +991,9 @@ def _handle_reroll(gs: dict[str, Any]) -> dict[str, Any]:
         gs["round_scores"].get("times_rerolled", 0) + 1
     )
 
+    # Regenerate shop joker cards
+    _reroll_shop_cards(gs)
+
     # Fire reroll_shop joker context (Flash Card +mult)
     _fire_shop_joker_context(gs, reroll_shop=True)
 
@@ -1007,6 +1012,11 @@ def _handle_next_round(gs: dict[str, Any]) -> dict[str, Any]:
     # Fire ending_shop joker context (Perkeo)
     mutations = _fire_shop_joker_context(gs, ending_shop=True)
     _apply_shop_mutations(gs, mutations)
+
+    # Clear shop areas
+    gs["shop_cards"] = []
+    gs["shop_vouchers"] = []
+    gs["shop_boosters"] = []
 
     rr = gs["round_resets"]
     blind_on_deck = gs.get("blind_on_deck", "Small")
@@ -1627,6 +1637,68 @@ def _resolve_create_descriptors(
                         "set": "Joker", "effect": "", "name": "Joker",
                     }
                     jokers.append(c)
+
+
+# ---------------------------------------------------------------------------
+# Shop population helpers
+# ---------------------------------------------------------------------------
+
+
+def _populate_shop(gs: dict[str, Any]) -> None:
+    """Generate shop cards using populate_shop and store in game_state.
+
+    Places results in ``gs["shop_cards"]``, ``gs["shop_vouchers"]``,
+    ``gs["shop_boosters"]``.
+    """
+    from jackdaw.engine.shop import populate_shop
+
+    rng = gs.get("rng")
+    if rng is None:
+        return
+
+    ante = gs.get("round_resets", {}).get("ante", 1)
+    result = populate_shop(rng, ante, gs)
+
+    gs["shop_cards"] = result.get("jokers", [])
+    voucher = result.get("voucher")
+    gs["shop_vouchers"] = [voucher] if voucher else []
+    gs["shop_boosters"] = result.get("boosters", [])
+
+
+def _reroll_shop_cards(gs: dict[str, Any]) -> None:
+    """Regenerate the shop joker/consumable cards (not voucher or boosters).
+
+    Matches the repopulate step of ``reroll_shop``
+    (``button_callbacks.lua:2855``).
+    """
+    from jackdaw.engine.card_factory import create_card
+    from jackdaw.engine.shop import select_shop_card_type
+
+    rng = gs.get("rng")
+    if rng is None:
+        return
+
+    ante = gs.get("round_resets", {}).get("ante", 1)
+    shop_joker_max: int = gs.get("shop", {}).get("joker_max", 2)
+
+    new_cards = []
+    for _ in range(shop_joker_max):
+        card_type = select_shop_card_type(
+            rng, ante,
+            joker_rate=gs.get("joker_rate", 20.0),
+            tarot_rate=gs.get("tarot_rate", 4.0),
+            planet_rate=gs.get("planet_rate", 4.0),
+            spectral_rate=gs.get("spectral_rate", 0.0),
+            playing_card_rate=gs.get("playing_card_rate", 0.0),
+        )
+        card = create_card(
+            card_type, rng, ante,
+            area="shop", append="sho",
+            game_state=gs,
+        )
+        new_cards.append(card)
+
+    gs["shop_cards"] = new_cards
 
 
 def _get_card_set(card: Any) -> str:
