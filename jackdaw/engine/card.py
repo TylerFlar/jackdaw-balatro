@@ -263,6 +263,66 @@ class Card:
         # hands_played_at_create (card.lua:337)
         self.ability["hands_played_at_create"] = hands_played
 
+    def enhance(self, center_key: str) -> None:
+        """Change enhancement while preserving base, edition, seal, perma_bonus.
+
+        Mirrors the tarot enhancement path in card.lua:use_consumeable
+        where ``set_ability`` is called but base identity, edition, seal,
+        and accumulated bonuses are preserved.
+
+        This is distinct from ``set_ability`` which is a full reset.
+        """
+        # Save fields that must survive enhancement change
+        old_edition = self.edition
+        old_seal = self.seal
+        old_perma_bonus = self.ability.get("perma_bonus", 0)
+        old_bonus = self.ability.get("bonus", 0)
+
+        # Apply new center (resets ability dict)
+        self.set_ability(center_key)
+
+        # Restore preserved fields
+        self.edition = old_edition
+        self.seal = old_seal
+        self.ability["perma_bonus"] = old_perma_bonus
+        self.ability["bonus"] = old_bonus
+
+    def change_suit(self, new_suit: str) -> None:
+        """Change suit while preserving rank. Matches card.lua:547.
+
+        Recalculates suit_nominal and suit_nominal_original. Preserves
+        rank, enhancement, edition, seal.
+        """
+        if self.base is None:
+            return
+        rank_str = self.base.rank.value
+        suit_letter = {"Hearts": "H", "Diamonds": "D", "Clubs": "C", "Spades": "S"}
+        rank_letter = {
+            "2": "2", "3": "3", "4": "4", "5": "5", "6": "6", "7": "7",
+            "8": "8", "9": "9", "10": "T", "Jack": "J", "Queen": "Q",
+            "King": "K", "Ace": "A",
+        }
+        card_key = f"{suit_letter[new_suit]}_{rank_letter[rank_str]}"
+        self.set_base(card_key, new_suit, rank_str)
+
+    def change_rank(self, new_rank: str) -> None:
+        """Change rank while preserving suit. Matches Strength tarot logic.
+
+        Recalculates id, nominal, face_nominal. Preserves suit,
+        enhancement, edition, seal.
+        """
+        if self.base is None:
+            return
+        suit_str = self.base.suit.value
+        suit_letter = {"Hearts": "H", "Diamonds": "D", "Clubs": "C", "Spades": "S"}
+        rank_letter = {
+            "2": "2", "3": "3", "4": "4", "5": "5", "6": "6", "7": "7",
+            "8": "8", "9": "9", "10": "T", "Jack": "J", "Queen": "Q",
+            "King": "K", "Ace": "A",
+        }
+        card_key = f"{suit_letter[suit_str]}_{rank_letter[new_rank]}"
+        self.set_base(card_key, suit_str, new_rank)
+
     def set_edition(self, edition: dict[str, bool] | None) -> None:
         """Set the card's edition, populating scoring values.
 
@@ -613,6 +673,83 @@ class Card:
             if self.seal == "Red":
                 return {"repetitions": 1, "card": self}
         return None
+
+    def add_to_deck(self, game_state: dict) -> None:
+        """Apply joker's passive effects when added to deck (card.lua:Card:add_to_deck).
+
+        Mutates *game_state* in-place.  Matches card.lua:564 exactly.
+        game_state keys: hand_size, discards, joker_slots, probabilities_normal,
+        bankrupt_at, free_rerolls, hands_per_round, interest_amount.
+        """
+        name = self.ability.get("name", "")
+        extra = self.ability.get("extra")
+
+        # Top-level h_size / d_size (Juggler, Merry Andy, Drunkard, etc.)
+        if self.ability.get("h_size", 0) != 0:
+            game_state["hand_size"] = game_state.get("hand_size", 0) + self.ability["h_size"]
+        if self.ability.get("d_size", 0) > 0:
+            game_state["discards"] = game_state.get("discards", 0) + self.ability["d_size"]
+
+        if name == "Credit Card":
+            amount = extra if isinstance(extra, int) else 0
+            game_state["bankrupt_at"] = game_state.get("bankrupt_at", 0) - amount
+        if name == "Chaos the Clown":
+            game_state["free_rerolls"] = game_state.get("free_rerolls", 0) + 1
+        if name == "Turtle Bean" and isinstance(extra, dict):
+            game_state["hand_size"] = game_state.get("hand_size", 0) + extra.get("h_size", 0)
+        if name == "Oops! All 6s":
+            game_state["probabilities_normal"] = game_state.get("probabilities_normal", 1) * 2
+        if name == "To the Moon":
+            amount = extra if isinstance(extra, int) else 0
+            game_state["interest_amount"] = game_state.get("interest_amount", 0) + amount
+        if name == "Troubadour" and isinstance(extra, dict):
+            game_state["hand_size"] = game_state.get("hand_size", 0) + extra.get("h_size", 0)
+            game_state["hands_per_round"] = (
+                game_state.get("hands_per_round", 0) + extra.get("h_plays", 0)
+            )
+        if name == "Stuntman" and isinstance(extra, dict):
+            game_state["hand_size"] = game_state.get("hand_size", 0) - extra.get("h_size", 0)
+
+        if self.edition and self.edition.get("negative"):
+            game_state["joker_slots"] = game_state.get("joker_slots", 0) + 1
+
+    def remove_from_deck(self, game_state: dict) -> None:
+        """Reverse joker's passive effects when removed from deck (card.lua:Card:remove_from_deck).
+
+        Mirrors :meth:`add_to_deck` — each effect is undone.  Matches card.lua:648.
+        """
+        name = self.ability.get("name", "")
+        extra = self.ability.get("extra")
+
+        if self.ability.get("h_size", 0) != 0:
+            game_state["hand_size"] = game_state.get("hand_size", 0) - self.ability["h_size"]
+        if self.ability.get("d_size", 0) > 0:
+            game_state["discards"] = game_state.get("discards", 0) - self.ability["d_size"]
+
+        if name == "Credit Card":
+            amount = extra if isinstance(extra, int) else 0
+            game_state["bankrupt_at"] = game_state.get("bankrupt_at", 0) + amount
+        if name == "Chaos the Clown":
+            game_state["free_rerolls"] = max(0, game_state.get("free_rerolls", 0) - 1)
+        if name == "Turtle Bean" and isinstance(extra, dict):
+            game_state["hand_size"] = game_state.get("hand_size", 0) - extra.get("h_size", 0)
+        if name == "Oops! All 6s":
+            game_state["probabilities_normal"] = max(
+                1, game_state.get("probabilities_normal", 1) // 2
+            )
+        if name == "To the Moon":
+            amount = extra if isinstance(extra, int) else 0
+            game_state["interest_amount"] = game_state.get("interest_amount", 0) - amount
+        if name == "Troubadour" and isinstance(extra, dict):
+            game_state["hand_size"] = game_state.get("hand_size", 0) - extra.get("h_size", 0)
+            game_state["hands_per_round"] = (
+                game_state.get("hands_per_round", 0) - extra.get("h_plays", 0)
+            )
+        if name == "Stuntman" and isinstance(extra, dict):
+            game_state["hand_size"] = game_state.get("hand_size", 0) + extra.get("h_size", 0)
+
+        if self.edition and self.edition.get("negative"):
+            game_state["joker_slots"] = game_state.get("joker_slots", 0) - 1
 
     def __repr__(self) -> str:
         if self.base:
