@@ -1114,14 +1114,19 @@ def _handle_reorder_jokers(
 
 
 def _draw_hand(gs: dict[str, Any]) -> None:
-    """Draw cards from deck to fill the hand up to hand_size."""
+    """Draw cards from deck to fill the hand up to hand_size.
+
+    Cards are drawn from the END of the deck list (top of the visual
+    stack), matching Lua's ``draw_card(G.deck, G.hand, ...)`` which
+    pops from the last position.
+    """
     deck: list = gs.get("deck", [])
     hand: list = gs.setdefault("hand", [])
     hand_size: int = gs.get("hand_size", 8)
     to_draw = min(len(deck), hand_size - len(hand))
     for _ in range(to_draw):
         if deck:
-            hand.append(deck.pop(0))
+            hand.append(deck.pop())
 
 
 def _round_won(gs: dict[str, Any]) -> None:
