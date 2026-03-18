@@ -3,7 +3,7 @@
 Provides :func:`validate_step` for point-in-time comparison and
 :func:`validate_run_log` for post-hoc analysis of a recorded run.
 
-This module is used by ``scripts/validate_run.py`` to bridge the
+This module is used by ``scripts/validate.py`` to bridge the
 simulator with balatrobot (https://coder.github.io/balatrobot/).
 """
 
