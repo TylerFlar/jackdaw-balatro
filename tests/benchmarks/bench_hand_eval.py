@@ -21,9 +21,19 @@ def _reset():
 def _card(suit: str, rank: str) -> Card:
     sl = {"Hearts": "H", "Diamonds": "D", "Clubs": "C", "Spades": "S"}
     rl = {
-        "2": "2", "3": "3", "4": "4", "5": "5", "6": "6", "7": "7",
-        "8": "8", "9": "9", "10": "T", "Jack": "J", "Queen": "Q",
-        "King": "K", "Ace": "A",
+        "2": "2",
+        "3": "3",
+        "4": "4",
+        "5": "5",
+        "6": "6",
+        "7": "7",
+        "8": "8",
+        "9": "9",
+        "10": "T",
+        "Jack": "J",
+        "Queen": "Q",
+        "King": "K",
+        "Ace": "A",
     }
     c = Card()
     c.set_base(f"{sl[suit]}_{rl[rank]}", suit, rank)

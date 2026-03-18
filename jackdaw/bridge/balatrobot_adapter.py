@@ -195,6 +195,19 @@ def bot_state_to_game_state(bot: dict[str, Any]) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Game state → balatrobot response (reverse direction)
+# ---------------------------------------------------------------------------
+
+
+def game_state_to_bot_response(gs: dict[str, Any]) -> dict[str, Any]:
+    """Convert our game_state to balatrobot's JSON response format.
+
+    TODO: Implement for M15 (API server).
+    """
+    raise NotImplementedError
+
+
+# ---------------------------------------------------------------------------
 # Game state → comparison keys
 # ---------------------------------------------------------------------------
 

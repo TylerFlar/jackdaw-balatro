@@ -40,12 +40,7 @@ from jackdaw.engine.run_init import initialize_run
 
 def _init_gs(seed: str = "GAME_TEST") -> dict[str, Any]:
     """Create a fully initialised game_state ready for blind selection."""
-    gs = initialize_run("b_red", 1, seed)
-    gs["phase"] = GamePhase.BLIND_SELECT
-    gs["blind_on_deck"] = "Small"
-    gs["jokers"] = []
-    gs["consumables"] = []
-    return gs
+    return initialize_run("b_red", 1, seed)
 
 
 def _joker_card(key: str = "j_joker", **kw) -> Card:
@@ -521,12 +516,7 @@ class TestActionToRpc:
 
 
 def _mech_init(seed: str = "MECH") -> dict[str, Any]:
-    gs = initialize_run("b_red", 1, seed)
-    gs["phase"] = GamePhase.BLIND_SELECT
-    gs["blind_on_deck"] = "Small"
-    gs["jokers"] = []
-    gs["consumables"] = []
-    return gs
+    return initialize_run("b_red", 1, seed)
 
 
 def _mech_joker(key: str = "j_joker", **kw) -> Card:

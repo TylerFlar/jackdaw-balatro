@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from jackdaw.engine.actions import GamePhase
 from jackdaw.engine.back import Back
 from jackdaw.engine.challenges import apply_challenge
 from jackdaw.engine.data.prototypes import BLINDS
@@ -339,6 +340,20 @@ def initialize_run(
     # HandLevels (not in Lua start_run but needed for scoring)
     # -----------------------------------------------------------------------
     gs["hand_levels"] = HandLevels()
+
+    # -----------------------------------------------------------------------
+    # Card areas — initialize empty lists so callers don't have to
+    # -----------------------------------------------------------------------
+    gs.setdefault("jokers", [])
+    gs.setdefault("consumables", [])
+    gs.setdefault("hand", [])
+    gs.setdefault("discard_pile", [])
+
+    # -----------------------------------------------------------------------
+    # Phase — the run starts at blind selection for Small blind
+    # -----------------------------------------------------------------------
+    gs["phase"] = GamePhase.BLIND_SELECT
+    gs["blind_on_deck"] = "Small"
 
     return gs
 

@@ -75,8 +75,6 @@ def simulate_run(
         * ``actions_taken`` (int) — total actions executed
     """
     gs = initialize_run(back_key, stake, seed, challenge=challenge)
-    gs["phase"] = GamePhase.BLIND_SELECT
-    gs["blind_on_deck"] = "Small"
 
     actions_taken = 0
     while actions_taken < max_actions:

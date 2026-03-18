@@ -14,7 +14,7 @@ uv sync
 ```
 
 ```python
-from jackdaw.engine.runner import simulate_run, random_agent
+from jackdaw.engine import simulate_run, random_agent
 
 # Simulate a complete game with a random agent
 result = simulate_run("b_red", 1, "MYSEED", random_agent)
@@ -24,19 +24,11 @@ print(f"Won: {result['won']}, Ante: {result['round_resets']['ante']}")
 For manual step-through control:
 
 ```python
-from jackdaw.engine.runner import simulate_run, random_agent
-from jackdaw.engine.run_init import initialize_run
-from jackdaw.engine.game import step
-from jackdaw.engine.actions import get_legal_actions, GamePhase, SelectBlind
+from jackdaw.engine import initialize_run, step, get_legal_actions, SelectBlind
 
 gs = initialize_run("b_red", 1, "MYSEED")
-gs["phase"] = GamePhase.BLIND_SELECT
-gs["blind_on_deck"] = "Small"
-gs["jokers"] = []
-gs["consumables"] = []
-
-actions = get_legal_actions(gs)  # [SelectBlind(), SkipBlind()]
-step(gs, actions[0])             # gs["phase"] is now "selecting_hand"
+actions = get_legal_actions(gs)   # [SelectBlind(), SkipBlind()]
+gs = step(gs, SelectBlind())      # now in SELECTING_HAND phase
 ```
 
 ## Architecture

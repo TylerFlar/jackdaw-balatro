@@ -58,10 +58,6 @@ class TestGreedyAgentCrashResistance:
 def _scripted_run(seed: str) -> dict:
     """Play a scripted Small→Big→Boss sequence and return final state."""
     gs = initialize_run("b_red", 1, seed)
-    gs["phase"] = GamePhase.BLIND_SELECT
-    gs["blind_on_deck"] = "Small"
-    gs["jokers"] = []
-    gs["consumables"] = []
 
     for blind_name in ("Small", "Big", "Boss"):
         if blind_name != "Small":
@@ -236,8 +232,6 @@ class TestValidatorIntegration:
     def test_sim_matches_mock(self):
         """When mock derives from sim state, no discrepancies."""
         gs = initialize_run("b_red", 1, "VALID_INT")
-        gs["phase"] = GamePhase.BLIND_SELECT
-        gs["blind_on_deck"] = "Small"
 
         live = {
             "money": gs["dollars"],

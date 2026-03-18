@@ -611,7 +611,7 @@ def buy_card(
         game_state["inflation"] = game_state.get("inflation", 0) + 1
         inflation = game_state["inflation"]
         discount = game_state.get("discount_percent", 0)
-        ante = game_state.get("ante", 1)
+        ante = game_state.get("round_resets", {}).get("ante", 1)
         for shop_card in game_state.get("all_shop_cards", []):
             if hasattr(shop_card, "set_cost"):
                 shop_card.set_cost(
