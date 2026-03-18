@@ -4,12 +4,21 @@ version = "0.1.0"
 description = "Headless Balatro simulator for reinforcement learning research"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = [
-    "httpx>=0.28.1",
+license = {text = "MIT"}
+authors = [{name = "Tyler Flar"}]
+classifiers = [
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/TylerFlar/jackdaw-balatro"
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28.1",
     "lupa>=2.6",
     "pytest>=8.0",
     "pytest-cov>=6.0",

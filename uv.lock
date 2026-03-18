@@ -176,12 +176,10 @@ wheels = [
 name = "jackdaw"
 version = "0.1.0"
 source = { virtual = "." }
-dependencies = [
-    { name = "httpx" },
-]
 
 [package.dev-dependencies]
 dev = [
+    { name = "httpx" },
     { name = "lupa" },
     { name = "pytest" },
     { name = "pytest-cov" },
@@ -189,10 +187,10 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "httpx", specifier = ">=0.28.1" }]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "lupa", specifier = ">=2.6" },
     { name = "pytest", specifier = ">=8.0" },
     { name = "pytest-cov", specifier = ">=6.0" },
