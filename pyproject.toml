@@ -27,8 +27,11 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = ["-v", "--tb=short", "-m", "not benchmark"]
-markers = ["benchmark: performance benchmarks (deselect with -m 'not benchmark')"]
+addopts = ["-v", "--tb=short", "-m", "not benchmark and not live"]
+markers = [
+    "benchmark: performance benchmarks (deselect with -m 'not benchmark')",
+    "live: requires a running balatrobot instance (deselect with -m 'not live')",
+]
 
 [tool.ruff]
 target-version = "py312"

@@ -202,9 +202,13 @@ def bot_state_to_game_state(bot: dict[str, Any]) -> dict[str, Any]:
 def game_state_to_bot_response(gs: dict[str, Any]) -> dict[str, Any]:
     """Convert our game_state to balatrobot's JSON response format.
 
-    TODO: Implement for M15 (API server).
+    Delegates to :func:`jackdaw.bridge.serializer.game_state_to_bot_response`.
     """
-    raise NotImplementedError
+    from jackdaw.bridge.serializer import (
+        game_state_to_bot_response as _serialize,
+    )
+
+    return _serialize(gs)
 
 
 # ---------------------------------------------------------------------------
