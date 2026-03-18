@@ -27,7 +27,7 @@ from jackdaw.engine.actions import (
 )
 from jackdaw.engine.game import step
 from jackdaw.engine.run_init import initialize_run
-from jackdaw.engine.runner import random_agent, simulate_run
+from jackdaw.engine.runner import greedy_play_agent, random_agent, simulate_run
 
 # ---------------------------------------------------------------------------
 # Mapping tables
@@ -443,10 +443,11 @@ def cmd_crash(args: argparse.Namespace) -> None:
     elapsed = time.time() - t0
     runs_per_sec = args.count / max(elapsed, 0.001)
 
-    # Determinism check
+    # Determinism check — use greedy_play_agent (deterministic) so the
+    # comparison is not confounded by Python's random module state.
     print("\nDeterminism check...")
-    gs1 = simulate_run("b_red", 1, "DETERMINISM_CHECK", agent, max_actions=500)
-    gs2 = simulate_run("b_red", 1, "DETERMINISM_CHECK", agent, max_actions=500)
+    gs1 = simulate_run("b_red", 1, "DETERMINISM_CHECK", greedy_play_agent, max_actions=500)
+    gs2 = simulate_run("b_red", 1, "DETERMINISM_CHECK", greedy_play_agent, max_actions=500)
     deterministic = (
         gs1.get("dollars") == gs2.get("dollars")
         and gs1.get("round") == gs2.get("round")
