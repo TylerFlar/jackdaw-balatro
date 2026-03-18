@@ -30,6 +30,7 @@ if TYPE_CHECKING:
 # ConsumableContext — data available when using a consumable
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ConsumableContext:
     """Context for consumable use.  Mirrors the data available to
@@ -63,6 +64,7 @@ class ConsumableContext:
 # ---------------------------------------------------------------------------
 # ConsumableResult — side-effect descriptor
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class ConsumableResult:
@@ -135,9 +137,11 @@ _CONSUMABLE_REGISTRY: dict[str, ConsumableHandler] = {}
 
 def register_consumable(key: str) -> Callable[[ConsumableHandler], ConsumableHandler]:
     """Decorator to register a consumable handler by center key."""
+
     def wrapper(fn: ConsumableHandler) -> ConsumableHandler:
         _CONSUMABLE_REGISTRY[key] = fn
         return fn
+
     return wrapper
 
 
@@ -150,6 +154,7 @@ def registered_consumables() -> list[str]:
 # Validation — can_use_consumable
 # ---------------------------------------------------------------------------
 
+
 def _resolve_consumable_config(card: Card) -> dict[str, Any]:
     """Get the consumable config from the card's ability."""
     cfg = card.ability.get("consumeable", {})
@@ -159,37 +164,70 @@ def _resolve_consumable_config(card: Card) -> dict[str, Any]:
 
 
 # Consumables that need no highlighted cards and no slot checks
-_ALWAYS_USABLE = frozenset({
-    "c_hermit", "c_temperance", "c_black_hole",
-})
+_ALWAYS_USABLE = frozenset(
+    {
+        "c_hermit",
+        "c_temperance",
+        "c_black_hole",
+    }
+)
 
 # Consumables that need a consumable slot
-_NEED_CONSUMABLE_SLOT = frozenset({
-    "c_fool", "c_emperor", "c_high_priestess",
-})
+_NEED_CONSUMABLE_SLOT = frozenset(
+    {
+        "c_fool",
+        "c_emperor",
+        "c_high_priestess",
+    }
+)
 
 # Consumables that need a joker slot
-_NEED_JOKER_SLOT = frozenset({
-    "c_judgement", "c_soul", "c_wraith",
-})
+_NEED_JOKER_SLOT = frozenset(
+    {
+        "c_judgement",
+        "c_soul",
+        "c_wraith",
+    }
+)
 
 # Consumables that need an eligible joker (editionless)
-_NEED_ELIGIBLE_JOKER = frozenset({
-    "c_wheel_of_fortune", "c_ectoplasm", "c_hex",
-})
+_NEED_ELIGIBLE_JOKER = frozenset(
+    {
+        "c_wheel_of_fortune",
+        "c_ectoplasm",
+        "c_hex",
+    }
+)
 
 # Consumables that need >1 card in hand (no highlight selection)
-_NEED_HAND_CARDS = frozenset({
-    "c_familiar", "c_grim", "c_incantation", "c_immolate",
-    "c_sigil", "c_ouija",
-})
+_NEED_HAND_CARDS = frozenset(
+    {
+        "c_familiar",
+        "c_grim",
+        "c_incantation",
+        "c_immolate",
+        "c_sigil",
+        "c_ouija",
+    }
+)
 
 # Planet cards — always usable (they have hand_type in config)
-_PLANET_KEYS = frozenset({
-    "c_mercury", "c_venus", "c_earth", "c_mars", "c_jupiter",
-    "c_saturn", "c_uranus", "c_neptune", "c_pluto", "c_planet_x",
-    "c_ceres", "c_eris",
-})
+_PLANET_KEYS = frozenset(
+    {
+        "c_mercury",
+        "c_venus",
+        "c_earth",
+        "c_mars",
+        "c_jupiter",
+        "c_saturn",
+        "c_uranus",
+        "c_neptune",
+        "c_pluto",
+        "c_planet_x",
+        "c_ceres",
+        "c_eris",
+    }
+)
 
 
 def can_use_consumable(
@@ -280,6 +318,7 @@ def can_use_consumable(
 # Use dispatch
 # ---------------------------------------------------------------------------
 
+
 def use_consumable(
     card: Card,
     context: ConsumableContext,
@@ -301,12 +340,15 @@ def use_consumable(
 # Source: card.lua:1091-1150 (mod_conv path)
 # ---------------------------------------------------------------------------
 
+
 def _enhance_handler(enhancement: str) -> ConsumableHandler:
     """Factory for enhancement tarot handlers."""
+
     def handler(card: Card, ctx: ConsumableContext) -> ConsumableResult:
         return ConsumableResult(
             enhance=[(c, enhancement) for c in (ctx.highlighted or [])],
         )
+
     return handler
 
 
@@ -325,12 +367,15 @@ register_consumable("c_tower")(_enhance_handler("m_stone"))
 # Source: card.lua:1137 (suit_conv path)
 # ---------------------------------------------------------------------------
 
+
 def _suit_handler(suit: str) -> ConsumableHandler:
     """Factory for suit-change tarot handlers."""
+
     def handler(card: Card, ctx: ConsumableContext) -> ConsumableResult:
         return ConsumableResult(
             change_suit=[(c, suit) for c in (ctx.highlighted or [])],
         )
+
     return handler
 
 
@@ -346,8 +391,19 @@ register_consumable("c_world")(_suit_handler("Spades"))
 
 # Rank progression: id-based. Ace(14)→2, else id+1 capped at 14.
 _ID_TO_RANK = {
-    2: "2", 3: "3", 4: "4", 5: "5", 6: "6", 7: "7", 8: "8",
-    9: "9", 10: "10", 11: "Jack", 12: "Queen", 13: "King", 14: "Ace",
+    2: "2",
+    3: "3",
+    4: "4",
+    5: "5",
+    6: "6",
+    7: "7",
+    8: "8",
+    9: "9",
+    10: "10",
+    11: "Jack",
+    12: "Queen",
+    13: "King",
+    14: "Ace",
 }
 
 
@@ -406,6 +462,7 @@ def _hanged_man(card: Card, ctx: ConsumableContext) -> ConsumableResult:
 # Source: card.lua:1373-1430 (Fool, Emperor, High Priestess, Judgement)
 # ---------------------------------------------------------------------------
 
+
 @register_consumable("c_fool")
 def _fool(_card: Card, ctx: ConsumableContext) -> ConsumableResult:
     """The Fool: create a copy of the last Tarot/Planet used.
@@ -462,6 +519,7 @@ def _judgement(card: Card, ctx: ConsumableContext) -> ConsumableResult:
 # Source: card.lua:1470-1510 (wheel_of_fortune path)
 # ---------------------------------------------------------------------------
 
+
 @register_consumable("c_wheel_of_fortune")
 def _wheel_of_fortune(card: Card, ctx: ConsumableContext) -> ConsumableResult:
     """The Wheel of Fortune: 1-in-4 chance to add a random edition to a joker.
@@ -480,7 +538,7 @@ def _wheel_of_fortune(card: Card, ctx: ConsumableContext) -> ConsumableResult:
     # Step 1: probability check (card.lua:1474)
     roll = ctx.rng.random("wheel_of_fortune")
     if roll >= prob / extra:
-        return ConsumableResult()   # failure — "Nope!"
+        return ConsumableResult()  # failure — "Nope!"
 
     # Step 2: pick a random editionless joker (card.lua:1477)
     editionless = [j for j in (ctx.jokers or []) if not j.edition and not j.debuff]
@@ -499,6 +557,7 @@ def _wheel_of_fortune(card: Card, ctx: ConsumableContext) -> ConsumableResult:
 # Economy tarots
 # Source: card.lua:1383-1399 (Hermit, Temperance)
 # ---------------------------------------------------------------------------
+
 
 @register_consumable("c_hermit")
 def _hermit(card: Card, ctx: ConsumableContext) -> ConsumableResult:
@@ -537,18 +596,18 @@ def _temperance(card: Card, ctx: ConsumableContext) -> ConsumableResult:
 
 # Planet key → hand type string (from centers.json config.hand_type)
 _PLANET_HAND: dict[str, str] = {
-    "c_pluto":    "High Card",
-    "c_mercury":  "Pair",
-    "c_uranus":   "Two Pair",
-    "c_venus":    "Three of a Kind",
-    "c_saturn":   "Straight",
-    "c_jupiter":  "Flush",
-    "c_earth":    "Full House",
-    "c_mars":     "Four of a Kind",
-    "c_neptune":  "Straight Flush",
+    "c_pluto": "High Card",
+    "c_mercury": "Pair",
+    "c_uranus": "Two Pair",
+    "c_venus": "Three of a Kind",
+    "c_saturn": "Straight",
+    "c_jupiter": "Flush",
+    "c_earth": "Full House",
+    "c_mars": "Four of a Kind",
+    "c_neptune": "Straight Flush",
     "c_planet_x": "Five of a Kind",
-    "c_ceres":    "Flush House",
-    "c_eris":     "Flush Five",
+    "c_ceres": "Flush House",
+    "c_eris": "Flush Five",
 }
 
 _ALL_HAND_TYPES: list[str] = list(_PLANET_HAND.values())
@@ -562,9 +621,16 @@ def _track_planet_usage(card: Card, ctx: ConsumableContext) -> None:
     gs = ctx.game_state
     if gs is None:
         return
-    totals = gs.setdefault("consumable_usage_total", {
-        "tarot": 0, "planet": 0, "spectral": 0, "tarot_planet": 0, "all": 0,
-    })
+    totals = gs.setdefault(
+        "consumable_usage_total",
+        {
+            "tarot": 0,
+            "planet": 0,
+            "spectral": 0,
+            "tarot_planet": 0,
+            "all": 0,
+        },
+    )
     totals["planet"] = totals.get("planet", 0) + 1
     totals["tarot_planet"] = totals.get("tarot_planet", 0) + 1
     totals["all"] = totals.get("all", 0) + 1
@@ -573,12 +639,14 @@ def _track_planet_usage(card: Card, ctx: ConsumableContext) -> None:
 
 def _make_planet_handler(hand_type: str) -> ConsumableHandler:
     """Factory for single-hand-type planet handlers."""
+
     def handler(card: Card, ctx: ConsumableContext) -> ConsumableResult:
         _track_planet_usage(card, ctx)
         return ConsumableResult(
             level_up=[(hand_type, 1)],
             notify_jokers_consumeable=True,
         )
+
     return handler
 
 
@@ -594,9 +662,16 @@ def _black_hole(card: Card, ctx: ConsumableContext) -> ConsumableResult:
     """
     gs = ctx.game_state
     if gs is not None:
-        totals = gs.setdefault("consumable_usage_total", {
-            "tarot": 0, "planet": 0, "spectral": 0, "tarot_planet": 0, "all": 0,
-        })
+        totals = gs.setdefault(
+            "consumable_usage_total",
+            {
+                "tarot": 0,
+                "planet": 0,
+                "spectral": 0,
+                "tarot_planet": 0,
+                "all": 0,
+            },
+        )
         totals["planet"] = totals.get("planet", 0) + 1
         totals["tarot_planet"] = totals.get("tarot_planet", 0) + 1
         totals["all"] = totals.get("all", 0) + 1
@@ -613,13 +688,16 @@ def _black_hole(card: Card, ctx: ConsumableContext) -> ConsumableResult:
 # The seal name is stored in ability.extra (from config.extra).
 # ---------------------------------------------------------------------------
 
+
 def _seal_handler(seal: str) -> ConsumableHandler:
     """Factory for seal-adding spectral handlers."""
+
     def handler(card: Card, ctx: ConsumableContext) -> ConsumableResult:
         highlighted = ctx.highlighted or []
         return ConsumableResult(
             add_seal=[(c, seal) for c in highlighted],
         )
+
     return handler
 
 
@@ -634,6 +712,7 @@ register_consumable("c_medium")(_seal_handler("Purple"))
 # Source: card.lua:1201-1218.  copy_card(G.hand.highlighted[1], …) × extra
 # The copy_of reference lets the state machine clone the source card fully.
 # ---------------------------------------------------------------------------
+
 
 @register_consumable("c_cryptid")
 def _cryptid(card: Card, ctx: ConsumableContext) -> ConsumableResult:
@@ -660,12 +739,25 @@ def _cryptid(card: Card, ctx: ConsumableContext) -> ConsumableResult:
 
 # Lua short-code → Python full name
 _SUIT_CODE: dict[str, str] = {
-    "S": "Spades", "H": "Hearts", "D": "Diamonds", "C": "Clubs",
+    "S": "Spades",
+    "H": "Hearts",
+    "D": "Diamonds",
+    "C": "Clubs",
 }
 _RANK_CODE: dict[str, str] = {
-    "2": "2", "3": "3", "4": "4", "5": "5", "6": "6",
-    "7": "7", "8": "8", "9": "9", "T": "10",
-    "J": "Jack", "Q": "Queen", "K": "King", "A": "Ace",
+    "2": "2",
+    "3": "3",
+    "4": "4",
+    "5": "5",
+    "6": "6",
+    "7": "7",
+    "8": "8",
+    "9": "9",
+    "T": "10",
+    "J": "Jack",
+    "Q": "Queen",
+    "K": "King",
+    "A": "Ace",
 }
 
 # Enhanced pool (non-Stone), sorted by order field — built once on first use
@@ -676,10 +768,10 @@ def _get_enhanced_pool() -> list[str]:
     global _ENHANCED_POOL_CACHE  # noqa: PLW0603
     if _ENHANCED_POOL_CACHE is None:
         from jackdaw.engine.data.prototypes import _load_json
+
         centers = _load_json("centers.json")
         _ENHANCED_POOL_CACHE = sorted(
-            [k for k, v in centers.items()
-             if v.get("set") == "Enhanced" and k != "m_stone"],
+            [k for k, v in centers.items() if v.get("set") == "Enhanced" and k != "m_stone"],
             key=lambda k: centers[k].get("order", 0),
         )
     return _ENHANCED_POOL_CACHE
@@ -713,6 +805,7 @@ def _roll_card_spec(
 # Source: card.lua:1292-1338
 # ---------------------------------------------------------------------------
 
+
 @register_consumable("c_familiar")
 def _familiar(card: Card, ctx: ConsumableContext) -> ConsumableResult:
     """Familiar: destroy 1 random hand card, create 3 enhanced face cards.
@@ -742,10 +835,7 @@ def _grim(card: Card, ctx: ConsumableContext) -> ConsumableResult:
     hand = list(ctx.hand_cards)
     destroyed, _ = ctx.rng.element(hand, ctx.rng.seed("random_destroy"))
     count = card.ability.get("extra", 2)
-    created = [
-        _roll_card_spec(["A"], "grim_create", "grim_create", ctx.rng)
-        for _ in range(count)
-    ]
+    created = [_roll_card_spec(["A"], "grim_create", "grim_create", ctx.rng) for _ in range(count)]
     return ConsumableResult(destroy=[destroyed], create=created)
 
 
@@ -773,6 +863,7 @@ def _incantation(card: Card, ctx: ConsumableContext) -> ConsumableResult:
 # Source: card.lua:1340-1365.  Pseudoshuffle + take first extra.destroy cards.
 # ---------------------------------------------------------------------------
 
+
 @register_consumable("c_immolate")
 def _immolate(card: Card, ctx: ConsumableContext) -> ConsumableResult:
     """Immolate: destroy 5 random hand cards, gain $20.
@@ -796,6 +887,7 @@ def _immolate(card: Card, ctx: ConsumableContext) -> ConsumableResult:
 # Source: card.lua:1232-1244.  pseudorandom_element({'S','H','D','C'}, pseudoseed('sigil'))
 # ---------------------------------------------------------------------------
 
+
 @register_consumable("c_sigil")
 def _sigil(_card: Card, ctx: ConsumableContext) -> ConsumableResult:
     """Sigil: change all hand cards to a single random suit.
@@ -804,9 +896,7 @@ def _sigil(_card: Card, ctx: ConsumableContext) -> ConsumableResult:
     """
     if ctx.rng is None or not ctx.hand_cards:
         return ConsumableResult()
-    suit_code, _ = ctx.rng.element(
-        list(_SUIT_CODE), ctx.rng.seed("sigil")
-    )
+    suit_code, _ = ctx.rng.element(list(_SUIT_CODE), ctx.rng.seed("sigil"))
     suit = _SUIT_CODE[suit_code]
     return ConsumableResult(
         change_suit=[(c, suit) for c in ctx.hand_cards],
@@ -817,6 +907,7 @@ def _sigil(_card: Card, ctx: ConsumableContext) -> ConsumableResult:
 # Ouija — change all hand cards to one random rank, -1 hand size
 # Source: card.lua:1246-1260.  pseudorandom_element({'2'…'A'}, pseudoseed('ouija'))
 # ---------------------------------------------------------------------------
+
 
 @register_consumable("c_ouija")
 def _ouija(_card: Card, ctx: ConsumableContext) -> ConsumableResult:
@@ -838,6 +929,7 @@ def _ouija(_card: Card, ctx: ConsumableContext) -> ConsumableResult:
 # ---------------------------------------------------------------------------
 # Edition spectrals
 # ---------------------------------------------------------------------------
+
 
 @register_consumable("c_aura")
 def _aura(_card: Card, ctx: ConsumableContext) -> ConsumableResult:
@@ -893,6 +985,7 @@ def _hex(_card: Card, ctx: ConsumableContext) -> ConsumableResult:
 # ---------------------------------------------------------------------------
 # Joker-creating spectrals
 # ---------------------------------------------------------------------------
+
 
 @register_consumable("c_wraith")
 def _wraith(_card: Card, ctx: ConsumableContext) -> ConsumableResult:

@@ -533,6 +533,7 @@ def get_challenge(challenge_id: str) -> dict[str, Any] | None:
 # apply_challenge — game.lua:2063-2148
 # ---------------------------------------------------------------------------
 
+
 def apply_challenge(
     challenge_def: dict[str, Any],
     game_state: dict[str, Any],
@@ -575,9 +576,7 @@ def apply_challenge(
     consumeables = challenge_def.get("consumeables", [])
     if consumeables:
         existing = game_state.get("starting_consumables", [])
-        game_state["starting_consumables"] = existing + [
-            c["id"] for c in consumeables
-        ]
+        game_state["starting_consumables"] = existing + [c["id"] for c in consumeables]
 
     # ------------------------------------------------------------------
     # 3. Starting vouchers — mark used + apply effects

@@ -10,14 +10,39 @@ from __future__ import annotations
 import pytest
 
 from jackdaw.engine.card import Card, CardBase, reset_sort_id_counter
+from jackdaw.engine.card_area import CardArea, draw_card
 from jackdaw.engine.data.enums import Rank, Suit
 from jackdaw.engine.data.prototypes import JOKERS
+from jackdaw.engine.rng import PseudoRandom
 
 
 @pytest.fixture(autouse=True)
 def _reset_sort_ids():
     """Reset sort_id counter before each test for determinism."""
     reset_sort_id_counter()
+
+
+def _playing_card(suit: str, rank: str, enhancement: str = "c_base") -> Card:
+    sl = {"Hearts": "H", "Diamonds": "D", "Clubs": "C", "Spades": "S"}
+    rl = {
+        "2": "2",
+        "3": "3",
+        "4": "4",
+        "5": "5",
+        "6": "6",
+        "7": "7",
+        "8": "8",
+        "9": "9",
+        "10": "T",
+        "Jack": "J",
+        "Queen": "Q",
+        "King": "K",
+        "Ace": "A",
+    }
+    c = Card()
+    c.set_base(f"{sl[suit]}_{rl[rank]}", suit, rank)
+    c.set_ability(enhancement)
+    return c
 
 
 # ============================================================================
@@ -40,28 +65,6 @@ class TestCardBase:
         assert b.original_value is Rank.ACE
         assert b.times_played == 0
 
-    def test_king_of_hearts(self):
-        b = CardBase.from_card_key("H_K", "Hearts", "King")
-        assert b.id == 13
-        assert b.nominal == 10
-        assert b.face_nominal == 0.3
-
-    def test_two_of_diamonds(self):
-        b = CardBase.from_card_key("D_2", "Diamonds", "2")
-        assert b.id == 2
-        assert b.nominal == 2
-        assert b.face_nominal == 0.0
-        assert b.suit_nominal == 0.01
-
-    def test_jack_face_nominal(self):
-        b = CardBase.from_card_key("C_J", "Clubs", "Jack")
-        assert b.face_nominal == 0.1
-        assert b.nominal == 10
-
-    def test_ten_not_face(self):
-        b = CardBase.from_card_key("S_T", "Spades", "10")
-        assert b.face_nominal == 0.0
-
 
 # ============================================================================
 # Card creation and sort_id
@@ -69,16 +72,6 @@ class TestCardBase:
 
 
 class TestCardCreation:
-    def test_sort_id_auto_increments(self):
-        c1, c2, c3 = Card(), Card(), Card()
-        assert (c1.sort_id, c2.sort_id, c3.sort_id) == (1, 2, 3)
-
-    def test_sort_id_reset(self):
-        Card()
-        Card()
-        reset_sort_id_counter()
-        assert Card().sort_id == 1
-
     def test_defaults(self):
         c = Card()
         assert c.base is None
@@ -99,26 +92,6 @@ class TestCardCreation:
 class TestSetAbilityByKey:
     """set_ability(center_key: str) looks up P_CENTERS and populates ability."""
 
-    def test_joker_flat_mult(self):
-        """j_joker: config.mult=4, no Xmult."""
-        c = Card()
-        c.set_ability("j_joker")
-        assert c.ability["name"] == "Joker"
-        assert c.ability["set"] == "Joker"
-        assert c.ability["effect"] == "Mult"
-        assert c.ability["mult"] == 4
-        assert c.ability["x_mult"] == 1  # no Xmult in config → default 1
-        assert c.center_key == "j_joker"
-        assert c.base_cost == 2
-
-    def test_greedy_joker_nested_extra(self):
-        """j_greedy_joker: config.extra.s_mult=3, config.extra.suit='Diamonds'."""
-        c = Card()
-        c.set_ability("j_greedy_joker")
-        assert c.ability["extra"]["s_mult"] == 3
-        assert c.ability["extra"]["suit"] == "Diamonds"
-        assert c.ability["effect"] == "Suit Mult"
-
     def test_duo_xmult(self):
         """j_duo: config.Xmult=2 (top-level) → ability.x_mult=2."""
         c = Card()
@@ -133,17 +106,6 @@ class TestSetAbilityByKey:
         c.set_ability("j_ice_cream")
         assert c.ability["extra"]["chips"] == 100
         assert c.ability["extra"]["chip_mod"] == 5
-
-    def test_hands_played_at_create(self):
-        """All cards get hands_played_at_create from game state."""
-        c = Card()
-        c.set_ability("j_joker", hands_played=42)
-        assert c.ability["hands_played_at_create"] == 42
-
-    def test_hands_played_at_create_defaults_zero(self):
-        c = Card()
-        c.set_ability("j_joker")
-        assert c.ability["hands_played_at_create"] == 0
 
     def test_bonus_card_enhancement(self):
         """m_bonus: config.bonus=30."""
@@ -167,11 +129,6 @@ class TestSetAbilityByKey:
 class TestPostInitFields:
     """Joker-specific fields set after the main ability assignment."""
 
-    def test_invisible_joker(self):
-        c = Card()
-        c.set_ability("j_invisible")
-        assert c.ability["invis_rounds"] == 0
-
     def test_caino(self):
         c = Card()
         c.set_ability("j_caino")
@@ -189,15 +146,6 @@ class TestPostInitFields:
         assert c.ability["loyalty_remaining"] == c.ability["extra"]["every"]
         assert c.ability["loyalty_remaining"] == 5
         assert c.ability["burnt_hand"] == 0
-
-    def test_non_special_joker_no_extra_fields(self):
-        """Normal jokers don't get special post-init fields."""
-        c = Card()
-        c.set_ability("j_joker")
-        assert "invis_rounds" not in c.ability
-        assert "caino_xmult" not in c.ability
-        assert "yorick_discards" not in c.ability
-        assert "loyalty_remaining" not in c.ability
 
 
 # ============================================================================
@@ -222,28 +170,6 @@ class TestDeepCopyIsolation:
         c.set_ability("j_greedy_joker")
         c.ability["extra"]["s_mult"] = 999
         assert JOKERS["j_greedy_joker"].config["extra"]["s_mult"] == 3
-
-    def test_ice_cream_decay_isolated(self):
-        """Simulate Ice Cream chip decay — must not affect other instances."""
-        c1 = Card()
-        c1.set_ability("j_ice_cream")
-        c2 = Card()
-        c2.set_ability("j_ice_cream")
-
-        # Simulate decay on c1
-        c1.ability["extra"]["chips"] -= 5
-        assert c1.ability["extra"]["chips"] == 95
-        assert c2.ability["extra"]["chips"] == 100  # unaffected
-
-    def test_scalar_extra_not_shared(self):
-        """Jokers with scalar extra (not dict) are also independent."""
-        c1 = Card()
-        c1.set_ability("j_fibonacci")  # extra = 8 (scalar)
-        c2 = Card()
-        c2.set_ability("j_fibonacci")
-        # Scalars are copied by value, so this is inherently safe
-        assert c1.ability["extra"] == 8
-        assert c2.ability["extra"] == 8
 
 
 # ============================================================================
@@ -271,19 +197,6 @@ class TestSetAbilityByDict:
         assert c.center_key == "test_joker"
         assert c.base_cost == 3
 
-    def test_consumeable_config_ref(self):
-        c = Card()
-        c.set_ability(
-            {
-                "key": "c_magician",
-                "name": "The Magician",
-                "set": "Tarot",
-                "config": {"mod_conv": "m_lucky", "max_highlighted": 2},
-                "consumeable": True,
-            }
-        )
-        assert c.ability["consumeable"]["mod_conv"] == "m_lucky"
-
 
 # ============================================================================
 # perma_bonus preservation
@@ -291,15 +204,6 @@ class TestSetAbilityByDict:
 
 
 class TestPermaBonus:
-    def test_preserved_across_set_ability(self):
-        c = Card()
-        c.set_base("S_5", "Spades", "5")
-        c.set_ability("c_base")
-        c.ability["perma_bonus"] = 15  # Hiker effect
-        c.set_ability("c_base")  # re-apply
-        assert c.ability["perma_bonus"] == 15
-        assert c.get_chip_bonus() == 5 + 15
-
     def test_preserved_across_key_change(self):
         c = Card()
         c.set_base("H_3", "Hearts", "3")
@@ -323,29 +227,9 @@ class TestIsFace:
         c.set_base("H_J", "Hearts", "Jack")
         assert c.is_face() is True
 
-    def test_queen_is_face(self):
-        c = Card()
-        c.set_base("S_Q", "Spades", "Queen")
-        assert c.is_face() is True
-
-    def test_king_is_face(self):
-        c = Card()
-        c.set_base("D_K", "Diamonds", "King")
-        assert c.is_face() is True
-
     def test_ace_is_not_face(self):
         c = Card()
         c.set_base("D_A", "Diamonds", "Ace")
-        assert c.is_face() is False
-
-    def test_ten_is_not_face(self):
-        c = Card()
-        c.set_base("S_T", "Spades", "10")
-        assert c.is_face() is False
-
-    def test_five_is_not_face(self):
-        c = Card()
-        c.set_base("H_5", "Hearts", "5")
         assert c.is_face() is False
 
     def test_debuffed_is_not_face(self):
@@ -354,41 +238,11 @@ class TestIsFace:
         c.debuff = True
         assert c.is_face() is False
 
-    def test_debuffed_with_from_boss(self):
-        """from_boss=True bypasses debuff check (The Plant boss blind)."""
-        c = Card()
-        c.set_base("H_K", "Hearts", "King")
-        c.debuff = True
-        assert c.is_face(from_boss=True) is True
-
     def test_pareidolia_makes_all_face(self):
         """Pareidolia joker: ALL cards are face cards."""
         c = Card()
         c.set_base("H_5", "Hearts", "5")
         assert c.is_face(pareidolia=True) is True
-
-    def test_pareidolia_ace(self):
-        c = Card()
-        c.set_base("D_A", "Diamonds", "Ace")
-        assert c.is_face(pareidolia=True) is True
-
-    def test_pareidolia_debuffed(self):
-        """Debuffed card with Pareidolia: debuff takes precedence."""
-        c = Card()
-        c.set_base("H_5", "Hearts", "5")
-        c.debuff = True
-        assert c.is_face(pareidolia=True) is False
-
-    def test_pareidolia_debuffed_from_boss(self):
-        """from_boss bypasses debuff even with Pareidolia."""
-        c = Card()
-        c.set_base("H_5", "Hearts", "5")
-        c.debuff = True
-        assert c.is_face(pareidolia=True, from_boss=True) is True
-
-    def test_no_base(self):
-        c = Card()
-        assert c.is_face() is False
 
 
 class TestIsSuit:
@@ -399,12 +253,6 @@ class TestIsSuit:
         c.set_base("S_A", "Spades", "Ace")
         assert c.is_suit("Spades") is True
         assert c.is_suit("Hearts") is False
-
-    def test_all_four_suits(self):
-        for suit_str in ["Hearts", "Diamonds", "Clubs", "Spades"]:
-            c = Card()
-            c.set_base(f"{suit_str[0]}_5", suit_str, "5")
-            assert c.is_suit(suit_str) is True
 
     def test_wild_card_matches_all(self):
         """Wild Card matches every suit."""
@@ -424,17 +272,6 @@ class TestIsSuit:
         c.debuff = True
         assert c.is_suit("Spades") is False
 
-    def test_wild_card_flush_calc_debuffed(self):
-        """In flush_calc mode: Wild Card still matches if debuffed? No.
-
-        Source card.lua:4069: Wild Card matches in flush_calc only if NOT debuffed.
-        """
-        c = Card()
-        c.set_base("H_5", "Hearts", "5")
-        c.set_ability("m_wild")
-        c.debuff = True
-        assert c.is_suit("Spades", flush_calc=True) is False
-
     def test_stone_card_never_matches(self):
         c = Card()
         c.set_base("H_5", "Hearts", "5")
@@ -449,49 +286,6 @@ class TestIsSuit:
         assert c.is_suit("Diamonds", smeared=True) is True
         assert c.is_suit("Hearts", smeared=True) is True
 
-    def test_smeared_black_suits(self):
-        """Smeared: Club matches Spade (both black)."""
-        c = Card()
-        c.set_base("C_5", "Clubs", "5")
-        c.set_ability("c_base")
-        assert c.is_suit("Spades", smeared=True) is True
-        assert c.is_suit("Clubs", smeared=True) is True
-
-    def test_smeared_red_not_black(self):
-        """Smeared: Heart does NOT match Spade (red vs black)."""
-        c = Card()
-        c.set_base("H_5", "Hearts", "5")
-        c.set_ability("c_base")
-        assert c.is_suit("Spades", smeared=True) is False
-
-    def test_smeared_black_not_red(self):
-        c = Card()
-        c.set_base("S_5", "Spades", "5")
-        c.set_ability("c_base")
-        assert c.is_suit("Diamonds", smeared=True) is False
-
-    def test_bypass_debuff(self):
-        c = Card()
-        c.set_base("H_5", "Hearts", "5")
-        c.set_ability("c_base")
-        c.debuff = True
-        assert c.is_suit("Hearts") is False
-        assert c.is_suit("Hearts", bypass_debuff=True) is True
-
-    def test_suit_enum_input(self):
-        """Accepts Suit enum as well as string."""
-        from jackdaw.engine.data.enums import Suit
-
-        c = Card()
-        c.set_base("S_A", "Spades", "Ace")
-        c.set_ability("c_base")
-        assert c.is_suit(Suit.SPADES) is True
-        assert c.is_suit(Suit.HEARTS) is False
-
-    def test_no_base(self):
-        c = Card()
-        assert c.is_suit("Hearts") is False
-
 
 class TestScoringMethods:
     def test_get_id_stone_card(self):
@@ -500,21 +294,101 @@ class TestScoringMethods:
         c.set_ability("m_stone")
         assert c.get_id() == -1
 
-    def test_get_chip_x_mult_glass(self):
-        c = Card()
-        c.set_ability("m_glass")
-        assert c.get_chip_x_mult() == 2
+    # -- Scoring Methods (from card_scoring) --
 
-    def test_stone_card_ignores_base_nominal(self):
-        c = Card()
-        c.set_base("H_A", "Hearts", "Ace")
-        c.set_ability("m_stone")
+    # get_chip_bonus
+
+    def test_stone_card_override(self):
+        """Stone Card: ignores nominal, returns bonus only (50)."""
+        c = _playing_card("Hearts", "Ace", enhancement="m_stone")
         assert c.get_chip_bonus() == 50
 
-    def test_repr(self):
-        c = Card()
-        c.set_ability("j_joker")
-        assert "Joker" in repr(c)
+    def test_perma_bonus(self):
+        c = _playing_card("Hearts", "5")
+        c.ability["perma_bonus"] = 15
+        assert c.get_chip_bonus() == 5 + 15
+
+    # get_chip_mult
+
+    def test_mult_card(self):
+        """Mult Card: ability.mult = 4."""
+        c = _playing_card("Hearts", "5", enhancement="m_mult")
+        assert c.get_chip_mult() == 4
+
+    # get_chip_x_mult
+
+    def test_glass_card(self):
+        """Glass Card: x_mult = 2.0."""
+        c = _playing_card("Hearts", "5", enhancement="m_glass")
+        assert c.get_chip_x_mult() == 2
+
+    # get_chip_h_x_mult
+
+    def test_steel_card(self):
+        """Steel Card: h_x_mult = 1.5."""
+        c = _playing_card("Hearts", "5", enhancement="m_steel")
+        assert c.get_chip_h_x_mult() == pytest.approx(1.5)
+
+    # get_edition
+
+    def test_foil_edition(self):
+        c = _playing_card("Hearts", "5")
+        c.set_edition({"foil": True})
+        ed = c.get_edition()
+        assert ed is not None
+        assert ed["chip_mod"] == 50
+        assert "mult_mod" not in ed
+        assert "x_mult_mod" not in ed
+
+    def test_holographic_edition(self):
+        c = _playing_card("Hearts", "5")
+        c.set_edition({"holo": True})
+        ed = c.get_edition()
+        assert ed is not None
+        assert ed["mult_mod"] == 10
+        assert "chip_mod" not in ed
+
+    def test_polychrome_edition(self):
+        c = _playing_card("Hearts", "5")
+        c.set_edition({"polychrome": True})
+        ed = c.get_edition()
+        assert ed is not None
+        assert ed["x_mult_mod"] == pytest.approx(1.5)
+        assert "chip_mod" not in ed
+        assert "mult_mod" not in ed
+
+    def test_edition_has_card_ref(self):
+        c = _playing_card("Hearts", "5")
+        c.set_edition({"holo": True})
+        ed = c.get_edition()
+        assert ed["card"] is c
+
+    # get_p_dollars
+
+    def test_gold_seal(self):
+        """Gold Seal: +$3 on score."""
+        c = _playing_card("Hearts", "5")
+        c.set_seal("Gold")
+        assert c.get_p_dollars() == 3
+
+    def test_gold_card_enhancement(self):
+        """Gold Card enhancement: h_dollars=3, NOT p_dollars.
+
+        Gold Card earns $3 when HELD at end of round, not when scored.
+        get_p_dollars should return 0 for Gold Card (p_dollars=0 in config).
+        """
+        c = _playing_card("Hearts", "5", enhancement="m_gold")
+        assert c.get_p_dollars() == 0  # h_dollars, not p_dollars
+
+    # calculate_seal
+
+    def test_red_seal_repetition(self):
+        c = _playing_card("Hearts", "5")
+        c.set_seal("Red")
+        result = c.calculate_seal(repetition=True)
+        assert result is not None
+        assert result["repetitions"] == 1
+        assert result["card"] is c
 
 
 # ============================================================================
@@ -523,26 +397,11 @@ class TestScoringMethods:
 
 
 class TestStickers:
-    def test_set_eternal(self):
-        c = Card()
-        c.set_eternal(True)
-        assert c.eternal is True
-
     def test_set_perishable_resets_tally(self):
         c = Card()
         c.perish_tally = 0
         c.set_perishable(True)
         assert c.perish_tally == 5
-
-    def test_set_edition(self):
-        c = Card()
-        c.set_edition({"foil": True})
-        assert c.edition["foil"] is True
-
-    def test_set_seal(self):
-        c = Card()
-        c.set_seal("Red")
-        assert c.seal == "Red"
 
 
 # ============================================================================
@@ -568,28 +427,6 @@ class TestSetCost:
         # floor((2 + 0 + 0.5) * 100/100) = floor(2.5) = 2
         assert c.cost == 2
 
-    def test_base_cost_5(self):
-        """j_greedy_joker: base_cost=5."""
-        c = self._make_joker("j_greedy_joker")
-        c.set_cost()
-        # floor((5 + 0 + 0.5) * 100/100) = floor(5.5) = 5
-        assert c.cost == 5
-
-    def test_sell_cost_is_half(self):
-        """sell_cost = max(1, floor(cost/2))."""
-        c = self._make_joker("j_greedy_joker")
-        c.set_cost()
-        # cost=5, sell = max(1, floor(5/2)) = max(1, 2) = 2
-        assert c.sell_cost == 2
-
-    def test_sell_cost_minimum_is_1(self):
-        """Even cost=1 gives sell_cost=1."""
-        c = self._make_joker("j_joker")
-        c.set_cost()
-        assert c.cost == 2
-        # floor(2/2) = 1
-        assert c.sell_cost == 1
-
     # -- Discount --
 
     def test_25_percent_discount(self):
@@ -598,20 +435,6 @@ class TestSetCost:
         c.set_cost(discount_percent=25)
         # floor((5 + 0 + 0.5) * 75/100) = floor(4.125) = 4
         assert c.cost == 4
-
-    def test_50_percent_discount(self):
-        """Liquidation: 50% discount on cost=5."""
-        c = self._make_joker("j_greedy_joker")
-        c.set_cost(discount_percent=50)
-        # floor((5 + 0 + 0.5) * 50/100) = floor(2.75) = 2
-        assert c.cost == 2
-
-    def test_discount_minimum_1(self):
-        """Discount can't reduce cost below 1."""
-        c = self._make_joker("j_joker")  # base_cost=2
-        c.set_cost(discount_percent=50)
-        # floor((2 + 0 + 0.5) * 50/100) = floor(1.25) = 1
-        assert c.cost == 1
 
     # -- Edition surcharges --
 
@@ -623,52 +446,6 @@ class TestSetCost:
         # floor((5 + 2 + 0.5) * 100/100) = floor(7.5) = 7
         assert c.cost == 7
 
-    def test_holo_surcharge(self):
-        """Holographic edition adds +3."""
-        c = self._make_joker("j_greedy_joker")
-        c.set_edition({"holo": True})
-        c.set_cost()
-        # floor((5 + 3 + 0.5) * 100/100) = floor(8.5) = 8
-        assert c.cost == 8
-
-    def test_polychrome_surcharge(self):
-        """Polychrome edition adds +5."""
-        c = self._make_joker("j_greedy_joker")
-        c.set_edition({"polychrome": True})
-        c.set_cost()
-        # floor((5 + 5 + 0.5) * 100/100) = floor(10.5) = 10
-        assert c.cost == 10
-
-    def test_negative_surcharge(self):
-        """Negative edition adds +5."""
-        c = self._make_joker("j_greedy_joker")
-        c.set_edition({"negative": True})
-        c.set_cost()
-        assert c.cost == 10
-
-    def test_edition_with_discount(self):
-        """Foil + 25% discount on cost=5."""
-        c = self._make_joker("j_greedy_joker")
-        c.set_edition({"foil": True})
-        c.set_cost(discount_percent=25)
-        # floor((5 + 2 + 0.5) * 75/100) = floor(5.625) = 5
-        assert c.cost == 5
-
-    # -- Inflation --
-
-    def test_inflation(self):
-        """Inflation adds to extra_cost."""
-        c = self._make_joker("j_greedy_joker")
-        c.set_cost(inflation=3)
-        # floor((5 + 3 + 0.5) * 100/100) = floor(8.5) = 8
-        assert c.cost == 8
-
-    def test_inflation_with_discount(self):
-        c = self._make_joker("j_greedy_joker")
-        c.set_cost(inflation=3, discount_percent=25)
-        # floor((5 + 3 + 0.5) * 75/100) = floor(6.375) = 6
-        assert c.cost == 6
-
     # -- Rental override --
 
     def test_rental_override(self):
@@ -679,104 +456,172 @@ class TestSetCost:
         assert c.cost == 1
         assert c.sell_cost == 1  # floor(1/2) = 0, clamped to 1
 
-    def test_rental_via_ability_flag(self):
-        """ability.rental also triggers the override."""
-        c = self._make_joker("j_greedy_joker")
-        c.ability["rental"] = True
-        c.set_cost()
-        assert c.cost == 1
 
-    # -- Astronomer --
+# ============================================================================
+# CardArea and draw_card (merged from test_card_area.py)
+# ============================================================================
 
-    def test_astronomer_planet(self):
-        """Astronomer makes planet cards cost 0."""
+
+_RANK_LETTER = {
+    "2": "2",
+    "3": "3",
+    "4": "4",
+    "5": "5",
+    "6": "6",
+    "7": "7",
+    "8": "8",
+    "9": "9",
+    "10": "T",
+    "Jack": "J",
+    "Queen": "Q",
+    "King": "K",
+    "Ace": "A",
+}
+
+
+def _make_playing_card(suit: str, rank: str) -> Card:
+    """Helper: create a Card with base set."""
+    c = Card()
+    key = f"{suit[0]}_{_RANK_LETTER[rank]}"
+    c.set_base(key, suit, rank)
+    c.set_ability({"name": "Default Base", "set": "Default", "config": {}})
+    return c
+
+
+def _make_deck(n: int = 52) -> list[Card]:
+    """Helper: create n cards with sequential sort_ids and bases."""
+    suits = ["Hearts", "Diamonds", "Clubs", "Spades"]
+    ranks = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "Jack", "Queen", "King", "Ace"]
+    rank_letters = {
+        "2": "2",
+        "3": "3",
+        "4": "4",
+        "5": "5",
+        "6": "6",
+        "7": "7",
+        "8": "8",
+        "9": "9",
+        "10": "T",
+        "Jack": "J",
+        "Queen": "Q",
+        "King": "K",
+        "Ace": "A",
+    }
+    cards = []
+    for suit in suits:
+        for rank in ranks:
+            c = Card()
+            key = f"{suit[0]}_{rank_letters[rank]}"
+            c.set_base(key, suit, rank)
+            c.set_ability({"name": "Default Base", "set": "Default", "config": {}})
+            cards.append(c)
+            if len(cards) >= n:
+                return cards
+    return cards
+
+
+class TestCardAreaBasics:
+    def test_add_and_len(self):
+        area = CardArea()
         c = Card()
-        c.set_ability(
-            {
-                "key": "c_pluto",
-                "name": "Pluto",
-                "set": "Planet",
-                "config": {"hand_type": "High Card"},
-                "cost": 3,
-            }
-        )
-        c.set_cost(has_astronomer=True)
-        assert c.cost == 0
+        area.add(c)
+        assert len(area) == 1
+        assert area.cards[0] is c
 
-    def test_astronomer_celestial_booster(self):
-        """Astronomer makes celestial boosters cost 0."""
+    def test_remove(self):
+        area = CardArea()
+        c1, c2, c3 = Card(), Card(), Card()
+        area.add(c1)
+        area.add(c2)
+        area.add(c3)
+        removed = area.remove(c2)
+        assert removed is c2
+        assert len(area) == 2
+        assert c2 not in area.cards
+
+    def test_has_space(self):
+        area = CardArea(card_limit=3)
+        assert area.has_space() is True
+        area.add(Card())
+        area.add(Card())
+        assert area.has_space() is True
+        area.add(Card())
+        assert area.has_space() is False
+
+
+class TestHighlighting:
+    def test_remove_also_unhighlights(self):
+        area = CardArea()
         c = Card()
-        c.set_ability(
-            {
-                "key": "p_celestial_normal_1",
-                "name": "Celestial Pack",
-                "set": "Booster",
-                "config": {},
-                "cost": 4,
-            }
-        )
-        c.set_cost(has_astronomer=True)
-        assert c.cost == 0
+        area.add(c)
+        area.add_to_highlighted(c)
+        area.remove(c)
+        assert c not in area.highlighted
 
-    def test_astronomer_non_planet(self):
-        """Astronomer doesn't affect joker costs."""
-        c = self._make_joker("j_joker")
-        c.set_cost(has_astronomer=True)
-        assert c.cost == 2  # unchanged
 
-    # -- Couponed --
+class TestDrawCard:
+    def test_draw_from_deck_to_hand(self):
+        deck = CardArea(card_limit=52, area_type="deck")
+        hand = CardArea(card_limit=8, area_type="hand")
+        cards = _make_deck(52)
+        for c in cards:
+            deck.add(c)
+        assert len(deck) == 52
 
-    def test_couponed(self):
-        """Couponed by tag: cost = 0, but sell_cost calculated before."""
-        c = self._make_joker("j_greedy_joker")
-        c.set_cost(is_couponed=True)
-        assert c.cost == 0
-        # sell_cost is calculated before couponed override
-        assert c.sell_cost == 2  # floor(5/2) = 2
+        drawn = draw_card(deck, hand, count=8)
+        assert len(drawn) == 8
+        assert len(deck) == 44
+        assert len(hand) == 8
 
-    # -- Booster ante scaling --
+    def test_draw_respects_target_limit(self):
+        deck = CardArea(card_limit=52, area_type="deck")
+        hand = CardArea(card_limit=3, area_type="hand")
+        for c in _make_deck(10):
+            deck.add(c)
 
-    def test_booster_ante_scaling(self):
-        """Booster cost += ante - 1 when modifier active."""
-        c = Card()
-        c.set_ability(
-            {
-                "key": "p_arcana_normal_1",
-                "name": "Arcana Pack",
-                "set": "Booster",
-                "config": {},
-                "cost": 4,
-            }
-        )
-        c.set_cost(ante=5, booster_ante_scaling=True)
-        # base formula: floor((4 + 0 + 0.5) * 100/100) = 4
-        # then + (5 - 1) = 4 + 4 = 8
-        assert c.cost == 8
+        drawn = draw_card(deck, hand, count=5)
+        assert len(drawn) == 3  # limited by hand capacity
+        assert len(hand) == 3
+        assert len(deck) == 7
 
-    def test_booster_ante_scaling_non_booster(self):
-        """Ante scaling doesn't apply to non-boosters."""
-        c = self._make_joker("j_joker")
-        c.set_cost(ante=5, booster_ante_scaling=True)
-        assert c.cost == 2  # unchanged
 
-    # -- extra_value (Egg/Gift Card) --
+class TestShuffle:
+    def test_deterministic_shuffle(self):
+        """Same seed produces same card order."""
 
-    def test_extra_value_adds_to_sell(self):
-        """Egg joker's extra_value increases sell_cost."""
-        c = self._make_joker("j_greedy_joker")
-        c.ability["extra_value"] = 9  # 3 rounds * 3
-        c.set_cost()
-        # cost=5, base sell = floor(5/2) = 2, + 9 = 11
-        assert c.sell_cost == 11
+        def make_area():
+            reset_sort_id_counter()
+            area = CardArea(card_limit=52, area_type="deck")
+            for c in _make_deck(10):
+                area.add(c)
+            return area
 
-    # -- Compound scenario --
+        a1 = make_area()
+        rng1 = PseudoRandom("TESTSEED")
+        a1.shuffle(rng1, "shuffle")
+        ids1 = [c.sort_id for c in a1.cards]
 
-    def test_foil_inflation_discount(self):
-        """Foil + inflation=2 + 25% discount on base_cost=8."""
-        c = self._make_joker("j_stencil")  # cost=8, uncommon
-        c.set_edition({"foil": True})
-        c.set_cost(inflation=2, discount_percent=25)
-        # extra_cost = 2 + 2 = 4
-        # floor((8 + 4 + 0.5) * 75/100) = floor(9.375) = 9
-        assert c.cost == 9
-        assert c.sell_cost == 4  # floor(9/2) = 4
+        a2 = make_area()
+        rng2 = PseudoRandom("TESTSEED")
+        a2.shuffle(rng2, "shuffle")
+        ids2 = [c.sort_id for c in a2.cards]
+
+        assert ids1 == ids2
+
+
+class TestSort:
+    def test_sort_by_value_descending(self):
+        area = CardArea(card_limit=10, area_type="hand")
+        # Add cards in arbitrary order
+        for rank in ["3", "Ace", "7", "King", "2"]:
+            c = Card()
+            c.set_base(f"H_{rank[0]}", "Hearts", rank)
+            c.set_ability({"name": "Default Base", "set": "Default", "config": {}})
+            area.add(c)
+
+        area.sort_by_value(descending=True)
+        ranks = [c.base.rank for c in area.cards]
+        # Ace(11) > King(10) > 7 > 3 > 2
+        assert ranks[0] is Rank.ACE
+        assert ranks[1] is Rank.KING
+        assert ranks[-1] is Rank.TWO

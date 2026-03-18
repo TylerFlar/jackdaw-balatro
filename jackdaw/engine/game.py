@@ -19,7 +19,6 @@ Usage::
 
 from __future__ import annotations
 
-import math
 from typing import Any
 
 from jackdaw.engine.actions import (
@@ -33,10 +32,10 @@ from jackdaw.engine.actions import (
     OpenBooster,
     PickPackCard,
     PlayHand,
-    Reroll,
     RedeemVoucher,
     ReorderHand,
     ReorderJokers,
+    Reroll,
     SelectBlind,
     SellCard,
     SkipBlind,
@@ -112,9 +111,7 @@ def _require_phase(gs: dict[str, Any], *phases: GamePhase) -> GamePhase:
     raw = gs.get("phase")
     phase = GamePhase(raw) if isinstance(raw, str) else raw
     if phase not in phases:
-        raise IllegalActionError(
-            f"Action not valid in phase {phase!r} (expected {phases})"
-        )
+        raise IllegalActionError(f"Action not valid in phase {phase!r} (expected {phases})")
     return phase
 
 
@@ -196,8 +193,7 @@ def _handle_select_blind(gs: dict[str, Any]) -> dict[str, Any]:
     # Debuff playing cards based on boss blind
     deck: list = gs.get("deck", [])
     pareidolia = any(
-        getattr(j, "center_key", None) == "j_pareidolia"
-        and not getattr(j, "debuff", False)
+        getattr(j, "center_key", None) == "j_pareidolia" and not getattr(j, "debuff", False)
         for j in jokers
     )
     for card in deck:
@@ -270,11 +266,13 @@ def _handle_skip_blind(gs: dict[str, Any]) -> dict[str, Any]:
         tag = Tag(tag_key)
         tag_result = tag.apply("immediate", gs, rng=gs.get("rng"))
 
-        awarded_tags.append({
-            "key": tag_key,
-            "result": tag_result,
-            "blind": blind_on_deck,
-        })
+        awarded_tags.append(
+            {
+                "key": tag_key,
+                "result": tag_result,
+                "blind": blind_on_deck,
+            }
+        )
 
         # Apply immediate tag effects
         if tag_result is not None:
@@ -321,9 +319,7 @@ def _handle_skip_blind(gs: dict[str, Any]) -> dict[str, Any]:
     return gs
 
 
-def _handle_play_hand(
-    gs: dict[str, Any], indices: tuple[int, ...]
-) -> dict[str, Any]:
+def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str, Any]:
     """Play cards from the hand, score them, and check if blind is beaten.
 
     Full sequence matching ``state_events.lua`` play_cards_from_highlighted
@@ -465,8 +461,7 @@ def _handle_play_hand(
         # Re-debuff hand cards for boss blind (new cards from deck)
         if blind.boss and not blind.disabled:
             pareidolia = any(
-                getattr(j, "center_key", None) == "j_pareidolia"
-                and not getattr(j, "debuff", False)
+                getattr(j, "center_key", None) == "j_pareidolia" and not getattr(j, "debuff", False)
                 for j in jokers
             )
             for card in gs.get("hand", []):
@@ -480,9 +475,7 @@ def _handle_play_hand(
     return gs
 
 
-def _handle_discard(
-    gs: dict[str, Any], indices: tuple[int, ...]
-) -> dict[str, Any]:
+def _handle_discard(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str, Any]:
     """Discard highlighted cards, fire joker contexts, draw replacements.
 
     Full sequence matching ``state_events.lua:379-448``:
@@ -524,7 +517,7 @@ def _handle_discard(
     # ------------------------------------------------------------------
     # 3. Fire joker pre_discard context (Burnt Joker: level up hand)
     # ------------------------------------------------------------------
-    from jackdaw.engine.jokers import GameSnapshot, JokerContext, calculate_joker
+    from jackdaw.engine.jokers import JokerContext, calculate_joker
 
     jokers: list = gs.get("jokers", [])
     rng = gs.get("rng")
@@ -644,8 +637,8 @@ def _handle_discard(
 
     # Track stat
     gs["round_scores"] = gs.get("round_scores", {})
-    gs["round_scores"]["cards_discarded"] = (
-        gs["round_scores"].get("cards_discarded", 0) + len(discarded)
+    gs["round_scores"]["cards_discarded"] = gs["round_scores"].get("cards_discarded", 0) + len(
+        discarded
     )
 
     # ------------------------------------------------------------------
@@ -673,8 +666,7 @@ def _handle_discard(
     # ------------------------------------------------------------------
     if blind and getattr(blind, "boss", False) and not getattr(blind, "disabled", False):
         pareidolia = any(
-            getattr(j, "center_key", None) == "j_pareidolia"
-            and not getattr(j, "debuff", False)
+            getattr(j, "center_key", None) == "j_pareidolia" and not getattr(j, "debuff", False)
             for j in jokers
         )
         for card in gs.get("hand", []):
@@ -683,9 +675,7 @@ def _handle_discard(
     return gs
 
 
-def _build_discard_snapshot(
-    gs: dict[str, Any], jokers: list
-) -> Any:
+def _build_discard_snapshot(gs: dict[str, Any], jokers: list) -> Any:
     """Build a GameSnapshot for discard context."""
     from jackdaw.engine.jokers import GameSnapshot
 
@@ -836,8 +826,9 @@ def _handle_use_consumable(
        requests it (Constellation +xMult when Planet used)
     5. Track usage stats (last_tarot_planet)
     """
-    _require_phase(gs, GamePhase.BLIND_SELECT, GamePhase.SELECTING_HAND,
-                   GamePhase.ROUND_EVAL, GamePhase.SHOP)
+    _require_phase(
+        gs, GamePhase.BLIND_SELECT, GamePhase.SELECTING_HAND, GamePhase.ROUND_EVAL, GamePhase.SHOP
+    )
 
     consumables: list = gs.get("consumables", [])
     if idx < 0 or idx >= len(consumables):
@@ -896,8 +887,8 @@ def _handle_open_booster(gs: dict[str, Any], idx: int) -> dict[str, Any]:
     boosters.pop(idx)
 
     # Generate pack cards
-    from jackdaw.engine.packs import generate_pack_cards
     from jackdaw.engine.data.prototypes import BOOSTERS
+    from jackdaw.engine.packs import generate_pack_cards
 
     pack_key = pack.center_key
     rng = gs.get("rng")
@@ -939,7 +930,9 @@ def _handle_open_booster(gs: dict[str, Any], idx: int) -> dict[str, Any]:
 
 
 def _handle_pick_pack_card(
-    gs: dict[str, Any], idx: int, targets: tuple[int, ...] | None = None,
+    gs: dict[str, Any],
+    idx: int,
+    targets: tuple[int, ...] | None = None,
 ) -> dict[str, Any]:
     """Pick a card from an opened booster pack.
 
@@ -1039,9 +1032,7 @@ def _handle_reroll(gs: dict[str, Any]) -> dict[str, Any]:
 
     # Track stat
     gs.setdefault("round_scores", {})
-    gs["round_scores"]["times_rerolled"] = (
-        gs["round_scores"].get("times_rerolled", 0) + 1
-    )
+    gs["round_scores"]["times_rerolled"] = gs["round_scores"].get("times_rerolled", 0) + 1
 
     # Regenerate shop joker cards
     _reroll_shop_cards(gs)
@@ -1091,21 +1082,23 @@ def _handle_sort_hand(gs: dict[str, Any], mode: str) -> dict[str, Any]:
 
     hand: list = gs.get("hand", [])
     if mode == "rank":
-        hand.sort(key=lambda c: (
-            getattr(c.base, "id", 0) if c.base else 0,
-            getattr(c.base, "suit_nominal", 0) if c.base else 0,
-        ))
+        hand.sort(
+            key=lambda c: (
+                getattr(c.base, "id", 0) if c.base else 0,
+                getattr(c.base, "suit_nominal", 0) if c.base else 0,
+            )
+        )
     elif mode == "suit":
-        hand.sort(key=lambda c: (
-            getattr(c.base, "suit_nominal", 0) if c.base else 0,
-            getattr(c.base, "id", 0) if c.base else 0,
-        ))
+        hand.sort(
+            key=lambda c: (
+                getattr(c.base, "suit_nominal", 0) if c.base else 0,
+                getattr(c.base, "id", 0) if c.base else 0,
+            )
+        )
     return gs
 
 
-def _handle_reorder_hand(
-    gs: dict[str, Any], order: tuple[int, ...]
-) -> dict[str, Any]:
+def _handle_reorder_hand(gs: dict[str, Any], order: tuple[int, ...]) -> dict[str, Any]:
     """Reorder cards in the player's hand.
 
     Free action — no cost, doesn't consume hands or discards.
@@ -1123,9 +1116,7 @@ def _handle_reorder_hand(
     return gs
 
 
-def _handle_reorder_jokers(
-    gs: dict[str, Any], order: tuple[int, ...]
-) -> dict[str, Any]:
+def _handle_reorder_jokers(gs: dict[str, Any], order: tuple[int, ...]) -> dict[str, Any]:
     """Reorder jokers by permutation."""
     _require_phase(gs, GamePhase.SELECTING_HAND, GamePhase.SHOP)
 
@@ -1188,7 +1179,7 @@ def _round_won(gs: dict[str, Any]) -> None:
     # ------------------------------------------------------------------
     # 1. Fire joker end_of_round context
     # ------------------------------------------------------------------
-    from jackdaw.engine.jokers import on_end_of_round, GameSnapshot
+    from jackdaw.engine.jokers import GameSnapshot, on_end_of_round
 
     game_snap = GameSnapshot(
         money=gs.get("dollars", 0),
@@ -1214,8 +1205,7 @@ def _round_won(gs: dict[str, Any]) -> None:
     # ------------------------------------------------------------------
     hand: list = gs.get("hand", [])
     gold_seal_dollars = sum(
-        3 for c in hand
-        if getattr(c, "seal", None) == "Gold" and not getattr(c, "debuff", False)
+        3 for c in hand if getattr(c, "seal", None) == "Gold" and not getattr(c, "debuff", False)
     )
     if gold_seal_dollars:
         gs["dollars"] = gs.get("dollars", 0) + gold_seal_dollars
@@ -1232,6 +1222,7 @@ def _round_won(gs: dict[str, Any]) -> None:
                 most_played = hand_levels.most_played()
                 # Find the planet key for this hand type
                 from jackdaw.engine.consumables import _PLANET_HAND
+
                 planet_key = None
                 for pk, ht in _PLANET_HAND.items():
                     if ht == most_played.value:
@@ -1239,6 +1230,7 @@ def _round_won(gs: dict[str, Any]) -> None:
                         break
                 if planet_key:
                     from jackdaw.engine.card import Card as _BSCard
+
                     planet = _BSCard(center_key=planet_key)
                     planet.ability = {"set": "Planet", "effect": ""}
                     consumables.append(planet)
@@ -1396,7 +1388,6 @@ def _apply_setting_blind_mutations(
         if mut.get("destroy_random_joker") and len(jokers) > 1:
             if rng:
                 # Pick a random non-self joker to destroy
-                import random
 
                 candidates = [j for j in jokers if j is not jokers[0]]
                 if candidates:
@@ -1491,12 +1482,23 @@ def _apply_boss_blind_effects(gs: dict[str, Any], blind: Any) -> None:
 
     # The Eye: reset hand tracking
     elif name == "The Eye":
-        blind.hands = {ht: False for ht in [
-            "Flush Five", "Flush House", "Five of a Kind",
-            "Straight Flush", "Four of a Kind", "Full House",
-            "Flush", "Straight", "Three of a Kind",
-            "Two Pair", "Pair", "High Card",
-        ]}
+        blind.hands = {
+            ht: False
+            for ht in [
+                "Flush Five",
+                "Flush House",
+                "Five of a Kind",
+                "Straight Flush",
+                "Four of a Kind",
+                "Full House",
+                "Flush",
+                "Straight",
+                "Three of a Kind",
+                "Two Pair",
+                "Pair",
+                "High Card",
+            ]
+        }
 
     # The Mouth: reset only_hand
     elif name == "The Mouth":
@@ -1574,7 +1576,9 @@ def _use_consumable_card(
 
 
 def _apply_consumable_result(
-    gs: dict[str, Any], result: Any, card: Any = None,
+    gs: dict[str, Any],
+    result: Any,
+    card: Any = None,
 ) -> None:
     """Apply a ConsumableResult's mutations to game_state.
 
@@ -1706,9 +1710,7 @@ def _apply_consumable_result(
         gs["hand_size"] = gs.get("hand_size", 8) + result.hand_size_mod
 
 
-def _resolve_create_descriptors(
-    gs: dict[str, Any], descriptors: list[dict[str, Any]]
-) -> None:
+def _resolve_create_descriptors(gs: dict[str, Any], descriptors: list[dict[str, Any]]) -> None:
     """Resolve card creation descriptors from ConsumableResult.create.
 
     Each descriptor is ``{'type': ..., 'count': ..., 'seed': ...,
@@ -1738,7 +1740,9 @@ def _resolve_create_descriptors(
                 if len(jokers) < joker_slots:
                     c = _Card(center_key="j_joker")
                     c.ability = {
-                        "set": "Joker", "effect": "", "name": "Joker",
+                        "set": "Joker",
+                        "effect": "",
+                        "name": "Joker",
                     }
                     jokers.append(c)
 
@@ -1788,7 +1792,8 @@ def _reroll_shop_cards(gs: dict[str, Any]) -> None:
     new_cards = []
     for _ in range(shop_joker_max):
         card_type = select_shop_card_type(
-            rng, ante,
+            rng,
+            ante,
             joker_rate=gs.get("joker_rate", 20.0),
             tarot_rate=gs.get("tarot_rate", 4.0),
             planet_rate=gs.get("planet_rate", 4.0),
@@ -1796,8 +1801,11 @@ def _reroll_shop_cards(gs: dict[str, Any]) -> None:
             playing_card_rate=gs.get("playing_card_rate", 0.0),
         )
         card = create_card(
-            card_type, rng, ante,
-            area="shop", append="sho",
+            card_type,
+            rng,
+            ante,
+            area="shop",
+            append="sho",
             game_state=gs,
         )
         new_cards.append(card)
@@ -1813,9 +1821,7 @@ def _get_card_set(card: Any) -> str:
     return ""
 
 
-def _fire_shop_joker_context(
-    gs: dict[str, Any], **context_flags: Any
-) -> list[dict[str, Any]]:
+def _fire_shop_joker_context(gs: dict[str, Any], **context_flags: Any) -> list[dict[str, Any]]:
     """Fire a joker context during shop phase and return mutations.
 
     Accepts keyword arguments matching :class:`JokerContext` flags
@@ -1981,11 +1987,13 @@ def _check_double_tag(gs: dict[str, Any], awarded_tag_key: str) -> None:
             dup_result = dup_tag.apply("immediate", gs, rng=gs.get("rng"))
 
             awarded_tags: list = gs.setdefault("awarded_tags", [])
-            awarded_tags.append({
-                "key": awarded_tag_key,
-                "result": dup_result,
-                "blind": "double",
-            })
+            awarded_tags.append(
+                {
+                    "key": awarded_tag_key,
+                    "result": dup_result,
+                    "blind": "double",
+                }
+            )
 
             if dup_result and dup_result.dollars:
                 gs["dollars"] = gs.get("dollars", 0) + dup_result.dollars

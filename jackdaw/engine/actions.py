@@ -32,7 +32,7 @@ Each phase permits a specific subset of actions:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -44,7 +44,7 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 
-class GamePhase(str, Enum):
+class GamePhase(StrEnum):
     """Phases where player input is needed.
 
     Maps to ``G.STATES`` in the Lua source, filtered to decision points.
@@ -414,9 +414,7 @@ def _legal_shop(gs: dict[str, Any]) -> list[Action]:
         # Check slot availability
         card_set = card.ability.get("set", "") if isinstance(card.ability, dict) else ""
         if card_set == "Joker":
-            is_negative = (
-                isinstance(card.edition, dict) and card.edition.get("negative")
-            )
+            is_negative = isinstance(card.edition, dict) and card.edition.get("negative")
             if len(jokers) >= joker_slots and not is_negative:
                 continue
         elif card_set in ("Tarot", "Planet", "Spectral"):

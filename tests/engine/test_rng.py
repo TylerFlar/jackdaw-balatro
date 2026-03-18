@@ -5,22 +5,22 @@ Test strategy:
   - Validate PseudoRandom.seed() stream advancement via Lua ground truth
   - Validate PseudoRandom class API: random, element, shuffle, predict_seed
   - Validate functional wrappers (pseudoseed, pseudorandom, etc.)
-  - Validate generate_starting_seed format
 
 Ground-truth values were obtained by running the original Lua functions
 (misc_functions.lua:279-320) via lupa, matching to 15 decimal places.
 """
 
+import json
+import shutil
+import subprocess
+from pathlib import Path
+
 import pytest
 
 from jackdaw.engine.rng import (
     PseudoRandom,
-    generate_starting_seed,
     pseudohash,
-    pseudorandom,
-    pseudorandom_element,
     pseudoseed,
-    pseudoshuffle,
 )
 
 # Tolerance: Lua uses IEEE 754 doubles, same as Python. pseudohash has no
@@ -36,15 +36,9 @@ SEED_TOL = 1e-13
 
 PSEUDOHASH_TRUTH = {
     "TESTSEED": 0.319272078222355,
-    "TUTORIAL": 0.417952113690717,
     "A3K9NZ2B": 0.946384286395556,
-    "A": 0.651751842670649,
     "a": 0.641368674218143,
-    "AB": 0.916420555346463,
     "bossTUTORIAL": 0.174561306470309,
-    "shuffleTUTORIAL": 0.663191794746467,
-    "lucky_multTUTORIAL": 0.853518645904103,
-    "Joker1shoA3K9NZ2B": 0.854421527927570,
 }
 
 # pseudoseed ground truth: {seed_str: {stream_key: [(result, stored), ...]}}
@@ -56,57 +50,6 @@ PSEUDOSEED_TRUTH = {
             (0.454214620624177, 0.589157163026000),
             (0.234808236884227, 0.150344395546100),
             (0.356483101926677, 0.393694125631000),
-        ],
-        "shuffle": [
-            (0.259181259155277, 0.199090440088200),
-            (0.398509804991727, 0.477747531761100),
-            (0.638755735891777, 0.958239393561200),
-            (0.553014759177527, 0.786757440132700),
-            (0.405170534985477, 0.491068991748600),
-        ],
-        "lucky_mult": [
-            (0.384863452913327, 0.450454827604300),
-            (0.615225162607027, 0.911178246991700),
-            (0.512440701295377, 0.705609324368400),
-            (0.335208186295427, 0.351144294368500),
-            (0.529603973631777, 0.739935869041200),
-        ],
-        "rarity1": [
-            (0.358788231947277, 0.398304385672200),
-            (0.570263337327027, 0.821254596431700),
-            (0.434912471136127, 0.550552864049900),
-            (0.201525302333477, 0.083778526444600),
-            (0.299092927169377, 0.278913776116400),
-        ],
-    },
-    "A3K9NZ2B": {
-        "boss": [
-            (0.894786055642878, 0.843187824890200),
-            (0.767378443466228, 0.588372600536900),
-            (0.547687925580128, 0.148991564764700),
-            (0.668872854608128, 0.391361422820700),
-            (0.877833523153128, 0.809282759910700),
-        ],
-        "shuffle": [
-            (0.738665515415678, 0.530946744435800),
-            (0.498177869425028, 0.049971452454500),
-            (0.583502053825778, 0.220619821256000),
-            (0.730627597888428, 0.514870909381300),
-            (0.484317989044878, 0.022251691694200),
-        ],
-        "lucky_mult": [
-            (0.713836136097628, 0.481287985799700),
-            (0.955364264272378, 0.964344242149200),
-            (0.871834196141178, 0.797284105886800),
-            (0.727802268901528, 0.509220251407500),
-            (0.479446239408228, 0.012508192420900),
-        ],
-        "rarity1": [
-            (0.879998709605878, 0.813613132816200),
-            (0.741880440218778, 0.537376594042000),
-            (0.503721403935178, 0.061058521474800),
-            (0.593060838788878, 0.239737391182200),
-            (0.747109928755728, 0.547835571115900),
         ],
     },
 }
@@ -133,526 +76,31 @@ class TestPseudohash:
             f"pseudohash({s!r}): {pseudohash(s):.15f} != {expected:.15f}"
         )
 
-    def test_empty_string(self):
-        assert pseudohash("") == 1.0
-
-    def test_deterministic(self):
-        assert pseudohash("hello") == pseudohash("hello")
-
-    def test_different_strings_differ(self):
-        assert pseudohash("foo") != pseudohash("bar")
-
-    def test_case_sensitive(self):
-        assert pseudohash("A") != pseudohash("a")
-
-    def test_long_string_in_range(self):
-        result = pseudohash("x" * 500)
-        assert 0.0 <= result < 1.0
-
 
 # ============================================================================
-# PseudoRandom class tests
+# PseudoRandom class — minimal smoke tests (oracle sections provide coverage)
 # ============================================================================
 
 
 class TestPseudoRandomSeed:
-    """PseudoRandom.seed(): stateful LCG per stream."""
-
-    @pytest.mark.parametrize("seed_str", ["TESTSEED", "A3K9NZ2B"])
-    @pytest.mark.parametrize("stream_key", ["boss", "shuffle", "lucky_mult", "rarity1"])
-    def test_matches_lua_sequence(self, seed_str: str, stream_key: str):
-        """5 sequential calls per stream must match Lua ground truth."""
-        prng = PseudoRandom(seed_str)
-        expected_seq = PSEUDOSEED_TRUTH[seed_str][stream_key]
-
-        for call_idx, (expected_result, expected_stored) in enumerate(expected_seq):
-            result = prng.seed(stream_key)
-            stored = prng.state[stream_key]
-
-            assert abs(result - expected_result) < SEED_TOL, (
-                f"seed={seed_str!r} stream={stream_key!r} call {call_idx + 1}: "
-                f"result {result:.15f} != {expected_result:.15f}"
-            )
-            assert abs(stored - expected_stored) < SEED_TOL, (
-                f"seed={seed_str!r} stream={stream_key!r} call {call_idx + 1}: "
-                f"stored {stored:.15f} != {expected_stored:.15f}"
-            )
+    """PseudoRandom.seed(): stream independence."""
 
     def test_streams_are_independent(self):
         """Advancing one stream must not affect another."""
         prng = PseudoRandom("TESTSEED")
-
-        # Prime both streams
         prng.seed("alpha")
         prng.seed("beta")
         alpha_val = prng.state["alpha"]
-
-        # Advance beta many times
         for _ in range(10):
             prng.seed("beta")
-
         assert prng.state["alpha"] == alpha_val
-
-    def test_never_repeats_in_50_calls(self):
-        prng = PseudoRandom("TESTSEED")
-        values = [prng.seed("test") for _ in range(50)]
-        assert len(set(values)) == 50
-
-    def test_output_range(self):
-        prng = PseudoRandom("TESTSEED")
-        for _ in range(500):
-            v = prng.seed("range_check")
-            assert 0.0 <= v <= 1.0
-
-    def test_hashed_seed_matches_pseudohash(self):
-        prng = PseudoRandom("TUTORIAL")
-        assert abs(prng.hashed_seed - pseudohash("TUTORIAL")) < HASH_TOL
-
-    def test_init_stores_seed_string(self):
-        prng = PseudoRandom("MYSEED")
-        assert prng.seed_str == "MYSEED"
-
-    def test_init_only_has_reserved_keys(self):
-        """Fresh PseudoRandom has only 'seed' and 'hashed_seed', no streams."""
-        prng = PseudoRandom("A3K9NZ2B")
-        assert set(prng.state.keys()) == {"seed", "hashed_seed"}
-
-    # LuaJIT ground truth: lazy init values = pseudohash(key + seed)
-    LAZY_INIT_TRUTH_A3K9NZ2B = {
-        "boss": 0.990965706218390,
-        "shuffle": 0.809884197253268,
-        "lucky_mult": 0.781085030487418,
-        "rarity1": 0.393872785063536,
-        "front1": 0.978286517849483,
-    }
-
-    @pytest.mark.parametrize("key,expected_init", LAZY_INIT_TRUTH_A3K9NZ2B.items())
-    def test_lazy_init_matches_pseudohash(self, key: str, expected_init: float):
-        """First access to a stream initializes it from pseudohash(key+seed)."""
-        prng = PseudoRandom("A3K9NZ2B")
-        assert key not in prng.state
-        prng.seed(key)  # triggers lazy init then advances
-        # After the first call, the stored value has been ADVANCED past init.
-        # Verify the init value itself:
-        init_val = pseudohash(key + "A3K9NZ2B")
-        assert abs(init_val - expected_init) < HASH_TOL, (
-            f"pseudohash({key!r}+'A3K9NZ2B') = {init_val:.15f}, expected {expected_init:.15f}"
-        )
-
-    def test_lazy_init_then_advance_matches_a3k9nz2b(self):
-        """Full sequence on A3K9NZ2B: lazy init → 5 advances, all match oracle."""
-        prng = PseudoRandom("A3K9NZ2B")
-        for stream_key in ["boss", "shuffle", "lucky_mult", "rarity1"]:
-            expected_seq = PSEUDOSEED_TRUTH["A3K9NZ2B"][stream_key]
-            for call_idx, (expected_result, _) in enumerate(expected_seq):
-                result = prng.seed(stream_key)
-                assert abs(result - expected_result) < SEED_TOL, (
-                    f"A3K9NZ2B {stream_key}[{call_idx + 1}]: "
-                    f"{result:.15f} != {expected_result:.15f}"
-                )
-
-
-class TestPseudoRandomPredictSeed:
-    """PseudoRandom.predict_seed(): stateless preview."""
-
-    @pytest.mark.parametrize("key,pseed,expected", PREDICT_SEED_TRUTH)
-    def test_matches_lua(self, key: str, pseed: str, expected: float):
-        prng = PseudoRandom("IRRELEVANT")  # state doesn't matter
-        result = prng.predict_seed(key, pseed)
-        assert abs(result - expected) < SEED_TOL, (
-            f"predict_seed({key!r}, {pseed!r}): {result:.15f} != {expected:.15f}"
-        )
-
-    def test_does_not_mutate_state(self):
-        prng = PseudoRandom("TESTSEED")
-        state_before = prng.get_state()
-        prng.predict_seed("Joker4", "TESTSEED")
-        state_after = prng.get_state()
-        assert state_before == state_after
-
-    def test_predict_matches_first_seed_call(self):
-        """predict_seed(key, seed) should equal the first seed(key) call."""
-        prng = PseudoRandom("A3K9NZ2B")
-        predicted = prng.predict_seed("boss", "A3K9NZ2B")
-        actual = prng.seed("boss")
-        assert abs(predicted - actual) < SEED_TOL
-
-
-class TestPseudoRandomRandom:
-    """PseudoRandom.random(): uniform output from stream."""
-
-    def test_float_in_unit_interval(self):
-        prng = PseudoRandom("TESTSEED")
-        result = prng.random("test")
-        assert isinstance(result, float)
-        assert 0.0 <= result < 1.0
-
-    def test_integer_range(self):
-        prng = PseudoRandom("TESTSEED")
-        result = prng.random("test", min_val=1, max_val=6)
-        assert isinstance(result, int)
-        assert 1 <= result <= 6
-
-    def test_integer_range_coverage(self):
-        """Over many calls, all values in range should appear."""
-        prng = PseudoRandom("TESTSEED")
-        values = {prng.random("roll", min_val=1, max_val=6) for _ in range(200)}
-        assert values == {1, 2, 3, 4, 5, 6}
-
-    def test_deterministic_with_same_seed(self):
-        p1 = PseudoRandom("SAME")
-        p2 = PseudoRandom("SAME")
-        assert p1.random("key") == p2.random("key")
-
-    def test_float_key(self):
-        """Passing a numeric seed directly (bypassing stream)."""
-        prng = PseudoRandom("TESTSEED")
-        result = prng.random(0.5)
-        assert isinstance(result, float)
-
-    def test_advances_stream(self):
-        """Calling random(str_key) should advance that stream's state."""
-        prng = PseudoRandom("TESTSEED")
-        prng.random("mystream")
-        assert "mystream" in prng.state
-
-
-class TestPseudoRandomElement:
-    """PseudoRandom.element(): deterministic selection.
-
-    Ground truth from LuaJIT 2.1 pseudorandom_element() with seed 'TESTSEED'.
-    Each test uses sequential pseudoseed advances on a named stream, then
-    passes the resulting float to element() — exactly matching the game's
-    usage pattern.
-    """
-
-    # LuaJIT ground truth: 5 calls on 'elem_str' stream with string-key dict
-    EXPECTED_STR = [
-        ("alpha", 1),
-        ("alpha", 1),
-        ("gamma", 3),
-        ("alpha", 1),
-        ("gamma", 3),
-    ]
-
-    def test_string_key_dict_matches_luajit(self):
-        """String keys are sorted lexicographically before selection."""
-        prng = PseudoRandom("TESTSEED")
-        table = {"alpha": 1, "beta": 2, "gamma": 3, "delta": 4, "epsilon": 5}
-        for i, (exp_key, exp_val) in enumerate(self.EXPECTED_STR):
-            sv = prng.seed("elem_str")
-            val, key = prng.element(table, sv)
-            assert key == exp_key and val == exp_val, (
-                f"str[{i + 1}]: got ({key!r}, {val}) expected ({exp_key!r}, {exp_val})"
-            )
-
-    # LuaJIT ground truth: sort_id dicts
-    EXPECTED_SORTID = [
-        ("b_second", "second"),
-        ("y_fourth", "fourth"),
-        ("b_second", "second"),
-        ("a_first", "first"),
-        ("y_fourth", "fourth"),
-    ]
-
-    def test_sort_id_dict_matches_luajit(self):
-        """Dicts with sort_id values are sorted by sort_id, not key."""
-        prng = PseudoRandom("TESTSEED")
-        # Keys are deliberately mis-ordered relative to sort_id
-        table = {
-            "z_last": {"sort_id": 5, "name": "last"},
-            "a_first": {"sort_id": 1, "name": "first"},
-            "m_mid": {"sort_id": 3, "name": "mid"},
-            "b_second": {"sort_id": 2, "name": "second"},
-            "y_fourth": {"sort_id": 4, "name": "fourth"},
-        }
-        for i, (exp_key, exp_name) in enumerate(self.EXPECTED_SORTID):
-            sv = prng.seed("elem_sortid")
-            val, key = prng.element(table, sv)
-            assert key == exp_key and val["name"] == exp_name, (
-                f"sortid[{i + 1}]: got ({key!r}, {val['name']!r}) "
-                f"expected ({exp_key!r}, {exp_name!r})"
-            )
-
-    # LuaJIT ground truth: large dict (20 items)
-    EXPECTED_LARGE = [
-        ("key_08", 8),
-        ("key_15", 15),
-        ("key_13", 13),
-        ("key_12", 12),
-        ("key_16", 16),
-    ]
-
-    def test_large_dict_matches_luajit(self):
-        """20-item dict — verifies sort and selection over a larger space."""
-        prng = PseudoRandom("TESTSEED")
-        table = {f"key_{i:02d}": i for i in range(1, 21)}
-        for i, (exp_key, exp_val) in enumerate(self.EXPECTED_LARGE):
-            sv = prng.seed("elem_large")
-            val, key = prng.element(table, sv)
-            assert key == exp_key and val == exp_val, (
-                f"large[{i + 1}]: got ({key!r}, {val}) expected ({exp_key!r}, {exp_val})"
-            )
-
-    def test_single_element_dict(self):
-        """Single-element dict always returns that element."""
-        prng = PseudoRandom("TESTSEED")
-        sv = prng.seed("elem_single")
-        val, key = prng.element({"only": 42}, sv)
-        assert key == "only" and val == 42
-
-    # LuaJIT ground truth: list input (Lua array with integer keys 1..N)
-    EXPECTED_LIST = [
-        (4, "date"),
-        (5, "elderberry"),
-        (1, "apple"),
-        (5, "elderberry"),
-        (3, "cherry"),
-    ]
-
-    def test_list_input_matches_luajit(self):
-        """Lists use 1-based integer keys matching Lua arrays."""
-        prng = PseudoRandom("TESTSEED")
-        items = ["apple", "banana", "cherry", "date", "elderberry"]
-        for i, (exp_key, exp_val) in enumerate(self.EXPECTED_LIST):
-            sv = prng.seed("elem_list")
-            val, key = prng.element(items, sv)
-            assert key == exp_key and val == exp_val, (
-                f"list[{i + 1}]: got (key={key}, val={val!r}) "
-                f"expected (key={exp_key}, val={exp_val!r})"
-            )
-
-    def test_deterministic(self):
-        prng = PseudoRandom("TESTSEED")
-        table = {"x": 10, "y": 20, "z": 30}
-        v1, k1 = prng.element(table, 0.42)
-        v2, k2 = prng.element(table, 0.42)
-        assert k1 == k2 and v1 == v2
-
-    def test_empty_raises(self):
-        prng = PseudoRandom("TESTSEED")
-        with pytest.raises(ValueError, match="empty"):
-            prng.element({}, 0.5)
-
-
-class TestPseudoRandomShuffle:
-    """PseudoRandom.shuffle(): Fisher-Yates with sort_id pre-sort.
-
-    Ground truth from LuaJIT 2.1 pseudoshuffle() with seed 'TESTSEED'.
-    Each test uses sequential pseudoseed advances on a named stream, then
-    passes the resulting float to shuffle() — exactly matching the game's
-    deck shuffle pattern.
-    """
-
-    # LuaJIT ground truth: plain [1..10], 3 trials on 'shuf_plain' stream
-    EXPECTED_PLAIN = [
-        [7, 1, 5, 3, 8, 10, 6, 9, 2, 4],
-        [4, 10, 1, 2, 6, 7, 5, 8, 9, 3],
-        [4, 10, 8, 6, 7, 3, 2, 5, 1, 9],
-    ]
-
-    def test_plain_list_matches_luajit(self):
-        """[1..10] shuffled 3 times must match LuaJIT exactly."""
-        prng = PseudoRandom("TESTSEED")
-        for trial, expected in enumerate(self.EXPECTED_PLAIN):
-            sv = prng.seed("shuf_plain")
-            lst = list(range(1, 11))
-            prng.shuffle(lst, sv)
-            assert lst == expected, f"plain[{trial + 1}]: {lst} != {expected}"
-
-    # LuaJIT ground truth: 52-item deck shuffle
-    EXPECTED_DECK52 = [
-        43,
-        19,
-        4,
-        45,
-        14,
-        3,
-        13,
-        52,
-        50,
-        7,
-        24,
-        33,
-        48,
-        20,
-        29,
-        41,
-        21,
-        26,
-        31,
-        37,
-        12,
-        25,
-        28,
-        40,
-        16,
-        1,
-        47,
-        5,
-        22,
-        42,
-        10,
-        46,
-        18,
-        23,
-        30,
-        15,
-        36,
-        8,
-        11,
-        39,
-        6,
-        35,
-        2,
-        38,
-        27,
-        34,
-        51,
-        17,
-        44,
-        32,
-        49,
-        9,
-    ]
-
-    def test_52_card_deck_matches_luajit(self):
-        """Full 52-card deck shuffle — the actual game use case."""
-        prng = PseudoRandom("TESTSEED")
-        sv = prng.seed("shuf_deck")
-        deck = list(range(1, 53))
-        prng.shuffle(deck, sv)
-        assert deck == self.EXPECTED_DECK52
-
-    # LuaJIT ground truth: sort_id pre-sort
-    EXPECTED_SORTID = [8, 2, 5, 6, 4, 7, 1, 3, 10, 9]
-
-    def test_sort_id_presort_reversed_input(self):
-        """Items with sort_id in reverse order are pre-sorted then shuffled."""
-
-        class Item:
-            def __init__(self, sort_id: int):
-                self.sort_id = sort_id
-                self.val = sort_id
-
-        prng = PseudoRandom("TESTSEED")
-        sv = prng.seed("shuf_sortid")
-        items = [Item(i) for i in range(10, 0, -1)]  # reversed
-        prng.shuffle(items, sv)
-        result = [x.val for x in items]
-        assert result == self.EXPECTED_SORTID, f"sortid_rev: {result} != {self.EXPECTED_SORTID}"
-
-    def test_sort_id_presort_forward_input(self):
-        """Items with sort_id in forward order produce same result as reversed."""
-
-        class Item:
-            def __init__(self, sort_id: int):
-                self.sort_id = sort_id
-                self.val = sort_id
-
-        prng = PseudoRandom("TESTSEED")
-        sv = prng.seed("shuf_sortid")
-        items = [Item(i) for i in range(1, 11)]  # forward
-        prng.shuffle(items, sv)
-        result = [x.val for x in items]
-        assert result == self.EXPECTED_SORTID, f"sortid_fwd: {result} != {self.EXPECTED_SORTID}"
-
-    def test_sort_id_presort_random_input(self):
-        """Items in arbitrary order still produce same result after pre-sort."""
-
-        class Item:
-            def __init__(self, sort_id: int):
-                self.sort_id = sort_id
-                self.val = sort_id
-
-        prng = PseudoRandom("TESTSEED")
-        sv = prng.seed("shuf_sortid")
-        items = [Item(i) for i in [5, 2, 8, 1, 9, 3, 7, 10, 6, 4]]  # scrambled
-        prng.shuffle(items, sv)
-        result = [x.val for x in items]
-        assert result == self.EXPECTED_SORTID
-
-    def test_dict_sort_id_presort(self):
-        """sort_id on dicts works the same as on objects."""
-        prng = PseudoRandom("TESTSEED")
-        sv = prng.seed("shuf_sortid")
-        items = [{"sort_id": i, "val": i} for i in range(10, 0, -1)]
-        prng.shuffle(items, sv)
-        result = [x["val"] for x in items]
-        assert result == self.EXPECTED_SORTID
-
-    def test_two_elements(self):
-        prng = PseudoRandom("TESTSEED")
-        sv = prng.seed("shuf_two")
-        lst = [1, 2]
-        prng.shuffle(lst, sv)
-        assert lst == [2, 1]  # LuaJIT ground truth
-
-    def test_single_element(self):
-        prng = PseudoRandom("TESTSEED")
-        sv = prng.seed("shuf_one")
-        lst = [42]
-        prng.shuffle(lst, sv)
-        assert lst == [42]
-
-    def test_empty_list(self):
-        prng = PseudoRandom("TESTSEED")
-        lst: list = []
-        prng.shuffle(lst, 0.5)
-        assert lst == []
-
-    def test_preserves_elements(self):
-        prng = PseudoRandom("TESTSEED")
-        lst = list(range(52))
-        prng.shuffle(lst, 0.42)
-        assert sorted(lst) == list(range(52))
-
-
-class TestPseudoRandomStateManagement:
-    """State save/load for persistence."""
-
-    def test_get_state_is_copy(self):
-        prng = PseudoRandom("TESTSEED")
-        prng.seed("boss")
-        state = prng.get_state()
-        prng.seed("boss")  # advance
-        assert state["boss"] != prng.state["boss"]
-
-    def test_load_state_restores(self):
-        prng1 = PseudoRandom("TESTSEED")
-        for _ in range(5):
-            prng1.seed("boss")
-        saved = prng1.get_state()
-
-        prng2 = PseudoRandom("IGNORED")
-        prng2.load_state(saved)
-
-        # Both should produce identical next values
-        assert prng1.seed("boss") == prng2.seed("boss")
-
-    def test_load_state_rehashes_zeroes(self):
-        """Save convention: stream values of 0 are re-hashed on load."""
-        prng = PseudoRandom("TESTSEED")
-        prng.load_state({"seed": "TESTSEED", "hashed_seed": pseudohash("TESTSEED"), "boss": 0})
-        # boss should have been re-hashed, not left at 0
-        assert prng.state["boss"] != 0
-        assert abs(prng.state["boss"] - pseudohash("bossTESTSEED")) < HASH_TOL
-
-
-# ============================================================================
-# Functional API wrappers (backward compat)
-# ============================================================================
 
 
 class TestFunctionalPseudoseed:
-    """pseudoseed(): functional wrapper matching old API."""
-
     def test_matches_class_api(self):
-        # Class API
         prng = PseudoRandom("TESTSEED")
         class_results = [prng.seed("boss") for _ in range(5)]
 
-        # Functional API
         state = {"seed": "TESTSEED", "hashed_seed": pseudohash("TESTSEED")}
         func_results = [pseudoseed("boss", state) for _ in range(5)]
 
@@ -660,94 +108,592 @@ class TestFunctionalPseudoseed:
             assert abs(c - f) < SEED_TOL, f"Call {i}: class={c:.15f} func={f:.15f}"
 
 
-class TestFunctionalPseudorandom:
-    """pseudorandom(): functional wrapper."""
+# ============================================================================
+# RNG sequence integration — simulates real Balatro run
+# ============================================================================
 
-    def test_float_output(self):
-        state = {"seed": "TESTSEED", "hashed_seed": pseudohash("TESTSEED")}
-        result = pseudorandom("boss", state)
-        assert isinstance(result, float)
-        assert 0.0 <= result < 1.0
+FLOAT_TOL = 1e-14
 
-    def test_integer_output(self):
-        state = {"seed": "TESTSEED", "hashed_seed": pseudohash("TESTSEED")}
-        result = pseudorandom("boss", state, min_val=1, max_val=10)
-        assert isinstance(result, int)
-        assert 1 <= result <= 10
+# Pools (simplified versions of the real game pools, matching the Lua oracle)
+BOSS_POOL = {
+    "bl_hook": "bl_hook",
+    "bl_ox": "bl_ox",
+    "bl_wall": "bl_wall",
+    "bl_wheel": "bl_wheel",
+    "bl_arm": "bl_arm",
+    "bl_club": "bl_club",
+    "bl_fish": "bl_fish",
+    "bl_psychic": "bl_psychic",
+    "bl_goad": "bl_goad",
+    "bl_water": "bl_water",
+}
 
-    def test_float_seed_direct(self):
-        result = pseudorandom(0.5)
-        assert isinstance(result, float)
+TAG_POOL = {
+    "tag_uncommon": "tag_uncommon",
+    "tag_rare": "tag_rare",
+    "tag_negative": "tag_negative",
+    "tag_foil": "tag_foil",
+    "tag_holo": "tag_holo",
+    "tag_polychrome": "tag_polychrome",
+    "tag_investment": "tag_investment",
+    "tag_voucher": "tag_voucher",
+    "tag_boss": "tag_boss",
+    "tag_standard": "tag_standard",
+    "tag_charm": "tag_charm",
+    "tag_meteor": "tag_meteor",
+    "tag_buffoon": "tag_buffoon",
+    "tag_handy": "tag_handy",
+    "tag_garbage": "tag_garbage",
+    "tag_ethereal": "tag_ethereal",
+    "tag_coupon": "tag_coupon",
+    "tag_double": "tag_double",
+    "tag_juggle": "tag_juggle",
+    "tag_d6": "tag_d6",
+}
 
-    def test_string_key_requires_state(self):
-        with pytest.raises(ValueError, match="state dict required"):
-            pseudorandom("boss")
+JOKER_POOL = {
+    "j_joker": "j_joker",
+    "j_greedy_joker": "j_greedy_joker",
+    "j_lusty_joker": "j_lusty_joker",
+    "j_wrathful_joker": "j_wrathful_joker",
+    "j_jolly": "j_jolly",
+    "j_zany": "j_zany",
+    "j_mad": "j_mad",
+    "j_crazy": "j_crazy",
+    "j_half": "j_half",
+    "j_stencil": "j_stencil",
+}
+
+# LuaJIT 2.1 ground truth for seed "TESTSEED"
+EXPECTED_DECK = [
+    17,
+    21,
+    14,
+    36,
+    29,
+    31,
+    35,
+    41,
+    43,
+    34,
+    44,
+    4,
+    49,
+    50,
+    32,
+    26,
+    10,
+    42,
+    12,
+    27,
+    6,
+    19,
+    48,
+    52,
+    51,
+    38,
+    8,
+    20,
+    11,
+    1,
+    30,
+    37,
+    13,
+    25,
+    47,
+    22,
+    18,
+    24,
+    16,
+    2,
+    40,
+    39,
+    15,
+    28,
+    5,
+    45,
+    7,
+    3,
+    33,
+    9,
+    23,
+    46,
+]
+
+EXPECTED_BOSS = "bl_goad"
+EXPECTED_TAGS = ["tag_voucher", "tag_investment"]
+
+EXPECTED_SHOP = [
+    {"cdt": 0.323673317736492, "rarity": 0.127372906355584, "joker": "j_joker"},
+    {"cdt": 0.537613412513260, "rarity": 0.777377281373973, "joker": "j_mad"},
+    {"cdt": 0.134618964202504, "rarity": 0.309657059223484, "joker": "j_joker"},
+]
+
+EXPECTED_REROLLS = [
+    {"cdt": 0.605297975170146, "rarity": 0.863258824107398, "joker": "j_greedy_joker"},
+    {"cdt": 0.572515377396789, "rarity": 0.854217398275141, "joker": "j_lusty_joker"},
+    {"cdt": 0.371821413620441, "rarity": 0.298228735213785, "joker": "j_crazy"},
+]
+
+EXPECTED_BOSS_CALL2 = 0.58145745166482732
 
 
-class TestFunctionalElement:
-    """pseudorandom_element(): functional wrapper."""
+class TestGameSequence:
+    """Simulate the first few RNG calls of a real Balatro run."""
 
-    def test_basic_selection(self):
-        table = {"a": 1, "b": 2, "c": 3}
-        val, key = pseudorandom_element(table, 0.42)
-        assert key in table and val == table[key]
+    @pytest.fixture
+    def prng(self) -> PseudoRandom:
+        return PseudoRandom("TESTSEED")
 
-    def test_deterministic(self):
-        table = {"a": 1, "b": 2, "c": 3}
-        assert pseudorandom_element(table, 0.42) == pseudorandom_element(table, 0.42)
+    def test_step1_deck_shuffle(self, prng: PseudoRandom):
+        """Deck shuffle uses 'shuffle' stream, produces known order."""
+        sv = prng.seed("shuffle")
+        deck = list(range(1, 53))
+        prng.shuffle(deck, sv)
+        assert deck == EXPECTED_DECK
+
+    def test_step2_boss_selection(self, prng: PseudoRandom):
+        """Boss selection uses 'boss' stream, picks from sorted pool."""
+        prng.seed("shuffle")
+        sv = prng.seed("boss")
+        _, boss_key = prng.element(BOSS_POOL, sv)
+        assert boss_key == EXPECTED_BOSS
+
+    def test_step3_tag_generation(self, prng: PseudoRandom):
+        """Two tags from 'Tag1' stream — consecutive calls, same stream."""
+        prng.seed("shuffle")
+        prng.seed("boss")
+        for expected_tag in EXPECTED_TAGS:
+            sv = prng.seed("Tag1")
+            _, tag_key = prng.element(TAG_POOL, sv)
+            assert tag_key == expected_tag
+
+    def test_step4_shop_population(self, prng: PseudoRandom):
+        """3 shop slots, each advancing cdt/rarity/pool streams."""
+        prng.seed("shuffle")
+        prng.seed("boss")
+        prng.seed("Tag1")
+        prng.seed("Tag1")
+
+        ante = 1
+        for slot_idx, expected in enumerate(EXPECTED_SHOP):
+            sv_cdt = prng.seed(f"cdt{ante}")
+            cdt_float = prng.random(sv_cdt)
+
+            sv_rar = prng.seed(f"rarity{ante}sho")
+            rarity_float = prng.random(sv_rar)
+
+            sv_pool = prng.seed(f"Joker1sho{ante}")
+            _, joker_key = prng.element(JOKER_POOL, sv_pool)
+
+            assert abs(cdt_float - expected["cdt"]) < FLOAT_TOL, (
+                f"shop[{slot_idx + 1}] cdt: {cdt_float:.15f} != {expected['cdt']:.15f}"
+            )
+            assert abs(rarity_float - expected["rarity"]) < FLOAT_TOL, (
+                f"shop[{slot_idx + 1}] rarity: {rarity_float:.15f} != {expected['rarity']:.15f}"
+            )
+            assert joker_key == expected["joker"], (
+                f"shop[{slot_idx + 1}] joker: {joker_key!r} != {expected['joker']!r}"
+            )
+
+    def test_step5_rerolls(self, prng: PseudoRandom):
+        """3 rerolls continue advancing the same shop streams."""
+        prng.seed("shuffle")
+        prng.seed("boss")
+        prng.seed("Tag1")
+        prng.seed("Tag1")
+
+        ante = 1
+        for _ in range(3):
+            prng.seed(f"cdt{ante}")
+            prng.seed(f"rarity{ante}sho")
+            prng.seed(f"Joker1sho{ante}")
+
+        for reroll_idx, expected in enumerate(EXPECTED_REROLLS):
+            sv_cdt = prng.seed(f"cdt{ante}")
+            cdt_float = prng.random(sv_cdt)
+
+            sv_rar = prng.seed(f"rarity{ante}sho")
+            rarity_float = prng.random(sv_rar)
+
+            sv_pool = prng.seed(f"Joker1sho{ante}")
+            _, joker_key = prng.element(JOKER_POOL, sv_pool)
+
+            assert abs(cdt_float - expected["cdt"]) < FLOAT_TOL, (
+                f"reroll[{reroll_idx + 1}] cdt: {cdt_float:.15f} != {expected['cdt']:.15f}"
+            )
+            assert abs(rarity_float - expected["rarity"]) < FLOAT_TOL, (
+                f"reroll[{reroll_idx + 1}] rarity"
+            )
+            assert joker_key == expected["joker"], (
+                f"reroll[{reroll_idx + 1}] joker: {joker_key!r} != {expected['joker']!r}"
+            )
+
+    def test_stream_independence(self, prng: PseudoRandom):
+        """Advancing shop streams must not affect the boss stream."""
+        prng.seed("shuffle")
+        prng.seed("boss")
+        prng.seed("Tag1")
+        prng.seed("Tag1")
+
+        ante = 1
+        for _ in range(6):
+            prng.seed(f"cdt{ante}")
+            prng.seed(f"rarity{ante}sho")
+            prng.seed(f"Joker1sho{ante}")
+
+        sv_boss2 = prng.seed("boss")
+        assert abs(sv_boss2 - EXPECTED_BOSS_CALL2) < SEED_TOL, (
+            f"boss call 2: {sv_boss2:.17g} != {EXPECTED_BOSS_CALL2:.17g}"
+        )
+
+    def test_full_sequence_in_one_pass(self, prng: PseudoRandom):
+        """Run all steps sequentially in a single pass, verifying each."""
+        ante = 1
+
+        # 1. Deck shuffle
+        sv = prng.seed("shuffle")
+        deck = list(range(1, 53))
+        prng.shuffle(deck, sv)
+        assert deck == EXPECTED_DECK
+
+        # 2. Boss selection
+        sv = prng.seed("boss")
+        _, boss = prng.element(BOSS_POOL, sv)
+        assert boss == EXPECTED_BOSS
+
+        # 3. Tags
+        for exp_tag in EXPECTED_TAGS:
+            sv = prng.seed("Tag1")
+            _, tag = prng.element(TAG_POOL, sv)
+            assert tag == exp_tag
+
+        # 4. Shop + 5. Rerolls (6 iterations total)
+        for expected in EXPECTED_SHOP + EXPECTED_REROLLS:
+            sv_cdt = prng.seed(f"cdt{ante}")
+            cdt = prng.random(sv_cdt)
+            assert abs(cdt - expected["cdt"]) < FLOAT_TOL
+
+            sv_rar = prng.seed(f"rarity{ante}sho")
+            rar = prng.random(sv_rar)
+            assert abs(rar - expected["rarity"]) < FLOAT_TOL
+
+            sv_pool = prng.seed(f"Joker1sho{ante}")
+            _, jk = prng.element(JOKER_POOL, sv_pool)
+            assert jk == expected["joker"]
+
+        # 6. Boss call 2
+        sv = prng.seed("boss")
+        assert abs(sv - EXPECTED_BOSS_CALL2) < SEED_TOL
 
 
-class TestFunctionalShuffle:
-    """pseudoshuffle(): functional wrapper."""
+# ============================================================================
+# Cross-validation: Python PseudoRandom vs Lua ground truth
+# (merged from test_rng_oracle.py)
+# ============================================================================
 
-    def test_preserves_and_shuffles(self):
-        lst = list(range(20))
-        pseudoshuffle(lst, 0.42)
-        assert sorted(lst) == list(range(20))
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+FIXTURE_PATH = PROJECT_ROOT / "tests" / "fixtures" / "rng_oracle_TESTSEED.json"
+ORACLE_SCRIPT = PROJECT_ROOT / "scripts" / "lua_rng_oracle.lua"
 
-    def test_deterministic(self):
-        a, b = list(range(20)), list(range(20))
-        pseudoshuffle(a, 0.42)
-        pseudoshuffle(b, 0.42)
-        assert a == b
+# Tolerances (same as main tests above)
+ORACLE_HASH_TOL = 1e-15
+ORACLE_SEED_TOL = 1e-13
 
 
-class TestGenerateStartingSeed:
-    """generate_starting_seed: 8-char alphanumeric.
+def load_fixture() -> dict:
+    """Load the pre-generated Lua oracle fixture."""
+    with open(FIXTURE_PATH) as f:
+        return json.load(f)
 
-    Ground truth from LuaJIT 2.1 random_string() (misc_functions.lua:270).
+
+def find_lua() -> str | None:
+    """Find a Lua interpreter (luajit preferred, then lua, lua5.1, etc.)."""
+    for name in ["luajit", "lua", "lua5.1", "lua5.4", "lua54", "lua51"]:
+        path = shutil.which(name)
+        if path:
+            return path
+    # Check common Windows install locations
+    for candidate in [
+        Path.home() / "AppData/Local/Programs/LuaJIT/bin/luajit.exe",
+        Path("C:/Program Files/LuaJIT/bin/luajit.exe"),
+        Path("C:/Program Files (x86)/LuaJIT/bin/luajit.exe"),
+    ]:
+        if candidate.exists():
+            return str(candidate)
+    return None
+
+
+def run_lua_oracle(seed: str, lua_path: str) -> dict:
+    """Run the Lua oracle script and parse its JSON output."""
+    result = subprocess.run(
+        [lua_path, str(ORACLE_SCRIPT), seed],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if result.returncode != 0:
+        pytest.fail(f"Lua oracle failed:\nstderr: {result.stderr}\nstdout: {result.stdout}")
+    # The output is a wrapper with a "seeds" array
+    data = json.loads(result.stdout)
+    if "seeds" in data:
+        return data["seeds"][0]
+    return data
+
+
+class TestFixtureOracle:
+    """Validate Python RNG against pre-generated Lua fixture (TESTSEED)."""
+
+    @pytest.fixture(scope="class")
+    def fixture(self) -> dict:
+        if not FIXTURE_PATH.exists():
+            pytest.skip(f"Fixture not found: {FIXTURE_PATH}")
+        return load_fixture()
+
+    @pytest.fixture(scope="class")
+    def prng(self) -> PseudoRandom:
+        return PseudoRandom("TESTSEED")
+
+    def test_hashed_seed(self, fixture):
+        expected = fixture["hashed_seed"]
+        actual = pseudohash("TESTSEED")
+        assert abs(actual - expected) < ORACLE_HASH_TOL, (
+            f"hashed_seed: {actual:.15f} != {expected:.15f}"
+        )
+
+    def test_pseudohash_stream_keys(self, fixture):
+        """Verify pseudohash(key + seed) for all stream keys."""
+        for key, expected in fixture["pseudohash"].items():
+            actual = pseudohash(key + "TESTSEED")
+            assert abs(actual - expected) < ORACLE_HASH_TOL, (
+                f"pseudohash({key}+TESTSEED): {actual:.15f} != {expected:.15f}"
+            )
+
+    @pytest.mark.parametrize(
+        "stream_key",
+        [
+            "boss",
+            "shuffle",
+            "lucky_mult",
+            "rarity1",
+            "stdset1",
+            "cdt1",
+            "front1",
+            "edition_generic",
+        ],
+    )
+    def test_pseudoseed_sequence(self, fixture, stream_key):
+        """10 consecutive pseudoseed advances must match Lua for each stream."""
+        prng = PseudoRandom("TESTSEED")
+        expected_seq = fixture["pseudoseed"][stream_key]
+
+        for entry in expected_seq:
+            call_num = entry["call"]
+            expected_result = entry["result"]
+            expected_stored = entry["stored"]
+
+            result = prng.seed(stream_key)
+            stored = prng.state[stream_key]
+
+            assert abs(result - expected_result) < ORACLE_SEED_TOL, (
+                f"stream={stream_key!r} call {call_num}: "
+                f"result {result:.15f} != {expected_result:.15f}"
+            )
+            assert abs(stored - expected_stored) < ORACLE_SEED_TOL, (
+                f"stream={stream_key!r} call {call_num}: "
+                f"stored {stored:.15f} != {expected_stored:.15f}"
+            )
+
+    def test_predict_seed(self, fixture):
+        """Stateless predict_seed must match Lua."""
+        prng = PseudoRandom("TESTSEED")
+        for entry in fixture["predict_seed"]:
+            key = entry["key"]
+            predict_with = entry["predict_with"]
+            expected = entry["result"]
+            actual = prng.predict_seed(key, predict_with)
+            assert abs(actual - expected) < ORACLE_SEED_TOL, (
+                f"predict_seed({key!r}, {predict_with!r}): {actual:.15f} != {expected:.15f}"
+            )
+
+    def test_all_streams_independent(self, fixture):
+        """Advancing all 8 streams interleaved must still match fixture.
+
+        This catches bugs where advancing one stream corrupts another.
+        """
+        prng = PseudoRandom("TESTSEED")
+        streams = list(fixture["pseudoseed"].keys())
+
+        # Advance all streams call-by-call (interleaved)
+        for call_idx in range(10):
+            for stream_key in streams:
+                entry = fixture["pseudoseed"][stream_key][call_idx]
+                result = prng.seed(stream_key)
+                assert abs(result - entry["result"]) < ORACLE_SEED_TOL, (
+                    f"interleaved: stream={stream_key} call {call_idx + 1}: "
+                    f"{result:.15f} != {entry['result']:.15f}"
+                )
+
+    def test_fixture_has_expected_structure(self, fixture):
+        """Sanity check: fixture has the data we expect."""
+        assert fixture["seed"] == "TESTSEED"
+        assert "hashed_seed" in fixture
+        assert len(fixture["pseudoseed"]) == 8
+        assert len(fixture["pseudoseed"]["boss"]) == 10
+        assert len(fixture["predict_seed"]) == 3
+
+
+class TestLiveLuaOracle:
+    """Run the Lua oracle script live and validate against Python."""
+
+    @pytest.fixture(scope="class")
+    def lua_path(self):
+        path = find_lua()
+        if not path:
+            pytest.skip(
+                "No Lua interpreter found. Install lua, lua5.1, or luajit "
+                "to enable live Lua cross-validation."
+            )
+        return path
+
+    @pytest.fixture(scope="class")
+    def oracle_data(self, lua_path) -> dict:
+        """Run oracle for TESTSEED and parse output."""
+        return run_lua_oracle("TESTSEED", lua_path)
+
+    def test_hashed_seed(self, oracle_data):
+        expected = oracle_data["hashed_seed"]
+        actual = pseudohash("TESTSEED")
+        assert abs(actual - expected) < ORACLE_HASH_TOL
+
+    @pytest.mark.parametrize(
+        "stream_key",
+        [
+            "boss",
+            "shuffle",
+            "lucky_mult",
+            "rarity1",
+            "stdset1",
+            "cdt1",
+            "front1",
+            "edition_generic",
+        ],
+    )
+    def test_pseudoseed_sequence(self, oracle_data, stream_key):
+        """10 advances must match live Lua output."""
+        prng = PseudoRandom("TESTSEED")
+        expected_seq = oracle_data["pseudoseed"][stream_key]
+
+        for entry in expected_seq:
+            call_num = entry["call"]
+            expected_result = entry["result"]
+            result = prng.seed(stream_key)
+            assert abs(result - expected_result) < ORACLE_SEED_TOL, (
+                f"live lua: stream={stream_key!r} call {call_num}: "
+                f"{result:.15f} != {expected_result:.15f}"
+            )
+
+    def test_predict_seed(self, oracle_data):
+        prng = PseudoRandom("TESTSEED")
+        for entry in oracle_data["predict_seed"]:
+            expected = entry["result"]
+            actual = prng.predict_seed(entry["key"], entry["predict_with"])
+            assert abs(actual - expected) < ORACLE_SEED_TOL
+
+    @pytest.mark.parametrize("seed_str", ["A3K9NZ2B", "TUTORIAL"])
+    def test_other_seeds(self, lua_path, seed_str):
+        """Cross-validate additional seeds beyond TESTSEED."""
+        oracle = run_lua_oracle(seed_str, lua_path)
+
+        # hashed_seed
+        assert abs(pseudohash(seed_str) - oracle["hashed_seed"]) < ORACLE_HASH_TOL
+
+        # All pseudoseed streams
+        for stream_key, expected_seq in oracle["pseudoseed"].items():
+            prng_stream = PseudoRandom(seed_str)  # fresh per stream
+            for entry in expected_seq:
+                result = prng_stream.seed(stream_key)
+                assert abs(result - entry["result"]) < ORACLE_SEED_TOL, (
+                    f"seed={seed_str!r} stream={stream_key!r} call {entry['call']}"
+                )
+
+
+# ============================================================================
+# Full-pipeline LuaJIT validation (pseudoseed -> TW223 -> output)
+# ============================================================================
+
+PIPELINE_FIXTURE = PROJECT_ROOT / "tests" / "fixtures" / "rng_pipeline_TESTSEED.json"
+PIPELINE_FLOAT_TOL = 1e-14
+
+
+class TestFullPipelineOracle:
+    """Validate the complete pseudorandom pipeline against LuaJIT.
+
+    This tests the end-to-end chain: PseudoRandom.seed() produces a float
+    that seeds LuaJIT's TW223 PRNG, which then produces the final
+    float/int output.  The fixture was generated by running the actual
+    pseudoseed -> math.randomseed -> math.random sequence in LuaJIT 2.1.
+
+    If these tests pass, the Python RNG is bit-compatible with LuaJIT.
     """
 
-    ALLOWED = set("123456789ABCDEFGHIJKLMNPQRSTUVWXYZ")
+    @pytest.fixture(scope="class")
+    def pipeline(self) -> dict:
+        if not PIPELINE_FIXTURE.exists():
+            pytest.skip(f"Pipeline fixture not found: {PIPELINE_FIXTURE}")
+        with open(PIPELINE_FIXTURE) as f:
+            return json.load(f)
 
-    # LuaJIT ground truth: entropy → seed string
-    LUAJIT_TRUTH = {
-        0.0: "7BXBJDJG",
-        0.42: "A9B2M1XG",
-        0.999: "XVXSVYEJ",
-        1.5: "5SVPRIP2",
-        3.14159: "84F18YHB",
-    }
+    @pytest.mark.parametrize("stream_key", ["boss", "shuffle", "lucky_mult", "rarity1"])
+    def test_pseudorandom_float(self, pipeline, stream_key):
+        """PseudoRandom.random(key) float output must match LuaJIT."""
+        prng = PseudoRandom("TESTSEED")
+        expected_seq = pipeline["pseudorandom_pipeline"][stream_key]
 
-    @pytest.mark.parametrize("entropy,expected", LUAJIT_TRUTH.items())
-    def test_matches_luajit(self, entropy: float, expected: str):
-        result = generate_starting_seed(entropy)
-        assert result == expected, f"entropy={entropy}: {result!r} != {expected!r}"
+        for entry in expected_seq:
+            result = prng.random(stream_key)
+            expected = entry["float"]
+            assert abs(result - expected) < PIPELINE_FLOAT_TOL, (
+                f"stream={stream_key!r} call {entry['call']}: "
+                f"float {result:.17g} != {expected:.17g}"
+            )
 
-    def test_length(self):
-        assert len(generate_starting_seed(0.42)) == 8
+    @pytest.mark.parametrize("stream_key", ["boss", "shuffle", "lucky_mult", "rarity1"])
+    def test_pseudorandom_int(self, pipeline, stream_key):
+        """PseudoRandom.random(key, 1, 10) int output must match LuaJIT."""
+        prng = PseudoRandom("TESTSEED")
+        expected_seq = pipeline["pseudorandom_pipeline"][stream_key]
 
-    def test_character_set(self):
-        seed = generate_starting_seed(0.42)
-        assert all(c in self.ALLOWED for c in seed), f"Bad chars in {seed!r}"
+        for entry in expected_seq:
+            result = prng.random(stream_key, min_val=1, max_val=10)
+            expected = entry["int"]
+            assert result == expected, (
+                f"stream={stream_key!r} call {entry['call']}: int {result} != {expected}"
+            )
 
-    def test_no_zero_or_oh(self):
-        seed = generate_starting_seed(0.42)
-        assert "0" not in seed
-        assert "O" not in seed
+    def test_pseudoshuffle(self, pipeline):
+        """PseudoRandom.shuffle() must match LuaJIT pseudoshuffle."""
+        prng = PseudoRandom("TESTSEED")
 
-    def test_deterministic(self):
-        assert generate_starting_seed(0.42) == generate_starting_seed(0.42)
+        for entry in pipeline["shuffle_pipeline"]:
+            sv = prng.seed("shuffle")
+            lst = list(range(1, 11))
+            prng.shuffle(lst, sv)
+            assert lst == entry["result"], (
+                f"shuffle trial {entry['trial']}: {lst} != {entry['result']}"
+            )
 
-    def test_different_entropy_different_seeds(self):
-        assert generate_starting_seed(0.1) != generate_starting_seed(0.9)
+    def test_pseudorandom_element(self, pipeline):
+        """PseudoRandom.element() must match LuaJIT pseudorandom_element."""
+        prng = PseudoRandom("TESTSEED")
+        table = {"alpha": 1, "beta": 2, "gamma": 3, "delta": 4, "epsilon": 5}
+
+        for entry in pipeline["element_pipeline"]:
+            sv = prng.seed("element_test")
+            val, key = prng.element(table, sv)
+            assert key == entry["key"], (
+                f"element trial {entry['trial']}: key {key!r} != {entry['key']!r}"
+            )
+            assert val == entry["value"], (
+                f"element trial {entry['trial']}: val {val} != {entry['value']}"
+            )

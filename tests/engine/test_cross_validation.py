@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -106,15 +105,69 @@ class TestScoringCrossValidation:
 
     # Hand definitions matching the fixture
     _HANDS = {
-        "pair_aces": [("Spades", "Ace"), ("Hearts", "Ace"), ("Clubs", "King"), ("Diamonds", "5"), ("Hearts", "3")],
-        "flush_hearts": [("Hearts", "Ace"), ("Hearts", "King"), ("Hearts", "10"), ("Hearts", "5"), ("Hearts", "3")],
-        "straight_5_9": [("Spades", "9"), ("Hearts", "8"), ("Clubs", "7"), ("Diamonds", "6"), ("Hearts", "5")],
-        "full_house_kings_sevens": [("Spades", "King"), ("Hearts", "King"), ("Clubs", "King"), ("Diamonds", "7"), ("Hearts", "7")],
-        "high_card_ace": [("Spades", "Ace"), ("Hearts", "Queen"), ("Clubs", "9"), ("Diamonds", "4"), ("Hearts", "2")],
-        "two_pair_jacks_fives": [("Spades", "Jack"), ("Hearts", "Jack"), ("Clubs", "5"), ("Diamonds", "5"), ("Hearts", "2")],
-        "three_tens": [("Spades", "10"), ("Hearts", "10"), ("Clubs", "10"), ("Diamonds", "6"), ("Hearts", "3")],
-        "four_eights": [("Spades", "8"), ("Hearts", "8"), ("Clubs", "8"), ("Diamonds", "8"), ("Hearts", "2")],
-        "straight_flush_spades": [("Spades", "Queen"), ("Spades", "Jack"), ("Spades", "10"), ("Spades", "9"), ("Spades", "8")],
+        "pair_aces": [
+            ("Spades", "Ace"),
+            ("Hearts", "Ace"),
+            ("Clubs", "King"),
+            ("Diamonds", "5"),
+            ("Hearts", "3"),
+        ],
+        "flush_hearts": [
+            ("Hearts", "Ace"),
+            ("Hearts", "King"),
+            ("Hearts", "10"),
+            ("Hearts", "5"),
+            ("Hearts", "3"),
+        ],
+        "straight_5_9": [
+            ("Spades", "9"),
+            ("Hearts", "8"),
+            ("Clubs", "7"),
+            ("Diamonds", "6"),
+            ("Hearts", "5"),
+        ],
+        "full_house_kings_sevens": [
+            ("Spades", "King"),
+            ("Hearts", "King"),
+            ("Clubs", "King"),
+            ("Diamonds", "7"),
+            ("Hearts", "7"),
+        ],
+        "high_card_ace": [
+            ("Spades", "Ace"),
+            ("Hearts", "Queen"),
+            ("Clubs", "9"),
+            ("Diamonds", "4"),
+            ("Hearts", "2"),
+        ],
+        "two_pair_jacks_fives": [
+            ("Spades", "Jack"),
+            ("Hearts", "Jack"),
+            ("Clubs", "5"),
+            ("Diamonds", "5"),
+            ("Hearts", "2"),
+        ],
+        "three_tens": [
+            ("Spades", "10"),
+            ("Hearts", "10"),
+            ("Clubs", "10"),
+            ("Diamonds", "6"),
+            ("Hearts", "3"),
+        ],
+        "four_eights": [
+            ("Spades", "8"),
+            ("Hearts", "8"),
+            ("Clubs", "8"),
+            ("Diamonds", "8"),
+            ("Hearts", "2"),
+        ],
+        "straight_flush_spades": [
+            ("Spades", "Queen"),
+            ("Spades", "Jack"),
+            ("Spades", "10"),
+            ("Spades", "9"),
+            ("Spades", "8"),
+        ],
         "single_ace": [("Diamonds", "Ace")],
     }
 
@@ -158,15 +211,29 @@ class TestShopCrossValidation:
         rng = PseudoRandom(case["seed"])
         vk = get_next_voucher_key(rng, {}, [], ante=case["ante"])
         gs = {
-            "joker_rate": 20.0, "tarot_rate": 4.0, "planet_rate": 4.0,
-            "spectral_rate": 0.0, "playing_card_rate": 0.0, "edition_rate": 1.0,
-            "enable_eternals_in_shop": True, "enable_perishables_in_shop": True,
-            "enable_rentals_in_shop": True, "banned_keys": set(), "used_jokers": {},
-            "used_vouchers": {}, "pool_flags": {}, "has_showman": False,
-            "deck_enhancements": set(), "playing_card_count": 52,
-            "played_hand_types": set(), "shop_vouchers": set(),
-            "inflation": 0, "discount_percent": 0, "booster_ante_scaling": False,
-            "has_astronomer": False, "shop": {"joker_max": 2},
+            "joker_rate": 20.0,
+            "tarot_rate": 4.0,
+            "planet_rate": 4.0,
+            "spectral_rate": 0.0,
+            "playing_card_rate": 0.0,
+            "edition_rate": 1.0,
+            "enable_eternals_in_shop": True,
+            "enable_perishables_in_shop": True,
+            "enable_rentals_in_shop": True,
+            "banned_keys": set(),
+            "used_jokers": {},
+            "used_vouchers": {},
+            "pool_flags": {},
+            "has_showman": False,
+            "deck_enhancements": set(),
+            "playing_card_count": 52,
+            "played_hand_types": set(),
+            "shop_vouchers": set(),
+            "inflation": 0,
+            "discount_percent": 0,
+            "booster_ante_scaling": False,
+            "has_astronomer": False,
+            "shop": {"joker_max": 2},
             "current_round": {"voucher": vk},
             "first_shop_buffoon": case["ante"] > 1,
         }
@@ -178,15 +245,29 @@ class TestShopCrossValidation:
         rng = PseudoRandom(case["seed"])
         vk = get_next_voucher_key(rng, {}, [], ante=case["ante"])
         gs = {
-            "joker_rate": 20.0, "tarot_rate": 4.0, "planet_rate": 4.0,
-            "spectral_rate": 0.0, "playing_card_rate": 0.0, "edition_rate": 1.0,
-            "enable_eternals_in_shop": True, "enable_perishables_in_shop": True,
-            "enable_rentals_in_shop": True, "banned_keys": set(), "used_jokers": {},
-            "used_vouchers": {}, "pool_flags": {}, "has_showman": False,
-            "deck_enhancements": set(), "playing_card_count": 52,
-            "played_hand_types": set(), "shop_vouchers": set(),
-            "inflation": 0, "discount_percent": 0, "booster_ante_scaling": False,
-            "has_astronomer": False, "shop": {"joker_max": 2},
+            "joker_rate": 20.0,
+            "tarot_rate": 4.0,
+            "planet_rate": 4.0,
+            "spectral_rate": 0.0,
+            "playing_card_rate": 0.0,
+            "edition_rate": 1.0,
+            "enable_eternals_in_shop": True,
+            "enable_perishables_in_shop": True,
+            "enable_rentals_in_shop": True,
+            "banned_keys": set(),
+            "used_jokers": {},
+            "used_vouchers": {},
+            "pool_flags": {},
+            "has_showman": False,
+            "deck_enhancements": set(),
+            "playing_card_count": 52,
+            "played_hand_types": set(),
+            "shop_vouchers": set(),
+            "inflation": 0,
+            "discount_percent": 0,
+            "booster_ante_scaling": False,
+            "has_astronomer": False,
+            "shop": {"joker_max": 2},
             "current_round": {"voucher": vk},
             "first_shop_buffoon": case["ante"] > 1,
         }
@@ -262,8 +343,10 @@ class TestConsumablesCrossValidation:
         assert result.enhance is not None
         for c, enh in result.enhance:
             c.set_ability(enh)
-        assert target.ability.get("name") == case["effect_name"] or \
-               target.ability.get("effect") == case["effect"]
+        assert (
+            target.ability.get("name") == case["effect_name"]
+            or target.ability.get("effect") == case["effect"]
+        )
 
     def test_strength_rank_change(self):
         case = self.CASES[1]

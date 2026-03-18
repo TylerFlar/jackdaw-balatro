@@ -416,7 +416,9 @@ def generate_blind_tags(
 
     used_vouchers: set[str] = set(game_state.get("used_vouchers", []))
     discovered: set[str] | None = game_state.get("discovered")
-    small = pick_card_from_pool("Tag", rng, ante, used_vouchers=used_vouchers, discovered=discovered)
+    small = pick_card_from_pool(
+        "Tag", rng, ante, used_vouchers=used_vouchers, discovered=discovered
+    )
     big = pick_card_from_pool("Tag", rng, ante, used_vouchers=used_vouchers, discovered=discovered)
     return {"Small": small, "Big": big}
 

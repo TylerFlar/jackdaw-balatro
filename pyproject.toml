@@ -18,7 +18,8 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = ["-v", "--tb=short"]
+addopts = ["-v", "--tb=short", "-m", "not benchmark"]
+markers = ["benchmark: performance benchmarks (deselect with -m 'not benchmark')"]
 
 [tool.ruff]
 target-version = "py312"

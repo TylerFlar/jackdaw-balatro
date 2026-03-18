@@ -1,7 +1,8 @@
-"""Tests for the joker evaluation dispatch system.
+"""Consolidated per-joker handler tests.
 
-Validates the registry, dispatch, debuff handling, and context routing
-without implementing any real joker effects.
+Tests individual joker handlers that have conditional logic, tricky state,
+or RNG dependence. Simpler pattern-only handlers (hand-type containment,
+flat bonuses, rank membership) are covered by oracle/pipeline tests.
 """
 
 from __future__ import annotations
@@ -70,6 +71,39 @@ def _wild_card(suit: str = "Hearts", rank: str = "5") -> Card:
     """Create a Wild Card (matches any suit in is_suit)."""
     c = _playing_card(suit, rank, enhancement="m_wild")
     return c
+
+
+def _suit_ctx(other_card: Card, **kw) -> JokerContext:
+    """Build an individual/play context with other_card."""
+    return JokerContext(individual=True, cardarea="play", other_card=other_card, **kw)
+
+
+def _held_ctx(other_card: Card, held_cards: list[Card] | None = None) -> JokerContext:
+    return JokerContext(
+        individual=True,
+        cardarea="hand",
+        other_card=other_card,
+        held_cards=held_cards,
+    )
+
+
+def _poker_hands_with(*types: str) -> dict[str, list]:
+    """Build a poker_hands dict where listed types have a non-empty entry."""
+    all_types = [
+        "Flush Five",
+        "Flush House",
+        "Five of a Kind",
+        "Straight Flush",
+        "Four of a Kind",
+        "Full House",
+        "Flush",
+        "Straight",
+        "Three of a Kind",
+        "Two Pair",
+        "Pair",
+        "High Card",
+    ]
+    return {t: [["placeholder"]] if t in types else [] for t in all_types}
 
 
 # ============================================================================
@@ -193,123 +227,8 @@ class TestDebuff:
 
 
 # ============================================================================
-# Unregistered joker
+# RNG-dependent jokers
 # ============================================================================
-
-
-class TestUnregistered:
-    def test_unregistered_returns_none(self):
-        card = _joker_card("j_nonexistent_joker")
-        result = calculate_joker(card, JokerContext(joker_main=True))
-        assert result is None
-
-
-# ============================================================================
-# JokerResult defaults
-# ============================================================================
-
-
-class TestJokerResult:
-    def test_default_values(self):
-        r = JokerResult()
-        assert r.chips == 0
-        assert r.mult == 0
-        assert r.x_mult == 0
-        assert r.dollars == 0
-        assert r.chip_mod == 0
-        assert r.mult_mod == 0
-        assert r.Xmult_mod == 0
-        assert r.repetitions == 0
-        assert r.level_up is False
-        assert r.saved is False
-        assert r.remove is False
-        assert r.message == ""
-        assert r.extra is None
-
-    def test_custom_values(self):
-        r = JokerResult(chips=50, x_mult=2.0, dollars=5, message="Nice!")
-        assert r.chips == 50
-        assert r.x_mult == 2.0
-        assert r.dollars == 5
-        assert r.message == "Nice!"
-
-
-# ============================================================================
-# JokerContext defaults
-# ============================================================================
-
-
-class TestJokerContext:
-    def test_default_all_false(self):
-        ctx = JokerContext()
-        assert ctx.before is False
-        assert ctx.individual is False
-        assert ctx.repetition is False
-        assert ctx.joker_main is False
-        assert ctx.after is False
-        assert ctx.other_joker is None
-        assert ctx.cardarea is None
-        assert ctx.blueprint == 0
-
-    def test_with_scoring_data(self):
-        cards = [Card(), Card()]
-        ctx = JokerContext(
-            joker_main=True,
-            scoring_hand=cards,
-            scoring_name="Flush",
-            full_hand=cards,
-        )
-        assert ctx.joker_main is True
-        assert ctx.scoring_name == "Flush"
-        assert len(ctx.scoring_hand) == 2
-
-
-# ============================================================================
-# Real joker handlers
-# ============================================================================
-
-
-class TestJokerHandler:
-    """j_joker: +4 mult (default) in joker_main context."""
-
-    def test_joker_main_returns_mult_mod(self):
-        card = _joker_card("j_joker", mult=4)
-        result = calculate_joker(card, JokerContext(joker_main=True))
-        assert result is not None
-        assert result.mult_mod == 4
-
-    def test_joker_custom_mult(self):
-        card = _joker_card("j_joker", mult=8)
-        result = calculate_joker(card, JokerContext(joker_main=True))
-        assert result is not None
-        assert result.mult_mod == 8
-
-    def test_joker_individual_returns_none(self):
-        card = _joker_card("j_joker", mult=4)
-        ctx = JokerContext(individual=True, cardarea="play")
-        result = calculate_joker(card, ctx)
-        assert result is None
-
-    def test_joker_debuffed_returns_none(self):
-        card = _joker_card("j_joker", debuff=True, mult=4)
-        result = calculate_joker(card, JokerContext(joker_main=True))
-        assert result is None
-
-
-class TestStuntmanHandler:
-    """j_stuntman: +250 chips (default) in joker_main context."""
-
-    def test_stuntman_returns_chip_mod(self):
-        card = _joker_card("j_stuntman", extra={"chip_mod": 250, "h_size": 2})
-        result = calculate_joker(card, JokerContext(joker_main=True))
-        assert result is not None
-        assert result.chip_mod == 250
-
-    def test_stuntman_individual_returns_none(self):
-        card = _joker_card("j_stuntman", extra={"chip_mod": 250, "h_size": 2})
-        ctx = JokerContext(individual=True, cardarea="play")
-        result = calculate_joker(card, ctx)
-        assert result is None
 
 
 class TestMisprintHandler:
@@ -341,548 +260,6 @@ class TestMisprintHandler:
         card = _joker_card("j_misprint", extra={"min": 0, "max": 23})
         ctx = JokerContext(individual=True, cardarea="play")
         result = calculate_joker(card, ctx)
-        assert result is None
-
-
-# ============================================================================
-# Hand-type joker helpers
-# ============================================================================
-
-
-def _poker_hands_with(*types: str) -> dict[str, list]:
-    """Build a poker_hands dict where listed types have a non-empty entry."""
-    all_types = [
-        "Flush Five",
-        "Flush House",
-        "Five of a Kind",
-        "Straight Flush",
-        "Four of a Kind",
-        "Full House",
-        "Flush",
-        "Straight",
-        "Three of a Kind",
-        "Two Pair",
-        "Pair",
-        "High Card",
-    ]
-    return {t: [["placeholder"]] if t in types else [] for t in all_types}
-
-
-# ============================================================================
-# Category B — poker_hands containment (t_mult jokers)
-# ============================================================================
-
-
-class TestJollyHandler:
-    """j_jolly: +8 mult if hand CONTAINS a Pair (poker_hands check)."""
-
-    def test_jolly_with_full_house(self):
-        """Full House contains Pair → triggers."""
-        card = _joker_card("j_jolly", t_mult=8, type="Pair")
-        ph = _poker_hands_with("Full House", "Three of a Kind", "Pair")
-        ctx = JokerContext(joker_main=True, poker_hands=ph)
-        result = calculate_joker(card, ctx)
-        assert result is not None
-        assert result.mult_mod == 8
-
-    def test_jolly_with_flush_no_pair(self):
-        """Flush without Pair → does NOT trigger."""
-        card = _joker_card("j_jolly", t_mult=8, type="Pair")
-        ph = _poker_hands_with("Flush")
-        ctx = JokerContext(joker_main=True, poker_hands=ph)
-        result = calculate_joker(card, ctx)
-        assert result is None
-
-    def test_jolly_individual_returns_none(self):
-        card = _joker_card("j_jolly", t_mult=8, type="Pair")
-        ph = _poker_hands_with("Pair")
-        ctx = JokerContext(individual=True, poker_hands=ph)
-        result = calculate_joker(card, ctx)
-        assert result is None
-
-
-class TestZanyHandler:
-    def test_zany_with_three_of_a_kind(self):
-        card = _joker_card("j_zany", t_mult=12, type="Three of a Kind")
-        ph = _poker_hands_with("Three of a Kind", "Pair")
-        ctx = JokerContext(joker_main=True, poker_hands=ph)
-        result = calculate_joker(card, ctx)
-        assert result is not None
-        assert result.mult_mod == 12
-
-    def test_zany_without_three(self):
-        card = _joker_card("j_zany", t_mult=12, type="Three of a Kind")
-        ph = _poker_hands_with("Pair")
-        ctx = JokerContext(joker_main=True, poker_hands=ph)
-        result = calculate_joker(card, ctx)
-        assert result is None
-
-
-class TestMadHandler:
-    def test_mad_with_two_pair(self):
-        card = _joker_card("j_mad", t_mult=10, type="Two Pair")
-        ph = _poker_hands_with("Two Pair", "Pair")
-        ctx = JokerContext(joker_main=True, poker_hands=ph)
-        result = calculate_joker(card, ctx)
-        assert result is not None
-        assert result.mult_mod == 10
-
-
-class TestCrazyHandler:
-    def test_crazy_with_straight(self):
-        card = _joker_card("j_crazy", t_mult=12, type="Straight")
-        ph = _poker_hands_with("Straight")
-        ctx = JokerContext(joker_main=True, poker_hands=ph)
-        result = calculate_joker(card, ctx)
-        assert result is not None
-        assert result.mult_mod == 12
-
-
-class TestDrollHandler:
-    def test_droll_with_flush(self):
-        card = _joker_card("j_droll", t_mult=10, type="Flush")
-        ph = _poker_hands_with("Flush")
-        ctx = JokerContext(joker_main=True, poker_hands=ph)
-        result = calculate_joker(card, ctx)
-        assert result is not None
-        assert result.mult_mod == 10
-
-
-# ============================================================================
-# Category B — poker_hands containment (t_chips jokers)
-# ============================================================================
-
-
-class TestSlyHandler:
-    def test_sly_with_pair(self):
-        card = _joker_card("j_sly", t_chips=50, type="Pair")
-        ph = _poker_hands_with("Pair")
-        ctx = JokerContext(joker_main=True, poker_hands=ph)
-        result = calculate_joker(card, ctx)
-        assert result is not None
-        assert result.chip_mod == 50
-
-
-class TestWilyHandler:
-    def test_wily_with_three(self):
-        card = _joker_card("j_wily", t_chips=100, type="Three of a Kind")
-        ph = _poker_hands_with("Three of a Kind", "Pair")
-        ctx = JokerContext(joker_main=True, poker_hands=ph)
-        result = calculate_joker(card, ctx)
-        assert result is not None
-        assert result.chip_mod == 100
-
-
-class TestCleverHandler:
-    def test_clever_with_two_pair(self):
-        card = _joker_card("j_clever", t_chips=80, type="Two Pair")
-        ph = _poker_hands_with("Two Pair", "Pair")
-        ctx = JokerContext(joker_main=True, poker_hands=ph)
-        result = calculate_joker(card, ctx)
-        assert result is not None
-        assert result.chip_mod == 80
-
-
-class TestDeviousHandler:
-    def test_devious_with_straight(self):
-        card = _joker_card("j_devious", t_chips=100, type="Straight")
-        ph = _poker_hands_with("Straight")
-        ctx = JokerContext(joker_main=True, poker_hands=ph)
-        result = calculate_joker(card, ctx)
-        assert result is not None
-        assert result.chip_mod == 100
-
-
-class TestCraftyHandler:
-    def test_crafty_with_flush(self):
-        card = _joker_card("j_crafty", t_chips=80, type="Flush")
-        ph = _poker_hands_with("Flush")
-        ctx = JokerContext(joker_main=True, poker_hands=ph)
-        result = calculate_joker(card, ctx)
-        assert result is not None
-        assert result.chip_mod == 80
-
-
-# ============================================================================
-# Category B — poker_hands containment (xMult jokers)
-# ============================================================================
-
-
-class TestDuoHandler:
-    """The Duo: x2 mult if hand contains Pair."""
-
-    def test_duo_with_three_of_a_kind(self):
-        """Three of a Kind contains Pair (downward propagation) → triggers."""
-        card = _joker_card("j_duo", x_mult=2, type="Pair")
-        ph = _poker_hands_with("Three of a Kind", "Pair")
-        ctx = JokerContext(joker_main=True, poker_hands=ph)
-        result = calculate_joker(card, ctx)
-        assert result is not None
-        assert result.Xmult_mod == 2
-
-    def test_duo_without_pair(self):
-        card = _joker_card("j_duo", x_mult=2, type="Pair")
-        ph = _poker_hands_with("Flush")
-        ctx = JokerContext(joker_main=True, poker_hands=ph)
-        result = calculate_joker(card, ctx)
-        assert result is None
-
-
-class TestTrioHandler:
-    def test_trio_with_full_house(self):
-        """Full House contains Three of a Kind → triggers."""
-        card = _joker_card("j_trio", x_mult=3, type="Three of a Kind")
-        ph = _poker_hands_with("Full House", "Three of a Kind", "Pair")
-        ctx = JokerContext(joker_main=True, poker_hands=ph)
-        result = calculate_joker(card, ctx)
-        assert result is not None
-        assert result.Xmult_mod == 3
-
-
-class TestFamilyHandler:
-    def test_family_with_four_of_a_kind(self):
-        card = _joker_card("j_family", x_mult=4, type="Four of a Kind")
-        ph = _poker_hands_with("Four of a Kind", "Three of a Kind", "Pair")
-        ctx = JokerContext(joker_main=True, poker_hands=ph)
-        result = calculate_joker(card, ctx)
-        assert result is not None
-        assert result.Xmult_mod == 4
-
-
-class TestOrderHandler:
-    def test_order_with_straight_flush(self):
-        """Straight Flush contains Straight → triggers."""
-        card = _joker_card("j_order", x_mult=3, type="Straight")
-        ph = _poker_hands_with("Straight Flush", "Straight", "Flush")
-        ctx = JokerContext(joker_main=True, poker_hands=ph)
-        result = calculate_joker(card, ctx)
-        assert result is not None
-        assert result.Xmult_mod == 3
-
-
-class TestTribeHandler:
-    def test_tribe_with_flush(self):
-        card = _joker_card("j_tribe", x_mult=2, type="Flush")
-        ph = _poker_hands_with("Flush")
-        ctx = JokerContext(joker_main=True, poker_hands=ph)
-        result = calculate_joker(card, ctx)
-        assert result is not None
-        assert result.Xmult_mod == 2
-
-
-# ============================================================================
-# scoring_name-based jokers
-# ============================================================================
-
-
-class TestSupernovaHandler:
-    """Supernova: +mult = times this hand type played in the run."""
-
-    def test_supernova_pair_played_5_times(self):
-        levels = HandLevels()
-        for _ in range(5):
-            levels.record_play("Pair")
-        card = _joker_card("j_supernova")
-        ctx = JokerContext(
-            joker_main=True,
-            scoring_name="Pair",
-            hand_levels=levels,
-        )
-        result = calculate_joker(card, ctx)
-        assert result is not None
-        assert result.mult_mod == 5
-
-    def test_supernova_zero_plays(self):
-        levels = HandLevels()
-        card = _joker_card("j_supernova")
-        ctx = JokerContext(
-            joker_main=True,
-            scoring_name="High Card",
-            hand_levels=levels,
-        )
-        result = calculate_joker(card, ctx)
-        assert result is not None
-        assert result.mult_mod == 0
-
-    def test_supernova_no_hand_levels_returns_none(self):
-        card = _joker_card("j_supernova")
-        ctx = JokerContext(joker_main=True, scoring_name="Pair")
-        result = calculate_joker(card, ctx)
-        assert result is None
-
-
-class TestCardSharpHandler:
-    """Card Sharp: x3 mult if same hand type played twice this round."""
-
-    def test_card_sharp_first_pair_no_effect(self):
-        levels = HandLevels()
-        levels.record_play("Pair")  # played_this_round = 1
-        card = _joker_card("j_card_sharp", extra={"Xmult": 3})
-        ctx = JokerContext(
-            joker_main=True,
-            scoring_name="Pair",
-            hand_levels=levels,
-        )
-        result = calculate_joker(card, ctx)
-        assert result is None
-
-    def test_card_sharp_second_pair_triggers(self):
-        levels = HandLevels()
-        levels.record_play("Pair")
-        levels.record_play("Pair")  # played_this_round = 2
-        card = _joker_card("j_card_sharp", extra={"Xmult": 3})
-        ctx = JokerContext(
-            joker_main=True,
-            scoring_name="Pair",
-            hand_levels=levels,
-        )
-        result = calculate_joker(card, ctx)
-        assert result is not None
-        assert result.Xmult_mod == 3
-
-    def test_card_sharp_different_type_no_effect(self):
-        levels = HandLevels()
-        levels.record_play("Pair")
-        levels.record_play("Pair")
-        card = _joker_card("j_card_sharp", extra={"Xmult": 3})
-        ctx = JokerContext(
-            joker_main=True,
-            scoring_name="Flush",  # different type — Flush played 0 times
-            hand_levels=levels,
-        )
-        result = calculate_joker(card, ctx)
-        assert result is None
-
-    def test_card_sharp_after_round_reset(self):
-        """After reset_round_counts, played_this_round resets to 0."""
-        levels = HandLevels()
-        levels.record_play("Pair")
-        levels.record_play("Pair")
-        levels.reset_round_counts()
-        levels.record_play("Pair")  # played_this_round = 1 again
-        card = _joker_card("j_card_sharp", extra={"Xmult": 3})
-        ctx = JokerContext(
-            joker_main=True,
-            scoring_name="Pair",
-            hand_levels=levels,
-        )
-        result = calculate_joker(card, ctx)
-        assert result is None
-
-
-# ============================================================================
-# Suit-conditional jokers (individual context, cardarea='play')
-# ============================================================================
-
-
-def _suit_ctx(other_card: Card, **kw) -> JokerContext:
-    """Build an individual/play context with other_card."""
-    return JokerContext(individual=True, cardarea="play", other_card=other_card, **kw)
-
-
-class TestGreedyJoker:
-    """j_greedy_joker: +3 mult per Diamond scored."""
-
-    def test_diamond_triggers(self):
-        joker = _joker_card(
-            "j_greedy_joker",
-            extra={"s_mult": 3, "suit": "Diamonds"},
-        )
-        ctx = _suit_ctx(_playing_card("Diamonds", "Ace"))
-        result = calculate_joker(joker, ctx)
-        assert result is not None
-        assert result.mult == 3
-
-    def test_spade_no_effect(self):
-        joker = _joker_card(
-            "j_greedy_joker",
-            extra={"s_mult": 3, "suit": "Diamonds"},
-        )
-        ctx = _suit_ctx(_playing_card("Spades", "Ace"))
-        result = calculate_joker(joker, ctx)
-        assert result is None
-
-    def test_wild_card_triggers(self):
-        """Wild Card matches any suit → triggers."""
-        joker = _joker_card(
-            "j_greedy_joker",
-            extra={"s_mult": 3, "suit": "Diamonds"},
-        )
-        ctx = _suit_ctx(_wild_card("Hearts", "5"))
-        result = calculate_joker(joker, ctx)
-        assert result is not None
-        assert result.mult == 3
-
-    def test_smeared_hearts_triggers(self):
-        """Smeared: Hearts ↔ Diamonds interchangeable → Hearts triggers."""
-        joker = _joker_card(
-            "j_greedy_joker",
-            extra={"s_mult": 3, "suit": "Diamonds"},
-        )
-        ctx = _suit_ctx(_playing_card("Hearts", "5"), smeared=True)
-        result = calculate_joker(joker, ctx)
-        assert result is not None
-        assert result.mult == 3
-
-    def test_smeared_clubs_no_effect(self):
-        """Smeared: Clubs is black, Diamonds is red → no match."""
-        joker = _joker_card(
-            "j_greedy_joker",
-            extra={"s_mult": 3, "suit": "Diamonds"},
-        )
-        ctx = _suit_ctx(_playing_card("Clubs", "5"), smeared=True)
-        result = calculate_joker(joker, ctx)
-        assert result is None
-
-    def test_joker_main_context_no_effect(self):
-        """Wrong context phase → None."""
-        joker = _joker_card(
-            "j_greedy_joker",
-            extra={"s_mult": 3, "suit": "Diamonds"},
-        )
-        ctx = JokerContext(
-            joker_main=True,
-            other_card=_playing_card("Diamonds", "Ace"),
-        )
-        result = calculate_joker(joker, ctx)
-        assert result is None
-
-
-class TestLustyJoker:
-    """j_lusty_joker: +3 mult per Heart scored."""
-
-    def test_heart_triggers(self):
-        joker = _joker_card(
-            "j_lusty_joker",
-            extra={"s_mult": 3, "suit": "Hearts"},
-        )
-        ctx = _suit_ctx(_playing_card("Hearts", "King"))
-        result = calculate_joker(joker, ctx)
-        assert result is not None
-        assert result.mult == 3
-
-    def test_diamond_no_effect(self):
-        joker = _joker_card(
-            "j_lusty_joker",
-            extra={"s_mult": 3, "suit": "Hearts"},
-        )
-        ctx = _suit_ctx(_playing_card("Diamonds", "King"))
-        result = calculate_joker(joker, ctx)
-        assert result is None
-
-
-class TestWrathfulJoker:
-    """j_wrathful_joker: +3 mult per Spade scored."""
-
-    def test_spade_triggers(self):
-        joker = _joker_card(
-            "j_wrathful_joker",
-            extra={"s_mult": 3, "suit": "Spades"},
-        )
-        ctx = _suit_ctx(_playing_card("Spades", "5"))
-        result = calculate_joker(joker, ctx)
-        assert result is not None
-        assert result.mult == 3
-
-    def test_club_no_effect(self):
-        joker = _joker_card(
-            "j_wrathful_joker",
-            extra={"s_mult": 3, "suit": "Spades"},
-        )
-        ctx = _suit_ctx(_playing_card("Clubs", "5"))
-        result = calculate_joker(joker, ctx)
-        assert result is None
-
-
-class TestGluttenousJoker:
-    """j_gluttenous_joker: +3 mult per Club scored (typo in key matches source)."""
-
-    def test_club_triggers(self):
-        joker = _joker_card(
-            "j_gluttenous_joker",
-            extra={"s_mult": 3, "suit": "Clubs"},
-        )
-        ctx = _suit_ctx(_playing_card("Clubs", "Jack"))
-        result = calculate_joker(joker, ctx)
-        assert result is not None
-        assert result.mult == 3
-
-    def test_heart_no_effect(self):
-        joker = _joker_card(
-            "j_gluttenous_joker",
-            extra={"s_mult": 3, "suit": "Clubs"},
-        )
-        ctx = _suit_ctx(_playing_card("Hearts", "Jack"))
-        result = calculate_joker(joker, ctx)
-        assert result is None
-
-    def test_smeared_spade_triggers(self):
-        """Smeared: Spades ↔ Clubs interchangeable."""
-        joker = _joker_card(
-            "j_gluttenous_joker",
-            extra={"s_mult": 3, "suit": "Clubs"},
-        )
-        ctx = _suit_ctx(_playing_card("Spades", "5"), smeared=True)
-        result = calculate_joker(joker, ctx)
-        assert result is not None
-        assert result.mult == 3
-
-
-class TestArrowheadHandler:
-    """j_arrowhead: +50 chips per Spade scored."""
-
-    def test_spade_triggers(self):
-        joker = _joker_card("j_arrowhead", extra=50)
-        ctx = _suit_ctx(_playing_card("Spades", "Ace"))
-        result = calculate_joker(joker, ctx)
-        assert result is not None
-        assert result.chips == 50
-
-    def test_heart_no_effect(self):
-        joker = _joker_card("j_arrowhead", extra=50)
-        ctx = _suit_ctx(_playing_card("Hearts", "Ace"))
-        result = calculate_joker(joker, ctx)
-        assert result is None
-
-    def test_wild_triggers(self):
-        joker = _joker_card("j_arrowhead", extra=50)
-        ctx = _suit_ctx(_wild_card())
-        result = calculate_joker(joker, ctx)
-        assert result is not None
-        assert result.chips == 50
-
-
-class TestOnyxAgateHandler:
-    """j_onyx_agate: +7 mult per Club scored."""
-
-    def test_club_triggers(self):
-        joker = _joker_card("j_onyx_agate", extra=7)
-        ctx = _suit_ctx(_playing_card("Clubs", "Queen"))
-        result = calculate_joker(joker, ctx)
-        assert result is not None
-        assert result.mult == 7
-
-    def test_diamond_no_effect(self):
-        joker = _joker_card("j_onyx_agate", extra=7)
-        ctx = _suit_ctx(_playing_card("Diamonds", "Queen"))
-        result = calculate_joker(joker, ctx)
-        assert result is None
-
-
-class TestRoughGemHandler:
-    """j_rough_gem: +$1 per Diamond scored."""
-
-    def test_diamond_triggers(self):
-        joker = _joker_card("j_rough_gem", extra=1)
-        ctx = _suit_ctx(_playing_card("Diamonds", "3"))
-        result = calculate_joker(joker, ctx)
-        assert result is not None
-        assert result.dollars == 1
-
-    def test_spade_no_effect(self):
-        joker = _joker_card("j_rough_gem", extra=1)
-        ctx = _suit_ctx(_playing_card("Spades", "3"))
-        result = calculate_joker(joker, ctx)
         assert result is None
 
 
@@ -958,257 +335,118 @@ class TestBloodstoneHandler:
             assert r1.x_mult == r2.x_mult
 
 
-class TestAncientJoker:
-    """j_ancient: x1.5 mult if scored card matches ancient_suit."""
+class TestBusinessCard:
+    """j_business: face card played → 1/2 chance → +$2."""
 
-    def test_matching_suit_triggers(self):
-        joker = _joker_card("j_ancient", extra=1.5)
-        ctx = _suit_ctx(
-            _playing_card("Spades", "King"),
-            ancient_suit="Spades",
-        )
-        result = calculate_joker(joker, ctx)
-        assert result is not None
-        assert result.x_mult == 1.5
-
-    def test_non_matching_suit_no_effect(self):
-        joker = _joker_card("j_ancient", extra=1.5)
+    def test_face_with_high_probability(self):
+        """High probabilities_normal guarantees trigger."""
+        joker = _joker_card("j_business", extra=2)
         ctx = _suit_ctx(
             _playing_card("Hearts", "King"),
-            ancient_suit="Spades",
+            rng=PseudoRandom("BIZ"),
+            probabilities_normal=1000.0,
         )
         result = calculate_joker(joker, ctx)
-        assert result is None
-
-    def test_no_ancient_suit_no_effect(self):
-        joker = _joker_card("j_ancient", extra=1.5)
-        ctx = _suit_ctx(_playing_card("Hearts", "King"))
-        result = calculate_joker(joker, ctx)
-        assert result is None
-
-    def test_wild_card_triggers(self):
-        joker = _joker_card("j_ancient", extra=1.5)
-        ctx = _suit_ctx(_wild_card(), ancient_suit="Diamonds")
-        result = calculate_joker(joker, ctx)
         assert result is not None
-        assert result.x_mult == 1.5
+        assert result.dollars == 2
+
+    def test_non_face_no_effect(self):
+        joker = _joker_card("j_business", extra=2)
+        ctx = _suit_ctx(
+            _playing_card("Hearts", "5"),
+            rng=PseudoRandom("BIZ"),
+            probabilities_normal=1000.0,
+        )
+        assert calculate_joker(joker, ctx) is None
+
+    def test_face_without_rng_no_effect(self):
+        joker = _joker_card("j_business", extra=2)
+        ctx = _suit_ctx(_playing_card("Hearts", "King"))
+        assert calculate_joker(joker, ctx) is None
+
+    def test_deterministic(self):
+        joker = _joker_card("j_business", extra=2)
+        r1 = calculate_joker(
+            joker,
+            _suit_ctx(
+                _playing_card("Hearts", "Jack"),
+                rng=PseudoRandom("S1"),
+                probabilities_normal=1.0,
+            ),
+        )
+        r2 = calculate_joker(
+            joker,
+            _suit_ctx(
+                _playing_card("Hearts", "Jack"),
+                rng=PseudoRandom("S1"),
+                probabilities_normal=1.0,
+            ),
+        )
+        assert (r1 is None) == (r2 is None)
 
 
 # ============================================================================
-# Rank-conditional jokers (individual context, cardarea='play')
+# Multi-condition / state jokers
 # ============================================================================
 
 
-class TestFibonacciHandler:
-    """j_fibonacci: +8 mult for Ace/2/3/5/8."""
+class TestCardSharpHandler:
+    """Card Sharp: x3 mult if same hand type played twice this round."""
 
-    def test_ace_triggers(self):
-        joker = _joker_card("j_fibonacci", extra=8)
-        ctx = _suit_ctx(_playing_card("Hearts", "Ace"))
-        result = calculate_joker(joker, ctx)
+    def test_card_sharp_first_pair_no_effect(self):
+        levels = HandLevels()
+        levels.record_play("Pair")  # played_this_round = 1
+        card = _joker_card("j_card_sharp", extra={"Xmult": 3})
+        ctx = JokerContext(
+            joker_main=True,
+            scoring_name="Pair",
+            hand_levels=levels,
+        )
+        result = calculate_joker(card, ctx)
+        assert result is None
+
+    def test_card_sharp_second_pair_triggers(self):
+        levels = HandLevels()
+        levels.record_play("Pair")
+        levels.record_play("Pair")  # played_this_round = 2
+        card = _joker_card("j_card_sharp", extra={"Xmult": 3})
+        ctx = JokerContext(
+            joker_main=True,
+            scoring_name="Pair",
+            hand_levels=levels,
+        )
+        result = calculate_joker(card, ctx)
         assert result is not None
-        assert result.mult == 8
+        assert result.Xmult_mod == 3
 
-    def test_two_triggers(self):
-        joker = _joker_card("j_fibonacci", extra=8)
-        ctx = _suit_ctx(_playing_card("Spades", "2"))
-        result = calculate_joker(joker, ctx)
-        assert result is not None
-        assert result.mult == 8
+    def test_card_sharp_different_type_no_effect(self):
+        levels = HandLevels()
+        levels.record_play("Pair")
+        levels.record_play("Pair")
+        card = _joker_card("j_card_sharp", extra={"Xmult": 3})
+        ctx = JokerContext(
+            joker_main=True,
+            scoring_name="Flush",  # different type — Flush played 0 times
+            hand_levels=levels,
+        )
+        result = calculate_joker(card, ctx)
+        assert result is None
 
-    def test_three_triggers(self):
-        joker = _joker_card("j_fibonacci", extra=8)
-        ctx = _suit_ctx(_playing_card("Clubs", "3"))
-        assert calculate_joker(joker, ctx) is not None
-
-    def test_five_triggers(self):
-        joker = _joker_card("j_fibonacci", extra=8)
-        ctx = _suit_ctx(_playing_card("Diamonds", "5"))
-        assert calculate_joker(joker, ctx) is not None
-
-    def test_eight_triggers(self):
-        joker = _joker_card("j_fibonacci", extra=8)
-        ctx = _suit_ctx(_playing_card("Hearts", "8"))
-        assert calculate_joker(joker, ctx) is not None
-
-    def test_four_no_effect(self):
-        joker = _joker_card("j_fibonacci", extra=8)
-        ctx = _suit_ctx(_playing_card("Hearts", "4"))
-        assert calculate_joker(joker, ctx) is None
-
-    def test_king_no_effect(self):
-        joker = _joker_card("j_fibonacci", extra=8)
-        ctx = _suit_ctx(_playing_card("Hearts", "King"))
-        assert calculate_joker(joker, ctx) is None
-
-
-class TestScholarHandler:
-    """j_scholar: +20 chips, +4 mult for Ace."""
-
-    def test_ace_triggers(self):
-        joker = _joker_card("j_scholar", extra={"chips": 20, "mult": 4})
-        ctx = _suit_ctx(_playing_card("Hearts", "Ace"))
-        result = calculate_joker(joker, ctx)
-        assert result is not None
-        assert result.chips == 20
-        assert result.mult == 4
-
-    def test_king_no_effect(self):
-        joker = _joker_card("j_scholar", extra={"chips": 20, "mult": 4})
-        ctx = _suit_ctx(_playing_card("Hearts", "King"))
-        assert calculate_joker(joker, ctx) is None
-
-
-class TestWalkieTalkieHandler:
-    """j_walkie_talkie: +10 chips, +4 mult for 10 or 4."""
-
-    def test_ten_triggers(self):
-        joker = _joker_card("j_walkie_talkie", extra={"chips": 10, "mult": 4})
-        ctx = _suit_ctx(_playing_card("Hearts", "10"))
-        result = calculate_joker(joker, ctx)
-        assert result is not None
-        assert result.chips == 10
-        assert result.mult == 4
-
-    def test_four_triggers(self):
-        joker = _joker_card("j_walkie_talkie", extra={"chips": 10, "mult": 4})
-        ctx = _suit_ctx(_playing_card("Spades", "4"))
-        result = calculate_joker(joker, ctx)
-        assert result is not None
-
-    def test_five_no_effect(self):
-        joker = _joker_card("j_walkie_talkie", extra={"chips": 10, "mult": 4})
-        ctx = _suit_ctx(_playing_card("Hearts", "5"))
-        assert calculate_joker(joker, ctx) is None
-
-
-class TestEvenStevenHandler:
-    """j_even_steven: +4 mult for even numbered cards (2/4/6/8/10)."""
-
-    def test_two_triggers(self):
-        joker = _joker_card("j_even_steven", extra=4)
-        ctx = _suit_ctx(_playing_card("Hearts", "2"))
-        result = calculate_joker(joker, ctx)
-        assert result is not None
-        assert result.mult == 4
-
-    def test_ten_triggers(self):
-        joker = _joker_card("j_even_steven", extra=4)
-        ctx = _suit_ctx(_playing_card("Hearts", "10"))
-        assert calculate_joker(joker, ctx) is not None
-
-    def test_three_no_effect(self):
-        """Odd numbered card → no effect."""
-        joker = _joker_card("j_even_steven", extra=4)
-        ctx = _suit_ctx(_playing_card("Hearts", "3"))
-        assert calculate_joker(joker, ctx) is None
-
-    def test_jack_no_effect(self):
-        """Face card (id=11) is outside 0-10 range."""
-        joker = _joker_card("j_even_steven", extra=4)
-        ctx = _suit_ctx(_playing_card("Hearts", "Jack"))
-        assert calculate_joker(joker, ctx) is None
-
-    def test_ace_no_effect(self):
-        """Ace (id=14) is outside 0-10 range."""
-        joker = _joker_card("j_even_steven", extra=4)
-        ctx = _suit_ctx(_playing_card("Hearts", "Ace"))
-        assert calculate_joker(joker, ctx) is None
-
-
-class TestOddToddHandler:
-    """j_odd_todd: +31 chips for odd numbered cards (3/5/7/9) and Ace."""
-
-    def test_three_triggers(self):
-        joker = _joker_card("j_odd_todd", extra=31)
-        ctx = _suit_ctx(_playing_card("Hearts", "3"))
-        result = calculate_joker(joker, ctx)
-        assert result is not None
-        assert result.chips == 31
-
-    def test_nine_triggers(self):
-        joker = _joker_card("j_odd_todd", extra=31)
-        ctx = _suit_ctx(_playing_card("Clubs", "9"))
-        assert calculate_joker(joker, ctx) is not None
-
-    def test_ace_triggers(self):
-        """Ace is special-cased as odd."""
-        joker = _joker_card("j_odd_todd", extra=31)
-        ctx = _suit_ctx(_playing_card("Hearts", "Ace"))
-        assert calculate_joker(joker, ctx) is not None
-
-    def test_four_no_effect(self):
-        joker = _joker_card("j_odd_todd", extra=31)
-        ctx = _suit_ctx(_playing_card("Hearts", "4"))
-        assert calculate_joker(joker, ctx) is None
-
-    def test_king_no_effect(self):
-        """Face card (id=13) outside 0-10 range, not Ace."""
-        joker = _joker_card("j_odd_todd", extra=31)
-        ctx = _suit_ctx(_playing_card("Hearts", "King"))
-        assert calculate_joker(joker, ctx) is None
-
-
-class TestScaryFaceHandler:
-    """j_scary_face: +30 chips for face cards."""
-
-    def test_king_triggers(self):
-        joker = _joker_card("j_scary_face", extra=30)
-        ctx = _suit_ctx(_playing_card("Spades", "King"))
-        result = calculate_joker(joker, ctx)
-        assert result is not None
-        assert result.chips == 30
-
-    def test_queen_triggers(self):
-        joker = _joker_card("j_scary_face", extra=30)
-        ctx = _suit_ctx(_playing_card("Hearts", "Queen"))
-        assert calculate_joker(joker, ctx) is not None
-
-    def test_jack_triggers(self):
-        joker = _joker_card("j_scary_face", extra=30)
-        ctx = _suit_ctx(_playing_card("Clubs", "Jack"))
-        assert calculate_joker(joker, ctx) is not None
-
-    def test_ten_no_effect(self):
-        joker = _joker_card("j_scary_face", extra=30)
-        ctx = _suit_ctx(_playing_card("Hearts", "10"))
-        assert calculate_joker(joker, ctx) is None
-
-    def test_pareidolia_every_card(self):
-        """With Pareidolia, ALL cards are face cards."""
-        joker = _joker_card("j_scary_face", extra=30)
-        ctx = _suit_ctx(_playing_card("Hearts", "2"), pareidolia=True)
-        result = calculate_joker(joker, ctx)
-        assert result is not None
-        assert result.chips == 30
-
-    def test_pareidolia_ace(self):
-        joker = _joker_card("j_scary_face", extra=30)
-        ctx = _suit_ctx(_playing_card("Hearts", "Ace"), pareidolia=True)
-        assert calculate_joker(joker, ctx) is not None
-
-
-class TestSmileyFaceHandler:
-    """j_smiley: +5 mult for face cards."""
-
-    def test_king_triggers(self):
-        joker = _joker_card("j_smiley", extra=5)
-        ctx = _suit_ctx(_playing_card("Hearts", "King"))
-        result = calculate_joker(joker, ctx)
-        assert result is not None
-        assert result.mult == 5
-
-    def test_five_no_effect(self):
-        joker = _joker_card("j_smiley", extra=5)
-        ctx = _suit_ctx(_playing_card("Hearts", "5"))
-        assert calculate_joker(joker, ctx) is None
-
-    def test_pareidolia_triggers_on_number(self):
-        joker = _joker_card("j_smiley", extra=5)
-        ctx = _suit_ctx(_playing_card("Hearts", "7"), pareidolia=True)
-        result = calculate_joker(joker, ctx)
-        assert result is not None
-        assert result.mult == 5
+    def test_card_sharp_after_round_reset(self):
+        """After reset_round_counts, played_this_round resets to 0."""
+        levels = HandLevels()
+        levels.record_play("Pair")
+        levels.record_play("Pair")
+        levels.reset_round_counts()
+        levels.record_play("Pair")  # played_this_round = 1 again
+        card = _joker_card("j_card_sharp", extra={"Xmult": 3})
+        ctx = JokerContext(
+            joker_main=True,
+            scoring_name="Pair",
+            hand_levels=levels,
+        )
+        result = calculate_joker(card, ctx)
+        assert result is None
 
 
 class TestPhotographHandler:
@@ -1265,35 +503,6 @@ class TestPhotographHandler:
         assert calculate_joker(joker, ctx) is None
 
 
-class TestTribouletHandler:
-    """j_triboulet: x2 mult for King or Queen."""
-
-    def test_king_triggers(self):
-        joker = _joker_card("j_triboulet", extra=2)
-        ctx = _suit_ctx(_playing_card("Hearts", "King"))
-        result = calculate_joker(joker, ctx)
-        assert result is not None
-        assert result.x_mult == 2
-
-    def test_queen_triggers(self):
-        joker = _joker_card("j_triboulet", extra=2)
-        ctx = _suit_ctx(_playing_card("Spades", "Queen"))
-        result = calculate_joker(joker, ctx)
-        assert result is not None
-        assert result.x_mult == 2
-
-    def test_jack_no_effect(self):
-        """Jack is a face card but not King/Queen."""
-        joker = _joker_card("j_triboulet", extra=2)
-        ctx = _suit_ctx(_playing_card("Clubs", "Jack"))
-        assert calculate_joker(joker, ctx) is None
-
-    def test_ace_no_effect(self):
-        joker = _joker_card("j_triboulet", extra=2)
-        ctx = _suit_ctx(_playing_card("Hearts", "Ace"))
-        assert calculate_joker(joker, ctx) is None
-
-
 class TestIdolHandler:
     """j_idol: x2 mult if scored card matches idol_card rank AND suit."""
 
@@ -1340,109 +549,115 @@ class TestIdolHandler:
         assert result.x_mult == 2
 
 
-# ============================================================================
-# Rank-conditional retrigger (repetition context)
-# ============================================================================
+class TestLoyaltyCard:
+    """Loyalty Card: x4 every 6th hand (every=5, triggers when remainder==every)."""
 
-
-class TestHackHandler:
-    """j_hack: retrigger 2/3/4/5 cards."""
-
-    def test_three_retriggers(self):
-        joker = _joker_card("j_hack", extra=1)
-        ctx = JokerContext(
-            repetition=True,
-            cardarea="play",
-            other_card=_playing_card("Hearts", "3"),
+    def test_sixth_hand_triggers(self):
+        """hands_played=5 (delta=5 from create at 0): triggers."""
+        joker = _joker_card(
+            "j_loyalty_card",
+            extra={"Xmult": 4, "every": 5},
+            hands_played_at_create=0,
         )
+        ctx = JokerContext(joker_main=True, hands_played=5)
         result = calculate_joker(joker, ctx)
         assert result is not None
-        assert result.repetitions == 1
+        assert result.Xmult_mod == 4
 
-    def test_two_retriggers(self):
-        joker = _joker_card("j_hack", extra=1)
-        ctx = JokerContext(
-            repetition=True,
-            cardarea="play",
-            other_card=_playing_card("Spades", "2"),
+    def test_first_hand_no_effect(self):
+        joker = _joker_card(
+            "j_loyalty_card",
+            extra={"Xmult": 4, "every": 5},
+            hands_played_at_create=0,
         )
-        assert calculate_joker(joker, ctx) is not None
-
-    def test_five_retriggers(self):
-        joker = _joker_card("j_hack", extra=1)
-        ctx = JokerContext(
-            repetition=True,
-            cardarea="play",
-            other_card=_playing_card("Clubs", "5"),
-        )
-        assert calculate_joker(joker, ctx) is not None
-
-    def test_six_no_effect(self):
-        joker = _joker_card("j_hack", extra=1)
-        ctx = JokerContext(
-            repetition=True,
-            cardarea="play",
-            other_card=_playing_card("Hearts", "6"),
-        )
+        ctx = JokerContext(joker_main=True, hands_played=0)
         assert calculate_joker(joker, ctx) is None
 
-    def test_ace_no_effect(self):
-        joker = _joker_card("j_hack", extra=1)
-        ctx = JokerContext(
-            repetition=True,
-            cardarea="play",
-            other_card=_playing_card("Hearts", "Ace"),
+    def test_twelfth_hand_triggers(self):
+        """delta=11 from create: (4-11)%6 = (-7)%6 = 5 = every → triggers."""
+        joker = _joker_card(
+            "j_loyalty_card",
+            extra={"Xmult": 4, "every": 5},
+            hands_played_at_create=0,
         )
+        ctx = JokerContext(joker_main=True, hands_played=11)
+        result = calculate_joker(joker, ctx)
+        assert result is not None
+        assert result.Xmult_mod == 4
+
+    def test_seventh_hand_no_effect(self):
+        """delta=6: (4-6)%6 = (-2)%6 = 4 ≠ 5 → no effect."""
+        joker = _joker_card(
+            "j_loyalty_card",
+            extra={"Xmult": 4, "every": 5},
+            hands_played_at_create=0,
+        )
+        ctx = JokerContext(joker_main=True, hands_played=6)
         assert calculate_joker(joker, ctx) is None
 
-    def test_individual_context_no_effect(self):
-        """Hack only fires in repetition context."""
-        joker = _joker_card("j_hack", extra=1)
-        ctx = _suit_ctx(_playing_card("Hearts", "3"))
+    def test_created_mid_run(self):
+        """Created at hands_played=10, triggers at hands_played=15."""
+        joker = _joker_card(
+            "j_loyalty_card",
+            extra={"Xmult": 4, "every": 5},
+            hands_played_at_create=10,
+        )
+        ctx = JokerContext(joker_main=True, hands_played=15)
+        result = calculate_joker(joker, ctx)
+        assert result is not None
+        assert result.Xmult_mod == 4
+
+
+class TestMatador:
+    """j_matador: +$8 when boss blind's debuff effect triggers."""
+
+    def _make_blind(self, *, triggered: bool) -> object:
+        from jackdaw.engine.blind import Blind
+
+        b = Blind.create("bl_eye", ante=1)
+        b.triggered = triggered
+        return b
+
+    def test_triggered_boss_earns_money(self):
+        joker = _joker_card("j_matador", extra=8)
+        blind = self._make_blind(triggered=True)
+        ctx = JokerContext(debuffed_hand=True, blind=blind)
+        result = calculate_joker(joker, ctx)
+        assert result is not None
+        assert result.dollars == 8
+
+    def test_non_triggered_boss_no_effect(self):
+        joker = _joker_card("j_matador", extra=8)
+        blind = self._make_blind(triggered=False)
+        ctx = JokerContext(debuffed_hand=True, blind=blind)
         assert calculate_joker(joker, ctx) is None
+
+    def test_no_blind_no_effect(self):
+        joker = _joker_card("j_matador", extra=8)
+        ctx = JokerContext(debuffed_hand=True)
+        assert calculate_joker(joker, ctx) is None
+
+    def test_not_debuffed_hand_no_effect(self):
+        joker = _joker_card("j_matador", extra=8)
+        blind = self._make_blind(triggered=True)
+        ctx = JokerContext(debuffed_hand=False, blind=blind)
+        assert calculate_joker(joker, ctx) is None
+
+    def test_disabled_blind_triggered(self):
+        """Disabled blind with triggered=True still pays (disabled prevents
+        future debuffs, but Matador checks the triggered flag)."""
+        joker = _joker_card("j_matador", extra=8)
+        blind = self._make_blind(triggered=True)
+        blind.disabled = True
+        ctx = JokerContext(debuffed_hand=True, blind=blind)
+        result = calculate_joker(joker, ctx)
+        assert result is not None
+        assert result.dollars == 8
 
 
 # ============================================================================
 # Game-state-dependent jokers (joker_main context)
 # ============================================================================
-
-
-class TestHalfJoker:
-    def test_three_cards_triggers(self):
-        joker = _joker_card("j_half", extra={"mult": 20, "size": 3})
-        hand = [_playing_card("Hearts", "5")] * 3
-        ctx = JokerContext(joker_main=True, full_hand=hand)
-        result = calculate_joker(joker, ctx)
-        assert result is not None
-        assert result.mult_mod == 20
-
-    def test_two_cards_triggers(self):
-        joker = _joker_card("j_half", extra={"mult": 20, "size": 3})
-        hand = [_playing_card("Hearts", "5")] * 2
-        ctx = JokerContext(joker_main=True, full_hand=hand)
-        assert calculate_joker(joker, ctx) is not None
-
-    def test_four_cards_no_effect(self):
-        joker = _joker_card("j_half", extra={"mult": 20, "size": 3})
-        hand = [_playing_card("Hearts", "5")] * 4
-        ctx = JokerContext(joker_main=True, full_hand=hand)
-        assert calculate_joker(joker, ctx) is None
-
-
-class TestAbstractJoker:
-    def test_five_jokers(self):
-        joker = _joker_card("j_abstract", extra=3)
-        ctx = JokerContext(joker_main=True, joker_count=5)
-        result = calculate_joker(joker, ctx)
-        assert result is not None
-        assert result.mult_mod == 15
-
-    def test_zero_jokers(self):
-        joker = _joker_card("j_abstract", extra=3)
-        ctx = JokerContext(joker_main=True, joker_count=0)
-        result = calculate_joker(joker, ctx)
-        assert result is not None
-        assert result.mult_mod == 0
 
 
 class TestAcrobat:
@@ -1470,98 +685,6 @@ class TestMysticSummit:
     def test_discards_remaining_no_effect(self):
         joker = _joker_card("j_mystic_summit", extra={"mult": 15, "d_remaining": 0})
         ctx = JokerContext(joker_main=True, discards_left=3)
-        assert calculate_joker(joker, ctx) is None
-
-
-class TestBanner:
-    def test_three_discards(self):
-        joker = _joker_card("j_banner", extra=30)
-        ctx = JokerContext(joker_main=True, discards_left=3)
-        result = calculate_joker(joker, ctx)
-        assert result is not None
-        assert result.chip_mod == 90
-
-    def test_zero_discards_no_effect(self):
-        joker = _joker_card("j_banner", extra=30)
-        ctx = JokerContext(joker_main=True, discards_left=0)
-        assert calculate_joker(joker, ctx) is None
-
-
-class TestBlueJoker:
-    def test_twenty_cards_in_deck(self):
-        joker = _joker_card("j_blue_joker", extra=2)
-        ctx = JokerContext(joker_main=True, deck_cards_remaining=20)
-        result = calculate_joker(joker, ctx)
-        assert result is not None
-        assert result.chip_mod == 40
-
-    def test_empty_deck_no_effect(self):
-        joker = _joker_card("j_blue_joker", extra=2)
-        ctx = JokerContext(joker_main=True, deck_cards_remaining=0)
-        assert calculate_joker(joker, ctx) is None
-
-
-class TestErosion:
-    def test_ten_cards_below(self):
-        joker = _joker_card("j_erosion", extra=4)
-        ctx = JokerContext(
-            joker_main=True,
-            starting_deck_size=52,
-            playing_cards_count=42,
-        )
-        result = calculate_joker(joker, ctx)
-        assert result is not None
-        assert result.mult_mod == 40
-
-    def test_full_deck_no_effect(self):
-        joker = _joker_card("j_erosion", extra=4)
-        ctx = JokerContext(
-            joker_main=True,
-            starting_deck_size=52,
-            playing_cards_count=52,
-        )
-        assert calculate_joker(joker, ctx) is None
-
-
-class TestStoneJoker:
-    def test_three_stone_cards(self):
-        joker = _joker_card("j_stone", extra=25)
-        ctx = JokerContext(joker_main=True, stone_tally=3)
-        result = calculate_joker(joker, ctx)
-        assert result is not None
-        assert result.chip_mod == 75
-
-    def test_no_stone_cards(self):
-        joker = _joker_card("j_stone", extra=25)
-        ctx = JokerContext(joker_main=True, stone_tally=0)
-        assert calculate_joker(joker, ctx) is None
-
-
-class TestSteelJoker:
-    def test_two_steel_cards(self):
-        joker = _joker_card("j_steel_joker", extra=0.2)
-        ctx = JokerContext(joker_main=True, steel_tally=2)
-        result = calculate_joker(joker, ctx)
-        assert result is not None
-        assert result.Xmult_mod == pytest.approx(1.4)
-
-    def test_no_steel_cards(self):
-        joker = _joker_card("j_steel_joker", extra=0.2)
-        ctx = JokerContext(joker_main=True, steel_tally=0)
-        assert calculate_joker(joker, ctx) is None
-
-
-class TestBull:
-    def test_ten_dollars(self):
-        joker = _joker_card("j_bull", extra=2)
-        ctx = JokerContext(joker_main=True, money=10)
-        result = calculate_joker(joker, ctx)
-        assert result is not None
-        assert result.chip_mod == 20
-
-    def test_zero_dollars_no_effect(self):
-        joker = _joker_card("j_bull", extra=2)
-        ctx = JokerContext(joker_main=True, money=0)
         assert calculate_joker(joker, ctx) is None
 
 
@@ -1615,22 +738,6 @@ class TestBlackboard:
         result = calculate_joker(joker, ctx)
         assert result is not None
         assert result.Xmult_mod == 3
-
-
-class TestJokerStencil:
-    def test_three_of_five_slots_filled(self):
-        """3/5 slots filled → 2 empty + 1 stencil = x_mult=3 (pre-computed)."""
-        joker = _joker_card("j_stencil", x_mult=3)
-        ctx = JokerContext(joker_main=True)
-        result = calculate_joker(joker, ctx)
-        assert result is not None
-        assert result.Xmult_mod == 3
-
-    def test_all_slots_filled_x_mult_1(self):
-        """All slots filled → x_mult=1, doesn't trigger (x_mult must be > 1)."""
-        joker = _joker_card("j_stencil", x_mult=1)
-        ctx = JokerContext(joker_main=True)
-        assert calculate_joker(joker, ctx) is None
 
 
 class TestFlowerPot:
@@ -1701,111 +808,9 @@ class TestSeeingDouble:
         assert calculate_joker(joker, ctx) is None
 
 
-class TestBootstraps:
-    def test_ten_dollars(self):
-        joker = _joker_card("j_bootstraps", extra={"mult": 2, "dollars": 5})
-        ctx = JokerContext(joker_main=True, money=10)
-        result = calculate_joker(joker, ctx)
-        assert result is not None
-        assert result.mult_mod == 4  # floor(10/5) * 2
-
-    def test_twelve_dollars(self):
-        joker = _joker_card("j_bootstraps", extra={"mult": 2, "dollars": 5})
-        ctx = JokerContext(joker_main=True, money=12)
-        result = calculate_joker(joker, ctx)
-        assert result.mult_mod == 4  # floor(12/5)=2 * 2
-
-    def test_four_dollars_no_effect(self):
-        joker = _joker_card("j_bootstraps", extra={"mult": 2, "dollars": 5})
-        ctx = JokerContext(joker_main=True, money=4)
-        assert calculate_joker(joker, ctx) is None
-
-
-class TestFortuneTeller:
-    def test_seven_tarot_uses(self):
-        joker = _joker_card("j_fortune_teller", extra=1)
-        ctx = JokerContext(joker_main=True, consumable_usage_tarot=7)
-        result = calculate_joker(joker, ctx)
-        assert result is not None
-        assert result.mult_mod == 7
-
-    def test_zero_uses_no_effect(self):
-        joker = _joker_card("j_fortune_teller", extra=1)
-        ctx = JokerContext(joker_main=True, consumable_usage_tarot=0)
-        assert calculate_joker(joker, ctx) is None
-
-
-class TestLoyaltyCard:
-    """Loyalty Card: x4 every 6th hand (every=5, triggers when remainder==every)."""
-
-    def test_sixth_hand_triggers(self):
-        """hands_played=5 (delta=5 from create at 0): triggers."""
-        joker = _joker_card(
-            "j_loyalty_card",
-            extra={"Xmult": 4, "every": 5},
-            hands_played_at_create=0,
-        )
-        ctx = JokerContext(joker_main=True, hands_played=5)
-        result = calculate_joker(joker, ctx)
-        assert result is not None
-        assert result.Xmult_mod == 4
-
-    def test_first_hand_no_effect(self):
-        joker = _joker_card(
-            "j_loyalty_card",
-            extra={"Xmult": 4, "every": 5},
-            hands_played_at_create=0,
-        )
-        ctx = JokerContext(joker_main=True, hands_played=0)
-        assert calculate_joker(joker, ctx) is None
-
-    def test_twelfth_hand_triggers(self):
-        """delta=11 from create: (4-11)%6 = (-7)%6 = 5 = every → triggers."""
-        joker = _joker_card(
-            "j_loyalty_card",
-            extra={"Xmult": 4, "every": 5},
-            hands_played_at_create=0,
-        )
-        ctx = JokerContext(joker_main=True, hands_played=11)
-        result = calculate_joker(joker, ctx)
-        assert result is not None
-        assert result.Xmult_mod == 4
-
-    def test_seventh_hand_no_effect(self):
-        """delta=6: (4-6)%6 = (-2)%6 = 4 ≠ 5 → no effect."""
-        joker = _joker_card(
-            "j_loyalty_card",
-            extra={"Xmult": 4, "every": 5},
-            hands_played_at_create=0,
-        )
-        ctx = JokerContext(joker_main=True, hands_played=6)
-        assert calculate_joker(joker, ctx) is None
-
-    def test_created_mid_run(self):
-        """Created at hands_played=10, triggers at hands_played=15."""
-        joker = _joker_card(
-            "j_loyalty_card",
-            extra={"Xmult": 4, "every": 5},
-            hands_played_at_create=10,
-        )
-        ctx = JokerContext(joker_main=True, hands_played=15)
-        result = calculate_joker(joker, ctx)
-        assert result is not None
-        assert result.Xmult_mod == 4
-
-
 # ============================================================================
 # Held-card jokers (individual context, cardarea='hand')
 # ============================================================================
-
-
-def _held_ctx(other_card: Card, held_cards: list[Card] | None = None) -> JokerContext:
-    return JokerContext(
-        individual=True,
-        cardarea="hand",
-        other_card=other_card,
-        held_cards=held_cards,
-    )
 
 
 class TestRaisedFist:
@@ -1887,84 +892,8 @@ class TestBaron:
 
 
 # ============================================================================
-# Scoring-phase economy jokers
+# Economy jokers with conditions
 # ============================================================================
-
-
-def _gold_card(suit: str = "Hearts", rank: str = "5") -> Card:
-    """Create a Gold Card (enhancement)."""
-    return _playing_card(suit, rank, enhancement="m_gold")
-
-
-class TestGoldenTicket:
-    """j_ticket: +$4 per Gold Card played."""
-
-    def test_gold_card_triggers(self):
-        joker = _joker_card("j_ticket", extra=4)
-        ctx = _suit_ctx(_gold_card("Hearts", "5"))
-        result = calculate_joker(joker, ctx)
-        assert result is not None
-        assert result.dollars == 4
-
-    def test_normal_card_no_effect(self):
-        joker = _joker_card("j_ticket", extra=4)
-        ctx = _suit_ctx(_playing_card("Hearts", "5"))
-        assert calculate_joker(joker, ctx) is None
-
-    def test_wrong_context_no_effect(self):
-        joker = _joker_card("j_ticket", extra=4)
-        ctx = JokerContext(joker_main=True)
-        assert calculate_joker(joker, ctx) is None
-
-
-class TestBusinessCard:
-    """j_business: face card played → 1/2 chance → +$2."""
-
-    def test_face_with_high_probability(self):
-        """High probabilities_normal guarantees trigger."""
-        joker = _joker_card("j_business", extra=2)
-        ctx = _suit_ctx(
-            _playing_card("Hearts", "King"),
-            rng=PseudoRandom("BIZ"),
-            probabilities_normal=1000.0,
-        )
-        result = calculate_joker(joker, ctx)
-        assert result is not None
-        assert result.dollars == 2
-
-    def test_non_face_no_effect(self):
-        joker = _joker_card("j_business", extra=2)
-        ctx = _suit_ctx(
-            _playing_card("Hearts", "5"),
-            rng=PseudoRandom("BIZ"),
-            probabilities_normal=1000.0,
-        )
-        assert calculate_joker(joker, ctx) is None
-
-    def test_face_without_rng_no_effect(self):
-        joker = _joker_card("j_business", extra=2)
-        ctx = _suit_ctx(_playing_card("Hearts", "King"))
-        assert calculate_joker(joker, ctx) is None
-
-    def test_deterministic(self):
-        joker = _joker_card("j_business", extra=2)
-        r1 = calculate_joker(
-            joker,
-            _suit_ctx(
-                _playing_card("Hearts", "Jack"),
-                rng=PseudoRandom("S1"),
-                probabilities_normal=1.0,
-            ),
-        )
-        r2 = calculate_joker(
-            joker,
-            _suit_ctx(
-                _playing_card("Hearts", "Jack"),
-                rng=PseudoRandom("S1"),
-                probabilities_normal=1.0,
-            ),
-        )
-        assert (r1 is None) == (r2 is None)
 
 
 class TestReservedParking:
@@ -2009,11 +938,6 @@ class TestReservedParking:
             probabilities_normal=1000.0,
         )
         assert calculate_joker(joker, ctx) is None
-
-
-# ============================================================================
-# Discard-phase economy jokers
-# ============================================================================
 
 
 class TestFaceless:
@@ -2147,11 +1071,6 @@ class TestTrading:
         assert calculate_joker(joker, ctx) is None
 
 
-# ============================================================================
-# Hand-type economy jokers (joker_main context)
-# ============================================================================
-
-
 class TestToDoList:
     """j_todo_list: +$4 if hand matches to_do_poker_hand."""
 
@@ -2185,55 +1104,263 @@ class TestToDoList:
 
 
 # ============================================================================
-# Boss blind reaction
+# Suit-conditional edge cases
 # ============================================================================
 
 
-class TestMatador:
-    """j_matador: +$8 when boss blind's debuff effect triggers."""
+class TestGreedyJoker:
+    """j_greedy_joker: +3 mult per Diamond scored."""
 
-    def _make_blind(self, *, triggered: bool) -> object:
-        from jackdaw.engine.blind import Blind
-
-        b = Blind.create("bl_eye", ante=1)
-        b.triggered = triggered
-        return b
-
-    def test_triggered_boss_earns_money(self):
-        joker = _joker_card("j_matador", extra=8)
-        blind = self._make_blind(triggered=True)
-        ctx = JokerContext(debuffed_hand=True, blind=blind)
+    def test_diamond_triggers(self):
+        joker = _joker_card(
+            "j_greedy_joker",
+            extra={"s_mult": 3, "suit": "Diamonds"},
+        )
+        ctx = _suit_ctx(_playing_card("Diamonds", "Ace"))
         result = calculate_joker(joker, ctx)
         assert result is not None
-        assert result.dollars == 8
+        assert result.mult == 3
 
-    def test_non_triggered_boss_no_effect(self):
-        joker = _joker_card("j_matador", extra=8)
-        blind = self._make_blind(triggered=False)
-        ctx = JokerContext(debuffed_hand=True, blind=blind)
-        assert calculate_joker(joker, ctx) is None
+    def test_spade_no_effect(self):
+        joker = _joker_card(
+            "j_greedy_joker",
+            extra={"s_mult": 3, "suit": "Diamonds"},
+        )
+        ctx = _suit_ctx(_playing_card("Spades", "Ace"))
+        result = calculate_joker(joker, ctx)
+        assert result is None
 
-    def test_no_blind_no_effect(self):
-        joker = _joker_card("j_matador", extra=8)
-        ctx = JokerContext(debuffed_hand=True)
-        assert calculate_joker(joker, ctx) is None
-
-    def test_not_debuffed_hand_no_effect(self):
-        joker = _joker_card("j_matador", extra=8)
-        blind = self._make_blind(triggered=True)
-        ctx = JokerContext(debuffed_hand=False, blind=blind)
-        assert calculate_joker(joker, ctx) is None
-
-    def test_disabled_blind_triggered(self):
-        """Disabled blind with triggered=True still pays (disabled prevents
-        future debuffs, but Matador checks the triggered flag)."""
-        joker = _joker_card("j_matador", extra=8)
-        blind = self._make_blind(triggered=True)
-        blind.disabled = True
-        ctx = JokerContext(debuffed_hand=True, blind=blind)
+    def test_wild_card_triggers(self):
+        """Wild Card matches any suit → triggers."""
+        joker = _joker_card(
+            "j_greedy_joker",
+            extra={"s_mult": 3, "suit": "Diamonds"},
+        )
+        ctx = _suit_ctx(_wild_card("Hearts", "5"))
         result = calculate_joker(joker, ctx)
         assert result is not None
-        assert result.dollars == 8
+        assert result.mult == 3
+
+    def test_smeared_hearts_triggers(self):
+        """Smeared: Hearts ↔ Diamonds interchangeable → Hearts triggers."""
+        joker = _joker_card(
+            "j_greedy_joker",
+            extra={"s_mult": 3, "suit": "Diamonds"},
+        )
+        ctx = _suit_ctx(_playing_card("Hearts", "5"), smeared=True)
+        result = calculate_joker(joker, ctx)
+        assert result is not None
+        assert result.mult == 3
+
+    def test_smeared_clubs_no_effect(self):
+        """Smeared: Clubs is black, Diamonds is red → no match."""
+        joker = _joker_card(
+            "j_greedy_joker",
+            extra={"s_mult": 3, "suit": "Diamonds"},
+        )
+        ctx = _suit_ctx(_playing_card("Clubs", "5"), smeared=True)
+        result = calculate_joker(joker, ctx)
+        assert result is None
+
+    def test_joker_main_context_no_effect(self):
+        """Wrong context phase → None."""
+        joker = _joker_card(
+            "j_greedy_joker",
+            extra={"s_mult": 3, "suit": "Diamonds"},
+        )
+        ctx = JokerContext(
+            joker_main=True,
+            other_card=_playing_card("Diamonds", "Ace"),
+        )
+        result = calculate_joker(joker, ctx)
+        assert result is None
+
+
+class TestAncientJoker:
+    """j_ancient: x1.5 mult if scored card matches ancient_suit."""
+
+    def test_matching_suit_triggers(self):
+        joker = _joker_card("j_ancient", extra=1.5)
+        ctx = _suit_ctx(
+            _playing_card("Spades", "King"),
+            ancient_suit="Spades",
+        )
+        result = calculate_joker(joker, ctx)
+        assert result is not None
+        assert result.x_mult == 1.5
+
+    def test_non_matching_suit_no_effect(self):
+        joker = _joker_card("j_ancient", extra=1.5)
+        ctx = _suit_ctx(
+            _playing_card("Hearts", "King"),
+            ancient_suit="Spades",
+        )
+        result = calculate_joker(joker, ctx)
+        assert result is None
+
+    def test_no_ancient_suit_no_effect(self):
+        joker = _joker_card("j_ancient", extra=1.5)
+        ctx = _suit_ctx(_playing_card("Hearts", "King"))
+        result = calculate_joker(joker, ctx)
+        assert result is None
+
+    def test_wild_card_triggers(self):
+        joker = _joker_card("j_ancient", extra=1.5)
+        ctx = _suit_ctx(_wild_card(), ancient_suit="Diamonds")
+        result = calculate_joker(joker, ctx)
+        assert result is not None
+        assert result.x_mult == 1.5
+
+
+class TestGluttenousJoker:
+    """j_gluttenous_joker: +3 mult per Club scored (typo in key matches source)."""
+
+    def test_club_triggers(self):
+        joker = _joker_card(
+            "j_gluttenous_joker",
+            extra={"s_mult": 3, "suit": "Clubs"},
+        )
+        ctx = _suit_ctx(_playing_card("Clubs", "Jack"))
+        result = calculate_joker(joker, ctx)
+        assert result is not None
+        assert result.mult == 3
+
+    def test_heart_no_effect(self):
+        joker = _joker_card(
+            "j_gluttenous_joker",
+            extra={"s_mult": 3, "suit": "Clubs"},
+        )
+        ctx = _suit_ctx(_playing_card("Hearts", "Jack"))
+        result = calculate_joker(joker, ctx)
+        assert result is None
+
+    def test_smeared_spade_triggers(self):
+        """Smeared: Spades ↔ Clubs interchangeable."""
+        joker = _joker_card(
+            "j_gluttenous_joker",
+            extra={"s_mult": 3, "suit": "Clubs"},
+        )
+        ctx = _suit_ctx(_playing_card("Spades", "5"), smeared=True)
+        result = calculate_joker(joker, ctx)
+        assert result is not None
+        assert result.mult == 3
+
+
+# ============================================================================
+# Rank-conditional edge cases
+# ============================================================================
+
+
+class TestScaryFaceHandler:
+    """j_scary_face: +30 chips for face cards."""
+
+    def test_king_triggers(self):
+        joker = _joker_card("j_scary_face", extra=30)
+        ctx = _suit_ctx(_playing_card("Spades", "King"))
+        result = calculate_joker(joker, ctx)
+        assert result is not None
+        assert result.chips == 30
+
+    def test_queen_triggers(self):
+        joker = _joker_card("j_scary_face", extra=30)
+        ctx = _suit_ctx(_playing_card("Hearts", "Queen"))
+        assert calculate_joker(joker, ctx) is not None
+
+    def test_jack_triggers(self):
+        joker = _joker_card("j_scary_face", extra=30)
+        ctx = _suit_ctx(_playing_card("Clubs", "Jack"))
+        assert calculate_joker(joker, ctx) is not None
+
+    def test_ten_no_effect(self):
+        joker = _joker_card("j_scary_face", extra=30)
+        ctx = _suit_ctx(_playing_card("Hearts", "10"))
+        assert calculate_joker(joker, ctx) is None
+
+    def test_pareidolia_every_card(self):
+        """With Pareidolia, ALL cards are face cards."""
+        joker = _joker_card("j_scary_face", extra=30)
+        ctx = _suit_ctx(_playing_card("Hearts", "2"), pareidolia=True)
+        result = calculate_joker(joker, ctx)
+        assert result is not None
+        assert result.chips == 30
+
+    def test_pareidolia_ace(self):
+        joker = _joker_card("j_scary_face", extra=30)
+        ctx = _suit_ctx(_playing_card("Hearts", "Ace"), pareidolia=True)
+        assert calculate_joker(joker, ctx) is not None
+
+
+class TestTribouletHandler:
+    """j_triboulet: x2 mult for King or Queen."""
+
+    def test_king_triggers(self):
+        joker = _joker_card("j_triboulet", extra=2)
+        ctx = _suit_ctx(_playing_card("Hearts", "King"))
+        result = calculate_joker(joker, ctx)
+        assert result is not None
+        assert result.x_mult == 2
+
+    def test_queen_triggers(self):
+        joker = _joker_card("j_triboulet", extra=2)
+        ctx = _suit_ctx(_playing_card("Spades", "Queen"))
+        result = calculate_joker(joker, ctx)
+        assert result is not None
+        assert result.x_mult == 2
+
+    def test_jack_no_effect(self):
+        """Jack is a face card but not King/Queen."""
+        joker = _joker_card("j_triboulet", extra=2)
+        ctx = _suit_ctx(_playing_card("Clubs", "Jack"))
+        assert calculate_joker(joker, ctx) is None
+
+    def test_ace_no_effect(self):
+        joker = _joker_card("j_triboulet", extra=2)
+        ctx = _suit_ctx(_playing_card("Hearts", "Ace"))
+        assert calculate_joker(joker, ctx) is None
+
+
+class TestEvenStevenHandler:
+    """j_even_steven: +4 mult for even numbered cards (2/4/6/8/10)."""
+
+    def test_ace_no_effect(self):
+        """Ace (id=14) is outside 0-10 range."""
+        joker = _joker_card("j_even_steven", extra=4)
+        ctx = _suit_ctx(_playing_card("Hearts", "Ace"))
+        assert calculate_joker(joker, ctx) is None
+
+
+class TestOddToddHandler:
+    """j_odd_todd: +31 chips for odd numbered cards (3/5/7/9) and Ace."""
+
+    def test_ace_triggers(self):
+        """Ace is special-cased as odd."""
+        joker = _joker_card("j_odd_todd", extra=31)
+        ctx = _suit_ctx(_playing_card("Hearts", "Ace"))
+        assert calculate_joker(joker, ctx) is not None
+
+
+class TestHackHandler:
+    """j_hack: retrigger 2/3/4/5 cards."""
+
+    def test_three_retriggers(self):
+        joker = _joker_card("j_hack", extra=1)
+        ctx = JokerContext(
+            repetition=True,
+            cardarea="play",
+            other_card=_playing_card("Hearts", "3"),
+        )
+        result = calculate_joker(joker, ctx)
+        assert result is not None
+        assert result.repetitions == 1
+
+    def test_six_no_effect(self):
+        joker = _joker_card("j_hack", extra=1)
+        ctx = JokerContext(
+            repetition=True,
+            cardarea="play",
+            other_card=_playing_card("Hearts", "6"),
+        )
+        assert calculate_joker(joker, ctx) is None
 
 
 # ============================================================================

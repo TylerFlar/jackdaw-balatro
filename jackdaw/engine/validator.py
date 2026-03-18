@@ -99,9 +99,7 @@ def validate_step(
         sim_blind_chips = getattr(sim_blind, "chips", 0)
         live_blind_chips = live_blind.get("chips", 0)
         if sim_blind_chips != live_blind_chips:
-            diffs.append(
-                f"blind_chips: sim={sim_blind_chips} live={live_blind_chips}"
-            )
+            diffs.append(f"blind_chips: sim={sim_blind_chips} live={live_blind_chips}")
 
     return diffs
 
@@ -142,8 +140,7 @@ def validate_hand_cards(
         live_rank = lc.get("rank", "")
         if sim_suit != live_suit or sim_rank != live_rank:
             diffs.append(
-                f"hand[{i}]: sim={sim_rank} of {sim_suit}, "
-                f"live={live_rank} of {live_suit}"
+                f"hand[{i}]: sim={sim_rank} of {sim_suit}, live={live_rank} of {live_suit}"
             )
     return diffs
 
@@ -163,9 +160,7 @@ def validate_jokers(
     """
     diffs: list[str] = []
     if len(sim_jokers) != len(live_jokers):
-        diffs.append(
-            f"joker_count: sim={len(sim_jokers)} live={len(live_jokers)}"
-        )
+        diffs.append(f"joker_count: sim={len(sim_jokers)} live={len(live_jokers)}")
     for i in range(min(len(sim_jokers), len(live_jokers))):
         sk = sim_jokers[i].center_key
         lk = live_jokers[i].get("key", "")
