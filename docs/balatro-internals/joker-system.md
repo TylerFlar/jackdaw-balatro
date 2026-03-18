@@ -1,5 +1,8 @@
 # Joker System Architecture
 
+> **Reference documentation** — produced during initial Balatro v1.0.1o source analysis.
+> The jackdaw engine is the authoritative implementation; see `jackdaw/engine/` for current behavior.
+
 How joker abilities are defined, stored, evaluated, and categorized.
 
 ---

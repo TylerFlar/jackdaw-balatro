@@ -1,5 +1,8 @@
 # Balatro Source File Inventory
 
+> **Reference documentation** — produced during initial Balatro v1.0.1o source analysis.
+> The jackdaw engine is the authoritative implementation; see `jackdaw/engine/` for current behavior.
+
 Source directory: `balatro_source/`
 
 Total: **44 Lua files** (~37,500 lines of game/engine code + localization)

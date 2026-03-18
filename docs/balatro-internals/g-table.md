@@ -1,5 +1,8 @@
 # The G Table — Balatro's Global State
 
+> **Reference documentation** — produced during initial Balatro v1.0.1o source analysis.
+> The jackdaw engine is the authoritative implementation; see `jackdaw/engine/` for current behavior.
+
 `G` is the single global `Game` instance. It holds **everything**: rendering state,
 UI elements, prototype data, and the per-run game state (`G.GAME`). Understanding
 the split between `G.*` (persistent across runs) and `G.GAME.*` (reset each run)

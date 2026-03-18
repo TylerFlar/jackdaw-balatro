@@ -1,5 +1,8 @@
 # Shop System
 
+> **Reference documentation** — produced during initial Balatro v1.0.1o source analysis.
+> The jackdaw engine is the authoritative implementation; see `jackdaw/engine/` for current behavior.
+
 How shop offerings are generated, priced, bought, sold, rerolled, and how
 vouchers and booster packs work.
 

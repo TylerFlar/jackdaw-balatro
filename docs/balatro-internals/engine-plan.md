@@ -1,5 +1,11 @@
 # Engine Plan — Simulator Blueprint
 
+> **Reference documentation** — produced during initial Balatro v1.0.1o source analysis.
+> The jackdaw engine is the authoritative implementation; see `jackdaw/engine/` for current behavior.
+
+> **Note:** The engine is now complete. This was the original planning document
+> used to guide the build sequence. Kept for historical context.
+
 Synthesized from all source map documents. This is the blueprint for building
 a headless Balatro simulator.
 

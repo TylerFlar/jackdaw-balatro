@@ -1,5 +1,8 @@
 # RNG System
 
+> **Reference documentation** — produced during initial Balatro v1.0.1o source analysis.
+> The jackdaw engine is the authoritative implementation; see `jackdaw/engine/` for current behavior.
+
 Balatro's pseudorandom number generation: algorithm, seed lifecycle, per-system
 streams, determinism analysis, and every random call site.
 

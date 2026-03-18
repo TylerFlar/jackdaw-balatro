@@ -1,5 +1,8 @@
 # Consumables & Vouchers
 
+> **Reference documentation** — produced during initial Balatro v1.0.1o source analysis.
+> The jackdaw engine is the authoritative implementation; see `jackdaw/engine/` for current behavior.
+
 Every Tarot, Planet, Spectral, and Voucher effect. Pack opening mechanics.
 Selection rules. RNG involvement.
 

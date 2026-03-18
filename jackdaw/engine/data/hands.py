@@ -1,7 +1,7 @@
 """Poker hand types, base values, and level-up increments.
 
 Data from ``Game:init_game_object()`` (game.lua:2001-2014), documented in
-``docs/source-map/scoring-pipeline.md`` and ``docs/source-map/g-table.md``.
+``docs/balatro-internals/scoring-pipeline.md`` and ``docs/balatro-internals/g-table.md``.
 
 The hand name strings are the exact keys used in ``G.GAME.hands`` and by
 ``evaluate_poker_hand`` for detection and lookup.

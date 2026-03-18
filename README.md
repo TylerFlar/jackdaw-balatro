@@ -33,5 +33,5 @@ uv run pytest
 
 ## Status
 
-Early development. See `docs/source-map/` for reverse-engineered Balatro
-source documentation and `docs/source-map/engine-plan.md` for the build plan.
+Early development. See `docs/balatro-internals/` for reverse-engineered Balatro
+source documentation and `docs/balatro-internals/engine-plan.md` for the build plan.

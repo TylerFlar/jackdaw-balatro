@@ -1,5 +1,8 @@
 # Decks & Stakes
 
+> **Reference documentation** — produced during initial Balatro v1.0.1o source analysis.
+> The jackdaw engine is the authoritative implementation; see `jackdaw/engine/` for current behavior.
+
 Starting conditions, modifiers, and card pool mutations for all 15 decks and
 all 8 stake levels.
 

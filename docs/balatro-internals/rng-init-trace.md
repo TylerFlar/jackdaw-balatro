@@ -1,5 +1,8 @@
 # RNG Call Trace — Run Initialization
 
+> **Reference documentation** — produced during initial Balatro v1.0.1o source analysis.
+> The jackdaw engine is the authoritative implementation; see `jackdaw/engine/` for current behavior.
+
 Exact sequence of every `pseudoseed`/`pseudorandom_element`/`pseudoshuffle`
 call from `Game:start_run()` through the first blind selection.
 
