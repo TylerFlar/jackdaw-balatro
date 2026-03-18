@@ -164,7 +164,12 @@ def get_current_pool(
         fallback = _FALLBACKS.get(pool_type, UNAVAILABLE)
         result = [fallback]
 
-    seed_key = pool_type + append
+    # Lua's _pool_key includes rarity for Jokers: 'Joker'..rarity..append
+    # For non-Jokers: pool_type..append
+    if pool_type == "Joker" and rarity is not None:
+        seed_key = pool_type + str(rarity) + (append if not legendary else "")
+    else:
+        seed_key = pool_type + append
     return result, seed_key
 
 
@@ -249,7 +254,6 @@ def select_from_pool(
     rng: PseudoRandom,
     pool_key: str,
     ante: int,
-    append: str = "",
 ) -> str:
     """Select one key from a pre-built pool using deterministic RNG.
 
@@ -284,7 +288,9 @@ def select_from_pool(
     # The full seed key matches Lua's _pool_key which is
     # pool_type + append + str(ante) (returned by get_current_pool at
     # common_events.lua:2052).  E.g. 'Tag1', 'Joker1sho1', 'Voucher1'.
-    full_key = pool_key + append + str(ante)
+    # NOTE: pool_key already contains append (from get_current_pool),
+    # so we only add ante here — NOT append again.
+    full_key = pool_key + str(ante)
 
     # Initial draw: pseudoseed(full_key)
     seed_val = rng.seed(full_key)
@@ -335,9 +341,8 @@ def pick_card_from_pool(
     str
         The selected center key.
     """
-    append: str = kwargs.get("append", "")
     pool, pool_key = get_current_pool(pool_type, rng, ante, **kwargs)
-    return select_from_pool(pool, rng, pool_key, ante, append)
+    return select_from_pool(pool, rng, pool_key, ante)
 
 
 # ---------------------------------------------------------------------------
@@ -484,6 +489,35 @@ def _filter_voucher(
     return key
 
 
+_PLANET_HAND: dict[str, str] = {
+    "c_pluto": "High Card",
+    "c_mercury": "Pair",
+    "c_uranus": "Two Pair",
+    "c_venus": "Three of a Kind",
+    "c_saturn": "Straight",
+    "c_jupiter": "Flush",
+    "c_earth": "Full House",
+    "c_mars": "Four of a Kind",
+    "c_neptune": "Straight Flush",
+    "c_planet_x": "Five of a Kind",
+    "c_ceres": "Flush House",
+    "c_eris": "Flush Five",
+    "c_black_hole": "all",
+}
+
+
+def _is_softlocked_planet(key: str, visible_hand_types: set[str]) -> bool:
+    """Return True if *key* is a planet whose hand type is not yet visible.
+
+    In Lua, softlocked planets are simply absent from the pool — they are
+    never added, so they don't affect pool size or index alignment.
+    """
+    hand_type = _PLANET_HAND.get(key)
+    if hand_type is None or hand_type == "all":
+        return False
+    return hand_type not in visible_hand_types
+
+
 def _filter_planet(*, key: str, played_hand_types: set[str]) -> str:
     """Exclude planet if its hand type has never been played (softlock guard).
 
@@ -493,22 +527,6 @@ def _filter_planet(*, key: str, played_hand_types: set[str]) -> str:
     """
     if not played_hand_types:
         return key
-
-    _PLANET_HAND: dict[str, str] = {
-        "c_pluto": "High Card",
-        "c_mercury": "Pair",
-        "c_uranus": "Two Pair",
-        "c_venus": "Three of a Kind",
-        "c_saturn": "Straight",
-        "c_jupiter": "Flush",
-        "c_earth": "Full House",
-        "c_mars": "Four of a Kind",
-        "c_neptune": "Straight Flush",
-        "c_planet_x": "Five of a Kind",
-        "c_ceres": "Flush House",
-        "c_eris": "Flush Five",
-        "c_black_hole": "all",  # levels all — never filtered
-    }
 
     hand_type = _PLANET_HAND.get(key)
     if hand_type is None:

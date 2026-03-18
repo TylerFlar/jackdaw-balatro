@@ -4,14 +4,19 @@ version = "0.1.0"
 description = "Headless Balatro simulator for reinforcement learning research"
 readme = "README.md"
 requires-python = ">=3.12"
-license = {text = "MIT"}
+license = "MIT"
 authors = [{name = "Tyler Flar"}]
 classifiers = [
     "Programming Language :: Python :: 3.12",
-    "License :: OSI Approved :: MIT License",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = []
+
+[tool.setuptools.packages.find]
+include = ["jackdaw*"]
+
+[project.scripts]
+jackdaw = "jackdaw.cli.main:main"
 
 [project.urls]
 Repository = "https://github.com/TylerFlar/jackdaw-balatro"

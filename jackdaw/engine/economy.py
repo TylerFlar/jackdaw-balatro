@@ -121,6 +121,8 @@ def calculate_round_earnings(
     jokers: list[Card],
     game_state: dict[str, Any],
     rng: PseudoRandom | None = None,
+    *,
+    joker_dollars: int | None = None,
 ) -> RoundEarnings:
     """Compute end-of-round earnings for a beaten blind.
 
@@ -158,6 +160,10 @@ def calculate_round_earnings(
         jokers: Active joker cards.
         game_state: Run-level state dict.
         rng: PseudoRandom instance (for end-of-round joker RNG effects).
+        joker_dollars: Pre-computed joker dollar bonus from the
+            ``on_end_of_round`` call in ``_round_won``.  When provided,
+            ``on_end_of_round`` is **not** called again, avoiding a
+            duplicate RNG consumption that would desync the PRNG state.
 
     Returns:
         :class:`RoundEarnings` with all components and their net total.
@@ -203,15 +209,19 @@ def calculate_round_earnings(
     # ------------------------------------------------------------------
     # Step 5 — Joker dollar bonuses (state_events.lua:1175)
     # calc_dollar_bonus per joker: Golden Joker, Cloud 9, Satellite, etc.
+    #
+    # When joker_dollars is pre-computed (passed from _round_won), skip
+    # on_end_of_round to avoid duplicate RNG consumption.
     # ------------------------------------------------------------------
-    game_snap = GameSnapshot(
-        money=money,
-        hands_left=hands_left,
-        discards_left=discards_left,
-        joker_count=len(jokers),
-    )
-    end_result = on_end_of_round(jokers, game_snap, rng)
-    joker_dollars = end_result["dollars_earned"]
+    if joker_dollars is None:
+        game_snap = GameSnapshot(
+            money=money,
+            hands_left=hands_left,
+            discards_left=discards_left,
+            joker_count=len(jokers),
+        )
+        end_result = on_end_of_round(jokers, game_snap, rng)
+        joker_dollars = end_result["dollars_earned"]
 
     # ------------------------------------------------------------------
     # Step 6 — Interest (state_events.lua:1191)

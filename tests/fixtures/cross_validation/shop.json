@@ -6,12 +6,13 @@
       "voucher": "v_hieroglyph",
       "jokers": [
         {
-          "key": "j_clever",
+          "key": "j_mail",
           "cost": 4,
-          "set": "Joker"
+          "set": "Joker",
+          "perishable": true
         },
         {
-          "key": "j_devious",
+          "key": "j_juggler",
           "cost": 4,
           "set": "Joker"
         }
@@ -24,12 +25,13 @@
       "voucher": "v_paint_brush",
       "jokers": [
         {
-          "key": "j_credit_card",
-          "cost": 1,
-          "set": "Joker"
+          "key": "j_egg",
+          "cost": 4,
+          "set": "Joker",
+          "perishable": true
         },
         {
-          "key": "c_venus",
+          "key": "c_jupiter",
           "cost": 3,
           "set": "Planet"
         }
@@ -43,13 +45,13 @@
       "jokers": [
         {
           "key": "j_joker",
-          "cost": 2,
+          "cost": 5,
           "set": "Joker",
           "eternal": true
         },
         {
-          "key": "j_gluttenous_joker",
-          "cost": 5,
+          "key": "j_ice_cream",
+          "cost": 4,
           "set": "Joker"
         }
       ],
@@ -61,14 +63,15 @@
       "voucher": "v_blank",
       "jokers": [
         {
-          "key": "c_jupiter",
+          "key": "c_mars",
           "cost": 3,
           "set": "Planet"
         },
         {
-          "key": "j_red_card",
+          "key": "j_superposition",
           "cost": 1,
-          "set": "Joker"
+          "set": "Joker",
+          "rental": true
         }
       ],
       "booster_count": 2
@@ -79,12 +82,13 @@
       "voucher": "v_reroll_surplus",
       "jokers": [
         {
-          "key": "j_juggler",
+          "key": "j_popcorn",
           "cost": 4,
-          "set": "Joker"
+          "set": "Joker",
+          "perishable": true
         },
         {
-          "key": "c_fool",
+          "key": "c_emperor",
           "cost": 3,
           "set": "Tarot"
         }
@@ -97,12 +101,12 @@
       "voucher": "v_telescope",
       "jokers": [
         {
-          "key": "c_pluto",
+          "key": "c_uranus",
           "cost": 3,
           "set": "Planet"
         },
         {
-          "key": "c_earth",
+          "key": "c_uranus",
           "cost": 3,
           "set": "Planet"
         }
@@ -115,14 +119,14 @@
       "voucher": "v_hieroglyph",
       "jokers": [
         {
-          "key": "j_ceremonial",
+          "key": "j_bull",
           "cost": 6,
           "set": "Joker",
           "eternal": true
         },
         {
-          "key": "j_business",
-          "cost": 4,
+          "key": "j_raised_fist",
+          "cost": 5,
           "set": "Joker"
         }
       ],
@@ -134,7 +138,7 @@
       "voucher": "v_overstock_norm",
       "jokers": [
         {
-          "key": "c_fool",
+          "key": "c_moon",
           "cost": 3,
           "set": "Tarot"
         },
@@ -152,14 +156,16 @@
       "voucher": "v_tarot_merchant",
       "jokers": [
         {
-          "key": "c_jupiter",
+          "key": "c_ceres",
           "cost": 3,
           "set": "Planet"
         },
         {
-          "key": "j_delayed_grat",
+          "key": "j_mad",
           "cost": 1,
-          "set": "Joker"
+          "set": "Joker",
+          "perishable": true,
+          "rental": true
         }
       ],
       "booster_count": 2

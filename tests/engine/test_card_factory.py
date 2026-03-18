@@ -151,9 +151,9 @@ class TestCreateCardKeyDetermination:
         assert card.center_key == "j_joker"
 
     def test_known_seed_returns_specific_joker(self):
-        """PseudoRandom('CF_JOKER_TEST') + forced_rarity=1 at ante=1 picks j_crafty."""
+        """PseudoRandom('CF_JOKER_TEST') + forced_rarity=1 at ante=1 picks j_credit_card."""
         card = create_card("Joker", PseudoRandom("CF_JOKER_TEST"), 1, forced_rarity=1)
-        assert card.center_key == "j_crafty"
+        assert card.center_key == "j_credit_card"
 
     def test_deterministic_same_seed(self):
         k1 = create_card("Joker", PseudoRandom("DET_CF"), ante=2, forced_rarity=2).center_key

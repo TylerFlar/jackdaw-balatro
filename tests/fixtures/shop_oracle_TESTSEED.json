@@ -9,11 +9,11 @@
       "voucher": "v_crystal_ball",
       "jokers": [
         {
-          "center_key": "j_jolly",
+          "center_key": "j_raised_fist",
           "set": "Joker"
         },
         {
-          "center_key": "j_to_the_moon",
+          "center_key": "j_pareidolia",
           "set": "Joker",
           "eternal": true
         }
@@ -36,13 +36,13 @@
       "voucher": "v_magic_trick",
       "jokers": [
         {
-          "center_key": "j_lusty_joker",
+          "center_key": "j_todo_list",
           "set": "Joker",
           "perishable": true,
           "rental": true
         },
         {
-          "center_key": "c_planet_x",
+          "center_key": "c_ceres",
           "set": "Planet"
         }
       ],
@@ -64,11 +64,11 @@
       "voucher": "v_hieroglyph",
       "jokers": [
         {
-          "center_key": "c_star",
+          "center_key": "c_sun",
           "set": "Tarot"
         },
         {
-          "center_key": "c_mercury",
+          "center_key": "c_eris",
           "set": "Planet"
         }
       ],

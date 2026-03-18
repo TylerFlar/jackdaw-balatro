@@ -1300,6 +1300,7 @@ def _round_won(gs: dict[str, Any]) -> None:
         jokers=jokers,
         game_state=gs,
         rng=rng,
+        joker_dollars=eor.get("dollars_earned", 0),
     )
     gs["round_earnings"] = earnings
 
@@ -1752,6 +1753,26 @@ def _resolve_create_descriptors(gs: dict[str, Any], descriptors: list[dict[str, 
 # ---------------------------------------------------------------------------
 
 
+def _sync_played_hand_types(gs: dict[str, Any]) -> None:
+    """Populate ``gs["played_hand_types"]`` from hand level visibility.
+
+    In Lua, ``G.GAME.hands[ht].visible`` gates whether a planet can
+    appear in pools (softlock).  Secret hand types (Five of a Kind,
+    Flush House, Flush Five) start invisible and become visible once
+    played or leveled.  This syncs that state so pool filtering works.
+    """
+    from jackdaw.engine.hand_levels import HandLevels
+
+    hand_levels: HandLevels | None = gs.get("hand_levels")
+    if hand_levels is None:
+        return
+    visible: set[str] = set()
+    for ht, state in hand_levels._hands.items():
+        if state.visible:
+            visible.add(ht.value)
+    gs["played_hand_types"] = visible
+
+
 def _populate_shop(gs: dict[str, Any]) -> None:
     """Generate shop cards using populate_shop and store in game_state.
 
@@ -1763,6 +1784,10 @@ def _populate_shop(gs: dict[str, Any]) -> None:
     rng = gs.get("rng")
     if rng is None:
         return
+
+    # Sync visible hand types for Planet pool softlock filtering.
+    # In Lua, G.GAME.hands[ht].visible gates planet availability.
+    _sync_played_hand_types(gs)
 
     ante = gs.get("round_resets", {}).get("ante", 1)
     result = populate_shop(rng, ante, gs)
@@ -1785,6 +1810,8 @@ def _reroll_shop_cards(gs: dict[str, Any]) -> None:
     rng = gs.get("rng")
     if rng is None:
         return
+
+    _sync_played_hand_types(gs)
 
     ante = gs.get("round_resets", {}).get("ante", 1)
     shop_joker_max: int = gs.get("shop", {}).get("joker_max", 2)
