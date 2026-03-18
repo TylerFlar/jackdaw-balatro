@@ -431,6 +431,9 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
 
     # ------------------------------------------------------------------
     # 8. Move surviving played cards to discard pile
+    #
+    # In Lua, draw_from_play_to_discard (state_events.lua:522, 1088-1096)
+    # moves played cards to the discard area after scoring.
     # ------------------------------------------------------------------
     discard_pile: list = gs.setdefault("discard_pile", [])
     discard_pile.extend(played)
@@ -907,6 +910,8 @@ def _handle_open_booster(gs: dict[str, Any], idx: int) -> dict[str, Any]:
     gs["shop_return_phase"] = GamePhase.SHOP
 
     # For Arcana/Spectral packs: deal hand from deck for targeting
+    # Cards are drawn from the END of deck (top of visual stack),
+    # matching Lua's draw_card(G.deck, G.hand) which pops last card.
     pack_kind = gs.get("pack_type", "")
     if pack_kind in ("Arcana", "Spectral"):
         deck: list = gs.get("deck", [])
@@ -916,7 +921,7 @@ def _handle_open_booster(gs: dict[str, Any], idx: int) -> dict[str, Any]:
         pack_hand: list = []
         for _ in range(to_deal):
             if deck:
-                card = deck.pop(0)
+                card = deck.pop()
                 pack_hand.append(card)
         gs["pack_hand"] = pack_hand
         # These cards serve as targets for Tarot/Spectral use
@@ -1237,13 +1242,28 @@ def _round_won(gs: dict[str, Any]) -> None:
 
     # ------------------------------------------------------------------
     # 4. Return all cards to deck
+    #
+    # Lua sequence (state_events.lua:237-250):
+    #   a) draw_from_hand_to_discard — hand cards removed first-first,
+    #      appended at end of discard
+    #   b) draw_from_discard_to_deck — discard cards popped LAST-first
+    #      (remove_card on discard type takes #cards), then INSERTED AT
+    #      FRONT of deck (emplace on deck type does table.insert(1))
+    #
+    # Net effect: [old_discard, hand] is prepended to deck front in
+    # original order (pop-last + insert-at-front cancel out).
     # ------------------------------------------------------------------
     deck: list = gs.setdefault("deck", [])
     played: list = gs.get("played_cards_area", [])
     discarded: list = gs.get("discard_pile", [])
-    deck.extend(hand)
-    deck.extend(played)
-    deck.extend(discarded)
+
+    # Step a: hand → discard end (forward order)
+    discarded.extend(hand)
+    # Any leftover played cards (shouldn't normally exist post-scoring)
+    discarded.extend(played)
+    # Step b: discard → deck FRONT (pop-last + insert-at-front = original order at front)
+    deck[:0] = discarded
+
     gs["hand"] = []
     gs["played_cards_area"] = []
     gs["discard_pile"] = []
