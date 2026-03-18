@@ -1,17 +1,7 @@
-"""Joker handler unit tests — 226 tests for individual joker effects.
+"""Tests for the joker evaluation dispatch system.
 
-This is the main joker test file. Related test files by category:
-
-- test_jokers_create.py      — Card creation descriptors (Marble, Riff-raff, etc.)
-- test_jokers_destructive.py — Destruction + rule-mod jokers (Madness, Chicot, etc.)
-- test_jokers_endround.py    — End-of-round economy (Golden, Cloud 9, Egg, etc.)
-- test_jokers_j2j.py         — Joker-on-joker interactions (Baseball Card, etc.)
-- test_jokers_retrigger.py   — Retrigger pipeline (Sock and Buskin, Mime, etc.)
-- test_jokers_scaling.py     — Per-hand/discard mutations (Green, Flash, Campfire, etc.)
-- test_jokers_xmult.py       — xMult accumulation (Madness, Throwback, Yorick, etc.)
-- test_jokers_integration.py — 150/150 coverage audit + multi-joker scenarios
-
-Total: 457 parametrized tests across all joker test files.
+Validates the registry, dispatch, debuff handling, and context routing
+without implementing any real joker effects.
 """
 
 from __future__ import annotations
