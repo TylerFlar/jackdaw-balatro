@@ -328,6 +328,11 @@ def create_card(
     # ------------------------------------------------------------------
     key = forced_key
 
+    # Lua: if _type == 'Base' then forced_key = 'c_base' end
+    # PlayingCard / Base type bypasses pool selection entirely.
+    if key is None and card_type in ("Base", "PlayingCard"):
+        key = "c_base"
+
     if key is None and soulable:
         key = check_soul_chance(card_type, rng, ante)
 

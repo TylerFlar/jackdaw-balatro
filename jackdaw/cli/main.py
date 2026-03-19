@@ -77,7 +77,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_vcrash.add_argument("--count", type=int, default=200, help="Number of runs (default: 200)")
     p_vcrash.add_argument(
         "--agent",
-        choices=("random",),
+        choices=("random", "smart"),
         default="random",
         help="Agent type (default: random)",
     )
@@ -94,6 +94,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p_vseed.add_argument("--stake", type=int, default=1, help="Stake level 1-8 (default: 1)")
     p_vseed.add_argument("--host", default="127.0.0.1", help="Balatrobot host (default: 127.0.0.1)")
     p_vseed.add_argument("--port", type=int, default=12346, help="Balatrobot port (default: 12346)")
+    p_vseed.add_argument(
+        "--agent",
+        choices=("default", "smart"),
+        default="default",
+        help="Agent strategy (default: basic validation agent, smart: economy+scoring aware)",
+    )
 
     # -- benchmark (top-level alias) -----------------------------------------
     p_bench = sub.add_parser("benchmark", help="Alias for 'validate benchmark'")
@@ -140,7 +146,12 @@ def main(argv: list[str] | None = None) -> None:
         elif args.validate_command == "benchmark":
             run_benchmark(args.count)
         elif args.validate_command == "seed":
-            sys.exit(run_seed(args.seed, args.seeds, args.back, args.stake, args.host, args.port))
+            sys.exit(
+                run_seed(
+                    args.seed, args.seeds, args.back, args.stake,
+                    args.host, args.port, agent=args.agent,
+                )
+            )
         return
 
     if args.command == "benchmark":

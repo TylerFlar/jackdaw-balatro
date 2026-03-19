@@ -76,6 +76,13 @@ def generate_pack_cards(
     gs = game_state or {}
 
     cards: list[Card] = []
+    # Track keys added during this pack generation so we can clean up after.
+    # In Lua, Card:set_ability (card.lua:349-354) adds every created card's
+    # center key to G.GAME.used_jokers, preventing duplicates within a pack.
+    # The keys are later removed when unpicked cards are destroyed
+    # (card.lua:4741-4748).  We replicate this by temporarily adding keys
+    # during generation and removing them after.
+    _pack_added_keys: list[str] = []
     for i in range(extra):
         if kind == "Arcana":
             card = _gen_arcana(rng, ante, gs)
@@ -90,6 +97,16 @@ def generate_pack_cards(
         else:
             raise ValueError(f"Unknown pack kind: {kind!r}")
         cards.append(card)
+
+        if "used_jokers" in gs and card.center_key != "c_base":
+            if card.center_key not in gs["used_jokers"]:
+                gs["used_jokers"][card.center_key] = True
+                _pack_added_keys.append(card.center_key)
+
+    # Clean up temporarily added keys (will be re-added by pick logic
+    # for whichever card the player selects)
+    for k in _pack_added_keys:
+        del gs["used_jokers"][k]
 
     return cards, choose
 

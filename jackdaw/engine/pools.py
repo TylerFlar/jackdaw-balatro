@@ -254,6 +254,8 @@ def select_from_pool(
     rng: PseudoRandom,
     pool_key: str,
     ante: int,
+    *,
+    pool_type: str = "",
 ) -> str:
     """Select one key from a pre-built pool using deterministic RNG.
 
@@ -309,7 +311,7 @@ def select_from_pool(
             return value
 
     # All resamples exhausted — return type fallback
-    return _FALLBACKS.get(pool_key, UNAVAILABLE)
+    return _FALLBACKS.get(pool_type, _FALLBACKS.get(pool_key, UNAVAILABLE))
 
 
 def pick_card_from_pool(
@@ -342,7 +344,7 @@ def pick_card_from_pool(
         The selected center key.
     """
     pool, pool_key = get_current_pool(pool_type, rng, ante, **kwargs)
-    return select_from_pool(pool, rng, pool_key, ante)
+    return select_from_pool(pool, rng, pool_key, ante, pool_type=pool_type)
 
 
 # ---------------------------------------------------------------------------
@@ -385,12 +387,25 @@ def _filter_key(
             if not (proto and proto.rarity == 4):
                 return UNAVAILABLE
 
+    # --- Enhanced / Tag: no used_jokers check (separate branches in Lua) ---
+    if pool_type == "Enhanced":
+        return key
+
+    if pool_type == "Tag":
+        return _filter_tag(key=key, ante=ante, used_vouchers=used_vouchers, discovered=discovered)
+
+    # --- Universal duplicate check (common_events.lua:1987) ---
+    # Lua checks G.GAME.used_jokers[v.key] for ALL remaining types
+    # (Joker, Tarot, Planet, Spectral, Voucher).  Despite the name,
+    # used_jokers tracks every center key that has been created via
+    # Card:set_ability (card.lua:349-354).
+    if not has_showman and key in used_jokers:
+        return UNAVAILABLE
+
     if pool_type == "Joker":
         return _filter_joker(
             key=key,
-            used_jokers=used_jokers,
             pool_flags=pool_flags,
-            has_showman=has_showman,
             deck_enhancements=deck_enhancements,
         )
 
@@ -407,19 +422,14 @@ def _filter_key(
     if pool_type == "Planet":
         return _filter_planet(key=key, played_hand_types=played_hand_types)
 
-    if pool_type == "Tag":
-        return _filter_tag(key=key, ante=ante, used_vouchers=used_vouchers, discovered=discovered)
-
-    # Tarot / Enhanced / unknown → no extra filtering beyond banned_keys
+    # Tarot / unknown → no extra filtering beyond the universal checks
     return key
 
 
 def _filter_joker(
     *,
     key: str,
-    used_jokers: set[str],
     pool_flags: dict[str, bool],
-    has_showman: bool,
     deck_enhancements: set[str],
 ) -> str:
     proto = JOKERS.get(key)
@@ -431,9 +441,7 @@ def _filter_joker(
     if key in ("c_soul", "c_black_hole"):
         return UNAVAILABLE
 
-    # Duplicate check (Showman bypasses)
-    if not has_showman and key in used_jokers:
-        return UNAVAILABLE
+    # Duplicate check now handled universally in _filter_key
 
     # unlocked check — legendaries (rarity 4) bypass
     if proto.rarity != 4 and proto.unlocked is False:

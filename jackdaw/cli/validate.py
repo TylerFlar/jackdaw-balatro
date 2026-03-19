@@ -22,8 +22,13 @@ from jackdaw.engine.runner import greedy_play_agent, random_agent, simulate_run
 # Agent dispatch
 # ---------------------------------------------------------------------------
 
+def _get_smart_agent():
+    from jackdaw.cli.smart_agent import smart_agent
+    return smart_agent
+
 _AGENTS = {
     "random": random_agent,
+    "smart": _get_smart_agent(),
 }
 
 # ---------------------------------------------------------------------------
@@ -804,9 +809,15 @@ def _seed_run_validation(
     seed: str,
     back_key: str,
     stake: int,
+    agent: str = "default",
 ) -> dict[str, Any]:
     """Play a full run using the validation agent, comparing state after each action."""
     from jackdaw.engine.actions import GamePhase, get_legal_actions
+
+    if agent == "smart":
+        from jackdaw.cli.smart_agent import smart_agent as agent_fn
+    else:
+        agent_fn = _validation_agent
 
     print(f"\n{'=' * 60}")
     print(f"Seed: {seed}  back={back_key}  stake={stake}")
@@ -866,7 +877,7 @@ def _seed_run_validation(
             print(f"  No legal actions at step {step_count}")
             break
 
-        action = _validation_agent(gs, legal)
+        action = agent_fn(gs, legal)
         desc = _action_description(action)
 
         # Convert to RPC for both sides
@@ -955,6 +966,7 @@ def run_seed(
     stake: int,
     host: str,
     port: int,
+    agent: str = "default",
 ) -> int:
     """Compare sim vs live balatrobot side-by-side.
 
@@ -976,7 +988,7 @@ def run_seed(
     for i in range(num_seeds):
         seed = f"{seed_base}{i}" if num_seeds > 1 else seed_base
         sim = SimBackend()
-        result = _seed_run_validation(sim, live_backend.handle, seed, back, stake)
+        result = _seed_run_validation(sim, live_backend.handle, seed, back, stake, agent=agent)
         results.append(result)
 
     # Summary
