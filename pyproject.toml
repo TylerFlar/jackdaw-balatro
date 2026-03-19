@@ -12,6 +12,10 @@ classifiers = [
 ]
 dependencies = []
 
+[project.optional-dependencies]
+rl = ["gymnasium>=1.0", "numpy>=1.24"]
+train = ["gymnasium>=1.0", "numpy>=1.24", "torch>=2.0"]
+
 [tool.setuptools.packages.find]
 include = ["jackdaw*"]
 

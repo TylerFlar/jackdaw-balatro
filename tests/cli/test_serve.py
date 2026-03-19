@@ -11,9 +11,8 @@ from typing import Any
 
 import pytest
 
-from jackdaw.bridge.backend import RPCError, SimBackend
+from jackdaw.bridge.backend import SimBackend
 from jackdaw.cli.serve import RPCHandler
-
 
 # ---------------------------------------------------------------------------
 # Helpers

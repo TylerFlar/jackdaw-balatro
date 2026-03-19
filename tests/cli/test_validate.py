@@ -17,7 +17,7 @@ class TestCrash:
         assert "PASS" in captured.out
 
     def test_crash_reports_stats(self, capsys: pytest.CaptureFixture[str]) -> None:
-        exit_code = run_crash(count=3, agent_name="random")
+        run_crash(count=3, agent_name="random")
         captured = capsys.readouterr()
         assert "Runs:" in captured.out
         assert "Crashes:" in captured.out
