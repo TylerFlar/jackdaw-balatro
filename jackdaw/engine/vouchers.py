@@ -90,35 +90,54 @@ def get_next_voucher_key(
 
     Mirrors ``get_next_voucher_key`` (common_events.lua:1901):
 
-    1. Build eligible pool from all vouchers filtered by used/prereqs/in-shop.
+    1. Build pool via ``get_current_pool('Voucher')`` which preserves
+       ``'UNAVAILABLE'`` sentinels at ineligible positions (matching Lua's
+       array-with-holes approach so ``pseudorandom_element`` picks from a
+       fixed-size array).
     2. Pick via ``pseudorandom_element(pool, pseudoseed(pool_key))``.
-    3. Resample with ``pool_key + '_resample' + str(it)`` if first draw is
-       somehow unavailable (defensive; pool is pre-filtered here).
+    3. Resample with ``pool_key + '_resample' + str(it)`` if the draw
+       lands on an UNAVAILABLE slot.
 
     The seed key for the normal path is ``'Voucher' + str(ante)`` (e.g.
     ``'Voucher1'`` at ante 1), matching ``get_current_pool``'s return at
     ``common_events.lua:2052``.  For tag-triggered vouchers, the key is
-    ``'Voucher_fromtag'`` (no ante).
+    ``'Voucher_fromtag'`` (no ante appended).
 
-    Returns ``None`` if the eligible pool is empty.
+    Returns ``None`` if the eligible pool is empty (shouldn't happen in
+    practice due to the ``v_blank`` fallback in ``get_current_pool``).
     """
-    pool = get_available_voucher_pool(used_vouchers, in_shop)
+    from jackdaw.engine.pools import UNAVAILABLE, get_current_pool
+
+    shop_vouchers_set = set(in_shop) if in_shop else set()
+    used_vouchers_set = {k for k, v in used_vouchers.items() if v}
+
+    pool, pool_key = get_current_pool(
+        "Voucher",
+        rng,
+        ante,
+        used_vouchers=used_vouchers_set,
+        shop_vouchers=shop_vouchers_set,
+    )
+
     if not pool:
         return None
 
+    # Lua: if _from_tag then _pool_key = 'Voucher_fromtag' end
+    # Otherwise pool_key from get_current_pool is 'Voucher'; Lua appends
+    # ante at common_events.lua:2052 → 'Voucher1'.
     if from_tag:
-        pool_key = "Voucher_fromtag"
+        full_key = "Voucher_fromtag"
     else:
-        pool_key = "Voucher" + str(ante)
-    seed = rng.seed(pool_key)
+        full_key = pool_key + str(ante)
+
+    seed = rng.seed(full_key)
     result, _ = rng.element(pool, seed)
 
-    # Defensive resampling matching the Lua while-loop (shouldn't fire in
-    # practice since we pre-filter, but preserves the API contract).
+    # Resample loop matching the Lua while-loop (common_events.lua:1906-1909).
     it = 1
-    while result == "UNAVAILABLE":
+    while result == UNAVAILABLE:
         it += 1
-        seed = rng.seed(pool_key + "_resample" + str(it))
+        seed = rng.seed(full_key + "_resample" + str(it))
         result, _ = rng.element(pool, seed)
 
     return result

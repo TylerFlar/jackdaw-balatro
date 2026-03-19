@@ -571,6 +571,28 @@ class Card:
 
     # -- scoring methods (card.lua:976-1089) --------------------------------
 
+    def get_nominal(self, mod: str | None = None) -> float:
+        """Sorting key for hand ordering, matching Card:get_nominal (card.lua:950).
+
+        Returns a float combining base nominal, suit tiebreaker, face nominal,
+        and a unique micro-tiebreaker so every card has a distinct sort value.
+        """
+        if self.base is None:
+            return 0.0
+        mult = 1.0
+        if mod == "suit":
+            mult = 1000.0
+        if self.ability.get("effect") == "Stone Card":
+            mult = -1000.0
+        unique_val = 1.0 - self.sort_id / 1603301.0
+        return (
+            self.base.nominal
+            + self.base.suit_nominal * mult
+            + (self.base.suit_nominal_original or 0.0) * 0.0001 * mult
+            + self.base.face_nominal
+            + 0.000001 * unique_val
+        )
+
     def get_chip_bonus(self) -> int:
         """Chip bonus when scored, matching Card:get_chip_bonus (card.lua:976).
 

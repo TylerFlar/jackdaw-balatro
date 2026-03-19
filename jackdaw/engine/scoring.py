@@ -225,6 +225,14 @@ def score_hand_base(
             breakdown=[f"Hand blocked by {blind.name}"],
         )
 
+    # === Phase 3b: The Arm — demote played hand type by 1 (min L1) ===
+    if (
+        getattr(blind, "name", "") == "The Arm"
+        and not getattr(blind, "disabled", False)
+        and hand_levels[hand_type].level > 1
+    ):
+        hand_levels.level_up(hand_type, amount=-1)
+
     # === Phase 4: Base chips/mult from hand level ===
     base_chips, base_mult = hand_levels.get(hand_type)
     hand_chips = float(base_chips)
@@ -484,6 +492,14 @@ def score_hand(
             debuffed=True,
             breakdown=[f"Hand blocked by {blind.name}"],
         )
+
+    # === Phase 3b: The Arm — demote played hand type by 1 (min L1) ===
+    if (
+        getattr(blind, "name", "") == "The Arm"
+        and not getattr(blind, "disabled", False)
+        and hand_levels[hand_type].level > 1
+    ):
+        hand_levels.level_up(hand_type, amount=-1)
 
     # === Phase 4: Base chips/mult from hand level ===
     base_chips, base_mult = hand_levels.get(hand_type)

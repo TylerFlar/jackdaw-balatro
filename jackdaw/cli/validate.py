@@ -12,7 +12,6 @@ Usage::
 from __future__ import annotations
 
 import re
-import sys
 import time
 from typing import Any
 
@@ -55,8 +54,11 @@ def run_crash(count: int, agent_name: str) -> int:
     for i in range(count):
         try:
             gs = simulate_run(
-                "b_red", 1, f"CRASH_{agent_name}_{i}",
-                agent, max_actions=2000,
+                "b_red",
+                1,
+                f"CRASH_{agent_name}_{i}",
+                agent,
+                max_actions=2000,
             )
             if gs.get("won"):
                 wins += 1
@@ -177,16 +179,32 @@ def run_benchmark(count: int) -> None:
 
 # Reverse maps: engine key → balatrobot enum name
 _DECK_MAP: dict[str, str] = {
-    "b_red": "RED", "b_blue": "BLUE", "b_yellow": "YELLOW",
-    "b_green": "GREEN", "b_black": "BLACK", "b_magic": "MAGIC",
-    "b_nebula": "NEBULA", "b_ghost": "GHOST", "b_abandoned": "ABANDONED",
-    "b_checkered": "CHECKERED", "b_zodiac": "ZODIAC", "b_painted": "PAINTED",
-    "b_anaglyph": "ANAGLYPH", "b_plasma": "PLASMA", "b_erratic": "ERRATIC",
+    "b_red": "RED",
+    "b_blue": "BLUE",
+    "b_yellow": "YELLOW",
+    "b_green": "GREEN",
+    "b_black": "BLACK",
+    "b_magic": "MAGIC",
+    "b_nebula": "NEBULA",
+    "b_ghost": "GHOST",
+    "b_abandoned": "ABANDONED",
+    "b_checkered": "CHECKERED",
+    "b_zodiac": "ZODIAC",
+    "b_painted": "PAINTED",
+    "b_anaglyph": "ANAGLYPH",
+    "b_plasma": "PLASMA",
+    "b_erratic": "ERRATIC",
 }
 
 _STAKE_MAP: dict[int, str] = {
-    1: "WHITE", 2: "RED", 3: "GREEN", 4: "BLACK",
-    5: "BLUE", 6: "PURPLE", 7: "ORANGE", 8: "GOLD",
+    1: "WHITE",
+    2: "RED",
+    3: "GREEN",
+    4: "BLACK",
+    5: "BLUE",
+    6: "PURPLE",
+    7: "ORANGE",
+    8: "GOLD",
 }
 
 
@@ -225,21 +243,55 @@ def _pick_best_hand(hand_cards: list[Any], jokers: list[Any]) -> list[int]:
 
 
 # ---------------------------------------------------------------------------
+# Pack target helpers
+# ---------------------------------------------------------------------------
+
+
+def _pick_pack_targets(
+    card: Any,
+    hand: list,
+) -> tuple[int, ...] | None:
+    """Return target indices for a pack card that requires them, or None.
+
+    Tarots/Spectrals with ``max_highlighted`` in their config need the
+    player to select 1–N hand cards as targets.  We pick the first N
+    eligible cards from the dealt hand.
+    """
+    from jackdaw.engine.card import _resolve_center
+
+    key = getattr(card, "center_key", "")
+    try:
+        center = _resolve_center(key)
+    except (KeyError, Exception):
+        return None
+
+    cfg = center.get("config") or {}
+    if isinstance(cfg, list):
+        cfg = {}
+    max_h = cfg.get("max_highlighted")
+    if not max_h or not hand:
+        return None
+
+    min_h = cfg.get("min_highlighted", 1)
+    n = min(max_h, len(hand))
+    if n < min_h:
+        return None
+    return tuple(range(n))
+
+
+# ---------------------------------------------------------------------------
 # Validation agent — exercises diverse game actions
 # ---------------------------------------------------------------------------
 
 
 def _validation_agent(gs: dict[str, Any], legal_actions: list[Any]) -> Any:
-    """Pick a smart action that exercises diverse code paths.
+    """Smart agent that tries to win the run while exercising diverse paths.
 
-    Priority order per phase:
-    - BLIND_SELECT: always select (never skip — we want to play rounds)
-    - SELECTING_HAND: play best hand; discard once per round if available
-    - ROUND_EVAL: cash out
-    - SHOP: buy cheapest affordable card, reroll once, open a booster, then next round
-    - PACK_OPENING: pick first card, or skip if no picks left
+    Strategy: build joker economy, level up best hand type via planets,
+    use discards aggressively, conserve money for interest, buy boosters.
     """
     from jackdaw.engine.actions import (
+        BuyAndUse,
         BuyCard,
         CashOut,
         Discard,
@@ -248,38 +300,68 @@ def _validation_agent(gs: dict[str, Any], legal_actions: list[Any]) -> Any:
         OpenBooster,
         PickPackCard,
         PlayHand,
+        RedeemVoucher,
         Reroll,
         SelectBlind,
+        SellCard,
         SkipPack,
+        UseConsumable,
     )
 
     phase = gs.get("phase")
     if isinstance(phase, str):
         phase = GamePhase(phase)
 
-    # -- BLIND_SELECT: always select
+    def _card_set(card: Any) -> str:
+        a = getattr(card, "ability", None)
+        return a.get("set", "") if isinstance(a, dict) else ""
+
+    # -- BLIND_SELECT --
     if phase == GamePhase.BLIND_SELECT:
+        # Always play — skipping costs scoring opportunities
         for a in legal_actions:
             if isinstance(a, SelectBlind):
                 return a
         return legal_actions[0]
 
-    # -- SELECTING_HAND: play best hand, discard first round if possible
+    # -- SELECTING_HAND --
     if phase == GamePhase.SELECTING_HAND:
         hand = gs.get("hand", [])
         jokers = gs.get("jokers", [])
         cr = gs.get("current_round", {})
 
-        # Discard once at the start of each blind (exercises discard path)
-        if cr.get("hands_played", 0) == 0 and cr.get("discards_used", 0) == 0:
-            for a in legal_actions:
-                if isinstance(a, Discard) and not a.card_indices and hand:
-                    # Discard the worst 2 cards (lowest chip value)
-                    ranked = sorted(range(len(hand)),
-                                    key=lambda i: hand[i].get_chip_bonus()
-                                    if hasattr(hand[i], "get_chip_bonus") else 0)
-                    n_discard = min(2, len(ranked))
-                    return Discard(card_indices=tuple(sorted(ranked[:n_discard])))
+        # Use planet consumables immediately (free hand level-up)
+        for a in legal_actions:
+            if isinstance(a, UseConsumable):
+                consumables = gs.get("consumables", [])
+                if a.card_index < len(consumables):
+                    if _card_set(consumables[a.card_index]) == "Planet":
+                        return a
+
+        # Discard to dig for better cards when we have discards left
+        # and haven't found a great hand yet
+        if cr.get("discards_left", 0) > 0 and cr.get("hands_left", 0) > 1 and hand:
+            best = _pick_best_hand(hand, jokers)
+            best_cards = [hand[i] for i in best]
+
+            from jackdaw.engine.data.hands import HAND_ORDER, HandType
+            from jackdaw.engine.hand_eval import evaluate_hand
+
+            result = evaluate_hand(best_cards, jokers)
+            try:
+                rank = HAND_ORDER.index(HandType(result.detected_hand))
+            except (ValueError, KeyError):
+                rank = len(HAND_ORDER)
+
+            # Discard if our best hand is weak (Pair or High Card)
+            if rank >= HAND_ORDER.index(HandType.PAIR):
+                best_set = set(best)
+                worst = [i for i in range(len(hand)) if i not in best_set]
+                if worst:
+                    n = min(len(worst), 5)
+                    for a in legal_actions:
+                        if isinstance(a, Discard) and not a.card_indices:
+                            return Discard(card_indices=tuple(sorted(worst[:n])))
 
         # Play best hand
         for a in legal_actions:
@@ -289,56 +371,142 @@ def _validation_agent(gs: dict[str, Any], legal_actions: list[Any]) -> Any:
 
         return legal_actions[0]
 
-    # -- ROUND_EVAL: cash out
+    # -- ROUND_EVAL --
     if phase == GamePhase.ROUND_EVAL:
+        # Use planet consumables before cashing out
+        for a in legal_actions:
+            if isinstance(a, UseConsumable):
+                consumables = gs.get("consumables", [])
+                if a.card_index < len(consumables):
+                    if _card_set(consumables[a.card_index]) == "Planet":
+                        return a
         for a in legal_actions:
             if isinstance(a, CashOut):
                 return a
         return legal_actions[0]
 
-    # -- SHOP: buy, reroll, open boosters, then leave
+    # -- SHOP --
     if phase == GamePhase.SHOP:
-        # Buy cheapest affordable shop card (joker or consumable)
-        buy_actions = [a for a in legal_actions if isinstance(a, BuyCard)]
-        if buy_actions:
-            shop_cards = gs.get("shop_cards", [])
-            cheapest = min(buy_actions, key=lambda a: (
-                shop_cards[a.shop_index].cost if a.shop_index < len(shop_cards) else 999
-            ))
-            if cheapest.shop_index < len(shop_cards):
-                card = shop_cards[cheapest.shop_index]
-                if card.cost <= gs.get("dollars", 0):
-                    return cheapest
+        dollars = gs.get("dollars", 0)
+        jokers = gs.get("jokers", [])
+        joker_slots = gs.get("joker_slots", 5)
+        consumables = gs.get("consumables", [])
+        consumable_slots = gs.get("consumable_slots", 2)
+        shop_cards = gs.get("shop_cards", [])
+        cr = gs.get("current_round", {})
 
-        # Open a booster pack if we can afford one
+        # 1. Use owned planets first (free value, no cost)
+        for a in legal_actions:
+            if isinstance(a, UseConsumable):
+                if a.card_index < len(consumables):
+                    if _card_set(consumables[a.card_index]) == "Planet":
+                        return a
+
+        # 2. Redeem vouchers (strong persistent upgrades)
+        for a in legal_actions:
+            if isinstance(a, RedeemVoucher):
+                vouchers = gs.get("shop_vouchers", [])
+                if a.card_index < len(vouchers):
+                    if vouchers[a.card_index].cost <= dollars:
+                        return a
+
+        # 3. Buy jokers if we have slots (core scaling)
+        has_joker_room = len(jokers) < joker_slots
+        buy_actions = [a for a in legal_actions if isinstance(a, BuyCard)]
+        if buy_actions and has_joker_room:
+            for a in buy_actions:
+                if a.shop_index < len(shop_cards):
+                    card = shop_cards[a.shop_index]
+                    if _card_set(card) == "Joker" and card.cost <= dollars:
+                        return a
+
+        # 4. Buy planets/tarots if we have consumable slots
+        if buy_actions and len(consumables) < consumable_slots:
+            for a in buy_actions:
+                if a.shop_index < len(shop_cards):
+                    card = shop_cards[a.shop_index]
+                    if _card_set(card) in ("Planet", "Tarot") and card.cost <= dollars:
+                        return a
+
+        # 5. Buy-and-use when consumable slots full
+        for a in legal_actions:
+            if isinstance(a, BuyAndUse):
+                if a.shop_index < len(shop_cards):
+                    card = shop_cards[a.shop_index]
+                    if card.cost <= dollars:
+                        return a
+
+        # 6. Sell consumables to make room for packs
+        if len(consumables) >= consumable_slots:
+            for a in legal_actions:
+                if isinstance(a, SellCard) and a.area == "consumables":
+                    return a
+
+        # 7. Open booster packs (good value — multiple cards)
         for a in legal_actions:
             if isinstance(a, OpenBooster):
                 boosters = gs.get("shop_boosters", [])
                 if a.card_index < len(boosters):
-                    if boosters[a.card_index].cost <= gs.get("dollars", 0):
+                    if boosters[a.card_index].cost <= dollars:
                         return a
 
-        # Reroll once per shop visit (if we haven't bought anything yet)
-        cr = gs.get("current_round", {})
-        if cr.get("jokers_purchased", 0) == 0:
+        # 8. Reroll if flush with cash (keep $5 for interest)
+        reroll_cost = cr.get("reroll_cost", 5)
+        free_rerolls = cr.get("free_rerolls", 0)
+        if free_rerolls > 0 or (
+            dollars >= reroll_cost + 6 and cr.get("times_rerolled", 0) < 3 and has_joker_room
+        ):
             for a in legal_actions:
                 if isinstance(a, Reroll):
-                    cost = cr.get("reroll_cost", 5)
-                    if gs.get("dollars", 0) >= cost:
-                        return a
+                    return a
 
-        # Leave shop
+        # 9. Leave shop
         for a in legal_actions:
             if isinstance(a, NextRound):
                 return a
 
         return legal_actions[0]
 
-    # -- PACK_OPENING: pick first card or skip
+    # -- PACK_OPENING --
     if phase == GamePhase.PACK_OPENING:
+        pack_cards = gs.get("pack_cards", [])
+        pack_hand = gs.get("hand", [])
+
+        # Pick the best card from the pack
+        best_pick = None
+        best_priority = -1
         for a in legal_actions:
-            if isinstance(a, PickPackCard):
-                return a
+            if not isinstance(a, PickPackCard):
+                continue
+            if a.card_index >= len(pack_cards):
+                continue
+            card = pack_cards[a.card_index]
+            cset = _card_set(card)
+            # Prioritize: Joker > Planet > Tarot > Playing card
+            if cset == "Joker":
+                p = 40
+            elif cset == "Planet":
+                p = 30
+            elif cset == "Spectral":
+                p = 20
+            elif cset == "Tarot":
+                p = 10
+            else:
+                p = 5  # playing card from standard pack
+            if p > best_priority:
+                best_priority = p
+                best_pick = a
+
+        if best_pick is not None:
+            card = pack_cards[best_pick.card_index]
+            targets = _pick_pack_targets(card, pack_hand)
+            if targets is not None:
+                return PickPackCard(
+                    card_index=best_pick.card_index,
+                    target_indices=targets,
+                )
+            return best_pick
+
         for a in legal_actions:
             if isinstance(a, SkipPack):
                 return a
@@ -351,6 +519,7 @@ def _validation_agent(gs: dict[str, Any], legal_actions: list[Any]) -> Any:
 def _action_to_rpc_call(action: Any) -> dict[str, Any]:
     """Convert an engine Action to an RPC method+params dict."""
     from jackdaw.bridge.balatrobot_adapter import action_to_rpc
+
     return action_to_rpc(action)
 
 
@@ -416,6 +585,7 @@ def _is_pack_variant_diff(diff: str) -> bool:
     """
     if not diff.startswith("packs:"):
         return False
+
     # Extract the two lists from the diff string and normalize variants
     # e.g. "packs: sim=['p_buffoon_normal_1', ...] live=['p_buffoon_normal_2', ...]"
     def normalize_pack_key(key: str) -> str:
@@ -476,30 +646,39 @@ def _compare_responses(
     cmp("hand_cards", set(sim_hand_keys), set(live_hand_keys))
 
     # Deck size
-    cmp("deck_size", sim_resp.get("cards", {}).get("count", 0),
-        live_resp.get("cards", {}).get("count", 0))
+    cmp(
+        "deck_size",
+        sim_resp.get("cards", {}).get("count", 0),
+        live_resp.get("cards", {}).get("count", 0),
+    )
 
     # Jokers (ordered — position matters for scoring)
-    cmp("jokers", _card_keys(sim_resp.get("jokers", {})),
-        _card_keys(live_resp.get("jokers", {})))
+    cmp("jokers", _card_keys(sim_resp.get("jokers", {})), _card_keys(live_resp.get("jokers", {})))
 
     # Consumables (as sets)
-    cmp("consumables", set(_card_keys(sim_resp.get("consumables", {}))),
-        set(_card_keys(live_resp.get("consumables", {}))))
+    cmp(
+        "consumables",
+        set(_card_keys(sim_resp.get("consumables", {}))),
+        set(_card_keys(live_resp.get("consumables", {}))),
+    )
 
     # Shop (when in SHOP phase)
     if state == "SHOP":
-        cmp("shop", _card_keys(sim_resp.get("shop", {})),
-            _card_keys(live_resp.get("shop", {})))
-        cmp("vouchers", _card_keys(sim_resp.get("vouchers", {})),
-            _card_keys(live_resp.get("vouchers", {})))
-        cmp("packs", _card_keys(sim_resp.get("packs", {})),
-            _card_keys(live_resp.get("packs", {})))
+        cmp("shop", _card_keys(sim_resp.get("shop", {})), _card_keys(live_resp.get("shop", {})))
+        cmp(
+            "vouchers",
+            _card_keys(sim_resp.get("vouchers", {})),
+            _card_keys(live_resp.get("vouchers", {})),
+        )
+        cmp("packs", _card_keys(sim_resp.get("packs", {})), _card_keys(live_resp.get("packs", {})))
 
     # Pack (when in pack opening)
     if state == "SMODS_BOOSTER_OPENED":
-        cmp("pack_cards", _card_keys(sim_resp.get("pack", {})),
-            _card_keys(live_resp.get("pack", {})))
+        cmp(
+            "pack_cards",
+            _card_keys(sim_resp.get("pack", {})),
+            _card_keys(live_resp.get("pack", {})),
+        )
 
     # Filter out known non-determinism: Buffoon pack variant (_1 vs _2)
     # The real game uses math.random (not pseudoseed) to pick the variant.
@@ -561,7 +740,7 @@ def _translate_action_for_live(
     hand may have the same cards in a different order, so we translate by
     matching card keys.
     """
-    from jackdaw.engine.actions import Discard, PlayHand
+    from jackdaw.engine.actions import Discard, PickPackCard, PlayHand
 
     rpc_call = _action_to_rpc_call(action)
 
@@ -573,7 +752,8 @@ def _translate_action_for_live(
 
         # Get the card keys the sim is playing
         play_keys = [
-            sim_hand[i].card_key for i in action.card_indices
+            sim_hand[i].card_key
+            for i in action.card_indices
             if i < len(sim_hand) and hasattr(sim_hand[i], "card_key")
         ]
 
@@ -590,6 +770,30 @@ def _translate_action_for_live(
         if len(live_indices) == len(play_keys):
             rpc_call["params"]["cards"] = live_indices
         # else: keep original indices as fallback
+
+    # Translate target indices for pack card picks (same hand translation)
+    if isinstance(action, PickPackCard) and action.target_indices:
+        sim_hand = gs.get("hand", [])
+        live_hand = live_resp.get("hand", {}).get("cards", [])
+        live_keys = [c.get("key", "") for c in live_hand]
+
+        target_keys = [
+            sim_hand[i].card_key
+            for i in action.target_indices
+            if i < len(sim_hand) and hasattr(sim_hand[i], "card_key")
+        ]
+
+        live_targets: list[int] = []
+        used_t: set[int] = set()
+        for key in target_keys:
+            for i, lk in enumerate(live_keys):
+                if i not in used_t and lk == key:
+                    live_targets.append(i)
+                    used_t.add(i)
+                    break
+
+        if len(live_targets) == len(target_keys):
+            rpc_call["params"]["targets"] = live_targets
 
     return rpc_call
 
@@ -691,22 +895,27 @@ def _seed_run_validation(
         # can watch the game in the balatrobot window.
         method = sim_rpc["method"]
         if method == "play":
-            time.sleep(2.5)     # scoring animation
+            time.sleep(2.5)  # scoring animation
         elif method == "cash_out":
-            time.sleep(3.0)     # round earnings scoreboard
+            time.sleep(3.0)  # round earnings scoreboard
         elif method in ("select", "buy", "reroll"):
-            time.sleep(1.0)     # card movement animation
+            time.sleep(1.0)  # card movement animation
         elif method == "pack":
-            time.sleep(1.5)     # pack opening animation
+            time.sleep(1.5)  # pack opening animation
         else:
             time.sleep(0.3)
 
         # Compare after action
         sim_resp = sim.handle("gamestate", None)
         live_resp = live_handle("gamestate", None)
+
         diffs = _compare_responses(
-            sim_resp, live_resp, f"{step_count}:{desc}",
-            action_desc=desc, sim_rpc=sim_rpc, live_rpc=live_rpc,
+            sim_resp,
+            live_resp,
+            f"{step_count}:{desc}",
+            action_desc=desc,
+            sim_rpc=sim_rpc,
+            live_rpc=live_rpc,
         )
         all_diffs.append(diffs)
         step_count += 1
@@ -722,7 +931,10 @@ def _seed_run_validation(
 
 
 def _seed_summary(
-    seed: str, all_diffs: list[list[str]], step_count: int, status: str,
+    seed: str,
+    all_diffs: list[list[str]],
+    step_count: int,
+    status: str,
 ) -> dict[str, Any]:
     total_diffs = sum(len(d) for d in all_diffs)
     clean = sum(1 for d in all_diffs if not d)
@@ -748,7 +960,7 @@ def run_seed(
 
     Returns 0 if all seeds clean, 1 otherwise.
     """
-    from jackdaw.bridge.backend import LiveBackend, RPCError
+    from jackdaw.bridge.backend import LiveBackend
 
     live_backend = LiveBackend(host=host, port=port)
 

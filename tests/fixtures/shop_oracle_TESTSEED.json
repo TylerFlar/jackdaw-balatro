@@ -33,7 +33,7 @@
       "seed": "TESTSEED",
       "ante": 3,
       "first_shop": false,
-      "voucher": "v_magic_trick",
+      "voucher": "v_tarot_merchant",
       "jokers": [
         {
           "center_key": "j_todo_list",

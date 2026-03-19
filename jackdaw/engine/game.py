@@ -656,11 +656,13 @@ def _handle_discard(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str, A
     )
     if serpent:
         # The Serpent: draw only 3 after first action
+        # Lua's draw_card(G.deck, G.hand) pops LAST card from deck
         deck: list = gs.get("deck", [])
         hand_out: list = gs.get("hand", [])
         for _ in range(min(3, len(deck))):
             if deck:
-                hand_out.append(deck.pop(0))
+                hand_out.append(deck.pop())
+        _sort_hand_desc(hand_out)
     else:
         _draw_hand(gs)
 
@@ -698,12 +700,22 @@ def _build_discard_snapshot(gs: dict[str, Any], jokers: list) -> Any:
 def _handle_cash_out(gs: dict[str, Any]) -> dict[str, Any]:
     """Accept round earnings and proceed to the shop.
 
-    1. Apply round earnings to dollars
-    2. Track previous_round.dollars
-    3. Populate shop (jokers, voucher, boosters)
-    4. Phase → SHOP
+    1. Shuffle deck (button_callbacks.lua:2918)
+    2. Apply round earnings to dollars
+    3. Track previous_round.dollars
+    4. Populate shop (jokers, voucher, boosters)
+    5. Phase → SHOP
     """
     _require_phase(gs, GamePhase.ROUND_EVAL)
+
+    # Shuffle deck at cash-out (button_callbacks.lua:2918)
+    # G.deck:shuffle('cashout'..G.GAME.round_resets.ante)
+    rng = gs.get("rng")
+    if rng:
+        deck: list = gs.get("deck", [])
+        ante = gs.get("round_resets", {}).get("ante", 1)
+        cashout_seed = rng.seed("cashout" + str(ante))
+        rng.shuffle(deck, cashout_seed)
 
     earnings = gs.get("round_earnings")
     if earnings:
@@ -863,6 +875,11 @@ def _handle_redeem_voucher(gs: dict[str, Any], idx: int) -> dict[str, Any]:
 
     gs["used_vouchers"][card.center_key] = True
     apply_voucher(card.center_key, gs)
+
+    # Clear the voucher slot so the next shop doesn't re-offer it.
+    # Matches card.lua:1850: G.GAME.current_round.voucher = nil
+    gs.get("current_round", {})["voucher"] = None
+
     return gs
 
 
@@ -925,7 +942,9 @@ def _handle_open_booster(gs: dict[str, Any], idx: int) -> dict[str, Any]:
                 pack_hand.append(card)
         gs["pack_hand"] = pack_hand
         # These cards serve as targets for Tarot/Spectral use
-        gs["hand"] = hand + pack_hand
+        combined_hand = hand + pack_hand
+        _sort_hand_desc(combined_hand)
+        gs["hand"] = combined_hand
 
     # Fire open_booster joker context (Hallucination creates Tarot)
     _fire_shop_joker_context(gs, open_booster=True)
@@ -1140,12 +1159,30 @@ def _handle_reorder_jokers(gs: dict[str, Any], order: tuple[int, ...]) -> dict[s
 # ---------------------------------------------------------------------------
 
 
+def _sort_hand_desc(hand: list) -> None:
+    """Sort hand in place, descending by nominal value.
+
+    Matches Lua ``CardArea:sort()`` with default config ``sort='desc'``
+    (cardarea.lua:577-580).  Uses ``Card.get_nominal()`` as the sort key,
+    which combines rank, suit tiebreaker, face nominal, and a unique
+    micro-value so every card gets a distinct position.
+
+    Only sorts cards that have a ``get_nominal`` method (playing cards);
+    non-playing-card entries are left at the end.
+    """
+    hand.sort(key=lambda c: c.get_nominal() if hasattr(c, "get_nominal") else -1e9, reverse=True)
+
+
 def _draw_hand(gs: dict[str, Any]) -> None:
     """Draw cards from deck to fill the hand up to hand_size.
 
     Cards are drawn from the END of the deck list (top of the visual
     stack), matching Lua's ``draw_card(G.deck, G.hand, ...)`` which
     pops from the last position.
+
+    After drawing, the hand is sorted descending by nominal value
+    (matching Lua's ``draw_from_deck_to_hand`` which passes ``sort=true``
+    to ``draw_card``, triggering ``CardArea:sort()`` with default 'desc').
     """
     deck: list = gs.get("deck", [])
     hand: list = gs.setdefault("hand", [])
@@ -1154,6 +1191,8 @@ def _draw_hand(gs: dict[str, Any]) -> None:
     for _ in range(to_draw):
         if deck:
             hand.append(deck.pop())
+    # Sort hand descending by nominal (matches Lua CardArea:sort 'desc')
+    _sort_hand_desc(hand)
 
 
 def _round_won(gs: dict[str, Any]) -> None:
@@ -1955,11 +1994,20 @@ def _close_pack(gs: dict[str, Any]) -> None:
     gs["pack_choices_remaining"] = 0
 
     # Return dealt hand cards to deck (Arcana/Spectral packs deal from deck)
+    # Lua's draw_from_hand_to_deck (state_events.lua:1121-1126) removes
+    # first card from hand and inserts at position 1 (front) of deck,
+    # repeated for all cards.  Net effect: hand cards end up REVERSED
+    # at the FRONT of the deck.
     pack_hand: list = gs.get("pack_hand", [])
     if pack_hand:
         deck: list = gs.setdefault("deck", [])
-        deck.extend(pack_hand)
+        hand: list = gs.get("hand", [])
+        hand_set = set(id(c) for c in hand)
+        # Only return cards that are still in the hand (not destroyed)
+        surviving = [c for c in pack_hand if id(c) in hand_set]
+        deck[:0] = list(reversed(surviving))
         gs["pack_hand"] = []
+        gs["hand"] = []
 
     # Restore phase
     gs["phase"] = gs.get("shop_return_phase", GamePhase.SHOP)

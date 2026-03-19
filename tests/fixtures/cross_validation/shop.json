@@ -98,7 +98,7 @@
     {
       "seed": "SHOP_B",
       "ante": 3,
-      "voucher": "v_telescope",
+      "voucher": "v_crystal_ball",
       "jokers": [
         {
           "key": "c_uranus",
@@ -135,7 +135,7 @@
     {
       "seed": "SHOP_C",
       "ante": 2,
-      "voucher": "v_overstock_norm",
+      "voucher": "v_seed_money",
       "jokers": [
         {
           "key": "c_moon",
@@ -153,7 +153,7 @@
     {
       "seed": "SHOP_C",
       "ante": 3,
-      "voucher": "v_tarot_merchant",
+      "voucher": "v_hieroglyph",
       "jokers": [
         {
           "key": "c_ceres",

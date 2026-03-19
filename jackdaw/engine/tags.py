@@ -430,13 +430,13 @@ def assign_ante_blinds(
 ) -> dict[str, Any]:
     """Set up blinds and tags for a new ante.
 
-    Mirrors the block at ``game.lua:2177-2180``.  RNG calls are issued in
-    the exact source order to preserve seed determinism:
+    RNG calls are issued in the exact Lua source order to preserve seed
+    determinism.  The Lua game generates these across two call sites:
 
-    1. ``get_new_boss()``         → Boss blind key
-    2. ``get_next_voucher_key()`` → Voucher for the post-boss shop
-    3. ``get_next_tag_key()``     → Small blind skip-reward tag
-    4. ``get_next_tag_key()``     → Big blind skip-reward tag
+    1. ``get_next_voucher_key()`` → state_events.lua:263 (boss defeat)
+    2. ``get_next_tag_key()``     → button_callbacks.lua:2951 (cash_out)
+    3. ``get_next_tag_key()``     → button_callbacks.lua:2952 (cash_out)
+    4. ``get_new_boss()``         → common_events.lua:2333 (reset_blinds)
 
     Side effects on *game_state*
     ----------------------------
@@ -472,15 +472,29 @@ def assign_ante_blinds(
     used_vouchers: set[str] = set(game_state.get("used_vouchers", []))
     used_v_dict: dict[str, bool] = {k: True for k in used_vouchers}
 
-    # 1. Boss
-    boss = get_new_boss(ante, bosses_used, rng)
+    # RNG call order must match Lua exactly:
+    #   1. get_next_voucher_key() — state_events.lua:263 (boss defeat)
+    #   2. get_next_tag_key() x2   — button_callbacks.lua:2949-2952 (cash_out)
+    #   3. get_new_boss()          — common_events.lua:2333 (reset_blinds)
 
-    # 2. Voucher
-    voucher = get_next_voucher_key(rng, used_v_dict, ante=ante)
+    # 1. Voucher
+    #    In Lua, get_next_voucher_key() fires at boss defeat
+    #    (state_events.lua:263).  By this point G.shop:remove() has already
+    #    run (button_callbacks.lua:2500), which calls CardArea:remove() on
+    #    G.shop_vouchers — setting its .cards to nil (cardarea.lua:659).
+    #    Therefore the shop-exclusion guard in get_current_pool
+    #    (common_events.lua:1999-2003) never fires and no voucher is
+    #    excluded from the pool.
+    voucher = get_next_voucher_key(
+        rng, used_v_dict, in_shop=None, ante=ante,
+    )
 
-    # 3-4. Tags (Small then Big)
+    # 2-3. Tags (Small then Big)
     small = pick_card_from_pool("Tag", rng, ante, used_vouchers=used_vouchers)
     big = pick_card_from_pool("Tag", rng, ante, used_vouchers=used_vouchers)
+
+    # 4. Boss
+    boss = get_new_boss(ante, bosses_used, rng)
 
     blind_tags: dict[str, str] = {"Small": small, "Big": big}
 
