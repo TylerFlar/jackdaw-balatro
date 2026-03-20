@@ -27,18 +27,20 @@ from jackdaw.engine.actions import (
 )
 
 # Methods that are queries or lifecycle commands, not game actions.
-_QUERY_METHODS = frozenset({
-    "gamestate",
-    "health",
-    "start",
-    "menu",
-    "save",
-    "load",
-    "screenshot",
-    "set",
-    "add",
-    "rpc.discover",
-})
+_QUERY_METHODS = frozenset(
+    {
+        "gamestate",
+        "health",
+        "start",
+        "menu",
+        "save",
+        "load",
+        "screenshot",
+        "set",
+        "add",
+        "rpc.discover",
+    }
+)
 
 
 def rpc_to_action(method: str, params: dict | None = None) -> Action | None:

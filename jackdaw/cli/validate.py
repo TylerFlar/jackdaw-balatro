@@ -22,9 +22,12 @@ from jackdaw.engine.runner import greedy_play_agent, random_agent, simulate_run
 # Agent dispatch
 # ---------------------------------------------------------------------------
 
+
 def _get_smart_agent():
     from jackdaw.cli.smart_agent import smart_agent
+
     return smart_agent
+
 
 _AGENTS = {
     "random": random_agent,

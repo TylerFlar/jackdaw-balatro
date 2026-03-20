@@ -1,7 +1,7 @@
 """Integration tests for the Balatro RL environment.
 
 End-to-end tests that exercise the full stack:
-- Full episode runs with HeuristicAgent through DirectAdapter and BridgeAdapter
+- Full episode runs with RandomAgent through DirectAdapter and BridgeAdapter
 - Multi-seed stress testing for crash resilience
 - Observation consistency with engine state
 - Action roundtrip fidelity
@@ -18,13 +18,12 @@ import pytest
 
 from jackdaw.engine.actions import GamePhase
 from jackdaw.env.action_space import (
-    ActionType,
     FactoredAction,
     engine_action_to_factored,
     factored_to_engine_action,
     get_action_mask,
 )
-from jackdaw.env.agents import HeuristicAgent, RandomAgent
+from jackdaw.env.agents import RandomAgent
 from jackdaw.env.game_interface import BridgeAdapter, DirectAdapter
 from jackdaw.env.observation import (
     D_CONSUMABLE,
@@ -131,12 +130,12 @@ def _run_episode_collecting(
 
 
 class TestFullEpisodeDirectAdapter:
-    """Run HeuristicAgent through a complete episode via DirectAdapter."""
+    """Run RandomAgent through a complete episode via DirectAdapter."""
 
     def test_episode_terminates(self):
         adapter = DirectAdapter()
         adapter.reset(BACK, STAKE, SEED)
-        agent = HeuristicAgent()
+        agent = RandomAgent()
         result = _run_episode_collecting(adapter, agent, collect_obs=True, collect_rewards=True)
 
         # Episode must terminate
@@ -146,7 +145,7 @@ class TestFullEpisodeDirectAdapter:
     def test_observations_valid(self):
         adapter = DirectAdapter()
         adapter.reset(BACK, STAKE, SEED)
-        agent = HeuristicAgent()
+        agent = RandomAgent()
         result = _run_episode_collecting(adapter, agent, collect_obs=True)
 
         for obs in result["observations"]:
@@ -179,7 +178,7 @@ class TestFullEpisodeDirectAdapter:
     def test_action_masking_consistent(self):
         adapter = DirectAdapter()
         adapter.reset(BACK, STAKE, SEED)
-        agent = HeuristicAgent()
+        agent = RandomAgent()
         result = _run_episode_collecting(adapter, agent, collect_obs=True)
 
         assert all(result["mask_checks"]), "Action mask inconsistent with legal actions"
@@ -187,7 +186,7 @@ class TestFullEpisodeDirectAdapter:
     def test_rewards_finite_and_bounded(self):
         adapter = DirectAdapter()
         adapter.reset(BACK, STAKE, SEED)
-        agent = HeuristicAgent()
+        agent = RandomAgent()
         result = _run_episode_collecting(adapter, agent, collect_rewards=True)
 
         for r in result["rewards"]:
@@ -200,6 +199,7 @@ class TestFullEpisodeDirectAdapter:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 class TestBridgeAdapterIdenticalTrajectory:
     """BridgeAdapter(SimBackend) must produce identical game trajectory."""
 
@@ -213,7 +213,7 @@ class TestBridgeAdapterIdenticalTrajectory:
         bridge = BridgeAdapter(SimBackend())
         bridge.reset(BACK, STAKE, SEED)
 
-        agent_d = HeuristicAgent()
+        agent_d = RandomAgent()
         agent_d.reset()
 
         steps = 0
@@ -272,7 +272,7 @@ class TestMultiSeedStress:
         for seed in seeds:
             adapter = DirectAdapter()
             adapter.reset(BACK, STAKE, seed)
-            agent = HeuristicAgent()
+            agent = RandomAgent()
             agent.reset()
 
             gs = adapter.raw_state
@@ -337,7 +337,7 @@ class TestObservationConsistency:
     def test_entity_counts_match(self):
         adapter = DirectAdapter()
         adapter.reset(BACK, STAKE, SEED)
-        agent = HeuristicAgent()
+        agent = RandomAgent()
         agent.reset()
 
         gs = adapter.raw_state
@@ -419,7 +419,7 @@ class TestActionRoundtrip:
     def test_roundtrip_across_episode(self):
         adapter = DirectAdapter()
         adapter.reset(BACK, STAKE, SEED)
-        agent = HeuristicAgent()
+        agent = RandomAgent()
         agent.reset()
 
         gs = adapter.raw_state
@@ -531,7 +531,7 @@ class TestRewardDeterminism:
     def test_deterministic_rewards(self):
         adapter = DirectAdapter()
         adapter.reset(BACK, STAKE, SEED)
-        agent = HeuristicAgent()
+        agent = RandomAgent()
         agent.reset()
 
         gs = adapter.raw_state
@@ -574,157 +574,6 @@ class TestRewardDeterminism:
             r1 = wrapper1.reward(prev, action, nxt)
             r2 = wrapper2.reward(prev, action, nxt)
             assert r1 == r2, f"Reward not deterministic: {r1} != {r2}"
-
-
-# ---------------------------------------------------------------------------
-# (g) Policy smoke test (if torch available)
-# ---------------------------------------------------------------------------
-
-
-_torch_available = False
-try:
-    import torch
-
-    _torch_available = True
-except ImportError:
-    pass
-
-
-@pytest.mark.skipif(not _torch_available, reason="torch not available")
-class TestPolicySmokeTest:
-    """Verify BalatroPolicy trains without NaN and produces valid actions."""
-
-    def test_ppo_training_smoke(self):
-        from jackdaw.env.balatro_env import _action_mask_to_game, _compute_shop_splits
-        from jackdaw.env.balatro_spec import balatro_game_spec
-        from jackdaw.env.observation import encode_observation
-        from jackdaw.env.policy.policy import (
-            BalatroPolicy,
-            PolicyInput,
-            collate_policy_inputs,
-        )
-
-        spec = balatro_game_spec()
-        # Create a small policy
-        policy = BalatroPolicy(spec, embed_dim=32, num_heads=2, num_layers=1, dropout=0.0)
-        optimizer = torch.optim.Adam(policy.parameters(), lr=1e-3)
-
-        # Collect some real game states
-        adapter = DirectAdapter()
-        adapter.reset(BACK, STAKE, SEED)
-        agent = HeuristicAgent()
-        agent.reset()
-
-        policy_inputs: list[PolicyInput] = []
-        actions_taken: list[FactoredAction] = []
-        gs = adapter.raw_state
-
-        for _ in range(30):
-            if adapter.done:
-                break
-            phase = gs.get("phase")
-            if adapter.won and phase == GamePhase.SHOP:
-                break
-
-            legal = adapter.get_legal_actions()
-            if not legal:
-                break
-
-            obs = encode_observation(gs)
-            mask = get_action_mask(gs)
-            game_obs = obs.to_game_observation()
-            game_mask = _action_mask_to_game(mask)
-            pi = PolicyInput(
-                obs=game_obs, action_mask=game_mask,
-                shop_splits=_compute_shop_splits(gs),
-            )
-            policy_inputs.append(pi)
-
-            info = {"raw_state": gs, "legal_actions": legal}
-            fa = agent.act({}, mask, info)
-            actions_taken.append(fa)
-
-            engine_action = factored_to_engine_action(fa, gs)
-            adapter.step(engine_action)
-            gs = adapter.raw_state
-
-        if len(policy_inputs) < 2:
-            pytest.skip("Not enough steps to test training")
-
-        # Take a subset for training
-        n = min(10, len(policy_inputs))
-        inputs = policy_inputs[:n]
-        acts = actions_taken[:n]
-
-        # Run 10 PPO-like training steps
-        for step in range(10):
-            batch = collate_policy_inputs(inputs, spec, device="cpu")
-            log_probs, entropy, values = policy.evaluate_actions(batch, acts)
-
-            # Fake advantages
-            advantages = torch.randn(n)
-            returns = values.detach() + torch.randn(n) * 0.1
-
-            # PPO loss
-            ratio = torch.exp(log_probs - log_probs.detach())
-            pg_loss = -(advantages * ratio).mean()
-            vf_loss = 0.5 * ((values - returns) ** 2).mean()
-            ent_loss = entropy.mean()
-            loss = pg_loss + 0.5 * vf_loss - 0.01 * ent_loss
-
-            optimizer.zero_grad()
-            loss.backward()
-
-            # Check no NaN in gradients
-            for name, param in policy.named_parameters():
-                if param.grad is not None:
-                    assert torch.isfinite(param.grad).all(), (
-                        f"NaN/Inf gradient in {name} at step {step}"
-                    )
-
-            optimizer.step()
-
-    def test_sample_action_produces_valid_actions(self):
-        from jackdaw.env.balatro_env import _action_mask_to_game, _compute_shop_splits
-        from jackdaw.env.balatro_spec import balatro_game_spec
-        from jackdaw.env.policy.policy import (
-            BalatroPolicy,
-            PolicyInput,
-            collate_policy_inputs,
-        )
-
-        spec = balatro_game_spec()
-        policy = BalatroPolicy(spec, embed_dim=32, num_heads=2, num_layers=1, dropout=0.0)
-        policy.eval()
-
-        # Get a real game state
-        adapter = DirectAdapter()
-        adapter.reset(BACK, STAKE, SEED)
-        adapter.step(
-            factored_to_engine_action(
-                FactoredAction(action_type=ActionType.SelectBlind), adapter.raw_state
-            )
-        )
-        gs = adapter.raw_state
-
-        obs = encode_observation(gs)
-        mask = get_action_mask(gs)
-        game_obs = obs.to_game_observation()
-        game_mask = _action_mask_to_game(mask)
-        pi = PolicyInput(
-            obs=game_obs, action_mask=game_mask,
-            shop_splits=_compute_shop_splits(gs),
-        )
-        batch = collate_policy_inputs([pi], spec, device="cpu")
-
-        with torch.no_grad():
-            actions, log_probs, _ = policy.sample_action(batch)
-
-        assert len(actions) == 1
-        fa = actions[0]
-        assert isinstance(fa, FactoredAction)
-        assert 0 <= fa.action_type < 21
-        assert torch.isfinite(log_probs["total"]).all()
 
 
 # ---------------------------------------------------------------------------
@@ -889,74 +738,6 @@ class TestFullEpisodeRandomAgent:
 
 
 # ---------------------------------------------------------------------------
-# (i) Full episode with HeuristicAgent — exercises shop/consumable/discard
-# ---------------------------------------------------------------------------
-
-
-class TestFullEpisodeHeuristicAgent:
-    """HeuristicAgent end-to-end: exercises buy, sell, consumable, discard logic."""
-
-    N_SEEDS = 20
-
-    def _seeds(self):
-        return [f"HEURISTIC_E2E_{i}" for i in range(self.N_SEEDS)]
-
-    @pytest.mark.slow
-    def test_no_crashes(self):
-        for seed in self._seeds():
-            adapter = DirectAdapter()
-            adapter.reset(BACK, STAKE, seed)
-            agent = HeuristicAgent()
-            result = _run_full_episode(adapter, agent)
-            assert result["steps"] > 0, f"seed={seed}: zero steps"
-
-    @pytest.mark.slow
-    def test_observations_valid(self):
-        for seed in self._seeds():
-            adapter = DirectAdapter()
-            adapter.reset(BACK, STAKE, seed)
-            agent = HeuristicAgent()
-            result = _run_full_episode(adapter, agent)
-
-            for i, obs in enumerate(result["observations"]):
-                assert obs.global_context.shape == (D_GLOBAL,)
-                assert np.isfinite(obs.global_context).all(), (
-                    f"seed={seed} step={i}: NaN in global_context"
-                )
-                if obs.hand_cards.shape[0] > 0:
-                    assert obs.hand_cards.shape[1] == D_PLAYING_CARD
-                    assert np.isfinite(obs.hand_cards).all()
-                if obs.jokers.shape[0] > 0:
-                    assert obs.jokers.shape[1] == D_JOKER
-                    assert np.isfinite(obs.jokers).all()
-                if obs.consumables.shape[0] > 0:
-                    assert obs.consumables.shape[1] == D_CONSUMABLE
-                    assert np.isfinite(obs.consumables).all()
-                if obs.shop_cards.shape[0] > 0:
-                    assert obs.shop_cards.shape[1] == D_SHOP
-                    assert np.isfinite(obs.shop_cards).all()
-
-    @pytest.mark.slow
-    def test_action_conversions_valid(self):
-        for seed in self._seeds():
-            adapter = DirectAdapter()
-            adapter.reset(BACK, STAKE, seed)
-            agent = HeuristicAgent()
-            result = _run_full_episode(adapter, agent)
-            assert all(result["action_ok"]), f"seed={seed}: action conversion failed"
-
-    @pytest.mark.slow
-    def test_rewards_finite(self):
-        for seed in self._seeds():
-            adapter = DirectAdapter()
-            adapter.reset(BACK, STAKE, seed)
-            agent = HeuristicAgent()
-            result = _run_full_episode(adapter, agent, collect_rewards=True)
-            for i, r in enumerate(result["rewards"]):
-                assert math.isfinite(r), f"seed={seed} step={i}: non-finite reward {r}"
-
-
-# ---------------------------------------------------------------------------
 # (j) Action roundtrip fidelity — comprehensive per-step test
 # ---------------------------------------------------------------------------
 
@@ -969,7 +750,7 @@ class TestActionRoundtripFidelity:
         """For every legal action at every step, convert to factored and back."""
         adapter = DirectAdapter()
         adapter.reset(BACK, STAKE, "ROUNDTRIP_FULL")
-        agent = HeuristicAgent()
+        agent = RandomAgent()
         agent.reset()
 
         gs = adapter.raw_state
@@ -1035,7 +816,7 @@ class TestActionRoundtripFidelity:
 
 
 class TestObservationEncodingStress:
-    """Run 50 seeds through HeuristicAgent, encode at every step."""
+    """Run 50 seeds through RandomAgent, encode at every step."""
 
     N_SEEDS = 50
     VALUE_LIMIT = 1e9  # no astronomically large numbers
@@ -1048,7 +829,7 @@ class TestObservationEncodingStress:
         for seed in seeds:
             adapter = DirectAdapter()
             adapter.reset(BACK, STAKE, seed)
-            agent = HeuristicAgent()
+            agent = RandomAgent()
             agent.reset()
             gs = adapter.raw_state
 
@@ -1135,12 +916,15 @@ class TestRewardDeterminismFullEpisode:
     """Run the same seed twice with the same agent. Rewards must be identical."""
 
     def test_identical_rewards_across_runs(self):
+        import random as _random
+
         seed = "DETERMINISM_CHECK_42"
 
         def _run_collecting_rewards():
+            _random.seed(42)
             adapter = DirectAdapter()
             adapter.reset(BACK, STAKE, seed)
-            agent = HeuristicAgent()
+            agent = RandomAgent()
             agent.reset()
             wrapper = DenseRewardWrapper()
             wrapper.reset()

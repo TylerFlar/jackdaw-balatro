@@ -7,7 +7,7 @@ the generic policy network, encoder, and training loop.  Also provides
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 import numpy as np
@@ -92,16 +92,12 @@ class GameSpec:
     @property
     def needs_entity_set(self) -> frozenset[int]:
         """Action type indices that require an entity target."""
-        return frozenset(
-            i for i, a in enumerate(self.action_types) if a.needs_entity_target
-        )
+        return frozenset(i for i, a in enumerate(self.action_types) if a.needs_entity_target)
 
     @property
     def needs_cards_set(self) -> frozenset[int]:
         """Action type indices that require card selection."""
-        return frozenset(
-            i for i, a in enumerate(self.action_types) if a.needs_card_select
-        )
+        return frozenset(i for i, a in enumerate(self.action_types) if a.needs_card_select)
 
     def entity_type_for_action(self, action_type_index: int) -> int:
         """Return the entity type index targeted by a given action type.
@@ -203,6 +199,4 @@ class GameEnvironment(Protocol):
 
     def step(
         self, action: FactoredAction
-    ) -> tuple[
-        GameObservation, float, bool, bool, GameActionMask, dict[str, object]
-    ]: ...
+    ) -> tuple[GameObservation, float, bool, bool, GameActionMask, dict[str, object]]: ...

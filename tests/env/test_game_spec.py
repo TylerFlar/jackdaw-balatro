@@ -13,6 +13,7 @@ import numpy as np
 import pytest
 
 from jackdaw.env.action_space import NUM_ACTION_TYPES, ActionType
+from jackdaw.env.balatro_spec import NEEDS_CARDS, NEEDS_ENTITY, NUM_ENTITY_TYPES
 from jackdaw.env.game_spec import (
     ActionTypeSpec,
     EntityTypeSpec,
@@ -29,7 +30,6 @@ from jackdaw.env.observation import (
     NUM_CENTER_KEYS,
     Observation,
 )
-from jackdaw.env.balatro_spec import NEEDS_CARDS, NEEDS_ENTITY, NUM_ENTITY_TYPES
 
 
 class TestGameSpec:
@@ -94,9 +94,7 @@ class TestGameSpec:
         spec = GameSpec(
             name="test",
             entity_types=(EntityTypeSpec("a", 4, 10, False),),
-            action_types=(
-                ActionTypeSpec("bad", True, False, entity_type_index=5),
-            ),
+            action_types=(ActionTypeSpec("bad", True, False, entity_type_index=5),),
             global_feature_dim=16,
         )
         with pytest.raises(ValueError, match="out of range"):

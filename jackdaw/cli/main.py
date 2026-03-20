@@ -148,8 +148,13 @@ def main(argv: list[str] | None = None) -> None:
         elif args.validate_command == "seed":
             sys.exit(
                 run_seed(
-                    args.seed, args.seeds, args.back, args.stake,
-                    args.host, args.port, agent=args.agent,
+                    args.seed,
+                    args.seeds,
+                    args.back,
+                    args.stake,
+                    args.host,
+                    args.port,
+                    agent=args.agent,
                 )
             )
         return

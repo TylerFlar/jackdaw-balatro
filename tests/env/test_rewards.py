@@ -147,21 +147,15 @@ class TestEconomy:
         calc = RewardCalculator()
         poor = _make_state(dollars=2)
         rich = _make_state(dollars=20)
-        r_poor = calc.step_reward(
-            _make_state(), _action(ActionType.CashOut), poor
-        )
+        r_poor = calc.step_reward(_make_state(), _action(ActionType.CashOut), poor)
         calc2 = RewardCalculator()
-        r_rich = calc2.step_reward(
-            _make_state(), _action(ActionType.CashOut), rich
-        )
+        r_rich = calc2.step_reward(_make_state(), _action(ActionType.CashOut), rich)
         assert r_rich > r_poor
 
     def test_bankrupt_negative_economy(self):
         calc = RewardCalculator()
         bankrupt = _make_state(dollars=-3)
-        calc.step_reward(
-            _make_state(), _action(ActionType.CashOut), bankrupt
-        )
+        calc.step_reward(_make_state(), _action(ActionType.CashOut), bankrupt)
         # Economy component should be negative
         assert calc._cumulative["economy"] < 0.0
 
@@ -239,9 +233,14 @@ class TestEpisodeSummary:
         calc.reset()
         summary = calc.episode_summary()
         expected = {
-            "terminal", "ante_advance", "score_efficiency",
-            "economy", "hand_improvement", "penalties",
-            "total", "steps",
+            "terminal",
+            "ante_advance",
+            "score_efficiency",
+            "economy",
+            "hand_improvement",
+            "penalties",
+            "total",
+            "steps",
         }
         assert set(summary.keys()) == expected
 

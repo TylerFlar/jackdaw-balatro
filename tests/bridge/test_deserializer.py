@@ -147,10 +147,21 @@ class TestRearrange:
 
 
 class TestQueryMethods:
-    @pytest.mark.parametrize("method", [
-        "gamestate", "health", "start", "menu", "save",
-        "load", "screenshot", "set", "add", "rpc.discover",
-    ])
+    @pytest.mark.parametrize(
+        "method",
+        [
+            "gamestate",
+            "health",
+            "start",
+            "menu",
+            "save",
+            "load",
+            "screenshot",
+            "set",
+            "add",
+            "rpc.discover",
+        ],
+    )
     def test_returns_none(self, method):
         assert rpc_to_action(method) is None
 

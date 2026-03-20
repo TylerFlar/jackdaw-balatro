@@ -486,7 +486,10 @@ def assign_ante_blinds(
     #    (common_events.lua:1999-2003) never fires and no voucher is
     #    excluded from the pool.
     voucher = get_next_voucher_key(
-        rng, used_v_dict, in_shop=None, ante=ante,
+        rng,
+        used_v_dict,
+        in_shop=None,
+        ante=ante,
     )
 
     # 2-3. Tags (Small then Big)

@@ -86,7 +86,6 @@ from jackdaw.env.action_space import (
     get_consumable_target_info,
 )
 from jackdaw.env.agents import RandomAgent
-from jackdaw.env.agents.heuristic import HeuristicAgent
 from jackdaw.env.game_interface import DirectAdapter
 
 # ---------------------------------------------------------------------------
@@ -913,6 +912,7 @@ class TestEngineToFactored:
     def test_buy_and_use_converts_to_buy_card(self):
         """BuyAndUse composite action maps to BuyCard."""
         from jackdaw.engine.actions import BuyAndUse
+
         action = BuyAndUse(shop_index=1)
         fa = engine_action_to_factored(action, {})
         assert fa.action_type == ActionType.BuyCard
@@ -1164,9 +1164,7 @@ def _run_coverage_episodes(
                 except (ValueError, KeyError, IndexError) as e:
                     stats[type_name]["fail"] += 1
                     if len(failure_examples[type_name]) < 5:
-                        failure_examples[type_name].append(
-                            f"ep={ep} phase={phase}: {e}"
-                        )
+                        failure_examples[type_name].append(f"ep={ep} phase={phase}: {e}")
 
             # Take the agent's chosen action to advance the game
             mask = get_action_mask(gs)
@@ -1194,7 +1192,7 @@ def _run_reverse_coverage(n_per_type: int = 50) -> dict[str, dict[str, int]]:
     for seed_idx in range(20):
         adapter = DirectAdapter()
         adapter.reset("b_red", 1, f"REVERSE_{seed_idx}")
-        agent = HeuristicAgent()
+        agent = RandomAgent()
         agent.reset()
         gs = adapter.raw_state
         for _ in range(500):
@@ -1225,10 +1223,15 @@ def _run_reverse_coverage(n_per_type: int = 50) -> dict[str, dict[str, int]]:
 
         for _ in range(n_per_type):
             # Pick a game state where this action type might be legal
-            if at in (ActionType.PlayHand, ActionType.Discard,
-                      ActionType.SortHandRank, ActionType.SortHandSuit,
-                      ActionType.SwapHandLeft, ActionType.SwapHandRight,
-                      ActionType.UseConsumable):
+            if at in (
+                ActionType.PlayHand,
+                ActionType.Discard,
+                ActionType.SortHandRank,
+                ActionType.SortHandSuit,
+                ActionType.SwapHandLeft,
+                ActionType.SwapHandRight,
+                ActionType.UseConsumable,
+            ):
                 candidates = game_states.get(GamePhase.SELECTING_HAND.value, [])
             elif at in (ActionType.SelectBlind, ActionType.SkipBlind):
                 candidates = game_states.get(GamePhase.BLIND_SELECT.value, [])
@@ -1418,21 +1421,17 @@ class TestActionCoverageEmpirical:
 
     def test_forward_coverage(self):
         """Every engine legal action converts to factored (except reorder perms)."""
-        # Run with both agents for diverse coverage
-        random_result = _run_coverage_episodes(RandomAgent(), self.N_EPISODES)
-        heuristic_result = _run_coverage_episodes(HeuristicAgent(), self.N_EPISODES)
+        result = _run_coverage_episodes(RandomAgent(), self.N_EPISODES)
 
-        # Merge stats
         all_stats: dict[str, dict[str, int]] = defaultdict(lambda: {"seen": 0, "ok": 0, "fail": 0})
         all_failures: dict[str, list[str]] = defaultdict(list)
 
-        for result in (random_result, heuristic_result):
-            for type_name, s in result["stats"].items():
-                all_stats[type_name]["seen"] += s["seen"]
-                all_stats[type_name]["ok"] += s["ok"]
-                all_stats[type_name]["fail"] += s["fail"]
-            for type_name, examples in result["failure_examples"].items():
-                all_failures[type_name].extend(examples)
+        for type_name, s in result["stats"].items():
+            all_stats[type_name]["seen"] += s["seen"]
+            all_stats[type_name]["ok"] += s["ok"]
+            all_stats[type_name]["fail"] += s["fail"]
+        for type_name, examples in result["failure_examples"].items():
+            all_failures[type_name].extend(examples)
 
         # Print report
         print("\n" + _format_coverage_table(dict(all_stats)))
@@ -1479,9 +1478,7 @@ class TestActionCoverageEmpirical:
         # All action types that were testable should have 100% conversion.
         for name, s in stats.items():
             if s["tested"] > 0:
-                assert s["fail"] == 0, (
-                    f"{name}: {s['fail']}/{s['tested']} failed factored→engine"
-                )
+                assert s["fail"] == 0, f"{name}: {s['fail']}/{s['tested']} failed factored→engine"
 
 
 # =========================================================================

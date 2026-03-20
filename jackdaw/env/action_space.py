@@ -46,7 +46,6 @@ from jackdaw.engine.actions import (
     Action,
     GamePhase,
 )
-from jackdaw.env.game_spec import FactoredAction  # noqa: F401 — re-export
 from jackdaw.engine.actions import (
     BuyAndUse as EngineBuyAndUse,
 )
@@ -102,6 +101,7 @@ from jackdaw.engine.actions import (
     UseConsumable as EngineUseConsumable,
 )
 from jackdaw.engine.consumables import _resolve_consumable_config, can_use_consumable
+from jackdaw.env.game_spec import FactoredAction  # noqa: F401 — re-export
 
 # ---------------------------------------------------------------------------
 # ActionType enum

@@ -18,18 +18,16 @@ from typing import Any
 
 import numpy as np
 
-from jackdaw.env.game_spec import GameObservation
-
 from jackdaw.engine.actions import GamePhase
 from jackdaw.engine.card import Card
 from jackdaw.engine.consumables import can_use_consumable
-from jackdaw.engine.data.hands import HAND_BASE, HAND_ORDER, HandType
+from jackdaw.engine.data.hands import HAND_BASE, HandType
 from jackdaw.engine.hand_eval import (
-    evaluate_poker_hand,
     get_best_hand,
     get_hand_eval_flags,
 )
 from jackdaw.engine.hand_levels import HandLevels
+from jackdaw.env.game_spec import GameObservation
 
 # ---------------------------------------------------------------------------
 # Center key → integer ID mapping (loaded once at module init)
@@ -170,14 +168,37 @@ NUM_HAND_TYPES: int = len(_HAND_TYPES)  # 12
 
 # Voucher keys in canonical order for binary vector
 _VOUCHER_KEYS: list[str] = [
-    "v_antimatter", "v_blank", "v_clearance_sale", "v_crystal_ball",
-    "v_directors_cut", "v_glow_up", "v_grabber", "v_hieroglyph",
-    "v_hone", "v_illusion", "v_liquidation", "v_magic_trick",
-    "v_money_tree", "v_nacho_tong", "v_observatory", "v_omen_globe",
-    "v_overstock_norm", "v_overstock_plus", "v_paint_brush", "v_palette",
-    "v_petroglyph", "v_planet_merchant", "v_planet_tycoon",
-    "v_recyclomancy", "v_reroll_glut", "v_reroll_surplus", "v_retcon",
-    "v_seed_money", "v_tarot_merchant", "v_tarot_tycoon", "v_telescope",
+    "v_antimatter",
+    "v_blank",
+    "v_clearance_sale",
+    "v_crystal_ball",
+    "v_directors_cut",
+    "v_glow_up",
+    "v_grabber",
+    "v_hieroglyph",
+    "v_hone",
+    "v_illusion",
+    "v_liquidation",
+    "v_magic_trick",
+    "v_money_tree",
+    "v_nacho_tong",
+    "v_observatory",
+    "v_omen_globe",
+    "v_overstock_norm",
+    "v_overstock_plus",
+    "v_paint_brush",
+    "v_palette",
+    "v_petroglyph",
+    "v_planet_merchant",
+    "v_planet_tycoon",
+    "v_recyclomancy",
+    "v_reroll_glut",
+    "v_reroll_surplus",
+    "v_retcon",
+    "v_seed_money",
+    "v_tarot_merchant",
+    "v_tarot_tycoon",
+    "v_telescope",
     "v_wasteful",
 ]
 NUM_VOUCHERS: int = len(_VOUCHER_KEYS)  # 32
@@ -185,11 +206,30 @@ _VOUCHER_IDX: dict[str, int] = {k: i for i, k in enumerate(_VOUCHER_KEYS)}
 
 # Tag keys in canonical order for binary vector
 _TAG_KEYS: list[str] = [
-    "tag_boss", "tag_buffoon", "tag_charm", "tag_coupon", "tag_d_six",
-    "tag_double", "tag_economy", "tag_ethereal", "tag_foil", "tag_garbage",
-    "tag_handy", "tag_holo", "tag_investment", "tag_juggle", "tag_meteor",
-    "tag_negative", "tag_orbital", "tag_polychrome", "tag_rare", "tag_skip",
-    "tag_standard", "tag_top_up", "tag_uncommon", "tag_voucher",
+    "tag_boss",
+    "tag_buffoon",
+    "tag_charm",
+    "tag_coupon",
+    "tag_d_six",
+    "tag_double",
+    "tag_economy",
+    "tag_ethereal",
+    "tag_foil",
+    "tag_garbage",
+    "tag_handy",
+    "tag_holo",
+    "tag_investment",
+    "tag_juggle",
+    "tag_meteor",
+    "tag_negative",
+    "tag_orbital",
+    "tag_polychrome",
+    "tag_rare",
+    "tag_skip",
+    "tag_standard",
+    "tag_top_up",
+    "tag_uncommon",
+    "tag_voucher",
 ]
 NUM_TAGS: int = len(_TAG_KEYS)  # 24
 _TAG_IDX: dict[str, int] = {k: i for i, k in enumerate(_TAG_KEYS)}
@@ -788,7 +828,9 @@ def encode_global_context(gs: dict[str, Any]) -> np.ndarray:
 
     # Hand type indicators + best hand analysis [211:223]
     hand_type_vec, best_hand_name, _scoring_ids = _compute_hand_analysis(
-        hand, jokers, hand_levels,
+        hand,
+        jokers,
+        hand_levels,
     )
     v[sbase : sbase + NUM_HAND_TYPES] = hand_type_vec
 
@@ -845,9 +887,9 @@ def encode_global_context(gs: dict[str, Any]) -> np.ndarray:
     deck_size = len(deck)
     if draws.best_flush_count < 5 and draws.best_flush_suit and deck_size > 0:
         suited_in_deck = sum(
-            1 for c in deck
-            if getattr(c, "base", None) is not None
-            and c.base.suit.value == draws.best_flush_suit
+            1
+            for c in deck
+            if getattr(c, "base", None) is not None and c.base.suit.value == draws.best_flush_suit
         )
         v[outs_base] = suited_in_deck / deck_size
 
@@ -855,9 +897,7 @@ def encode_global_context(gs: dict[str, Any]) -> np.ndarray:
     if draws.straight_gap_ranks and deck_size > 0:
         gap_set = set(draws.straight_gap_ranks)
         matching_in_deck = sum(
-            1 for c in deck
-            if getattr(c, "base", None) is not None
-            and c.base.id in gap_set
+            1 for c in deck if getattr(c, "base", None) is not None and c.base.id in gap_set
         )
         v[outs_base + 1] = matching_in_deck / deck_size
 
@@ -961,9 +1001,7 @@ def encode_playing_cards_batch(
         # row[7] = 0.0 already
         row[8] = float(card.base.id in (11, 12, 13))
         row[9] = float(splash or not card.debuff)
-        row[10] = _log_scale(
-            card.ability.get("bonus", 0) + card.ability.get("perma_bonus", 0)
-        )
+        row[10] = _log_scale(card.ability.get("bonus", 0) + card.ability.get("perma_bonus", 0))
         row[11] = _log_scale(card.base.times_played)
         row[12] = i / 20.0
         row[13] = float(id(card) in scoring_ids)
@@ -1005,13 +1043,9 @@ def encode_jokers_batch(
         row[7] = float(card.rental)
         row[8] = float(card.debuff)
         row[9] = i / 20.0
-        row[10] = _log_scale(
-            card.ability.get("mult", 0) + card.ability.get("t_mult", 0)
-        )
+        row[10] = _log_scale(card.ability.get("mult", 0) + card.ability.get("t_mult", 0))
         row[11] = card.ability.get("x_mult", 1.0)
-        row[12] = _log_scale(
-            card.ability.get("t_chips", 0) + card.ability.get("bonus", 0)
-        )
+        row[12] = _log_scale(card.ability.get("t_chips", 0) + card.ability.get("bonus", 0))
         extra = card.ability.get("extra")
         if isinstance(extra, (int, float)):
             row[13] = _log_scale(extra)

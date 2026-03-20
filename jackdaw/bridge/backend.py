@@ -92,10 +92,22 @@ class Backend(Protocol):
 # ---------------------------------------------------------------------------
 
 # Methods that map to engine game actions (handled via rpc_to_action + step).
-_ACTION_METHODS = frozenset({
-    "play", "discard", "select", "skip", "buy", "sell",
-    "use", "reroll", "next_round", "cash_out", "pack", "rearrange",
-})
+_ACTION_METHODS = frozenset(
+    {
+        "play",
+        "discard",
+        "select",
+        "skip",
+        "buy",
+        "sell",
+        "use",
+        "reroll",
+        "next_round",
+        "cash_out",
+        "pack",
+        "rearrange",
+    }
+)
 
 
 class SimBackend:

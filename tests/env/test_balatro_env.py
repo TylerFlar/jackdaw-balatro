@@ -17,7 +17,6 @@ import pytest
 
 from jackdaw.env.action_space import ActionMask, ActionType, FactoredAction
 from jackdaw.env.balatro_env import BalatroEnvironment
-from jackdaw.env.balatro_spec import balatro_game_spec
 from jackdaw.env.game_interface import DirectAdapter
 from jackdaw.env.game_spec import GameActionMask, GameEnvironment, GameObservation
 from jackdaw.env.observation import Observation

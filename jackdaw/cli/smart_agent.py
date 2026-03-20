@@ -39,9 +39,18 @@ _HAND_BASE_SCORE: dict[str, tuple[int, int]] = {
 
 # Hand type priority order (index 0 = best)
 _HAND_PRIORITY = [
-    "Flush Five", "Flush House", "Five of a Kind", "Straight Flush",
-    "Four of a Kind", "Full House", "Flush", "Straight",
-    "Three of a Kind", "Two Pair", "Pair", "High Card",
+    "Flush Five",
+    "Flush House",
+    "Five of a Kind",
+    "Straight Flush",
+    "Four of a Kind",
+    "Full House",
+    "Flush",
+    "Straight",
+    "Three of a Kind",
+    "Two Pair",
+    "Pair",
+    "High Card",
 ]
 
 
@@ -66,6 +75,7 @@ def _estimate_hand_score(
 
     # Scale with level
     from jackdaw.engine.data.hands import HAND_BASE
+
     hd = HAND_BASE.get(HandType(hand_type))
     if hd:
         base_chips = hd.chips_at(level)
@@ -104,8 +114,7 @@ def _estimate_hand_score(
             x_mult *= max(1, _num(a.get("x_mult"), 1))
         elif name == "Steel Joker":
             x_mult *= max(1, 1 + _num(a.get("extra")) * 0.2)
-        elif name in ("Joker", "Greedy Joker", "Lusty Joker",
-                       "Wrathful Joker", "Gluttonous Joker"):
+        elif name in ("Joker", "Greedy Joker", "Lusty Joker", "Wrathful Joker", "Gluttonous Joker"):
             flat_mult += _num(a.get("t_mult")) + _num(a.get("extra"))
         elif name == "Jolly Joker" and hand_type == "Pair":
             flat_mult += _num(a.get("t_mult"), 8)
@@ -125,12 +134,21 @@ def _estimate_hand_score(
             extra = a.get("extra")
             if isinstance(extra, dict):
                 x_mult *= _num(extra.get("x_mult"), 1)
-        elif name == "The Duo" and hand_type in ("Pair", "Two Pair", "Full House",
-                                                    "Three of a Kind", "Four of a Kind",
-                                                    "Five of a Kind"):
+        elif name == "The Duo" and hand_type in (
+            "Pair",
+            "Two Pair",
+            "Full House",
+            "Three of a Kind",
+            "Four of a Kind",
+            "Five of a Kind",
+        ):
             x_mult *= 2
-        elif name == "The Trio" and hand_type in ("Three of a Kind", "Full House",
-                                                    "Four of a Kind", "Five of a Kind"):
+        elif name == "The Trio" and hand_type in (
+            "Three of a Kind",
+            "Full House",
+            "Four of a Kind",
+            "Five of a Kind",
+        ):
             x_mult *= 2
         elif name == "The Family" and hand_type in ("Four of a Kind", "Five of a Kind"):
             x_mult *= 2
@@ -197,28 +215,60 @@ def _pick_best_hand_scored(
 # Jokers roughly ranked by late-game value
 _GOOD_JOKERS: set[str] = {
     # xMult scaling
-    "Steel Joker", "Hologram", "Obelisk", "The Idol",
-    "Photograph", "Ancient Joker", "Loyalty Card",
-    "Stencil", "Blackboard",
+    "Steel Joker",
+    "Hologram",
+    "Obelisk",
+    "The Idol",
+    "Photograph",
+    "Ancient Joker",
+    "Loyalty Card",
+    "Stencil",
+    "Blackboard",
     # Pair/type boosters
-    "The Duo", "The Trio", "The Family", "The Order", "The Tribe",
+    "The Duo",
+    "The Trio",
+    "The Family",
+    "The Order",
+    "The Tribe",
     # Economy
-    "Golden Joker", "Delayed Gratification", "Cloud 9",
-    "Business Card", "Faceless Joker", "To the Moon",
+    "Golden Joker",
+    "Delayed Gratification",
+    "Cloud 9",
+    "Business Card",
+    "Faceless Joker",
+    "To the Moon",
     # Retrigger / copy
-    "Dusk", "Hack", "Sock and Buskin", "Hanging Chad",
+    "Dusk",
+    "Hack",
+    "Sock and Buskin",
+    "Hanging Chad",
     # Chip/mult scaling
-    "Blue Joker", "Green Joker", "Red Card", "Spare Trousers",
-    "Ride the Bus", "Runner", "Ice Cream", "Constellation",
-    "Swashbuckler", "Joker Stencil",
+    "Blue Joker",
+    "Green Joker",
+    "Red Card",
+    "Spare Trousers",
+    "Ride the Bus",
+    "Runner",
+    "Ice Cream",
+    "Constellation",
+    "Swashbuckler",
+    "Joker Stencil",
     # Utility
     "Chaos the Clown",
 }
 
 _GREAT_JOKERS: set[str] = {
-    "Steel Joker", "Hologram", "The Duo", "The Trio", "The Family",
-    "The Order", "The Tribe", "Blackboard", "Stencil",
-    "Blueprint", "Brainstorm",
+    "Steel Joker",
+    "Hologram",
+    "The Duo",
+    "The Trio",
+    "The Family",
+    "The Order",
+    "The Tribe",
+    "Blackboard",
+    "Stencil",
+    "Blueprint",
+    "Brainstorm",
 }
 
 
@@ -279,8 +329,10 @@ def _pick_consumable_targets(
 
     if effect in ("destroy",):
         # Target lowest value cards
-        ranked = sorted(range(len(hand)),
-                        key=lambda i: hand[i].get_chip_bonus() if hasattr(hand[i], "get_chip_bonus") else 0)
+        ranked = sorted(
+            range(len(hand)),
+            key=lambda i: hand[i].get_chip_bonus() if hasattr(hand[i], "get_chip_bonus") else 0,
+        )
         return tuple(sorted(ranked[:n]))
 
     # Default: target first N cards (simplest valid choice)
@@ -352,9 +404,7 @@ def smart_agent(gs: dict[str, Any], legal_actions: list[Any]) -> Any:
             return legal_actions[0]
 
         # Evaluate best hand
-        best_indices, best_type, best_score = _pick_best_hand_scored(
-            hand, jokers, hand_levels
-        )
+        best_indices, best_type, best_score = _pick_best_hand_scored(hand, jokers, hand_levels)
 
         # Decide: discard or play?
         # Only discard when hand is truly bad (High Card) AND we have
@@ -457,9 +507,7 @@ def smart_agent(gs: dict[str, Any], legal_actions: list[Any]) -> Any:
                     if a.card_index < len(consumables):
                         c = consumables[a.card_index]
                         if _card_set(c) == "Tarot":
-                            targets = _pick_consumable_targets(
-                                c, gs.get("hand", [])
-                            )
+                            targets = _pick_consumable_targets(c, gs.get("hand", []))
                             if targets is not None:
                                 return UseConsumable(
                                     card_index=a.card_index,
@@ -539,8 +587,9 @@ def smart_agent(gs: dict[str, Any], legal_actions: list[Any]) -> Any:
                 for a in buy_actions
             )
             if great_in_shop:
-                sell_actions = [a for a in legal_actions
-                                if isinstance(a, SellCard) and a.area == "jokers"]
+                sell_actions = [
+                    a for a in legal_actions if isinstance(a, SellCard) and a.area == "jokers"
+                ]
                 if sell_actions:
                     worst_val = 999
                     worst_action = None

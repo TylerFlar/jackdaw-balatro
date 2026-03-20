@@ -25,9 +25,19 @@ def _reset_sort_ids():
 def _playing_card(suit: str, rank: str, enhancement: str = "c_base") -> Card:
     sl = {"Hearts": "H", "Diamonds": "D", "Clubs": "C", "Spades": "S"}
     rl = {
-        "2": "2", "3": "3", "4": "4", "5": "5", "6": "6",
-        "7": "7", "8": "8", "9": "9", "10": "T",
-        "Jack": "J", "Queen": "Q", "King": "K", "Ace": "A",
+        "2": "2",
+        "3": "3",
+        "4": "4",
+        "5": "5",
+        "6": "6",
+        "7": "7",
+        "8": "8",
+        "9": "9",
+        "10": "T",
+        "Jack": "J",
+        "Queen": "Q",
+        "King": "K",
+        "Ace": "A",
     }
     c = Card()
     c.set_base(f"{sl[suit]}_{rl[rank]}", suit, rank)
@@ -276,8 +286,15 @@ class TestSerializeArea:
 
 
 _VISIBLE_HANDS = {
-    "Straight Flush", "Four of a Kind", "Full House", "Flush",
-    "Straight", "Three of a Kind", "Two Pair", "Pair", "High Card",
+    "Straight Flush",
+    "Four of a Kind",
+    "Full House",
+    "Flush",
+    "Straight",
+    "Three of a Kind",
+    "Two Pair",
+    "Pair",
+    "High Card",
 }
 
 _SECRET_HANDS = {"Flush Five", "Flush House", "Five of a Kind"}

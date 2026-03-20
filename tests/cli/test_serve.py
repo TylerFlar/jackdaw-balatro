@@ -102,9 +102,7 @@ class TestParseErrors:
         assert resp["id"] == 1
 
     def test_non_string_method(self, server: str) -> None:
-        resp = _raw_post(
-            server, json.dumps({"jsonrpc": "2.0", "method": 42, "id": 1}).encode()
-        )
+        resp = _raw_post(server, json.dumps({"jsonrpc": "2.0", "method": 42, "id": 1}).encode())
         assert resp["error"]["code"] == -32600
 
     def test_non_object_body(self, server: str) -> None:

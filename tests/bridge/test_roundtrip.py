@@ -31,23 +31,55 @@ from jackdaw.engine.actions import (
 # ============================================================================
 
 _VALID_STATES = {
-    "BLIND_SELECT", "SELECTING_HAND", "ROUND_EVAL",
-    "SHOP", "SMODS_BOOSTER_OPENED", "GAME_OVER",
+    "BLIND_SELECT",
+    "SELECTING_HAND",
+    "ROUND_EVAL",
+    "SHOP",
+    "SMODS_BOOSTER_OPENED",
+    "GAME_OVER",
 }
 
 _VALID_DECKS = {
-    "RED", "BLUE", "YELLOW", "GREEN", "BLACK", "MAGIC", "NEBULA",
-    "GHOST", "ABANDONED", "CHECKERED", "ZODIAC", "PAINTED",
-    "ANAGLYPH", "PLASMA", "ERRATIC",
+    "RED",
+    "BLUE",
+    "YELLOW",
+    "GREEN",
+    "BLACK",
+    "MAGIC",
+    "NEBULA",
+    "GHOST",
+    "ABANDONED",
+    "CHECKERED",
+    "ZODIAC",
+    "PAINTED",
+    "ANAGLYPH",
+    "PLASMA",
+    "ERRATIC",
 }
 
 _VALID_STAKES = {"WHITE", "RED", "GREEN", "BLACK", "BLUE", "PURPLE", "ORANGE", "GOLD"}
 
 _TOP_LEVEL_KEYS = {
-    "state", "round_num", "ante_num", "money", "deck", "stake", "seed",
-    "won", "used_vouchers", "hands", "round", "blinds",
-    "jokers", "consumables", "cards", "hand",
-    "shop", "vouchers", "packs", "pack",
+    "state",
+    "round_num",
+    "ante_num",
+    "money",
+    "deck",
+    "stake",
+    "seed",
+    "won",
+    "used_vouchers",
+    "hands",
+    "round",
+    "blinds",
+    "jokers",
+    "consumables",
+    "cards",
+    "hand",
+    "shop",
+    "vouchers",
+    "packs",
+    "pack",
 }
 
 _AREA_KEYS = {"count", "limit", "highlighted_limit", "cards"}
@@ -74,8 +106,12 @@ def _assert_valid_gamestate(gs: dict) -> None:
     # Round
     r = gs["round"]
     _round_keys = (
-        "hands_left", "hands_played", "discards_left",
-        "discards_used", "reroll_cost", "chips",
+        "hands_left",
+        "hands_played",
+        "discards_left",
+        "discards_used",
+        "reroll_cost",
+        "chips",
     )
     for k in _round_keys:
         assert isinstance(r[k], int), f"round.{k} should be int"
@@ -262,8 +298,7 @@ class TestFullRunThroughBackend:
             new_state = gs["state"]
             allowed = valid_next.get(prev_state, set())
             assert new_state in allowed, (
-                f"Invalid transition {prev_state} → {new_state} "
-                f"(expected one of {allowed})"
+                f"Invalid transition {prev_state} → {new_state} (expected one of {allowed})"
             )
             prev_state = new_state
 
@@ -345,7 +380,19 @@ class TestCardSchemaInContext:
         # Playing card should have suit/rank
         assert card["value"]["suit"] in ("H", "D", "C", "S")
         assert card["value"]["rank"] in (
-            "2", "3", "4", "5", "6", "7", "8", "9", "T", "J", "Q", "K", "A",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "T",
+            "J",
+            "Q",
+            "K",
+            "A",
         )
 
     def test_deck_cards_have_full_schema(self):
