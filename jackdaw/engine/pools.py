@@ -374,18 +374,10 @@ def _filter_key(
     if key in banned_keys:
         return UNAVAILABLE
 
-    # --- Universal: unlock check (common_events.lua:1988) ---
-    # Items with unlocked=false are excluded unless they're in the
-    # profile_unlocked set or are legendary (rarity 4).
-    if profile_unlocked is not None:
-        from jackdaw.engine.profile import _get_locked_items
-
-        locked = _get_locked_items()
-        if key in locked and key not in profile_unlocked:
-            # Legendary jokers bypass the unlock check
-            proto = JOKERS.get(key)
-            if not (proto and proto.rarity == 4):
-                return UNAVAILABLE
+    # --- Unlock check SKIPPED (common_events.lua:1988) ---
+    # Sim assumes a fully-unlocked profile so all items are available.
+    # Rarity 4 (legendary) jokers always bypass per hardcoded Lua rule
+    # (v.unlocked ~= false or v.rarity == 4); see _filter_joker.
 
     # --- Enhanced / Tag: no used_jokers check (separate branches in Lua) ---
     if pool_type == "Enhanced":
@@ -443,9 +435,12 @@ def _filter_joker(
 
     # Duplicate check now handled universally in _filter_key
 
-    # unlocked check — legendaries (rarity 4) bypass
-    if proto.rarity != 4 and proto.unlocked is False:
-        return UNAVAILABLE
+    # Unlock check (common_events.lua:1988):
+    # Rarity 4 (legendary) jokers always bypass the unlock gate —
+    # hardcoded Lua rule: (v.unlocked ~= false or v.rarity == 4).
+    # All other items are treated as fully-unlocked (no filtering).
+    if proto.rarity == 4:
+        pass  # always available regardless of unlock state
 
     # no_pool_flag: excluded when flag is True
     if proto.no_pool_flag and pool_flags.get(proto.no_pool_flag):

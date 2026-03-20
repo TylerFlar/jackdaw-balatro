@@ -1,32 +1,12 @@
 """Gymnasium environment for Balatro RL research.
 
-Quick start::
+Canonical usage::
 
-    from jackdaw.env import DirectAdapter, RandomAgent
+    from jackdaw.env import BalatroEnvironment, DirectAdapter, balatro_game_spec
 
-    env = DirectAdapter()
-    agent = RandomAgent()
-
-    env.reset(back_key="b_red", stake=1, seed="MYSEED")
-    agent.reset()
-
-    while not env.done:
-        gs = env.raw_state
-        mask = get_action_mask(gs)
-        info = {"raw_state": gs, "legal_actions": env.get_legal_actions()}
-        fa = agent.act({}, mask, info)
-        engine_action = factored_to_engine_action(fa, gs)
-        env.step(engine_action)
-
-Architecture::
-
-    Agent -> GameAdapter -> DirectAdapter  -> Engine      (training, fast)
-                         -> BridgeAdapter  -> SimBackend  (bridge validation)
-
-    Observation: entity-based, variable-length
-        (hand_cards, jokers, consumables, shop, pack) + global context
-    Action: factored 21-type with entity selection and card targeting
-    Reward: configurable (dense for training, sparse for evaluation)
+    spec = balatro_game_spec()
+    env = BalatroEnvironment(adapter_factory=DirectAdapter)
+    obs, mask, info = env.reset()
 """
 
 from jackdaw.env.action_space import (
@@ -40,6 +20,8 @@ from jackdaw.env.action_space import (
     get_consumable_target_info,
 )
 from jackdaw.env.agents import Agent, RandomAgent
+from jackdaw.env.balatro_env import BalatroEnvironment
+from jackdaw.env.balatro_spec import balatro_game_spec
 from jackdaw.env.consumable_targets import (
     ConsumableTargetSpec,
     get_consumable_target_spec,
@@ -51,6 +33,11 @@ from jackdaw.env.game_interface import (
     DirectAdapter,
     GameAdapter,
     GameState,
+)
+from jackdaw.env.game_spec import (
+    GameActionMask,
+    GameObservation,
+    GameSpec,
 )
 from jackdaw.env.observation import (
     D_CONSUMABLE,
@@ -73,6 +60,7 @@ __all__ = [
     "ActionMask",
     "ActionType",
     "Agent",
+    "BalatroEnvironment",
     "BridgeAdapter",
     "ConsumableTargetSpec",
     "D_CONSUMABLE",
@@ -83,7 +71,10 @@ __all__ = [
     "DenseRewardWrapper",
     "DirectAdapter",
     "FactoredAction",
+    "GameActionMask",
     "GameAdapter",
+    "GameObservation",
+    "GameSpec",
     "GameState",
     "NUM_ACTION_TYPES",
     "NUM_CENTER_KEYS",
@@ -92,6 +83,7 @@ __all__ = [
     "RewardCalculator",
     "RewardConfig",
     "SparseRewardWrapper",
+    "balatro_game_spec",
     "encode_observation",
     "engine_action_to_factored",
     "factored_to_engine_action",

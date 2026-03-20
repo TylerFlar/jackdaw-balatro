@@ -212,7 +212,10 @@ def score_hand_base(
         )
 
     # === Phase 3: Boss blind debuff check ===
-    debuffed = blind.debuff_hand(scoring_cards, poker_hands, hand_type)
+    # Lua passes G.play.cards (all played cards, not just scoring subset)
+    # to debuff_hand (state_events.lua:614).  Matters for The Psychic
+    # which checks #cards >= h_size_ge against the full played hand.
+    debuffed = blind.debuff_hand(played_cards, poker_hands, hand_type)
     if debuffed:
         return ScoreResult(
             hand_type=hand_type,
@@ -463,7 +466,10 @@ def score_hand(
         )
 
     # === Phase 3: Boss blind debuff check ===
-    debuffed = blind.debuff_hand(scoring_cards, poker_hands, hand_type)
+    # Lua passes G.play.cards (all played cards, not just scoring subset)
+    # to debuff_hand (state_events.lua:614).  Matters for The Psychic
+    # which checks #cards >= h_size_ge against the full played hand.
+    debuffed = blind.debuff_hand(played_cards, poker_hands, hand_type)
     if debuffed:
         # Phase 3a: Matador check on debuffed hands
         for joker in jokers:

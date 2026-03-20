@@ -416,9 +416,12 @@ def start_round(game_state: dict[str, Any]) -> None:
     if hand_levels is not None:
         hand_levels.reset_round_counts()
 
-    # NOTE: targeting cards are NOT reset in new_round (per-round start).
-    # They are reset in start_run (once) and end_round (between blinds).
-    # See state_events.lua:270-276 (end_round) and game.lua:2385 (start_run).
+    # Reset targeting cards (idol, mail, ancient, castle) — state_events.lua:273-276
+    # These are re-rolled every round from the current deck state.
+    rng = game_state.get("rng")
+    ante = rr.get("ante", 1)
+    if rng is not None:
+        reset_round_targets(rng, ante, game_state)
 
 
 # ---------------------------------------------------------------------------

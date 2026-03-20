@@ -196,8 +196,8 @@ class TestFreshProfile:
 
 
 class TestPoolFilteringWithProfile:
-    def test_locked_joker_excluded_from_fresh(self):
-        p = fresh_profile()
+    def test_locked_joker_available_all_unlocked(self):
+        """Sim assumes fully-unlocked profile: locked jokers are available."""
         locked = _get_locked_items()
         from jackdaw.engine.data.prototypes import JOKERS
 
@@ -213,14 +213,10 @@ class TestPoolFilteringWithProfile:
             "Joker",
             rng,
             1,
-            rarity=1,
-            profile_unlocked=p.unlocked,
+            rarity=JOKERS[locked_joker].rarity,
         )
-        assert (
-            locked_joker not in pool or pool[pool.index(locked_joker)] == UNAVAILABLE
-            if locked_joker in pool
-            else True
-        )
+        # Unlock check is skipped — locked jokers are always available
+        assert locked_joker in pool and pool[pool.index(locked_joker)] != UNAVAILABLE
 
 
 # ============================================================================

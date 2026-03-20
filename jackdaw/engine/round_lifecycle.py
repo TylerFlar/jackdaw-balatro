@@ -224,11 +224,12 @@ def reset_round_targets(
     # reset_mail_rank — common_events.lua:2288-2301
     # One pseudorandom_element call → card's rank only
     # ------------------------------------------------------------------
-    cr["mail_card"] = {"rank": "Ace"}
+    cr["mail_card"] = {"rank": "Ace", "id": 14}
     if valid_cards:
         seed_val = rng.seed("mail" + str(ante))
         mail, _ = rng.element(valid_cards, seed_val)
         cr["mail_card"]["rank"] = _card_rank_str(mail)
+        cr["mail_card"]["id"] = mail.base.id
 
     # ------------------------------------------------------------------
     # reset_ancient_card — common_events.lua:2303-2310

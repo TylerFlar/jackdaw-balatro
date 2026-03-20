@@ -564,11 +564,11 @@ class TestSelectFromPool:
     """Tests for the deterministic pool-selection step."""
 
     def test_known_seed_returns_specific_joker(self):
-        """Fixed seed 'TEST_SELECT' + rarity=1 picks j_wily from Joker pool."""
+        """Fixed seed 'TEST_SELECT' + rarity=1 picks a deterministic joker."""
         rng = PseudoRandom("TEST_SELECT")
         pool, pool_key = get_current_pool("Joker", rng, ante=1, rarity=1)
         result = select_from_pool(pool, rng, pool_key, ante=1)
-        assert result == "j_wily"
+        assert result == "j_swashbuckler"
 
 
 class _ScriptedRNG:
