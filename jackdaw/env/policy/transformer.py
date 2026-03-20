@@ -11,19 +11,17 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 
-from jackdaw.env.observation import D_GLOBAL
-
 
 class TransformerCore(nn.Module):
     """Self-attention across all entities + global context."""
 
     def __init__(
         self,
+        global_dim: int,
         embed_dim: int = 128,
         num_heads: int = 4,
         num_layers: int = 3,
         dropout: float = 0.1,
-        global_dim: int = D_GLOBAL,
     ) -> None:
         super().__init__()
         self.embed_dim = embed_dim

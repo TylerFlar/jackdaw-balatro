@@ -18,6 +18,7 @@ from jackdaw.env.action_space import (
     factored_to_engine_action,
     get_action_mask,
 )
+from jackdaw.env.balatro_spec import balatro_game_spec
 from jackdaw.env.game_interface import DirectAdapter
 from jackdaw.env.observation import encode_observation
 from jackdaw.env.policy.policy import (
@@ -107,7 +108,7 @@ def profile_rollout_step_breakdown(
             PolicyInput(obs=obs, action_mask=mask, shop_splits=ss)
             for obs, mask, ss in zip(trainer._current_obs, trainer._current_masks, step_shop_splits)
         ]
-        batch = collate_policy_inputs(policy_inputs, device=trainer.device)
+        batch = collate_policy_inputs(policy_inputs, balatro_game_spec(), device=trainer.device)
         timers["collation"].stop(t0)
 
         # Policy forward + action sampling (combined since sample_action calls forward)
@@ -306,13 +307,10 @@ def _pct(part: float, whole: float) -> str:
     return f"{part / whole * 100:.1f}%"
 
 
-def main() -> None:
-    print("=" * 70)
-    print("  TRAINING PIPELINE PROFILER")
-    print("=" * 70)
-
-    # Configuration matching a realistic small training run
+def _make_configs(device: str = "cpu") -> tuple[PPOConfig, PPOConfig]:
+    """Create small and tiny profiling configs for the given device."""
     cfg = PPOConfig(
+        game_spec=balatro_game_spec(),
         num_envs=4,
         num_steps=128,
         total_timesteps=1024,
@@ -321,16 +319,15 @@ def main() -> None:
         embed_dim=64,
         num_heads=2,
         num_layers=2,
-        device="cpu",
+        device=device,
         back_keys="b_red",
         stake=1,
         log_interval=999,
         eval_interval=999999,
         save_interval=999999,
     )
-
-    # Also measure with the tiny config used in smoke tests
     cfg_tiny = PPOConfig(
+        game_spec=balatro_game_spec(),
         num_envs=2,
         num_steps=64,
         total_timesteps=512,
@@ -339,13 +336,30 @@ def main() -> None:
         embed_dim=32,
         num_heads=2,
         num_layers=1,
-        device="cpu",
+        device=device,
         back_keys="b_red",
         stake=1,
         log_interval=999,
         eval_interval=999999,
         save_interval=999999,
     )
+    return cfg, cfg_tiny
+
+
+def main() -> None:
+    print("=" * 70)
+    print("  TRAINING PIPELINE PROFILER")
+    print("=" * 70)
+
+    # Determine devices to profile
+    devices = ["cpu"]
+    if torch.cuda.is_available():
+        devices.append("cuda")
+        print(f"\n  CUDA available: {torch.cuda.get_device_name()}")
+    else:
+        print("\n  CUDA not available — CPU only")
+
+    cfg, cfg_tiny = _make_configs("cpu")
 
     # -----------------------------------------------------------------------
     # Part 1: Single env step breakdown
@@ -410,7 +424,7 @@ def main() -> None:
                     trainer._current_obs, trainer._current_masks, bootstrap_shop_splits
                 )
             ]
-            batch = collate_policy_inputs(policy_inputs, device=trainer.device)
+            batch = collate_policy_inputs(policy_inputs, balatro_game_spec(), device=trainer.device)
             out = trainer.policy.forward(batch)
             last_value = out["value"].squeeze(-1).cpu()
 
@@ -454,6 +468,80 @@ def main() -> None:
         print(f"  Total:               {total_training_step * 1000:8.1f}ms")
         print(f"  Steps this update:   {steps}")
         print(f"  Effective SPS:       {steps / total_training_step:.0f}")
+
+    # -----------------------------------------------------------------------
+    # Part 6: GPU comparison (if available)
+    # -----------------------------------------------------------------------
+    if "cuda" in devices:
+        print("\n" + "=" * 70)
+        print("  GPU PROFILING")
+        print("=" * 70)
+
+        cfg_gpu, cfg_tiny_gpu = _make_configs("cuda")
+
+        for label, config in [
+            ("Tiny GPU (embed=32, 1L, 2 envs)", cfg_tiny_gpu),
+            ("Small GPU (embed=64, 2L, 4 envs)", cfg_gpu),
+        ]:
+            print(f"\n--- {label} ---\n")
+
+            trainer = PPOTrainer(config)
+            reset_data = trainer.envs.reset()
+            trainer._current_obs = [d[0] for d in reset_data]
+            trainer._current_masks = [d[1] for d in reset_data]
+            trainer._current_infos = [d[2] for d in reset_data]
+
+            # Warmup (GPU kernel compilation)
+            _ = profile_rollout_step_breakdown(trainer, 16)
+
+            # Reset for clean measurement
+            reset_data = trainer.envs.reset()
+            trainer._current_obs = [d[0] for d in reset_data]
+            trainer._current_masks = [d[1] for d in reset_data]
+            trainer._current_infos = [d[2] for d in reset_data]
+
+            torch.cuda.synchronize()
+            rollout_timers = profile_rollout_step_breakdown(trainer, config.num_steps)
+            torch.cuda.synchronize()
+
+            total_rollout = rollout_timers["total_step"].total_s
+            steps = config.num_steps * config.num_envs
+
+            for name in ["shop_splits", "collation", "action_sample", "env_step", "buffer_add"]:
+                t = rollout_timers[name]
+                print(
+                    f"  {t.name:<20s}  mean={t.mean_us:8.1f}us  "
+                    f"total={t.total_s * 1000:8.1f}ms  "
+                    f"{_pct(t.total_s, total_rollout):>6s}"
+                )
+
+            buffer = trainer._collect_rollouts()
+            torch.cuda.synchronize()
+            with torch.no_grad():
+                bootstrap_ss = [
+                    _compute_shop_splits(i["raw_state"]) for i in trainer._current_infos
+                ]
+                pis = [
+                    PolicyInput(obs=o, action_mask=m, shop_splits=s)
+                    for o, m, s in zip(
+                        trainer._current_obs, trainer._current_masks, bootstrap_ss
+                    )
+                ]
+                b = collate_policy_inputs(pis, balatro_game_spec(), device=trainer.device)
+                lv = trainer.policy.forward(b)["value"].squeeze(-1).cpu()
+
+            last_done = np.zeros(config.num_envs, dtype=np.bool_)
+            buffer.compute_returns(lv, last_done, config.gamma, config.gae_lambda)
+
+            torch.cuda.synchronize()
+            update_timers = profile_ppo_update(trainer, buffer)
+            torch.cuda.synchronize()
+
+            total_update = update_timers["total_update"].total_s
+            total_all = total_rollout + total_update
+            sps = steps / total_all if total_all > 0 else 0
+            print(f"\n  Rollout SPS: {steps / total_rollout:.0f}")
+            print(f"  Effective SPS: {sps:.0f}")
 
     # -----------------------------------------------------------------------
     # Write report
@@ -510,7 +598,7 @@ def _write_report(
                 PolicyInput(obs=o, action_mask=m, shop_splits=s)
                 for o, m, s in zip(trainer._current_obs, trainer._current_masks, bootstrap_ss)
             ]
-            b = collate_policy_inputs(pis, device=trainer.device)
+            b = collate_policy_inputs(pis, balatro_game_spec(), device=trainer.device)
             lv = trainer.policy.forward(b)["value"].squeeze(-1).cpu()
 
         last_done = np.zeros(config.num_envs, dtype=np.bool_)

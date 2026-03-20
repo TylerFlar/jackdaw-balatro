@@ -9,10 +9,12 @@ Reference: https://docs.cleanrl.dev/rl-algorithms/ppo/
 
 from __future__ import annotations
 
-import random
+import logging
 import time
+from collections import deque
 from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -20,29 +22,32 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from jackdaw.env.action_space import (
-    ActionMask,
-    FactoredAction,
-    factored_to_engine_action,
-    get_action_mask,
-)
+from jackdaw.env.balatro_env import BalatroEnvironment
 from jackdaw.env.game_interface import DirectAdapter, GameAdapter
-from jackdaw.env.observation import Observation, encode_observation
+from jackdaw.env.game_spec import (
+    FactoredAction,
+    GameActionMask,
+    GameObservation,
+    GameSpec,
+)
 from jackdaw.env.policy.policy import (
     BalatroPolicy,
     PolicyInput,
     collate_policy_inputs,
 )
-from jackdaw.env.rewards import DenseRewardWrapper
+from jackdaw.env.rewards import DenseRewardWrapper, RewardConfig
+from jackdaw.env.training.curriculum import CurriculumConfig, CurriculumManager
 
+try:
+    from torch.utils.tensorboard import SummaryWriter
 
-def _compute_shop_splits(gs: dict[str, Any]) -> tuple[int, int, int]:
-    """Compute ``(n_shop_cards, n_vouchers, n_boosters)`` from a game state."""
-    return (
-        len(gs.get("shop_cards", [])),
-        len(gs.get("shop_vouchers", [])),
-        len(gs.get("shop_boosters", [])),
-    )
+    _HAS_TENSORBOARD = True
+except ImportError:
+    SummaryWriter = None  # type: ignore[assignment, misc]
+    _HAS_TENSORBOARD = False
+
+logger = logging.getLogger(__name__)
+
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -56,7 +61,7 @@ class PPOConfig:
     # Environment
     num_envs: int = 8
     back_keys: list[str] | str = "b_red"  # single key or list to sample from
-    stake: int = 1
+    stake: list[int] | int = 1  # single stake or list to sample from
     max_steps_per_episode: int = 10_000
 
     # PPO hyperparameters
@@ -82,6 +87,14 @@ class PPOConfig:
     eval_interval: int = 50
     eval_episodes: int = 20
     save_interval: int = 100
+    log_dir: str = "runs"
+    run_name: str | None = None
+
+    # Curriculum
+    curriculum: CurriculumConfig | None = None
+
+    # Game spec (required — drives policy architecture)
+    game_spec: GameSpec | None = None  # None only for backward-compat; will error at policy init
 
     # Device
     device: str = "auto"  # "cpu", "cuda", "mps", "auto"
@@ -126,6 +139,13 @@ def _normalize_back_keys(back_keys: list[str] | str) -> list[str]:
     return list(back_keys)
 
 
+def _normalize_stakes(stake: list[int] | int) -> list[int]:
+    """Normalize stake config to a list."""
+    if isinstance(stake, int):
+        return [stake]
+    return list(stake)
+
+
 # ---------------------------------------------------------------------------
 # Synchronous vectorized environment
 # ---------------------------------------------------------------------------
@@ -143,7 +163,7 @@ class SyncVectorEnv:
         self.envs = [fn() for fn in env_fns]
         self.num_envs = len(self.envs)
 
-    def reset(self) -> list[tuple[Observation, ActionMask, dict[str, Any]]]:
+    def reset(self) -> list[tuple[GameObservation, GameActionMask, dict[str, Any]]]:
         """Reset all environments, return (obs, mask, info) per env."""
         results = []
         for env in self.envs:
@@ -154,11 +174,11 @@ class SyncVectorEnv:
     def step(
         self, actions: list[FactoredAction]
     ) -> tuple[
-        list[Observation],
+        list[GameObservation],
         np.ndarray,
         np.ndarray,
         np.ndarray,
-        list[ActionMask],
+        list[GameActionMask],
         list[dict[str, Any]],
     ]:
         """Step all environments.
@@ -166,11 +186,11 @@ class SyncVectorEnv:
         Returns (obs_list, rewards, terminateds, truncateds, masks, infos).
         Auto-resets environments that are done.
         """
-        obs_list: list[Observation] = []
+        obs_list: list[GameObservation] = []
         rewards = np.zeros(self.num_envs, dtype=np.float32)
         terminateds = np.zeros(self.num_envs, dtype=np.bool_)
         truncateds = np.zeros(self.num_envs, dtype=np.bool_)
-        masks: list[ActionMask] = []
+        masks: list[GameActionMask] = []
         infos: list[dict[str, Any]] = []
 
         for i, (env, action) in enumerate(zip(self.envs, actions)):
@@ -198,102 +218,70 @@ class SyncVectorEnv:
 
 
 class _EnvInstance:
-    """Single environment instance wrapping a GameAdapter with reward shaping."""
+    """Single environment instance delegating to a :class:`BalatroEnvironment`.
 
-    def __init__(
-        self,
-        adapter_factory: Callable[[], GameAdapter],
-        reward_wrapper: DenseRewardWrapper,
-        back_keys: list[str],
-        stake: int,
-        max_steps: int,
-        seed_prefix: str = "TRAIN",
-    ) -> None:
-        self._adapter_factory = adapter_factory
-        self._adapter = adapter_factory()
-        self._reward = reward_wrapper
-        self._back_keys = back_keys
-        self._stake = stake
-        self._max_steps = max_steps
-        self._seed_prefix = seed_prefix
-        self._episode_count = 0
-        self._step_count = 0
+    Adapts the game-agnostic ``GameEnvironment`` interface back to the
+    Balatro-typed ``Observation``/``ActionMask`` objects that the rest of the
+    training loop expects.  Episode tracking attributes are forwarded from
+    the underlying environment.
+    """
 
-        # Episode tracking
-        self.episode_return: float = 0.0
-        self.episode_length: int = 0
-        self.episode_won: bool = False
-        self.episode_ante: int = 1
+    def __init__(self, env: BalatroEnvironment) -> None:
+        self._env = env
 
-    def reset(self) -> tuple[Observation, ActionMask, dict[str, Any]]:
-        seed = f"{self._seed_prefix}_{self._episode_count}"
-        self._episode_count += 1
-        self._step_count = 0
-        self.episode_return = 0.0
-        self.episode_length = 0
-        self.episode_won = False
-        self.episode_ante = 1
+    # Expose reward wrapper for curriculum updates
+    @property
+    def _reward(self) -> DenseRewardWrapper:
+        return self._env.reward_wrapper
 
-        self._adapter = self._adapter_factory()
-        if len(self._back_keys) > 1:
-            back_key = random.choice(self._back_keys)
-        else:
-            back_key = self._back_keys[0]
-        self._adapter.reset(back_key, self._stake, seed)
-        self._reward.reset()
+    @property
+    def episode_return(self) -> float:
+        return self._env.episode_return
 
-        gs = self._adapter.raw_state
-        obs = encode_observation(gs)
-        mask = get_action_mask(gs)
-        info = {"raw_state": gs}
-        return obs, mask, info
+    @property
+    def episode_length(self) -> int:
+        return self._env.episode_length
+
+    @property
+    def episode_won(self) -> bool:
+        return self._env.episode_won
+
+    @property
+    def episode_ante(self) -> int:
+        return self._env.episode_ante
+
+    def reset(self) -> tuple[GameObservation, GameActionMask, dict[str, Any]]:
+        game_obs, game_mask, info = self._env.reset()
+        return game_obs, game_mask, info  # type: ignore[return-value]
 
     def step(
-        self, action: FactoredAction
-    ) -> tuple[Observation, float, bool, bool, ActionMask, dict[str, Any]]:
-        gs_prev = self._adapter.raw_state
-        engine_action = factored_to_engine_action(action, gs_prev)
-        self._adapter.step(engine_action)
-
-        gs = self._adapter.raw_state
-        reward = self._reward.reward(gs_prev, action, gs)
-        self.episode_return += reward
-        self.episode_length += 1
-        self._step_count += 1
-
-        terminated = self._adapter.done
-        truncated = self._step_count >= self._max_steps
-
-        # Track episode stats
-        rr = gs.get("round_resets", {})
-        self.episode_ante = rr.get("ante", 1)
-        self.episode_won = self._adapter.won
-
-        obs = encode_observation(gs)
-        mask = get_action_mask(gs)
-        info = {"raw_state": gs}
-        return obs, reward, terminated, truncated, mask, info
+        self, action: FactoredAction,
+    ) -> tuple[GameObservation, float, bool, bool, GameActionMask, dict[str, Any]]:
+        game_obs, reward, terminated, truncated, game_mask, info = self._env.step(action)
+        return game_obs, reward, terminated, truncated, game_mask, info  # type: ignore[return-value]
 
 
 def _make_env(
     back_keys: list[str],
-    stake: int,
+    stakes: list[int],
     max_steps: int,
     env_idx: int,
     adapter_factory: Callable[[], GameAdapter] | None = None,
+    reward_config: RewardConfig | None = None,
 ) -> Callable[[], _EnvInstance]:
     """Create a factory function for a single environment instance."""
 
     def _factory() -> _EnvInstance:
         factory = adapter_factory or DirectAdapter
-        return _EnvInstance(
+        env = BalatroEnvironment(
             adapter_factory=factory,
-            reward_wrapper=DenseRewardWrapper(),
+            reward_config=reward_config,
             back_keys=back_keys,
-            stake=stake,
+            stakes=stakes,
             max_steps=max_steps,
             seed_prefix=f"TRAIN_E{env_idx}",
         )
+        return _EnvInstance(env)
 
     return _factory
 
@@ -307,8 +295,8 @@ def _make_env(
 class StepData:
     """Data for a single step across all environments."""
 
-    obs: list[Observation]
-    masks: list[ActionMask]
+    obs: list[GameObservation]  # per-env observations
+    masks: list[GameActionMask]  # per-env action masks
     shop_splits: list[tuple[int, int, int]]
     actions: list[FactoredAction]
     log_probs: torch.Tensor  # (num_envs,) total log prob
@@ -387,6 +375,8 @@ class RolloutBuffer:
         self,
         num_minibatches: int,
         device: torch.device,
+        *,
+        game_spec: GameSpec | None = None,
     ) -> Iterator[MiniBatch]:
         """Yield shuffled minibatches of experience.
 
@@ -401,8 +391,8 @@ class RolloutBuffer:
         indices = np.random.permutation(total)
 
         # Flatten all data
-        all_obs: list[Observation] = []
-        all_masks: list[ActionMask] = []
+        all_obs: list[GameObservation] = []  # type: ignore[type-arg]
+        all_masks: list[GameActionMask] = []  # type: ignore[type-arg]
         all_shop_splits: list[tuple[int, int, int]] = []
         all_actions: list[FactoredAction] = []
         all_log_probs: list[torch.Tensor] = []
@@ -435,7 +425,7 @@ class RolloutBuffer:
                 for o, m, ss in zip(mb_obs, mb_masks, mb_shop_splits)
             ]
 
-            batch = collate_policy_inputs(mb_policy_inputs, device=device)
+            batch = collate_policy_inputs(mb_policy_inputs, game_spec, device=device)
 
             yield MiniBatch(
                 batch=batch,
@@ -491,15 +481,28 @@ class PPOTrainer:
         self.config = config
         self.device = _resolve_device(config.device)
         self.back_keys = _normalize_back_keys(config.back_keys)
+        self.stakes = _normalize_stakes(config.stake)
+
+        # Curriculum
+        self.curriculum: CurriculumManager | None = None
+        initial_reward_config: RewardConfig | None = None
+        if config.curriculum is not None:
+            self.curriculum = CurriculumManager(config.curriculum)
+            initial_reward_config = self.curriculum.current_reward_config
+            print(
+                f"[Jackdaw] Curriculum: {len(config.curriculum.stages)} stages, "
+                f"starting with '{self.curriculum.current_stage.name}'"
+            )
 
         # Create vectorized environment
         env_fns = [
             _make_env(
                 self.back_keys,
-                config.stake,
+                self.stakes,
                 config.max_steps_per_episode,
                 i,
                 adapter_factory,
+                reward_config=initial_reward_config,
             )
             for i in range(config.num_envs)
         ]
@@ -507,10 +510,20 @@ class PPOTrainer:
 
         # Create policy
         self.policy = BalatroPolicy(
+            config.game_spec,
             embed_dim=config.embed_dim,
             num_heads=config.num_heads,
             num_layers=config.num_layers,
         ).to(self.device)
+
+        # Device info
+        n_params = sum(p.numel() for p in self.policy.parameters())
+        device_name = str(self.device)
+        if self.device.type == "cuda":
+            gpu_name = torch.cuda.get_device_name(self.device)
+            device_name = f"{self.device} ({gpu_name})"
+        print(f"[Jackdaw] Using device: {device_name}")
+        print(f"[Jackdaw] Policy parameters: {n_params:,}")
 
         # Optimizer
         self.optimizer = optim.Adam(self.policy.parameters(), lr=config.learning_rate, eps=1e-5)
@@ -520,9 +533,33 @@ class PPOTrainer:
         self.update_count = 0
         self.episode_count = 0
 
+        # Episode rolling window
+        self._episode_returns: deque[float] = deque(maxlen=100)
+        self._episode_lengths: deque[float] = deque(maxlen=100)
+        self._episode_antes: deque[float] = deque(maxlen=100)
+        self._episode_wins: deque[bool] = deque(maxlen=100)
+
+        # TensorBoard
+        self.writer: SummaryWriter | None = None  # type: ignore[assignment]
+        if _HAS_TENSORBOARD:
+            run_name = config.run_name
+            if run_name is None:
+                back = (
+                    config.back_keys if isinstance(config.back_keys, str) else config.back_keys[0]
+                )
+                run_name = f"balatro_{back}_{int(time.time())}"
+            log_path = f"{config.log_dir}/{run_name}"
+            self.writer = SummaryWriter(log_dir=log_path)
+            self.writer.add_text("config", str(asdict(config)))
+        else:
+            logger.warning(
+                "tensorboard not installed — training will log to stdout only. "
+                "Install with: uv pip install tensorboard"
+            )
+
         # Current observations/masks (set on first reset)
-        self._current_obs: list[Observation] = []
-        self._current_masks: list[ActionMask] = []
+        self._current_obs: list[GameObservation] = []  # type: ignore[type-arg]
+        self._current_masks: list[GameActionMask] = []  # type: ignore[type-arg]
         self._current_infos: list[dict[str, Any]] = []
 
     def train(self) -> TrainResult:
@@ -561,15 +598,42 @@ class PPOTrainer:
                 result.log_history.append(metrics)
                 self._log_metrics(metrics)
 
+                if self.writer is not None:
+                    gs = self.global_step
+                    self.writer.add_scalar("charts/SPS", sps, gs)
+                    self.writer.add_scalar("charts/episodes", self.episode_count, gs)
+                    um = update_metrics
+                    self.writer.add_scalar("losses/policy_loss", um["policy_loss"], gs)
+                    self.writer.add_scalar("losses/value_loss", um["value_loss"], gs)
+                    self.writer.add_scalar("losses/entropy", um["entropy"], gs)
+                    self.writer.add_scalar("losses/total_loss", um["total_loss"], gs)
+                    self.writer.add_scalar("losses/clip_fraction", um["clip_fraction"], gs)
+                    self.writer.add_scalar("losses/approx_kl", um["approx_kl"], gs)
+                    ev = um["explained_variance"]
+                    self.writer.add_scalar("losses/explained_variance", ev, gs)
+                    self.writer.add_scalar("losses/learning_rate", um["learning_rate"], gs)
+
+                    if self.curriculum is not None:
+                        for k, v in self.curriculum.get_metrics().items():
+                            self.writer.add_scalar(k, v, gs)
+
             # Evaluation
             if update % cfg.eval_interval == 0:
                 eval_metrics = self._evaluate()
                 result.final_eval = eval_metrics
                 self._log_eval(eval_metrics, update)
+                if self.writer is not None:
+                    gs = self.global_step
+                    self.writer.add_scalar("eval/win_rate", eval_metrics.win_rate, gs)
+                    self.writer.add_scalar("eval/avg_ante", eval_metrics.avg_ante, gs)
+                    self.writer.add_scalar("eval/avg_length", eval_metrics.avg_length, gs)
 
             # Checkpointing
             if update % cfg.save_interval == 0:
                 self.save_checkpoint(f"checkpoint_{update}.pt")
+
+        if self.writer is not None:
+            self.writer.close()
 
         result.total_timesteps = self.global_step
         result.total_updates = self.update_count
@@ -584,20 +648,17 @@ class PPOTrainer:
         self.policy.eval()
 
         for step in range(cfg.num_steps):
-            # Compute shop splits from game state
-            step_shop_splits = [
-                _compute_shop_splits(info["raw_state"])
-                for info in self._current_infos
-            ]
-
             # Build policy inputs from current observations
+            step_shop_splits = [
+                info.get("shop_splits", (0, 0, 0)) for info in self._current_infos
+            ]
             policy_inputs = [
                 PolicyInput(obs=obs, action_mask=mask, shop_splits=ss)
-                for obs, mask, ss in zip(
-                    self._current_obs, self._current_masks, step_shop_splits
-                )
+                for obs, mask, ss in zip(self._current_obs, self._current_masks, step_shop_splits)
             ]
-            batch = collate_policy_inputs(policy_inputs, device=self.device)
+            batch = collate_policy_inputs(
+                policy_inputs, self.config.game_spec, device=self.device,
+            )
 
             # Sample actions (also returns value estimates)
             with torch.no_grad():
@@ -615,6 +676,30 @@ class PPOTrainer:
             for i, info in enumerate(infos):
                 if dones[i]:
                     self.episode_count += 1
+                    ep_ante = info.get("episode_ante", 1)
+                    ep_won = bool(info.get("episode_won", False))
+                    self._episode_returns.append(info.get("episode_return", 0.0))
+                    self._episode_lengths.append(info.get("episode_length", 0.0))
+                    self._episode_antes.append(float(ep_ante))
+                    self._episode_wins.append(ep_won)
+
+                    # Curriculum tracking
+                    if self.curriculum is not None:
+                        advanced = self.curriculum.record_episode(ep_ante, ep_won)
+                        if advanced:
+                            self._on_curriculum_advance()
+
+                    if self.writer is not None and self._episode_returns:
+                        gs = self.global_step
+                        self.writer.add_scalar(
+                            "charts/episode_return", np.mean(self._episode_returns), gs
+                        )
+                        self.writer.add_scalar(
+                            "charts/episode_length", np.mean(self._episode_lengths), gs
+                        )
+                        self.writer.add_scalar("charts/avg_ante", np.mean(self._episode_antes), gs)
+                        self.writer.add_scalar("charts/win_rate", np.mean(self._episode_wins), gs)
+                        self.writer.add_scalar("charts/max_ante", max(self._episode_antes), gs)
 
             buffer.add(
                 StepData(
@@ -638,8 +723,7 @@ class PPOTrainer:
         # Compute bootstrap value for last step
         with torch.no_grad():
             bootstrap_shop_splits = [
-                _compute_shop_splits(info["raw_state"])
-                for info in self._current_infos
+                info.get("shop_splits", (0, 0, 0)) for info in self._current_infos
             ]
             policy_inputs = [
                 PolicyInput(obs=obs, action_mask=mask, shop_splits=ss)
@@ -647,7 +731,9 @@ class PPOTrainer:
                     self._current_obs, self._current_masks, bootstrap_shop_splits
                 )
             ]
-            batch = collate_policy_inputs(policy_inputs, device=self.device)
+            batch = collate_policy_inputs(
+                policy_inputs, self.config.game_spec, device=self.device,
+            )
             out = self.policy.forward(batch)
             last_value = out["value"].squeeze(-1).cpu()
 
@@ -667,7 +753,9 @@ class PPOTrainer:
         all_total_loss: list[float] = []
 
         for _epoch in range(cfg.update_epochs):
-            for mb in buffer.get_batches(cfg.num_minibatches, self.device):
+            for mb in buffer.get_batches(
+                cfg.num_minibatches, self.device, game_spec=self.config.game_spec,
+            ):
                 # Evaluate actions under current policy
                 new_log_probs, entropy, new_values = self.policy.evaluate_actions(
                     mb.batch, mb.actions
@@ -746,7 +834,7 @@ class PPOTrainer:
             agent,
             n_episodes=self.config.eval_episodes,
             back_key=self.back_keys[0],
-            stake=self.config.stake,
+            stake=self.stakes[0],
             max_steps=self.config.max_steps_per_episode,
         )
         return EvalMetrics(
@@ -757,9 +845,17 @@ class PPOTrainer:
             n_episodes=result.n_episodes,
         )
 
-    def save_checkpoint(self, path: str) -> None:
-        """Save model weights, optimizer state, and config."""
-        checkpoint = {
+    def save_checkpoint(self, path: str, extra: dict[str, Any] | None = None) -> None:
+        """Save model weights, optimizer state, and config.
+
+        Parameters
+        ----------
+        path:
+            File path for the checkpoint.
+        extra:
+            Optional extra data to include (e.g. best_avg_ante).
+        """
+        checkpoint: dict[str, Any] = {
             "policy_state_dict": self.policy.state_dict(),
             "optimizer_state_dict": self.optimizer.state_dict(),
             "global_step": self.global_step,
@@ -767,16 +863,44 @@ class PPOTrainer:
             "episode_count": self.episode_count,
             "config": asdict(self.config),
         }
-        torch.save(checkpoint, path)
+        if self.curriculum is not None:
+            checkpoint["curriculum_state"] = {
+                "stage_idx": self.curriculum.stage_index,
+                "stage_episodes": self.curriculum._stage_episodes,
+                "history": self.curriculum.transition_history,
+            }
+        if extra:
+            checkpoint.update(extra)
 
-    def load_checkpoint(self, path: str) -> None:
-        """Load model weights, optimizer state, and training progress."""
+        # Atomic write: save to .tmp then rename
+        tmp_path = path + ".tmp"
+        torch.save(checkpoint, tmp_path)
+        Path(tmp_path).replace(path)
+
+    def load_checkpoint(self, path: str) -> dict[str, Any]:
+        """Load model weights, optimizer state, and training progress.
+
+        Returns the full checkpoint dict for callers that need extra fields.
+        """
         checkpoint = torch.load(path, map_location=self.device, weights_only=False)
         self.policy.load_state_dict(checkpoint["policy_state_dict"])
         self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         self.global_step = checkpoint.get("global_step", 0)
         self.update_count = checkpoint.get("update_count", 0)
         self.episode_count = checkpoint.get("episode_count", 0)
+
+        # Restore curriculum state
+        cur_state = checkpoint.get("curriculum_state")
+        if cur_state is not None and self.curriculum is not None:
+            self.curriculum._stage_idx = cur_state["stage_idx"]
+            self.curriculum._stage_episodes = cur_state["stage_episodes"]
+            self.curriculum._history = cur_state.get("history", [])
+            # Update env reward configs to match restored stage
+            new_config = self.curriculum.current_reward_config
+            for env in self.envs.envs:
+                env._reward.update_config(new_config)
+
+        return checkpoint
 
     def _log_metrics(self, metrics: dict[str, float]) -> None:
         """Print training metrics."""
@@ -802,6 +926,23 @@ class PPOTrainer:
             f"({eval_metrics.n_episodes} episodes)"
         )
 
+    def _on_curriculum_advance(self) -> None:
+        """Handle curriculum stage transition."""
+        assert self.curriculum is not None
+        stage = self.curriculum.current_stage
+        new_config = self.curriculum.current_reward_config
+        print(
+            f"[Jackdaw] Curriculum → stage {self.curriculum.stage_index}: "
+            f"'{stage.name}' (episode {self.episode_count})"
+        )
+        # Update reward config in all envs
+        for env in self.envs.envs:
+            env._reward.update_config(new_config)
+
+        if self.writer is not None:
+            gs = self.global_step
+            self.writer.add_scalar("curriculum/stage", float(self.curriculum.stage_index), gs)
+
 
 # ---------------------------------------------------------------------------
 # Policy agent wrapper (for evaluation harness)
@@ -809,7 +950,11 @@ class PPOTrainer:
 
 
 class _PolicyAgent:
-    """Wraps BalatroPolicy as an Agent for use with evaluate_agent."""
+    """Wraps BalatroPolicy as an Agent for use with evaluate_agent.
+
+    This is Balatro-specific glue code — it encodes raw game states into
+    the game-agnostic observation format expected by the policy.
+    """
 
     def __init__(self, policy: BalatroPolicy, device: torch.device) -> None:
         self._policy = policy
@@ -818,15 +963,23 @@ class _PolicyAgent:
     def reset(self) -> None:
         pass
 
-    def act(self, obs: dict, action_mask: ActionMask, info: dict) -> FactoredAction:
+    def act(self, obs: dict, action_mask: object, info: dict) -> FactoredAction:
+        # Late imports: Balatro-specific encoding used only here
+        from jackdaw.env.balatro_env import _action_mask_to_game, _compute_shop_splits
+        from jackdaw.env.observation import encode_observation
+
         gs = info["raw_state"]
         encoded_obs = encode_observation(gs)
+        game_obs = encoded_obs.to_game_observation()
+        game_mask = _action_mask_to_game(action_mask)  # type: ignore[arg-type]
         policy_input = PolicyInput(
-            obs=encoded_obs,
-            action_mask=action_mask,
+            obs=game_obs,
+            action_mask=game_mask,
             shop_splits=_compute_shop_splits(gs),
         )
-        batch = collate_policy_inputs([policy_input], device=self._device)
+        batch = collate_policy_inputs(
+            [policy_input], self._policy.game_spec, device=self._device,
+        )
 
         self._policy.eval()
         with torch.no_grad():

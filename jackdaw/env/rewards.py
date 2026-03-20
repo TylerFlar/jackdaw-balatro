@@ -319,6 +319,10 @@ class DenseRewardWrapper:
     ) -> float:
         return self.calculator.step_reward(prev_state, action, next_state)
 
+    def update_config(self, config: RewardConfig) -> None:
+        """Update reward weights (e.g. on curriculum stage change)."""
+        self.calculator.config = config
+
     def episode_summary(self) -> dict[str, float]:
         return self.calculator.episode_summary()
 

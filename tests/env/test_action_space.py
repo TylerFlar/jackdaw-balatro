@@ -12,7 +12,11 @@ Covers:
 
 from __future__ import annotations
 
+import copy
+import random
+from collections import defaultdict
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -81,6 +85,9 @@ from jackdaw.env.action_space import (
     get_action_mask,
     get_consumable_target_info,
 )
+from jackdaw.env.agents import RandomAgent
+from jackdaw.env.agents.heuristic import HeuristicAgent
+from jackdaw.env.game_interface import DirectAdapter
 
 # ---------------------------------------------------------------------------
 # Lightweight mock Card
@@ -1116,15 +1123,6 @@ class TestPlayHandCardTargets:
 # Tests: Empirical action coverage over real game states
 # =========================================================================
 
-import math
-import random
-import textwrap
-from collections import Counter, defaultdict
-from pathlib import Path
-
-from jackdaw.env.agents import HeuristicAgent, RandomAgent
-from jackdaw.env.game_interface import DirectAdapter
-
 
 def _run_coverage_episodes(
     agent,
@@ -1208,7 +1206,7 @@ def _run_reverse_coverage(n_per_type: int = 50) -> dict[str, dict[str, int]]:
             phase_key = phase.value if hasattr(phase, "value") else str(phase)
             if len(game_states[phase_key]) < 20:
                 mask = get_action_mask(gs)
-                game_states[phase_key].append((gs, mask))
+                game_states[phase_key].append((copy.deepcopy(gs), mask))
             legal = adapter.get_legal_actions()
             if not legal:
                 break
@@ -1272,7 +1270,7 @@ def _build_random_factored(
     mask,
 ) -> FactoredAction | None:
     """Build a random valid FactoredAction for the given type and state."""
-    from jackdaw.env.policy.action_heads import NEEDS_CARDS, NEEDS_ENTITY
+    from jackdaw.env.balatro_spec import NEEDS_CARDS, NEEDS_ENTITY
 
     entity_target = None
     card_target = None
@@ -1479,12 +1477,71 @@ class TestActionCoverageEmpirical:
         print("\n" + _format_reverse_table(stats))
 
         # All action types that were testable should have 100% conversion.
-        # SwapHand* excluded: the stored game states are snapshots that may
-        # have stale hand arrays, making random entity_target selection hit
-        # index boundaries. Swap correctness is verified in TestSwapPermutations.
-        SKIP_REVERSE = {"SwapHandLeft", "SwapHandRight"}
         for name, s in stats.items():
-            if s["tested"] > 0 and name not in SKIP_REVERSE:
+            if s["tested"] > 0:
                 assert s["fail"] == 0, (
                     f"{name}: {s['fail']}/{s['tested']} failed factored→engine"
                 )
+
+
+# =========================================================================
+# Tests: Randomized swap roundtrip
+# =========================================================================
+
+
+class TestSwapHandRoundtrip:
+    """Randomized test: SwapHandLeft/Right with hands of size 2-8."""
+
+    N_STATES = 200
+
+    def test_swap_hand_roundtrip(self):
+        """All valid entity_targets for both swap directions produce
+        valid adjacent-swap ReorderHand permutations."""
+        rng = random.Random(42)
+        total_tested = 0
+        failures: list[str] = []
+
+        for _ in range(self.N_STATES):
+            n = rng.randint(2, 8)
+            gs = {"hand": _make_hand(n)}
+
+            # SwapHandLeft: valid targets are 1..n-1
+            for idx in range(1, n):
+                fa = FactoredAction(ActionType.SwapHandLeft, entity_target=idx)
+                try:
+                    action = factored_to_engine_action(fa, gs)
+                except (ValueError, IndexError) as e:
+                    failures.append(f"SwapLeft(idx={idx}, n={n}): {e}")
+                    continue
+                total_tested += 1
+                assert isinstance(action, EngineReorderHand)
+                perm = action.new_order
+                assert len(perm) == n
+                # Exactly one adjacent swap: positions idx and idx-1 swapped
+                expected = list(range(n))
+                expected[idx], expected[idx - 1] = expected[idx - 1], expected[idx]
+                assert list(perm) == expected, (
+                    f"SwapLeft(idx={idx}, n={n}): expected {expected}, got {list(perm)}"
+                )
+
+            # SwapHandRight: valid targets are 0..n-2
+            for idx in range(0, n - 1):
+                fa = FactoredAction(ActionType.SwapHandRight, entity_target=idx)
+                try:
+                    action = factored_to_engine_action(fa, gs)
+                except (ValueError, IndexError) as e:
+                    failures.append(f"SwapRight(idx={idx}, n={n}): {e}")
+                    continue
+                total_tested += 1
+                assert isinstance(action, EngineReorderHand)
+                perm = action.new_order
+                assert len(perm) == n
+                # Exactly one adjacent swap: positions idx and idx+1 swapped
+                expected = list(range(n))
+                expected[idx], expected[idx + 1] = expected[idx + 1], expected[idx]
+                assert list(perm) == expected, (
+                    f"SwapRight(idx={idx}, n={n}): expected {expected}, got {list(perm)}"
+                )
+
+        assert not failures, f"{len(failures)} failures:\n" + "\n".join(failures[:20])
+        assert total_tested > 200, f"Only tested {total_tested} cases"

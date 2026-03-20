@@ -46,6 +46,7 @@ from jackdaw.engine.actions import (
     Action,
     GamePhase,
 )
+from jackdaw.env.game_spec import FactoredAction  # noqa: F401 — re-export
 from jackdaw.engine.actions import (
     BuyAndUse as EngineBuyAndUse,
 )
@@ -133,32 +134,6 @@ class ActionType(IntEnum):
     SwapHandRight = 18
     SortHandRank = 19
     SortHandSuit = 20
-
-
-# ---------------------------------------------------------------------------
-# FactoredAction
-# ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class FactoredAction:
-    """A single action in the factored representation.
-
-    Parameters
-    ----------
-    action_type:
-        One of the 21 ActionType values.
-    card_target:
-        Tuple of hand card indices for PlayHand, Discard, or
-        UseConsumable targeting.  ``None`` when not applicable.
-    entity_target:
-        Index into the relevant entity list (shop cards, jokers,
-        consumables, etc.).  ``None`` for actions without entities.
-    """
-
-    action_type: int
-    card_target: tuple[int, ...] | None = None
-    entity_target: int | None = None
 
 
 # ---------------------------------------------------------------------------

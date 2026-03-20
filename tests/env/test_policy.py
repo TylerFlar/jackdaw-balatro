@@ -13,7 +13,9 @@ from jackdaw.env.action_space import (
     factored_to_engine_action,
     get_action_mask,
 )
+from jackdaw.env.balatro_spec import NEEDS_CARDS, NEEDS_ENTITY, balatro_game_spec
 from jackdaw.env.game_interface import DirectAdapter
+from jackdaw.env.game_spec import GameActionMask, GameObservation
 from jackdaw.env.observation import (
     D_CONSUMABLE,
     D_GLOBAL,
@@ -23,15 +25,15 @@ from jackdaw.env.observation import (
     Observation,
     encode_observation,
 )
-from jackdaw.env.policy.action_heads import NEEDS_CARDS, NEEDS_ENTITY
 from jackdaw.env.policy.policy import (
     BalatroPolicy,
     PolicyInput,
     collate_policy_inputs,
 )
-from jackdaw.env.training.ppo import _compute_shop_splits
 
 torch = pytest.importorskip("torch")
+
+_SPEC = balatro_game_spec()
 
 
 # ---------------------------------------------------------------------------
@@ -39,22 +41,24 @@ torch = pytest.importorskip("torch")
 # ---------------------------------------------------------------------------
 
 
-def _make_obs(
+def _make_game_obs(
     n_hand: int = 5,
     n_joker: int = 2,
     n_cons: int = 1,
     n_shop: int = 3,
     n_pack: int = 0,
-) -> Observation:
-    """Create a synthetic Observation with random features."""
+) -> GameObservation:
+    """Create a synthetic GameObservation with random features."""
     rng = np.random.default_rng(42)
-    return Observation(
+    return GameObservation(
         global_context=rng.standard_normal(D_GLOBAL).astype(np.float32),
-        hand_cards=rng.standard_normal((n_hand, D_PLAYING_CARD)).astype(np.float32),
-        jokers=rng.standard_normal((n_joker, D_JOKER)).astype(np.float32),
-        consumables=rng.standard_normal((n_cons, D_CONSUMABLE)).astype(np.float32),
-        shop_cards=rng.standard_normal((n_shop, D_SHOP)).astype(np.float32),
-        pack_cards=rng.standard_normal((n_pack, D_PLAYING_CARD)).astype(np.float32),
+        entities={
+            "hand_card": rng.standard_normal((n_hand, D_PLAYING_CARD)).astype(np.float32),
+            "joker": rng.standard_normal((n_joker, D_JOKER)).astype(np.float32),
+            "consumable": rng.standard_normal((n_cons, D_CONSUMABLE)).astype(np.float32),
+            "shop_item": rng.standard_normal((n_shop, D_SHOP)).astype(np.float32),
+            "pack_card": rng.standard_normal((n_pack, D_PLAYING_CARD)).astype(np.float32),
+        },
     )
 
 
@@ -65,8 +69,8 @@ def _make_mask(
     n_shop: int = 3,
     n_pack: int = 0,
     phase: str = "selecting_hand",
-) -> ActionMask:
-    """Create a synthetic ActionMask for the given phase."""
+) -> GameActionMask:
+    """Create a synthetic GameActionMask for the given phase."""
     type_mask = np.zeros(NUM_ACTION_TYPES, dtype=bool)
     entity_masks: dict[int, np.ndarray] = {}
     card_mask = np.ones(n_hand, dtype=bool) if n_hand > 0 else np.zeros(0, dtype=bool)
@@ -103,7 +107,7 @@ def _make_mask(
         type_mask[ActionType.SelectBlind] = True
         type_mask[ActionType.SkipBlind] = True
 
-    return ActionMask(type_mask, card_mask, entity_masks, max_card_select, min_card_select)
+    return GameActionMask(type_mask, card_mask, entity_masks, min_card_select, max_card_select)
 
 
 def _make_input(
@@ -114,7 +118,7 @@ def _make_input(
     n_pack: int = 0,
     phase: str = "selecting_hand",
 ) -> PolicyInput:
-    obs = _make_obs(n_hand, n_joker, n_cons, n_shop, n_pack)
+    obs = _make_game_obs(n_hand, n_joker, n_cons, n_shop, n_pack)
     mask = _make_mask(n_hand, n_joker, n_cons, n_shop, n_pack, phase)
     return PolicyInput(obs=obs, action_mask=mask, shop_splits=(n_shop, 0, 0))
 
@@ -130,13 +134,14 @@ class TestCollation:
             _make_input(n_hand=5, n_joker=2, n_cons=1, n_shop=3),
             _make_input(n_hand=3, n_joker=0, n_cons=2, n_shop=1),
         ]
-        batch = collate_policy_inputs(inputs)
+        batch = collate_policy_inputs(inputs, _SPEC)
 
-        assert batch["hand_cards"].shape == (2, 5, D_PLAYING_CARD)
-        assert batch["jokers"].shape == (2, 2, D_JOKER)
-        assert batch["consumables"].shape == (2, 2, D_CONSUMABLE)
-        assert batch["shop_cards"].shape == (2, 3, D_SHOP)
-        assert batch["hand_mask"].shape == (2, 5)
+        # entity_features[0] = hand_card, [1] = joker, etc.
+        assert batch["entity_features"][0].shape == (2, 5, D_PLAYING_CARD)
+        assert batch["entity_features"][1].shape == (2, 2, D_JOKER)
+        assert batch["entity_features"][2].shape == (2, 2, D_CONSUMABLE)
+        assert batch["entity_features"][3].shape == (2, 3, D_SHOP)
+        assert batch["entity_masks"][0].shape == (2, 5)
         assert batch["type_mask"].shape == (2, NUM_ACTION_TYPES)
         assert batch["card_mask"].shape == (2, 5)
         assert batch["pointer_masks"].shape[0] == 2
@@ -144,43 +149,40 @@ class TestCollation:
 
     def test_masks_correct(self):
         inp = _make_input(n_hand=3, n_joker=2)
-        batch = collate_policy_inputs([inp])
+        batch = collate_policy_inputs([inp], _SPEC)
 
         # Hand mask: first 3 True, rest False (max_hand=3 here)
-        assert batch["hand_mask"][0, :3].all()
+        assert batch["entity_masks"][0][0, :3].all()
         assert batch["max_hand"] == 3
 
     def test_empty_entities(self):
         inp = _make_input(n_hand=0, n_joker=0, n_cons=0, n_shop=0, n_pack=0, phase="blind_select")
-        batch = collate_policy_inputs([inp])
-        assert batch["hand_cards"].shape[1] == 0
-        assert batch["jokers"].shape[1] == 0
+        batch = collate_policy_inputs([inp], _SPEC)
+        assert batch["entity_features"][0].shape[1] == 0
+        assert batch["entity_features"][1].shape[1] == 0
 
 
 class TestForwardPass:
     def test_output_shapes(self):
         torch.manual_seed(0)
-        policy = BalatroPolicy(embed_dim=64, num_heads=2, num_layers=1)
+        policy = BalatroPolicy(_SPEC, embed_dim=64, num_heads=2, num_layers=1)
         inputs = [_make_input() for _ in range(4)]
-        batch = collate_policy_inputs(inputs)
+        batch = collate_policy_inputs(inputs, _SPEC)
         out = policy.forward(batch)
 
         assert out["type_logits"].shape == (4, NUM_ACTION_TYPES)
         assert out["card_logits"].shape == (4, batch["max_hand"])
         assert out["value"].shape == (4, 1)
         assert out["global_repr"].shape == (4, 64)
-        N_total = sum(
-            batch[k].shape[1]
-            for k in ["hand_cards", "jokers", "consumables", "shop_cards", "pack_cards"]
-        )
+        N_total = sum(t.shape[1] for t in batch["entity_features"])
         assert out["entity_reprs"].shape == (4, N_total, 64)
 
     def test_no_entities(self):
         """Forward pass works with zero entities (only CLS token)."""
         torch.manual_seed(0)
-        policy = BalatroPolicy(embed_dim=64, num_heads=2, num_layers=1)
+        policy = BalatroPolicy(_SPEC, embed_dim=64, num_heads=2, num_layers=1)
         inp = _make_input(n_hand=0, n_joker=0, n_cons=0, n_shop=0, n_pack=0, phase="blind_select")
-        batch = collate_policy_inputs([inp])
+        batch = collate_policy_inputs([inp], _SPEC)
         out = policy.forward(batch)
 
         assert out["type_logits"].shape == (1, NUM_ACTION_TYPES)
@@ -191,9 +193,9 @@ class TestSampleAction:
     def test_produces_valid_types(self):
         """Sampled action types are always legal."""
         torch.manual_seed(1)
-        policy = BalatroPolicy(embed_dim=64, num_heads=2, num_layers=1)
+        policy = BalatroPolicy(_SPEC, embed_dim=64, num_heads=2, num_layers=1)
         inputs = [_make_input() for _ in range(8)]
-        batch = collate_policy_inputs(inputs)
+        batch = collate_policy_inputs(inputs, _SPEC)
         actions, log_probs, _ = policy.sample_action(batch)
 
         assert len(actions) == 8
@@ -205,10 +207,10 @@ class TestSampleAction:
     def test_entity_targets_present(self):
         """Entity-targeting actions have non-None entity_target."""
         torch.manual_seed(2)
-        policy = BalatroPolicy(embed_dim=64, num_heads=2, num_layers=1)
+        policy = BalatroPolicy(_SPEC, embed_dim=64, num_heads=2, num_layers=1)
         # Use shop phase to get entity-targeting actions
         inputs = [_make_input(n_shop=3, phase="shop") for _ in range(16)]
-        batch = collate_policy_inputs(inputs)
+        batch = collate_policy_inputs(inputs, _SPEC)
         actions, _, _ = policy.sample_action(batch)
 
         for action in actions:
@@ -218,9 +220,9 @@ class TestSampleAction:
     def test_card_targets_present(self):
         """Card-targeting actions have non-None card_target."""
         torch.manual_seed(3)
-        policy = BalatroPolicy(embed_dim=64, num_heads=2, num_layers=1)
+        policy = BalatroPolicy(_SPEC, embed_dim=64, num_heads=2, num_layers=1)
         inputs = [_make_input(n_hand=5) for _ in range(16)]
-        batch = collate_policy_inputs(inputs)
+        batch = collate_policy_inputs(inputs, _SPEC)
         actions, _, _ = policy.sample_action(batch)
 
         for action in actions:
@@ -230,9 +232,9 @@ class TestSampleAction:
 
     def test_log_probs_finite(self):
         torch.manual_seed(4)
-        policy = BalatroPolicy(embed_dim=64, num_heads=2, num_layers=1)
+        policy = BalatroPolicy(_SPEC, embed_dim=64, num_heads=2, num_layers=1)
         inputs = [_make_input() for _ in range(4)]
-        batch = collate_policy_inputs(inputs)
+        batch = collate_policy_inputs(inputs, _SPEC)
         _, log_probs, _ = policy.sample_action(batch)
 
         assert torch.isfinite(log_probs["total"]).all()
@@ -242,9 +244,9 @@ class TestSampleAction:
 class TestEvaluateActions:
     def test_finite_outputs(self):
         torch.manual_seed(5)
-        policy = BalatroPolicy(embed_dim=64, num_heads=2, num_layers=1)
+        policy = BalatroPolicy(_SPEC, embed_dim=64, num_heads=2, num_layers=1)
         inputs = [_make_input() for _ in range(4)]
-        batch = collate_policy_inputs(inputs)
+        batch = collate_policy_inputs(inputs, _SPEC)
 
         # Sample actions first
         actions, _, _ = policy.sample_action(batch)
@@ -262,9 +264,9 @@ class TestEvaluateActions:
     def test_log_probs_negative(self):
         """Log-probabilities should be <= 0."""
         torch.manual_seed(6)
-        policy = BalatroPolicy(embed_dim=64, num_heads=2, num_layers=1)
+        policy = BalatroPolicy(_SPEC, embed_dim=64, num_heads=2, num_layers=1)
         inputs = [_make_input() for _ in range(4)]
-        batch = collate_policy_inputs(inputs)
+        batch = collate_policy_inputs(inputs, _SPEC)
         actions, _, _ = policy.sample_action(batch)
         log_probs, _, _ = policy.evaluate_actions(batch, actions)
 
@@ -275,9 +277,9 @@ class TestMasking:
     def test_masked_types_zero_probability(self):
         """Invalid action types receive ~0 probability."""
         torch.manual_seed(7)
-        policy = BalatroPolicy(embed_dim=64, num_heads=2, num_layers=1)
+        policy = BalatroPolicy(_SPEC, embed_dim=64, num_heads=2, num_layers=1)
         inp = _make_input()
-        batch = collate_policy_inputs([inp])
+        batch = collate_policy_inputs([inp], _SPEC)
         out = policy.forward(batch)
 
         probs = torch.softmax(out["type_logits"][0], dim=0)
@@ -287,12 +289,12 @@ class TestMasking:
     def test_masked_cards_zero_probability(self):
         """Masked card positions receive ~0 selection probability."""
         torch.manual_seed(8)
-        policy = BalatroPolicy(embed_dim=64, num_heads=2, num_layers=1)
+        policy = BalatroPolicy(_SPEC, embed_dim=64, num_heads=2, num_layers=1)
         # Create input with some cards masked
         inp = _make_input(n_hand=5)
         inp.action_mask.card_mask[3] = False
         inp.action_mask.card_mask[4] = False
-        batch = collate_policy_inputs([inp])
+        batch = collate_policy_inputs([inp], _SPEC)
         out = policy.forward(batch)
 
         card_probs = torch.sigmoid(out["card_logits"][0])
@@ -304,13 +306,13 @@ class TestVariableLength:
     def test_different_sizes(self):
         """Batch items with different entity counts work correctly."""
         torch.manual_seed(9)
-        policy = BalatroPolicy(embed_dim=64, num_heads=2, num_layers=1)
+        policy = BalatroPolicy(_SPEC, embed_dim=64, num_heads=2, num_layers=1)
         inputs = [
             _make_input(n_hand=3, n_joker=1, n_cons=0, n_shop=2),
             _make_input(n_hand=8, n_joker=5, n_cons=3, n_shop=0),
             _make_input(n_hand=1, n_joker=0, n_cons=0, n_shop=0, phase="blind_select"),
         ]
-        batch = collate_policy_inputs(inputs)
+        batch = collate_policy_inputs(inputs, _SPEC)
         out = policy.forward(batch)
 
         assert out["type_logits"].shape == (3, NUM_ACTION_TYPES)
@@ -318,12 +320,12 @@ class TestVariableLength:
 
     def test_sample_with_variable_sizes(self):
         torch.manual_seed(10)
-        policy = BalatroPolicy(embed_dim=64, num_heads=2, num_layers=1)
+        policy = BalatroPolicy(_SPEC, embed_dim=64, num_heads=2, num_layers=1)
         inputs = [
             _make_input(n_hand=5, n_joker=2, n_cons=1, n_shop=3),
             _make_input(n_hand=2, n_joker=0, n_cons=0, n_shop=0, phase="blind_select"),
         ]
-        batch = collate_policy_inputs(inputs)
+        batch = collate_policy_inputs(inputs, _SPEC)
         actions, log_probs, _ = policy.sample_action(batch)
 
         assert len(actions) == 2
@@ -334,9 +336,9 @@ class TestGradientFlow:
     def test_gradients_through_forward(self):
         """loss.backward() from forward outputs produces gradients for all parameters."""
         torch.manual_seed(11)
-        policy = BalatroPolicy(embed_dim=64, num_heads=2, num_layers=1)
+        policy = BalatroPolicy(_SPEC, embed_dim=64, num_heads=2, num_layers=1)
         inputs = [_make_input() for _ in range(2)]
-        batch = collate_policy_inputs(inputs)
+        batch = collate_policy_inputs(inputs, _SPEC)
         out = policy.forward(batch)
 
         # Combine all differentiable outputs
@@ -357,12 +359,12 @@ class TestGradientFlow:
     def test_gradients_through_evaluate(self):
         """evaluate_actions produces gradients for PPO training."""
         torch.manual_seed(12)
-        policy = BalatroPolicy(embed_dim=64, num_heads=2, num_layers=1)
+        policy = BalatroPolicy(_SPEC, embed_dim=64, num_heads=2, num_layers=1)
         inputs = [
             _make_input(n_hand=5, phase="selecting_hand"),
             _make_input(n_shop=3, phase="shop"),
         ]
-        batch = collate_policy_inputs(inputs)
+        batch = collate_policy_inputs(inputs, _SPEC)
 
         # Sample actions (no_grad)
         actions, _, _ = policy.sample_action(batch)
@@ -382,9 +384,9 @@ class TestPackPhase:
     def test_pack_card_selection(self):
         """Pack phase with entity-targeting works."""
         torch.manual_seed(13)
-        policy = BalatroPolicy(embed_dim=64, num_heads=2, num_layers=1)
+        policy = BalatroPolicy(_SPEC, embed_dim=64, num_heads=2, num_layers=1)
         inputs = [_make_input(n_hand=0, n_joker=0, n_cons=0, n_shop=0, n_pack=3, phase="pack")]
-        batch = collate_policy_inputs(inputs)
+        batch = collate_policy_inputs(inputs, _SPEC)
         actions, log_probs, _ = policy.sample_action(batch)
 
         assert len(actions) == 1
@@ -401,10 +403,14 @@ class TestPackPhase:
 
 def _make_real_policy_input(gs: dict) -> PolicyInput:
     """Build a PolicyInput from a real game state with correct shop_splits."""
+    from jackdaw.env.balatro_env import _action_mask_to_game, _compute_shop_splits
+
     obs = encode_observation(gs)
     mask = get_action_mask(gs)
+    game_obs = obs.to_game_observation()
+    game_mask = _action_mask_to_game(mask)
     ss = _compute_shop_splits(gs)
-    return PolicyInput(obs=obs, action_mask=mask, shop_splits=ss)
+    return PolicyInput(obs=game_obs, action_mask=game_mask, shop_splits=ss)
 
 
 def _collect_diverse_game_states(n: int = 8) -> list[dict]:
@@ -460,9 +466,9 @@ class TestRealObservationForward:
         gs = adapter.raw_state
 
         pi = _make_real_policy_input(gs)
-        batch = collate_policy_inputs([pi])
+        batch = collate_policy_inputs([pi], _SPEC)
 
-        policy = BalatroPolicy(embed_dim=32, num_heads=2, num_layers=1, dropout=0.0)
+        policy = BalatroPolicy(_SPEC, embed_dim=32, num_heads=2, num_layers=1, dropout=0.0)
         policy.eval()
         with torch.no_grad():
             out = policy.forward(batch)
@@ -476,7 +482,7 @@ class TestRealObservationForward:
     def test_multiple_phases_no_nan(self):
         """Forward pass through blind_select, selecting_hand, shop states."""
         torch.manual_seed(101)
-        policy = BalatroPolicy(embed_dim=32, num_heads=2, num_layers=1, dropout=0.0)
+        policy = BalatroPolicy(_SPEC, embed_dim=32, num_heads=2, num_layers=1, dropout=0.0)
         policy.eval()
 
         adapter = DirectAdapter()
@@ -486,7 +492,7 @@ class TestRealObservationForward:
         gs = adapter.raw_state
         assert gs.get("phase") == GamePhase.BLIND_SELECT
         pi = _make_real_policy_input(gs)
-        batch = collate_policy_inputs([pi])
+        batch = collate_policy_inputs([pi], _SPEC)
         with torch.no_grad():
             out = policy.forward(batch)
         assert torch.isfinite(out["type_logits"]).all()
@@ -497,7 +503,7 @@ class TestRealObservationForward:
         gs = adapter.raw_state
         assert gs.get("phase") == GamePhase.SELECTING_HAND
         pi = _make_real_policy_input(gs)
-        batch = collate_policy_inputs([pi])
+        batch = collate_policy_inputs([pi], _SPEC)
         with torch.no_grad():
             out = policy.forward(batch)
         assert torch.isfinite(out["type_logits"]).all()
@@ -510,14 +516,14 @@ class TestBatchedRealObservations:
 
     def test_batched_diverse_states(self):
         torch.manual_seed(200)
-        policy = BalatroPolicy(embed_dim=32, num_heads=2, num_layers=1, dropout=0.0)
+        policy = BalatroPolicy(_SPEC, embed_dim=32, num_heads=2, num_layers=1, dropout=0.0)
         policy.eval()
 
         states = _collect_diverse_game_states(8)
         assert len(states) >= 3, "Need at least 3 diverse game states"
 
         policy_inputs = [_make_real_policy_input(gs) for gs in states]
-        batch = collate_policy_inputs(policy_inputs)
+        batch = collate_policy_inputs(policy_inputs, _SPEC)
         B = len(states)
 
         with torch.no_grad():
@@ -542,11 +548,11 @@ class TestSampleActionRealObs:
 
     def test_sampled_actions_valid(self):
         torch.manual_seed(300)
-        policy = BalatroPolicy(embed_dim=32, num_heads=2, num_layers=1, dropout=0.0)
+        policy = BalatroPolicy(_SPEC, embed_dim=32, num_heads=2, num_layers=1, dropout=0.0)
 
         states = _collect_diverse_game_states(8)
         policy_inputs = [_make_real_policy_input(gs) for gs in states]
-        batch = collate_policy_inputs(policy_inputs)
+        batch = collate_policy_inputs(policy_inputs, _SPEC)
 
         actions, log_probs, values = policy.sample_action(batch)
 
@@ -595,11 +601,11 @@ class TestEvaluateActionsGradientFlow:
 
     def test_no_nan_gradients(self):
         torch.manual_seed(400)
-        policy = BalatroPolicy(embed_dim=32, num_heads=2, num_layers=1, dropout=0.0)
+        policy = BalatroPolicy(_SPEC, embed_dim=32, num_heads=2, num_layers=1, dropout=0.0)
 
         states = _collect_diverse_game_states(6)
         policy_inputs = [_make_real_policy_input(gs) for gs in states]
-        batch = collate_policy_inputs(policy_inputs)
+        batch = collate_policy_inputs(policy_inputs, _SPEC)
 
         # Sample actions (no grad)
         actions, _, _ = policy.sample_action(batch)
@@ -616,8 +622,6 @@ class TestEvaluateActionsGradientFlow:
         assert torch.isfinite(loss), f"Loss is not finite: {loss.item()}"
 
         # Check no NaN in any gradient that was computed.
-        # Some heads (e.g. card_scorer) may not participate if no sampled
-        # action required card selection — that's fine, just check what's there.
         params_with_grad = 0
         for name, param in policy.named_parameters():
             if param.requires_grad and param.grad is not None:
@@ -631,12 +635,12 @@ class TestEvaluateActionsGradientFlow:
     def test_multiple_backward_passes(self):
         """Multiple training steps don't accumulate NaN."""
         torch.manual_seed(401)
-        policy = BalatroPolicy(embed_dim=32, num_heads=2, num_layers=1, dropout=0.0)
+        policy = BalatroPolicy(_SPEC, embed_dim=32, num_heads=2, num_layers=1, dropout=0.0)
         optimizer = torch.optim.Adam(policy.parameters(), lr=1e-3)
 
         states = _collect_diverse_game_states(4)
         policy_inputs = [_make_real_policy_input(gs) for gs in states]
-        batch = collate_policy_inputs(policy_inputs)
+        batch = collate_policy_inputs(policy_inputs, _SPEC)
 
         actions, _, _ = policy.sample_action(batch)
 
@@ -680,13 +684,15 @@ class TestCollationPointerMasks:
         rng = np.random.default_rng(42)
         n_shop_total = n_shop_cards + n_vouchers + n_boosters
 
-        obs = Observation(
+        obs = GameObservation(
             global_context=rng.standard_normal(D_GLOBAL).astype(np.float32),
-            hand_cards=rng.standard_normal((n_hand, D_PLAYING_CARD)).astype(np.float32),
-            jokers=rng.standard_normal((n_joker, D_JOKER)).astype(np.float32),
-            consumables=rng.standard_normal((n_cons, D_CONSUMABLE)).astype(np.float32),
-            shop_cards=rng.standard_normal((n_shop_total, D_SHOP)).astype(np.float32),
-            pack_cards=rng.standard_normal((n_pack, D_PLAYING_CARD)).astype(np.float32),
+            entities={
+                "hand_card": rng.standard_normal((n_hand, D_PLAYING_CARD)).astype(np.float32),
+                "joker": rng.standard_normal((n_joker, D_JOKER)).astype(np.float32),
+                "consumable": rng.standard_normal((n_cons, D_CONSUMABLE)).astype(np.float32),
+                "shop_item": rng.standard_normal((n_shop_total, D_SHOP)).astype(np.float32),
+                "pack_card": rng.standard_normal((n_pack, D_PLAYING_CARD)).astype(np.float32),
+            },
         )
 
         type_mask = np.zeros(NUM_ACTION_TYPES, dtype=bool)
@@ -721,7 +727,7 @@ class TestCollationPointerMasks:
         type_mask[ActionType.NextRound] = True
 
         card_mask = np.ones(n_hand, dtype=bool) if n_hand > 0 else np.zeros(0, dtype=bool)
-        mask = ActionMask(type_mask, card_mask, entity_masks, 5, 1)
+        mask = GameActionMask(type_mask, card_mask, entity_masks, 1, 5)
 
         return PolicyInput(
             obs=obs,
@@ -735,7 +741,7 @@ class TestCollationPointerMasks:
             n_hand=3, n_joker=2, n_cons=1,
             n_shop_cards=2, n_vouchers=1, n_boosters=1,
         )
-        batch = collate_policy_inputs([pi])
+        batch = collate_policy_inputs([pi], _SPEC)
         pmask = batch["pointer_masks"][0, ActionType.BuyCard]
 
         # shop region starts at hand + joker + cons = 3 + 2 + 1 = 6
@@ -759,7 +765,7 @@ class TestCollationPointerMasks:
             n_hand=3, n_joker=2, n_cons=1,
             n_shop_cards=2, n_vouchers=1, n_boosters=1,
         )
-        batch = collate_policy_inputs([pi])
+        batch = collate_policy_inputs([pi], _SPEC)
         pmask = batch["pointer_masks"][0, ActionType.RedeemVoucher]
 
         shop_start = 3 + 2 + 1
@@ -782,7 +788,7 @@ class TestCollationPointerMasks:
             n_hand=3, n_joker=2, n_cons=1,
             n_shop_cards=2, n_vouchers=1, n_boosters=1,
         )
-        batch = collate_policy_inputs([pi])
+        batch = collate_policy_inputs([pi], _SPEC)
         pmask = batch["pointer_masks"][0, ActionType.OpenBooster]
 
         shop_start = 3 + 2 + 1
@@ -805,7 +811,7 @@ class TestCollationPointerMasks:
             n_hand=3, n_joker=2, n_cons=1,
             n_shop_cards=2, n_vouchers=0, n_boosters=0,
         )
-        batch = collate_policy_inputs([pi])
+        batch = collate_policy_inputs([pi], _SPEC)
         pmask = batch["pointer_masks"][0, ActionType.SellJoker]
 
         joker_start = 3  # after hand
@@ -828,7 +834,7 @@ class TestCollationPointerMasks:
             n_shop_cards=0, n_vouchers=0, n_boosters=0,
             n_pack=3,
         )
-        batch = collate_policy_inputs([pi])
+        batch = collate_policy_inputs([pi], _SPEC)
         pmask = batch["pointer_masks"][0, ActionType.PickPackCard]
 
         # pack starts after hand + joker + cons + shop = 3 + 2 + 1 + 0 = 6
@@ -857,7 +863,7 @@ class TestCollationPointerMasks:
             n_shop_cards=2, n_vouchers=1, n_boosters=1,
             n_pack=2,
         )
-        batch = collate_policy_inputs([pi])
+        batch = collate_policy_inputs([pi], _SPEC)
         offsets = batch["entity_offsets"]
         splits = batch["shop_splits"][0]
 
@@ -875,8 +881,8 @@ class TestCollationPointerMasks:
         ]
 
         for at, et in test_cases:
-            ptr = _entity_target_to_pointer(et, at, offsets, splits)
-            recovered_et = _pointer_to_entity_target(ptr, at, offsets, splits)
+            ptr = _entity_target_to_pointer(et, at, _SPEC, offsets, splits)
+            recovered_et = _pointer_to_entity_target(ptr, at, _SPEC, offsets, splits)
             assert recovered_et == et, (
                 f"Roundtrip failed for action_type={at}, entity_target={et}: "
                 f"ptr={ptr}, recovered={recovered_et}"
@@ -892,7 +898,7 @@ class TestCollationPointerMasks:
             n_hand=3, n_joker=1, n_cons=0,
             n_shop_cards=1, n_vouchers=1, n_boosters=1,
         )
-        batch = collate_policy_inputs([pi1, pi2])
+        batch = collate_policy_inputs([pi1, pi2], _SPEC)
 
         # pi1: all 3 shop items are cards
         assert batch["shop_splits"][0].tolist() == [3, 0, 0]

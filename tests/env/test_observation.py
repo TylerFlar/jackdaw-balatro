@@ -109,7 +109,7 @@ class TestShapesAndDtypes:
         assert obs.global_context.shape == (D_GLOBAL,)
         # D_GLOBAL = 90 base + 32 vouchers + 8 blind + 3 round_pos
         #          + 2 round_progress + 24 tags + 52 discard_hist = 211
-        assert D_GLOBAL == 211
+        assert D_GLOBAL == 235
 
 
 # ---------------------------------------------------------------------------

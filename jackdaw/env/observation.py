@@ -18,10 +18,17 @@ from typing import Any
 
 import numpy as np
 
+from jackdaw.env.game_spec import GameObservation
+
 from jackdaw.engine.actions import GamePhase
 from jackdaw.engine.card import Card
 from jackdaw.engine.consumables import can_use_consumable
-from jackdaw.engine.data.hands import HandType
+from jackdaw.engine.data.hands import HAND_BASE, HAND_ORDER, HandType
+from jackdaw.engine.hand_eval import (
+    evaluate_poker_hand,
+    get_best_hand,
+    get_hand_eval_flags,
+)
 from jackdaw.engine.hand_levels import HandLevels
 
 # ---------------------------------------------------------------------------
@@ -204,7 +211,7 @@ _DEBUFF_SUIT_IDX: dict[str, int] = {
 # Feature dimensions
 # ---------------------------------------------------------------------------
 
-D_PLAYING_CARD: int = 14
+D_PLAYING_CARD: int = 15
 D_JOKER: int = 15
 D_CONSUMABLE: int = 7
 D_SHOP: int = 9
@@ -219,8 +226,22 @@ D_SHOP: int = 9
 #   [133:135]  round_progress (2)
 #   [135:159]  tags binary (24)
 #   [159:211]  discard_pile histogram (52)
+#   --- NEW: strategic features ---
+#   [211:223]  hand_type_indicators (12) — binary, which hand types current hand forms
+#   [223:226]  base_score (3) — log(chips), log(mult), log(chips×mult) for best hand
+#   [226]      score_to_blind_ratio (1) — log(base_score)/log(blind_chips), clamped
+#   [227]      flush_proximity (1) — max suit count in hand / 5 (continuous)
+#   [228]      straight_proximity (1) — max consecutive run length / 5 (continuous)
+#   [229]      interest_earned (1) — current interest bracket, normalized
+#   [230]      flush_draw_outs (1) — P(drawing suit-completing card) from deck
+#   [231]      straight_draw_outs (1) — P(drawing rank-completing card) from deck
+#   [232]      debuff_hand_fraction (1) — fraction of hand cards debuffed by boss blind
+#   [233]      spendable_above_interest (1) — money above interest floor, log-scaled
+#   [234]      urgency (1) — blind_remaining / (base_score × hands_left), clamped
 _D_BASE: int = 6 + 4 + 20 + NUM_HAND_TYPES * 5  # 90
-D_GLOBAL: int = _D_BASE + NUM_VOUCHERS + 8 + 3 + 2 + NUM_TAGS + D_DISCARD_HISTOGRAM  # 211
+_D_OLD_GLOBAL: int = _D_BASE + NUM_VOUCHERS + 8 + 3 + 2 + NUM_TAGS + D_DISCARD_HISTOGRAM  # 211
+_D_STRATEGIC: int = NUM_HAND_TYPES + 3 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1  # 24
+D_GLOBAL: int = _D_OLD_GLOBAL + _D_STRATEGIC  # 235
 
 
 # ---------------------------------------------------------------------------
@@ -281,7 +302,7 @@ def encode_playing_card(
 
     Returns shape ``(D_PLAYING_CARD,)`` float32 array.
 
-    Features (14):
+    Features (15):
         0: rank_id (ordinal 2-14, normalized /14)
         1: suit (ordinal 0-3, normalized /3)
         2: chip_value (normalized /11)
@@ -295,7 +316,8 @@ def encode_playing_card(
        10: bonus_chips (log-scaled)
        11: times_played (log-scaled)
        12: position_in_hand (normalized /20)
-       13: reserved/padding (0)
+       13: is_best_hand_card (0/1 — contributes to best detected hand)
+       14: reserved/padding (0)
     """
     v = np.zeros(D_PLAYING_CARD, dtype=np.float32)
 
@@ -492,10 +514,132 @@ def encode_shop_item(
     return v
 
 
+def _compute_hand_analysis(
+    hand: list[Card],
+    jokers: list[Card],
+    hand_levels: HandLevels | None,
+) -> tuple[np.ndarray, str, set[int]]:
+    """Compute hand type indicators, base score, and scoring card ids.
+
+    Returns:
+        hand_type_vec: (12,) binary array — which hand types the hand contains
+        best_hand_name: name of the best detected hand type
+        scoring_ids: set of id() values for cards in the best hand
+    """
+    hand_type_vec = np.zeros(NUM_HAND_TYPES, dtype=np.float32)
+    scoring_ids: set[int] = set()
+    best_hand_name = ""
+
+    if not hand:
+        return hand_type_vec, best_hand_name, scoring_ids
+
+    # Get joker modifier flags
+    flags = get_hand_eval_flags(jokers)
+
+    # Detect best hand and all present hand types
+    best_name, scoring_cards, full_results = get_best_hand(
+        hand,
+        four_fingers=flags["four_fingers"],
+        shortcut=flags["shortcut"],
+        smeared=flags["smeared"],
+    )
+    best_hand_name = best_name
+
+    # Set binary indicators for all detected hand types
+    for j, ht in enumerate(_HAND_TYPES):
+        if full_results.get(ht.value):
+            hand_type_vec[j] = 1.0
+
+    # Track which cards are in the best hand
+    scoring_ids = {id(c) for c in scoring_cards}
+
+    return hand_type_vec, best_hand_name, scoring_ids
+
+
+@dataclass
+class _DrawAnalysis:
+    """Result of draw proximity analysis."""
+
+    flush_proximity: float  # max suit count / 5 (1.0 = have flush)
+    straight_proximity: float  # max consecutive run / 5 (1.0 = have straight)
+    best_flush_suit: str  # suit with most cards
+    best_flush_count: int  # how many cards of that suit
+    straight_gap_ranks: list[int]  # ranks needed to complete best straight
+
+
+def _analyze_draws(hand: list[Card]) -> _DrawAnalysis:
+    """Analyze flush and straight draw proximity with detail.
+
+    Returns continuous proximity values and the specific suit/ranks
+    needed to complete draws (for computing draw-out probabilities).
+    """
+    if not hand:
+        return _DrawAnalysis(0.0, 0.0, "", 0, [])
+
+    # Flush: count cards per suit, find best
+    suit_counts: dict[str, int] = {}
+    for card in hand:
+        if card.base is None:
+            continue
+        suit = card.base.suit.value
+        suit_counts[suit] = suit_counts.get(suit, 0) + 1
+
+    best_suit = max(suit_counts, key=suit_counts.get, default="")  # type: ignore[arg-type]
+    best_suit_count = suit_counts.get(best_suit, 0)
+    flush_proximity = min(best_suit_count / 5.0, 1.0)
+
+    # Straight: find longest consecutive run + gap ranks
+    ranks: set[int] = set()
+    for card in hand:
+        if card.base is None:
+            continue
+        ranks.add(card.base.id)
+    if 14 in ranks:
+        ranks.add(1)  # Ace low
+
+    best_run = 0
+    best_run_start = 0
+    current_run = 0
+    current_start = 0
+    sorted_ranks = sorted(ranks)
+
+    for i, r in enumerate(sorted_ranks):
+        if i == 0 or r != sorted_ranks[i - 1] + 1:
+            current_run = 1
+            current_start = r
+        else:
+            current_run += 1
+        if current_run > best_run:
+            best_run = current_run
+            best_run_start = current_start
+
+    straight_proximity = min(best_run / 5.0, 1.0)
+
+    # Find which ranks would extend the best run to 5
+    gap_ranks: list[int] = []
+    if best_run >= 3:
+        run_end = best_run_start + best_run - 1
+        # Check ranks just below and above the run
+        for r in range(best_run_start - 1, max(best_run_start - 3, 0), -1):
+            if 2 <= r <= 14 and r not in ranks:
+                gap_ranks.append(r)
+        for r in range(run_end + 1, min(run_end + 3, 15)):
+            if 2 <= r <= 14 and r not in ranks:
+                gap_ranks.append(r)
+
+    return _DrawAnalysis(
+        flush_proximity=flush_proximity,
+        straight_proximity=straight_proximity,
+        best_flush_suit=best_suit,
+        best_flush_count=best_suit_count,
+        straight_gap_ranks=gap_ranks,
+    )
+
+
 def encode_global_context(gs: dict[str, Any]) -> np.ndarray:
     """Encode the fixed-size global context vector.
 
-    Returns shape ``(D_GLOBAL,)`` float32 array (211 features).
+    Returns shape ``(D_GLOBAL,)`` float32 array (230 features).
 
     Layout:
         [0:6]      phase one-hot (6)
@@ -635,6 +779,109 @@ def encode_global_context(gs: dict[str, Any]) -> np.ndarray:
         if si is not None and ri_val is not None:
             v[dbase + si * NUM_RANKS + ri_val] = 1.0
 
+    # --- Strategic features [211:230] — 19 dims ---
+    sbase = dbase + D_DISCARD_HISTOGRAM  # 211
+
+    hand: list[Card] = gs.get("hand", [])
+    jokers: list[Card] = gs.get("jokers", [])
+    hand_levels: HandLevels | None = gs.get("hand_levels")
+
+    # Hand type indicators + best hand analysis [211:223]
+    hand_type_vec, best_hand_name, _scoring_ids = _compute_hand_analysis(
+        hand, jokers, hand_levels,
+    )
+    v[sbase : sbase + NUM_HAND_TYPES] = hand_type_vec
+
+    # Base score estimate [223:226]
+    score_base = sbase + NUM_HAND_TYPES  # 223
+    if best_hand_name and hand_levels is not None:
+        try:
+            ht_enum = HandType(best_hand_name)
+            base_data = HAND_BASE[ht_enum]
+            hs = hand_levels.get_state(ht_enum)
+            level = hs.level
+            base_chips = base_data.chips_at(level)
+            base_mult = base_data.mult_at(level)
+            base_score = base_chips * base_mult
+            v[score_base + 0] = _log_scale(base_chips)
+            v[score_base + 1] = _log_scale(base_mult)
+            v[score_base + 2] = _log_scale(base_score)
+        except (ValueError, KeyError):
+            pass
+
+    # Score-to-blind ratio [226]
+    ratio_base = score_base + 3  # 226
+    base_score_val = 0.0
+    if best_hand_name and hand_levels is not None:
+        try:
+            ht_enum = HandType(best_hand_name)
+            bd = HAND_BASE[ht_enum]
+            hs = hand_levels.get_state(ht_enum)
+            base_score_val = bd.chips_at(hs.level) * bd.mult_at(hs.level)
+        except (ValueError, KeyError):
+            pass
+    if base_score_val > 0 and blind_chips > 0:
+        v[ratio_base] = min(math.log1p(base_score_val) / math.log1p(blind_chips), 2.0) / 2.0
+
+    # Draw proximity [227:229] — continuous, not binary
+    draw_base = ratio_base + 1  # 227
+    draws = _analyze_draws(hand)
+    v[draw_base + 0] = draws.flush_proximity
+    v[draw_base + 1] = draws.straight_proximity
+
+    # Interest earned [229]
+    int_base = draw_base + 2  # 229
+    dollars = gs.get("dollars", 0)
+    interest_cap = gs.get("interest_cap", 25)
+    max_interest = interest_cap // 5
+    interest = min(max(dollars, 0) // 5, max_interest)
+    v[int_base] = interest / max(max_interest, 1)
+
+    # --- New features [230:235] ---
+
+    # Flush draw outs [230] — P(drawing suit-completing card) from remaining deck
+    outs_base = int_base + 1  # 230
+    deck: list = gs.get("deck", [])
+    deck_size = len(deck)
+    if draws.best_flush_count < 5 and draws.best_flush_suit and deck_size > 0:
+        suited_in_deck = sum(
+            1 for c in deck
+            if getattr(c, "base", None) is not None
+            and c.base.suit.value == draws.best_flush_suit
+        )
+        v[outs_base] = suited_in_deck / deck_size
+
+    # Straight draw outs [231] — P(drawing rank-completing card) from remaining deck
+    if draws.straight_gap_ranks and deck_size > 0:
+        gap_set = set(draws.straight_gap_ranks)
+        matching_in_deck = sum(
+            1 for c in deck
+            if getattr(c, "base", None) is not None
+            and c.base.id in gap_set
+        )
+        v[outs_base + 1] = matching_in_deck / deck_size
+
+    # Boss blind debuff impact [232] — fraction of hand cards debuffed
+    debuff_base = outs_base + 2  # 232
+    if hand:
+        n_debuffed = sum(1 for c in hand if c.debuff)
+        v[debuff_base] = n_debuffed / len(hand)
+
+    # Spendable above interest [233] — money that can be spent without losing interest
+    spend_base = debuff_base + 1  # 233
+    interest_floor = interest * 5  # dollars needed to maintain current interest
+    spendable = max(0, dollars - interest_floor)
+    v[spend_base] = _log_scale(spendable)
+
+    # Urgency [234] — blind_remaining / (base_score × hands_left)
+    # High values = in trouble, need joker help or better hands
+    urg_base = spend_base + 1  # 234
+    hands_left = gs.get("current_round", {}).get("hands_left", 0)
+    blind_remaining = max(blind_chips - chips, 0)
+    if base_score_val > 0 and hands_left > 0:
+        urgency = blind_remaining / (base_score_val * hands_left)
+        v[urg_base] = min(urgency, 5.0) / 5.0
+
     return v
 
 
@@ -689,6 +936,10 @@ def encode_playing_cards_batch(
     buf = _get_hand_buf(n)
     splash = bool(gs.get("splash", 0))
 
+    # Compute which cards belong to the best detected hand
+    jokers: list[Card] = gs.get("jokers", [])
+    _, _, scoring_ids = _compute_hand_analysis(cards, jokers, gs.get("hand_levels"))
+
     for i, card in enumerate(cards):
         row = buf[i]  # already zeroed
         face_down = card.facing == "back"
@@ -715,6 +966,7 @@ def encode_playing_cards_batch(
         )
         row[11] = _log_scale(card.base.times_played)
         row[12] = i / 20.0
+        row[13] = float(id(card) in scoring_ids)
 
     # Return a copy so the buffer can be reused next call
     return buf.copy()
@@ -793,6 +1045,19 @@ class Observation:
     consumables: np.ndarray  # (N_cons, D_CONSUMABLE)
     shop_cards: np.ndarray  # (N_shop, D_SHOP)
     pack_cards: np.ndarray  # (N_pack, D_PLAYING_CARD)
+
+    def to_game_observation(self) -> GameObservation:
+        """Convert to a game-agnostic :class:`GameObservation`."""
+        return GameObservation(
+            global_context=self.global_context,
+            entities={
+                "hand_card": self.hand_cards,
+                "joker": self.jokers,
+                "consumable": self.consumables,
+                "shop_item": self.shop_cards,
+                "pack_card": self.pack_cards,
+            },
+        )
 
 
 # ---------------------------------------------------------------------------

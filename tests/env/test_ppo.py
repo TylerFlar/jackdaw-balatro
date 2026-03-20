@@ -13,9 +13,12 @@ import numpy as np
 import pytest
 import torch
 
-from jackdaw.env.action_space import ActionMask, FactoredAction, get_action_mask
+from jackdaw.env.action_space import FactoredAction, get_action_mask
+from jackdaw.env.balatro_env import _action_mask_to_game, _compute_shop_splits
+from jackdaw.env.balatro_spec import balatro_game_spec
 from jackdaw.env.game_interface import DirectAdapter
-from jackdaw.env.observation import Observation, encode_observation
+from jackdaw.env.game_spec import GameActionMask, GameObservation
+from jackdaw.env.observation import encode_observation
 from jackdaw.env.training.ppo import (
     EvalMetrics,
     PPOConfig,
@@ -33,6 +36,8 @@ from jackdaw.env.training.ppo import (
 # Minimal config for fast tests
 # ---------------------------------------------------------------------------
 
+_SPEC = balatro_game_spec()
+
 FAST_CONFIG = PPOConfig(
     num_envs=2,
     num_steps=4,
@@ -47,6 +52,7 @@ FAST_CONFIG = PPOConfig(
     num_heads=2,
     num_layers=1,
     device="cpu",
+    game_spec=_SPEC,
 )
 
 
@@ -71,17 +77,17 @@ def test_resolve_device_auto():
 
 class TestSyncVectorEnv:
     def test_reset_returns_correct_count(self):
-        env_fns = [_make_env(["b_red"], 1, 100, i) for i in range(3)]
+        env_fns = [_make_env(["b_red"], [1], 100, i) for i in range(3)]
         vec_env = SyncVectorEnv(env_fns)
         results = vec_env.reset()
         assert len(results) == 3
         for obs, mask, info in results:
-            assert isinstance(obs, Observation)
-            assert isinstance(mask, ActionMask)
+            assert isinstance(obs, GameObservation)
+            assert isinstance(mask, GameActionMask)
             assert isinstance(info, dict)
 
     def test_step_returns_correct_shapes(self):
-        env_fns = [_make_env(["b_red"], 1, 100, i) for i in range(2)]
+        env_fns = [_make_env(["b_red"], [1], 100, i) for i in range(2)]
         vec_env = SyncVectorEnv(env_fns)
         reset_data = vec_env.reset()
 
@@ -108,19 +114,19 @@ class TestSyncVectorEnv:
 
 class TestEnvInstance:
     def test_reset_and_step(self):
-        env = _make_env(["b_red"], 1, 100, 0)()
+        env = _make_env(["b_red"], [1], 100, 0)()
         obs, mask, info = env.reset()
-        assert isinstance(obs, Observation)
+        assert isinstance(obs, GameObservation)
         assert obs.global_context.shape[0] > 0
 
         legal_types = np.nonzero(mask.type_mask)[0]
         action = FactoredAction(action_type=int(legal_types[0]))
         obs2, reward, term, trunc, mask2, info2 = env.step(action)
-        assert isinstance(obs2, Observation)
+        assert isinstance(obs2, GameObservation)
         assert isinstance(reward, float)
 
     def test_episode_tracking(self):
-        env = _make_env(["b_red"], 1, 100, 0)()
+        env = _make_env(["b_red"], [1], 100, 0)()
         env.reset()
         assert env.episode_return == 0.0
         assert env.episode_length == 0
@@ -139,19 +145,15 @@ class TestRolloutBuffer:
         gs = adapter.raw_state
         obs = encode_observation(gs)
         mask = get_action_mask(gs)
+        game_obs = obs.to_game_observation()
+        game_mask = _action_mask_to_game(mask)
 
-        obs_list = [obs] * num_envs
-        masks = [mask] * num_envs
+        obs_list = [game_obs] * num_envs
+        masks = [game_mask] * num_envs
         legal_types = np.nonzero(mask.type_mask)[0]
         actions = [FactoredAction(action_type=int(legal_types[0]))] * num_envs
 
-        shop_splits = [
-            (
-                len(gs.get("shop_cards", [])),
-                len(gs.get("shop_vouchers", [])),
-                len(gs.get("shop_boosters", [])),
-            )
-        ] * num_envs
+        shop_splits = [_compute_shop_splits(gs)] * num_envs
 
         return StepData(
             obs=obs_list,
@@ -198,7 +200,7 @@ class TestRolloutBuffer:
         last_done = np.zeros(num_envs, dtype=np.bool_)
         buffer.compute_returns(last_value, last_done, gamma=0.99, gae_lambda=0.95)
 
-        batches = list(buffer.get_batches(num_minibatches, torch.device("cpu")))
+        batches = list(buffer.get_batches(num_minibatches, torch.device("cpu"), game_spec=_SPEC))
         assert len(batches) == num_minibatches
 
         total_samples = sum(len(mb.actions) for mb in batches)
@@ -338,14 +340,14 @@ class TestPPOTrainer:
 
 class TestPPOConfig:
     def test_defaults(self):
-        cfg = PPOConfig()
+        cfg = PPOConfig(game_spec=_SPEC)
         assert cfg.num_envs == 8
         assert cfg.total_timesteps == 1_000_000
         assert cfg.clip_coef == 0.2
         assert cfg.device == "auto"
 
     def test_custom(self):
-        cfg = PPOConfig(num_envs=4, learning_rate=1e-3, device="cpu")
+        cfg = PPOConfig(num_envs=4, learning_rate=1e-3, device="cpu", game_spec=_SPEC)
         assert cfg.num_envs == 4
         assert cfg.learning_rate == 1e-3
         assert cfg.device == "cpu"
@@ -380,6 +382,7 @@ def test_train_ppo_10k_smoke():
         device="cpu",
         back_keys="b_red",
         stake=1,
+        game_spec=_SPEC,
     )
 
     result = train_ppo(config)

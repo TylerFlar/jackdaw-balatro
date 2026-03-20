@@ -595,6 +595,8 @@ class TestPolicySmokeTest:
     """Verify BalatroPolicy trains without NaN and produces valid actions."""
 
     def test_ppo_training_smoke(self):
+        from jackdaw.env.balatro_env import _action_mask_to_game, _compute_shop_splits
+        from jackdaw.env.balatro_spec import balatro_game_spec
         from jackdaw.env.observation import encode_observation
         from jackdaw.env.policy.policy import (
             BalatroPolicy,
@@ -602,8 +604,9 @@ class TestPolicySmokeTest:
             collate_policy_inputs,
         )
 
+        spec = balatro_game_spec()
         # Create a small policy
-        policy = BalatroPolicy(embed_dim=32, num_heads=2, num_layers=1, dropout=0.0)
+        policy = BalatroPolicy(spec, embed_dim=32, num_heads=2, num_layers=1, dropout=0.0)
         optimizer = torch.optim.Adam(policy.parameters(), lr=1e-3)
 
         # Collect some real game states
@@ -629,7 +632,12 @@ class TestPolicySmokeTest:
 
             obs = encode_observation(gs)
             mask = get_action_mask(gs)
-            pi = PolicyInput(obs=obs, action_mask=mask)
+            game_obs = obs.to_game_observation()
+            game_mask = _action_mask_to_game(mask)
+            pi = PolicyInput(
+                obs=game_obs, action_mask=game_mask,
+                shop_splits=_compute_shop_splits(gs),
+            )
             policy_inputs.append(pi)
 
             info = {"raw_state": gs, "legal_actions": legal}
@@ -650,7 +658,7 @@ class TestPolicySmokeTest:
 
         # Run 10 PPO-like training steps
         for step in range(10):
-            batch = collate_policy_inputs(inputs, device="cpu")
+            batch = collate_policy_inputs(inputs, spec, device="cpu")
             log_probs, entropy, values = policy.evaluate_actions(batch, acts)
 
             # Fake advantages
@@ -677,13 +685,16 @@ class TestPolicySmokeTest:
             optimizer.step()
 
     def test_sample_action_produces_valid_actions(self):
+        from jackdaw.env.balatro_env import _action_mask_to_game, _compute_shop_splits
+        from jackdaw.env.balatro_spec import balatro_game_spec
         from jackdaw.env.policy.policy import (
             BalatroPolicy,
             PolicyInput,
             collate_policy_inputs,
         )
 
-        policy = BalatroPolicy(embed_dim=32, num_heads=2, num_layers=1, dropout=0.0)
+        spec = balatro_game_spec()
+        policy = BalatroPolicy(spec, embed_dim=32, num_heads=2, num_layers=1, dropout=0.0)
         policy.eval()
 
         # Get a real game state
@@ -698,8 +709,13 @@ class TestPolicySmokeTest:
 
         obs = encode_observation(gs)
         mask = get_action_mask(gs)
-        pi = PolicyInput(obs=obs, action_mask=mask)
-        batch = collate_policy_inputs([pi], device="cpu")
+        game_obs = obs.to_game_observation()
+        game_mask = _action_mask_to_game(mask)
+        pi = PolicyInput(
+            obs=game_obs, action_mask=game_mask,
+            shop_splits=_compute_shop_splits(gs),
+        )
+        batch = collate_policy_inputs([pi], spec, device="cpu")
 
         with torch.no_grad():
             actions, log_probs, _ = policy.sample_action(batch)

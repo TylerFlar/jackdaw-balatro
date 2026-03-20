@@ -1,9 +1,11 @@
 """Factored action heads: type -> entity -> card selection + value.
 
-The action type head produces logits over 21 action types.
+The action type head produces logits over action types.
 The entity head uses pointer-network attention to select a target entity.
 The card head produces independent Bernoulli logits for hand card selection.
 The value head estimates the state value for PPO.
+
+Architecture is fully parametric — driven by :class:`~jackdaw.env.game_spec.GameSpec`.
 """
 
 from __future__ import annotations
@@ -13,29 +15,33 @@ import math
 import torch
 import torch.nn as nn
 
-from jackdaw.env.action_space import NUM_ACTION_TYPES
-
-# Action types that require an entity target (indices 8-18).
-NEEDS_ENTITY: frozenset[int] = frozenset(range(8, 19))
-
-# Action types that require card targets.
-NEEDS_CARDS: frozenset[int] = frozenset({0, 1, 11})
+from jackdaw.env.game_spec import GameSpec
 
 
 class ActionHeads(nn.Module):
-    """Factored action heads for the Balatro policy."""
+    """Factored action heads for the policy.
+
+    Parameters
+    ----------
+    game_spec:
+        Game specification defining action types and their entity/card requirements.
+    embed_dim:
+        Input/output embedding dimension.
+    """
 
     def __init__(
         self,
+        game_spec: GameSpec,
         embed_dim: int = 128,
-        num_action_types: int = NUM_ACTION_TYPES,
     ) -> None:
         super().__init__()
         self.embed_dim = embed_dim
-        self.num_action_types = num_action_types
+        self.num_action_types = game_spec.num_action_types
+        self.needs_entity = game_spec.needs_entity_set
+        self.needs_cards = game_spec.needs_cards_set
 
         # Type head: global_repr -> type logits
-        self.type_head = nn.Linear(embed_dim, num_action_types)
+        self.type_head = nn.Linear(embed_dim, self.num_action_types)
 
         # Entity pointer: scaled dot-product between query (from global) and
         # keys (from entity reprs).
@@ -66,11 +72,11 @@ class ActionHeads(nn.Module):
         Parameters
         ----------
         global_repr : ``(B, E)``
-        type_mask : ``(B, 21)`` bool
+        type_mask : ``(B, num_action_types)`` bool
 
         Returns
         -------
-        logits : ``(B, 21)`` with ``-1e9`` for invalid types.
+        logits : ``(B, num_action_types)`` with ``-1e9`` for invalid types.
         """
         logits = self.type_head(global_repr)
         return logits.masked_fill(~type_mask, -1e9)

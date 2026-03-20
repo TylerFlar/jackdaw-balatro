@@ -207,3 +207,6 @@ __marimo__/
 
 # Balatro
 balatro_source/
+runs/
+logs/
+checkpoints/
