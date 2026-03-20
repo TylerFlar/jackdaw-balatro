@@ -35,6 +35,15 @@ from jackdaw.env.policy.policy import (
 )
 from jackdaw.env.rewards import DenseRewardWrapper
 
+
+def _compute_shop_splits(gs: dict[str, Any]) -> tuple[int, int, int]:
+    """Compute ``(n_shop_cards, n_vouchers, n_boosters)`` from a game state."""
+    return (
+        len(gs.get("shop_cards", [])),
+        len(gs.get("shop_vouchers", [])),
+        len(gs.get("shop_boosters", [])),
+    )
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -300,6 +309,7 @@ class StepData:
 
     obs: list[Observation]
     masks: list[ActionMask]
+    shop_splits: list[tuple[int, int, int]]
     actions: list[FactoredAction]
     log_probs: torch.Tensor  # (num_envs,) total log prob
     values: torch.Tensor  # (num_envs,)
@@ -393,6 +403,7 @@ class RolloutBuffer:
         # Flatten all data
         all_obs: list[Observation] = []
         all_masks: list[ActionMask] = []
+        all_shop_splits: list[tuple[int, int, int]] = []
         all_actions: list[FactoredAction] = []
         all_log_probs: list[torch.Tensor] = []
         all_values: list[torch.Tensor] = []
@@ -401,6 +412,7 @@ class RolloutBuffer:
             for env_idx in range(self.num_envs):
                 all_obs.append(step.obs[env_idx])
                 all_masks.append(step.masks[env_idx])
+                all_shop_splits.append(step.shop_splits[env_idx])
                 all_actions.append(step.actions[env_idx])
                 all_log_probs.append(step.log_probs[env_idx])
                 all_values.append(step.values[env_idx])
@@ -416,8 +428,12 @@ class RolloutBuffer:
 
             mb_obs = [all_obs[i] for i in mb_indices]
             mb_masks = [all_masks[i] for i in mb_indices]
+            mb_shop_splits = [all_shop_splits[i] for i in mb_indices]
             mb_actions = [all_actions[i] for i in mb_indices]
-            mb_policy_inputs = [PolicyInput(obs=o, action_mask=m) for o, m in zip(mb_obs, mb_masks)]
+            mb_policy_inputs = [
+                PolicyInput(obs=o, action_mask=m, shop_splits=ss)
+                for o, m, ss in zip(mb_obs, mb_masks, mb_shop_splits)
+            ]
 
             batch = collate_policy_inputs(mb_policy_inputs, device=device)
 
@@ -568,19 +584,25 @@ class PPOTrainer:
         self.policy.eval()
 
         for step in range(cfg.num_steps):
+            # Compute shop splits from game state
+            step_shop_splits = [
+                _compute_shop_splits(info["raw_state"])
+                for info in self._current_infos
+            ]
+
             # Build policy inputs from current observations
             policy_inputs = [
-                PolicyInput(obs=obs, action_mask=mask)
-                for obs, mask in zip(self._current_obs, self._current_masks)
+                PolicyInput(obs=obs, action_mask=mask, shop_splits=ss)
+                for obs, mask, ss in zip(
+                    self._current_obs, self._current_masks, step_shop_splits
+                )
             ]
             batch = collate_policy_inputs(policy_inputs, device=self.device)
 
-            # Sample actions
+            # Sample actions (also returns value estimates)
             with torch.no_grad():
-                actions, log_probs_dict = self.policy.sample_action(batch)
-                # Get values
-                out = self.policy.forward(batch)
-                values = out["value"].squeeze(-1).cpu()
+                actions, log_probs_dict, values = self.policy.sample_action(batch)
+                values = values.cpu()
 
             total_log_probs = log_probs_dict["total"].cpu()
 
@@ -598,6 +620,7 @@ class PPOTrainer:
                 StepData(
                     obs=self._current_obs,
                     masks=self._current_masks,
+                    shop_splits=step_shop_splits,
                     actions=actions,
                     log_probs=total_log_probs,
                     values=values,
@@ -614,9 +637,15 @@ class PPOTrainer:
 
         # Compute bootstrap value for last step
         with torch.no_grad():
+            bootstrap_shop_splits = [
+                _compute_shop_splits(info["raw_state"])
+                for info in self._current_infos
+            ]
             policy_inputs = [
-                PolicyInput(obs=obs, action_mask=mask)
-                for obs, mask in zip(self._current_obs, self._current_masks)
+                PolicyInput(obs=obs, action_mask=mask, shop_splits=ss)
+                for obs, mask, ss in zip(
+                    self._current_obs, self._current_masks, bootstrap_shop_splits
+                )
             ]
             batch = collate_policy_inputs(policy_inputs, device=self.device)
             out = self.policy.forward(batch)
@@ -792,12 +821,16 @@ class _PolicyAgent:
     def act(self, obs: dict, action_mask: ActionMask, info: dict) -> FactoredAction:
         gs = info["raw_state"]
         encoded_obs = encode_observation(gs)
-        policy_input = PolicyInput(obs=encoded_obs, action_mask=action_mask)
+        policy_input = PolicyInput(
+            obs=encoded_obs,
+            action_mask=action_mask,
+            shop_splits=_compute_shop_splits(gs),
+        )
         batch = collate_policy_inputs([policy_input], device=self._device)
 
         self._policy.eval()
         with torch.no_grad():
-            actions, _ = self._policy.sample_action(batch)
+            actions, _, _ = self._policy.sample_action(batch)
         return actions[0]
 
 

@@ -409,10 +409,17 @@ def profile_training_step() -> dict[str, float]:
     # GAE computation
     with torch.no_grad():
         from jackdaw.env.policy.policy import PolicyInput, collate_policy_inputs
+        from jackdaw.env.training.ppo import _compute_shop_splits
 
         policy_inputs = [
-            PolicyInput(obs=obs, action_mask=mask)
-            for obs, mask in zip(trainer._current_obs, trainer._current_masks)
+            PolicyInput(
+                obs=obs,
+                action_mask=mask,
+                shop_splits=_compute_shop_splits(info["raw_state"]),
+            )
+            for obs, mask, info in zip(
+                trainer._current_obs, trainer._current_masks, trainer._current_infos
+            )
         ]
         batch = collate_policy_inputs(policy_inputs, device=trainer.device)
         out = trainer.policy.forward(batch)

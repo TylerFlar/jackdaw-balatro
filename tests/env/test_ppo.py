@@ -5,6 +5,7 @@ Tests the mechanics only — NOT convergence (too slow).
 
 from __future__ import annotations
 
+import math
 import tempfile
 from pathlib import Path
 
@@ -15,7 +16,6 @@ import torch
 from jackdaw.env.action_space import ActionMask, FactoredAction, get_action_mask
 from jackdaw.env.game_interface import DirectAdapter
 from jackdaw.env.observation import Observation, encode_observation
-from jackdaw.env.policy.policy import BalatroPolicy, PolicyInput, collate_policy_inputs
 from jackdaw.env.training.ppo import (
     EvalMetrics,
     PPOConfig,
@@ -24,7 +24,6 @@ from jackdaw.env.training.ppo import (
     StepData,
     SyncVectorEnv,
     TrainResult,
-    _EnvInstance,
     _make_env,
     _resolve_device,
     train_ppo,
@@ -146,9 +145,18 @@ class TestRolloutBuffer:
         legal_types = np.nonzero(mask.type_mask)[0]
         actions = [FactoredAction(action_type=int(legal_types[0]))] * num_envs
 
+        shop_splits = [
+            (
+                len(gs.get("shop_cards", [])),
+                len(gs.get("shop_vouchers", [])),
+                len(gs.get("shop_boosters", [])),
+            )
+        ] * num_envs
+
         return StepData(
             obs=obs_list,
             masks=masks,
+            shop_splits=shop_splits,
             actions=actions,
             log_probs=torch.randn(num_envs),
             values=torch.randn(num_envs),
@@ -341,3 +349,61 @@ class TestPPOConfig:
         assert cfg.num_envs == 4
         assert cfg.learning_rate == 1e-3
         assert cfg.device == "cpu"
+
+
+# ---------------------------------------------------------------------------
+# Full pipeline smoke test — 10K timesteps
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.slow
+def test_train_ppo_10k_smoke():
+    """Full PPO training pipeline runs without crashing for 10K steps.
+
+    Exercises the ENTIRE pipeline end-to-end: env reset, observation
+    encoding, action masking, policy forward pass, action sampling,
+    engine step, reward computation, GAE, PPO update, gradient clipping.
+    """
+    config = PPOConfig(
+        num_envs=2,
+        total_timesteps=10_000,
+        num_steps=64,
+        num_minibatches=2,
+        update_epochs=2,
+        embed_dim=32,
+        num_heads=2,
+        num_layers=1,
+        learning_rate=3e-4,
+        log_interval=1,
+        eval_interval=999_999,   # effectively skip eval
+        save_interval=999_999,   # effectively skip checkpointing
+        device="cpu",
+        back_keys="b_red",
+        stake=1,
+    )
+
+    result = train_ppo(config)
+
+    # Basic sanity checks — actual steps may be slightly under total_timesteps
+    # due to integer division of timesteps by (num_envs * num_steps)
+    assert result.total_timesteps >= 9_000
+    assert result.total_updates > 0
+    assert result.total_episodes > 0
+    assert result.wall_time > 0
+    assert len(result.log_history) > 0
+
+    # Verify no NaN/Inf in logged metrics
+    for entry in result.log_history:
+        for key, value in entry.items():
+            if isinstance(value, float):
+                assert not math.isnan(value), (
+                    f"NaN in metric {key} at update {entry.get('update')}"
+                )
+                assert not math.isinf(value), (
+                    f"Inf in metric {key} at update {entry.get('update')}"
+                )
+
+    # Verify loss values are reasonable (not exploding)
+    last_entry = result.log_history[-1]
+    assert abs(last_entry["policy_loss"]) < 100, "Policy loss exploded"
+    assert abs(last_entry["value_loss"]) < 1000, "Value loss exploded"

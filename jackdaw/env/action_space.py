@@ -47,6 +47,9 @@ from jackdaw.engine.actions import (
     GamePhase,
 )
 from jackdaw.engine.actions import (
+    BuyAndUse as EngineBuyAndUse,
+)
+from jackdaw.engine.actions import (
     BuyCard as EngineBuyCard,
 )
 from jackdaw.engine.actions import (
@@ -722,6 +725,15 @@ def engine_action_to_factored(
             entity_target=action.shop_index,
         )
 
+    if isinstance(action, EngineBuyAndUse):
+        # Composite action: buy consumable + use immediately.
+        # The factored space decomposes this into BuyCard + UseConsumable.
+        # Map to BuyCard — the RL agent can UseConsumable in a later step.
+        return FactoredAction(
+            action_type=ActionType.BuyCard,
+            entity_target=action.shop_index,
+        )
+
     if isinstance(action, EngineSellCard):
         if action.area == "jokers":
             return FactoredAction(
@@ -767,6 +779,11 @@ def engine_action_to_factored(
         return FactoredAction(action_type=ActionType.SortHandSuit)
 
     if isinstance(action, EngineReorderJokers):
+        if not action.new_order:
+            # Marker from get_legal_actions — "joker reordering is available".
+            # Map to SwapJokersLeft marker (entity_target=None), matching how
+            # PlayHand(card_indices=()) → PlayHand(card_target=None).
+            return FactoredAction(action_type=ActionType.SwapJokersLeft)
         return _permutation_to_swap(
             action.new_order,
             ActionType.SwapJokersLeft,
@@ -774,6 +791,8 @@ def engine_action_to_factored(
         )
 
     if isinstance(action, EngineReorderHand):
+        if not action.new_order:
+            return FactoredAction(action_type=ActionType.SwapHandLeft)
         return _permutation_to_swap(
             action.new_order,
             ActionType.SwapHandLeft,
@@ -783,40 +802,68 @@ def engine_action_to_factored(
     raise ValueError(f"Unknown engine action type: {type(action).__name__}")
 
 
+def _decompose_permutation(perm: tuple[int, ...]) -> tuple[int, int]:
+    """Find the first adjacent swap needed to sort a permutation.
+
+    Uses a single pass of bubble sort: find the leftmost position ``i``
+    where ``perm[i] > perm[i+1]`` and return ``(i, i+1)``.  If no such
+    position exists, scan for any out-of-place element and swap it toward
+    its target.
+
+    Returns ``(lower_idx, higher_idx)`` of the swap to perform.
+    """
+    n = len(perm)
+    # Bubble-sort pass: find leftmost inversion
+    for i in range(n - 1):
+        if perm[i] > perm[i + 1]:
+            return (i, i + 1)
+    # No inversion in bubble order — find first out-of-place element
+    for i in range(n):
+        if perm[i] != i:
+            # Move it toward its target
+            target = perm[i]
+            if target > i:
+                return (i, i + 1)
+            else:
+                return (i - 1, i)
+    # Identity permutation — shouldn't happen, but return first pair
+    return (0, 1)
+
+
 def _permutation_to_swap(
     new_order: tuple[int, ...],
     left_type: ActionType,
     right_type: ActionType,
 ) -> FactoredAction:
-    """Convert a permutation to a single adjacent swap, if possible.
+    """Convert a permutation to the first adjacent swap needed to reach it.
 
-    Raises ValueError if the permutation isn't a single adjacent swap.
+    For single adjacent swaps, returns the exact swap.  For complex
+    permutations (multi-element rearrangements), decomposes into the
+    first adjacent swap of a bubble-sort pass toward the target order.
+
+    The RL agent achieves arbitrary reorderings through repeated
+    single-swap actions, matching the balatrobot ``rearrange`` API.
+
+    Empty-tuple markers are handled by the caller before reaching here.
     """
-    if not new_order:
-        raise ValueError("Empty permutation cannot be converted to swap")
     n = len(new_order)
-    list(range(n))
 
     # Find positions that differ from identity
     diffs = [i for i in range(n) if new_order[i] != i]
-    if len(diffs) != 2:
-        raise ValueError(
-            f"Permutation {new_order} is not a single swap ({len(diffs)} positions differ)"
-        )
 
-    i, j = diffs
-    if abs(i - j) != 1:
-        raise ValueError(f"Permutation {new_order} is not an adjacent swap (positions {i} and {j})")
+    if len(diffs) == 0:
+        # Identity permutation — no-op, return first valid swap as fallback
+        if n >= 2:
+            return FactoredAction(action_type=left_type, entity_target=1)
+        raise ValueError("Single-element permutation cannot be swapped")
 
-    # Verify it's actually a swap
-    if new_order[i] != j or new_order[j] != i:
-        raise ValueError(f"Permutation {new_order} is not a swap at {i},{j}")
+    if len(diffs) == 2:
+        i, j = diffs
+        if abs(i - j) == 1 and new_order[i] == j and new_order[j] == i:
+            # Single adjacent swap — exact conversion
+            return FactoredAction(action_type=left_type, entity_target=j)
 
-    # The element at the higher index moved left, or the element at the
-    # lower index moved right — both describe the same swap.
-    # Convention: SwapLeft(idx=j) where j>i means "move element at j leftward"
-    # SwapRight(idx=i) where i<j means "move element at i rightward"
-    # We use the "moved" element perspective: element that ended up
-    # in a lower position → SwapLeft; element in higher position → SwapRight
-    # Use SwapLeft with the higher index (it moved left)
-    return FactoredAction(action_type=left_type, entity_target=j)
+    # Complex permutation: decompose into first adjacent swap
+    lo, hi = _decompose_permutation(new_order)
+    # SwapLeft with the higher index (the element at hi moves left)
+    return FactoredAction(action_type=left_type, entity_target=hi)

@@ -20,6 +20,7 @@ import numpy as np
 
 from jackdaw.engine.actions import GamePhase
 from jackdaw.engine.card import Card
+from jackdaw.engine.consumables import can_use_consumable
 from jackdaw.engine.data.hands import HandType
 from jackdaw.engine.hand_levels import HandLevels
 
@@ -160,6 +161,45 @@ _CARD_SET_IDX: dict[str, int] = {
 _HAND_TYPES: list[HandType] = list(HandType)
 NUM_HAND_TYPES: int = len(_HAND_TYPES)  # 12
 
+# Voucher keys in canonical order for binary vector
+_VOUCHER_KEYS: list[str] = [
+    "v_antimatter", "v_blank", "v_clearance_sale", "v_crystal_ball",
+    "v_directors_cut", "v_glow_up", "v_grabber", "v_hieroglyph",
+    "v_hone", "v_illusion", "v_liquidation", "v_magic_trick",
+    "v_money_tree", "v_nacho_tong", "v_observatory", "v_omen_globe",
+    "v_overstock_norm", "v_overstock_plus", "v_paint_brush", "v_palette",
+    "v_petroglyph", "v_planet_merchant", "v_planet_tycoon",
+    "v_recyclomancy", "v_reroll_glut", "v_reroll_surplus", "v_retcon",
+    "v_seed_money", "v_tarot_merchant", "v_tarot_tycoon", "v_telescope",
+    "v_wasteful",
+]
+NUM_VOUCHERS: int = len(_VOUCHER_KEYS)  # 32
+_VOUCHER_IDX: dict[str, int] = {k: i for i, k in enumerate(_VOUCHER_KEYS)}
+
+# Tag keys in canonical order for binary vector
+_TAG_KEYS: list[str] = [
+    "tag_boss", "tag_buffoon", "tag_charm", "tag_coupon", "tag_d_six",
+    "tag_double", "tag_economy", "tag_ethereal", "tag_foil", "tag_garbage",
+    "tag_handy", "tag_holo", "tag_investment", "tag_juggle", "tag_meteor",
+    "tag_negative", "tag_orbital", "tag_polychrome", "tag_rare", "tag_skip",
+    "tag_standard", "tag_top_up", "tag_uncommon", "tag_voucher",
+]
+NUM_TAGS: int = len(_TAG_KEYS)  # 24
+_TAG_IDX: dict[str, int] = {k: i for i, k in enumerate(_TAG_KEYS)}
+
+# Suit/rank indices for discard pile histogram (4 suits × 13 ranks = 52)
+NUM_SUITS: int = 4
+NUM_RANKS: int = 13
+D_DISCARD_HISTOGRAM: int = NUM_SUITS * NUM_RANKS  # 52
+
+# Boss blind debuff categories (for one-hot encoding)
+_DEBUFF_SUIT_IDX: dict[str, int] = {
+    "Hearts": 0,
+    "Diamonds": 1,
+    "Clubs": 2,
+    "Spades": 3,
+}
+
 # ---------------------------------------------------------------------------
 # Feature dimensions
 # ---------------------------------------------------------------------------
@@ -168,8 +208,19 @@ D_PLAYING_CARD: int = 14
 D_JOKER: int = 15
 D_CONSUMABLE: int = 7
 D_SHOP: int = 9
-# Global: 6 phase + 4 blind_on_deck + 20 scalars + 12*5 hand_levels = 90
-D_GLOBAL: int = 6 + 4 + 20 + NUM_HAND_TYPES * 5
+# Global layout:
+#   [0:6]      phase one-hot (6)
+#   [6:10]     blind_on_deck one-hot (4)
+#   [10:30]    scalar features (20)
+#   [30:90]    hand_levels 12×5 (60)
+#   [90:122]   vouchers_owned binary (32)
+#   [122:130]  blind_effect features (8)
+#   [130:133]  round_position one-hot (3)
+#   [133:135]  round_progress (2)
+#   [135:159]  tags binary (24)
+#   [159:211]  discard_pile histogram (52)
+_D_BASE: int = 6 + 4 + 20 + NUM_HAND_TYPES * 5  # 90
+D_GLOBAL: int = _D_BASE + NUM_VOUCHERS + 8 + 3 + 2 + NUM_TAGS + D_DISCARD_HISTOGRAM  # 211
 
 
 # ---------------------------------------------------------------------------
@@ -363,7 +414,6 @@ def encode_consumable(
     v[2] = _log_scale(card.sell_cost)
 
     # can_use — check without highlighting (conservative: some need targets)
-    from jackdaw.engine.consumables import can_use_consumable
 
     hand_cards: list[Card] = gs.get("hand", [])
     jokers: list[Card] = gs.get("jokers", [])
@@ -445,13 +495,19 @@ def encode_shop_item(
 def encode_global_context(gs: dict[str, Any]) -> np.ndarray:
     """Encode the fixed-size global context vector.
 
-    Returns shape ``(D_GLOBAL,)`` float32 array.
+    Returns shape ``(D_GLOBAL,)`` float32 array (211 features).
 
     Layout:
-        [0:6]    phase one-hot (6)
-        [6:10]   blind_on_deck one-hot (4)
-        [10:30]  scalar features (20)
-        [30:90]  hand_levels 12 x (level, chips, mult, played, visible) = 60
+        [0:6]      phase one-hot (6)
+        [6:10]     blind_on_deck one-hot (4)
+        [10:30]    scalar features (20)
+        [30:90]    hand_levels 12 × 5 (60)
+        [90:122]   vouchers_owned binary (32)
+        [122:130]  blind_effect: boss, disabled, mult, debuff_suit(4), debuff_face (8)
+        [130:133]  round_position one-hot: small/big/boss (3)
+        [133:135]  round_progress: hands_played, discards_used (2)
+        [135:159]  awarded_tags binary (24)
+        [159:211]  discard_pile suit×rank histogram (52)
     """
     v = np.zeros(D_GLOBAL, dtype=np.float32)
 
@@ -470,64 +526,40 @@ def encode_global_context(gs: dict[str, Any]) -> np.ndarray:
     bod_idx = _BLIND_ON_DECK_IDX.get(bod, 0)
     v[6 + bod_idx] = 1.0
 
-    # Scalar features [10:30]
+    # Scalar features [10:30] — inlined _log_scale for speed
+    _ls = _log_scale  # local alias avoids global lookup per call
     rr = gs.get("round_resets", {})
     cr = gs.get("current_round", {})
     blind = gs.get("blind")
     blind_chips = getattr(blind, "chips", 0) if blind else 0
     chips = gs.get("chips", 0)
-
-    i = 10
-    v[i] = rr.get("ante", 1) / 8.0
-    i += 1  # 10: ante
-    v[i] = gs.get("round", 0) / 30.0
-    i += 1  # 11: round
-    v[i] = _log_scale(gs.get("dollars", 0))
-    i += 1  # 12: dollars
-    v[i] = cr.get("hands_left", 0) / 10.0
-    i += 1  # 13: hands_left
-    v[i] = cr.get("discards_left", 0) / 10.0
-    i += 1  # 14: discards_left
-    v[i] = gs.get("hand_size", 8) / 15.0
-    i += 1  # 15: hand_size
-    v[i] = gs.get("joker_slots", 5) / 10.0
-    i += 1  # 16: joker_slots
-    v[i] = gs.get("consumable_slots", 2) / 5.0
-    i += 1  # 17: consumable_slots
-    v[i] = _log_scale(blind_chips)
-    i += 1  # 18: blind_chips_required
-    v[i] = _log_scale(chips)
-    i += 1  # 19: chips_scored
-    # Score fraction (clamp to avoid div-by-zero)
-    v[i] = min(chips / max(blind_chips, 1), 10.0) / 10.0
-    i += 1  # 20: score_fraction
-    v[i] = cr.get("reroll_cost", 5) / 10.0
-    i += 1  # 21: reroll_cost
-    v[i] = min(cr.get("free_rerolls", 0), 5) / 5.0
-    i += 1  # 22: free_rerolls
-    v[i] = gs.get("interest_cap", 25) / 100.0
-    i += 1  # 23: interest_cap
-    v[i] = gs.get("discount_percent", 0) / 50.0
-    i += 1  # 24: discount_percent
-    v[i] = gs.get("skips", 0) / 10.0
-    i += 1  # 25: skips
-    # Boss blind key ID
     blind_key = getattr(blind, "key", "") if blind else ""
-    v[i] = center_key_id(blind_key) / max(NUM_CENTER_KEYS, 1)
-    i += 1  # 26: boss_blind_key_id
-    v[i] = _log_scale(len(gs.get("deck", [])))
-    i += 1  # 27: deck_cards_remaining
-    v[i] = _log_scale(len(gs.get("discard_pile", [])))
-    i += 1  # 28: discard_pile_size
-    # Meta joker flags
-    flags = (
+
+    v[10] = rr.get("ante", 1) / 8.0
+    v[11] = gs.get("round", 0) / 30.0
+    v[12] = _ls(gs.get("dollars", 0))
+    v[13] = cr.get("hands_left", 0) / 10.0
+    v[14] = cr.get("discards_left", 0) / 10.0
+    v[15] = gs.get("hand_size", 8) / 15.0
+    v[16] = gs.get("joker_slots", 5) / 10.0
+    v[17] = gs.get("consumable_slots", 2) / 5.0
+    v[18] = _ls(blind_chips)
+    v[19] = _ls(chips)
+    v[20] = min(chips / max(blind_chips, 1), 10.0) / 10.0
+    v[21] = cr.get("reroll_cost", 5) / 10.0
+    v[22] = min(cr.get("free_rerolls", 0), 5) / 5.0
+    v[23] = gs.get("interest_cap", 25) / 100.0
+    v[24] = gs.get("discount_percent", 0) / 50.0
+    v[25] = gs.get("skips", 0) / 10.0
+    v[26] = center_key_id(blind_key) / max(NUM_CENTER_KEYS, 1)
+    v[27] = _ls(len(gs.get("deck", [])))
+    v[28] = _ls(len(gs.get("discard_pile", [])))
+    v[29] = (
         float(bool(gs.get("four_fingers", 0)))
         + float(bool(gs.get("shortcut", 0))) * 2
         + float(bool(gs.get("smeared", 0))) * 4
         + float(bool(gs.get("splash", 0))) * 8
-    )
-    v[i] = flags / 15.0
-    i += 1  # 29: meta_flags_packed
+    ) / 15.0
 
     # Hand levels [30:90] — 12 hand types × 5 features
     hand_levels: HandLevels | None = gs.get("hand_levels")
@@ -541,6 +573,67 @@ def encode_global_context(gs: dict[str, Any]) -> np.ndarray:
             v[offset + 2] = _log_scale(hs.mult)
             v[offset + 3] = _log_scale(hs.played)
             v[offset + 4] = float(hs.visible)
+
+    # --- Vouchers owned [90:122] — 32-dim binary vector ---
+    used_vouchers = gs.get("used_vouchers", {})
+    vbase = _D_BASE  # 90
+    for vk, vi in _VOUCHER_IDX.items():
+        if used_vouchers.get(vk):
+            v[vbase + vi] = 1.0
+
+    # --- Blind effect features [122:130] — 8 dims ---
+    bbase = vbase + NUM_VOUCHERS  # 122
+    blind = gs.get("blind")
+    if blind is not None:
+        v[bbase + 0] = float(getattr(blind, "boss", False))
+        v[bbase + 1] = float(getattr(blind, "disabled", False))
+        v[bbase + 2] = getattr(blind, "mult", 1.0) / 4.0  # normalize (small=1, big=1.5, boss=2+)
+        # Debuff category: suit one-hot (4 dims) + face debuff (1 dim)
+        debuff_cfg = getattr(blind, "debuff_config", {}) or {}
+        suit = debuff_cfg.get("suit")
+        if suit and suit in _DEBUFF_SUIT_IDX:
+            v[bbase + 3 + _DEBUFF_SUIT_IDX[suit]] = 1.0
+        if debuff_cfg.get("is_face") == "face":
+            v[bbase + 7] = 1.0
+
+    # --- Round position [130:133] — 3-dim one-hot (which blind is current) ---
+    rbase = bbase + 8  # 130
+    rr = gs.get("round_resets", {})
+    blind_states = rr.get("blind_states", {})
+    for ri, bname in enumerate(("Small", "Big", "Boss")):
+        state = blind_states.get(bname, "")
+        if state in ("Current", "Select"):
+            v[rbase + ri] = 1.0
+            break  # only one can be active
+
+    # --- Round progress [133:135] — hands_played, discards_used this round ---
+    pbase = rbase + 3  # 133
+    cr = gs.get("current_round", {})
+    v[pbase + 0] = cr.get("hands_played", 0) / 10.0
+    v[pbase + 1] = cr.get("discards_used", 0) / 10.0
+
+    # --- Tags [135:159] — 24-dim binary vector of awarded tags ---
+    tbase = pbase + 2  # 135
+    awarded_tags = gs.get("awarded_tags", [])
+    for tag_entry in awarded_tags:
+        tag_key = tag_entry.get("key", "") if isinstance(tag_entry, dict) else ""
+        ti = _TAG_IDX.get(tag_key)
+        if ti is not None:
+            v[tbase + ti] = 1.0
+
+    # --- Discard pile histogram [159:211] — 52-dim (4 suits × 13 ranks) ---
+    dbase = tbase + NUM_TAGS  # 159
+    discard_pile: list = gs.get("discard_pile", [])
+    for card in discard_pile:
+        base = getattr(card, "base", None)
+        if base is None:
+            continue
+        suit_str = base.suit.value if hasattr(base.suit, "value") else str(base.suit)
+        rank_str = base.rank.value if hasattr(base.rank, "value") else str(base.rank)
+        si = _SUIT_IDX.get(suit_str)
+        ri_val = _RANK_IDX.get(rank_str)
+        if si is not None and ri_val is not None:
+            v[dbase + si * NUM_RANKS + ri_val] = 1.0
 
     return v
 

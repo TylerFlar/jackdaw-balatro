@@ -40,6 +40,7 @@ addopts = ["-v", "--tb=short", "-m", "not benchmark and not live"]
 markers = [
     "benchmark: performance benchmarks (deselect with -m 'not benchmark')",
     "live: requires a running balatrobot instance (deselect with -m 'not live')",
+    "slow: tests that take >10s (run with -m slow or include via -m 'not benchmark and not live')",
 ]
 
 [tool.ruff]

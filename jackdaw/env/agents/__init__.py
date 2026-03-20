@@ -30,6 +30,13 @@ from jackdaw.env.action_space import (
 from jackdaw.env.agents.heuristic import HeuristicAgent
 from jackdaw.env.game_interface import DirectAdapter, GameAdapter
 
+_SWAP_TYPES = frozenset({
+    ActionType.SwapHandLeft,
+    ActionType.SwapHandRight,
+    ActionType.SwapJokersLeft,
+    ActionType.SwapJokersRight,
+})
+
 # ---------------------------------------------------------------------------
 # Agent Protocol
 # ---------------------------------------------------------------------------
@@ -152,12 +159,17 @@ class EngineAgent:
 
         engine_action = self._agent(gs, legal_actions)
         try:
-            return engine_action_to_factored(engine_action, gs)
+            fa = engine_action_to_factored(engine_action, gs)
         except ValueError:
-            # Engine action can't be cleanly mapped (e.g. complex permutation,
-            # empty reorder). Fall back using RandomAgent logic.
-            fallback = RandomAgent()
-            return fallback.act(obs, action_mask, info)
+            fa = None
+
+        # Marker actions (e.g. swap with entity_target=None) can't be
+        # executed directly — fall back to RandomAgent.
+        if fa is None or (
+            fa.action_type in _SWAP_TYPES and fa.entity_target is None
+        ):
+            return RandomAgent().act(obs, action_mask, info)
+        return fa
 
 
 # ---------------------------------------------------------------------------

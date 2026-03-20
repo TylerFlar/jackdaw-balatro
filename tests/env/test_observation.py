@@ -107,8 +107,9 @@ class TestShapesAndDtypes:
         adapter = _make_adapter()
         obs = encode_observation(adapter.raw_state)
         assert obs.global_context.shape == (D_GLOBAL,)
-        # D_GLOBAL = 6 + 4 + 20 + 12*5 = 90
-        assert D_GLOBAL == 90
+        # D_GLOBAL = 90 base + 32 vouchers + 8 blind + 3 round_pos
+        #          + 2 round_progress + 24 tags + 52 discard_hist = 211
+        assert D_GLOBAL == 211
 
 
 # ---------------------------------------------------------------------------

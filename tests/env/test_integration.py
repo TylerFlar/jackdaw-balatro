@@ -12,7 +12,6 @@ End-to-end tests that exercise the full stack:
 from __future__ import annotations
 
 import math
-import random
 
 import numpy as np
 import pytest
@@ -25,8 +24,8 @@ from jackdaw.env.action_space import (
     factored_to_engine_action,
     get_action_mask,
 )
-from jackdaw.env.agents import HeuristicAgent, RandomAgent, evaluate_agent
-from jackdaw.env.game_interface import BridgeAdapter, DirectAdapter, GameState
+from jackdaw.env.agents import HeuristicAgent, RandomAgent
+from jackdaw.env.game_interface import BridgeAdapter, DirectAdapter
 from jackdaw.env.observation import (
     D_CONSUMABLE,
     D_GLOBAL,
@@ -97,7 +96,6 @@ def _run_episode_collecting(
             observations.append(obs)
 
             # Check mask consistency: every legal action type has mask True
-            legal_type_names = {type(a).__name__ for a in legal}
             mask_ok = True
             if mask.type_mask.sum() == 0 and legal:
                 mask_ok = False
@@ -139,9 +137,7 @@ class TestFullEpisodeDirectAdapter:
         adapter = DirectAdapter()
         adapter.reset(BACK, STAKE, SEED)
         agent = HeuristicAgent()
-        result = _run_episode_collecting(
-            adapter, agent, collect_obs=True, collect_rewards=True
-        )
+        result = _run_episode_collecting(adapter, agent, collect_obs=True, collect_rewards=True)
 
         # Episode must terminate
         assert result["done"] or result["won"], "Episode did not terminate"
@@ -448,7 +444,7 @@ class TestActionRoundtrip:
                     recovered = factored_to_engine_action(fa, gs)
 
                     # Compare the recovered action to the original
-                    assert type(engine_action) == type(recovered), (
+                    assert type(engine_action) is type(recovered), (
                         f"Type mismatch: {type(engine_action).__name__} "
                         f"!= {type(recovered).__name__}"
                     )
@@ -470,11 +466,8 @@ class TestActionRoundtrip:
     def test_specific_action_types(self):
         """Test roundtrip for specific action types that must be exact."""
         from jackdaw.engine.actions import (
-            CashOut,
             Discard,
-            NextRound,
             PlayHand,
-            Reroll,
             SelectBlind,
             SkipBlind,
             SortHand,
@@ -696,9 +689,11 @@ class TestPolicySmokeTest:
         # Get a real game state
         adapter = DirectAdapter()
         adapter.reset(BACK, STAKE, SEED)
-        adapter.step(factored_to_engine_action(
-            FactoredAction(action_type=ActionType.SelectBlind), adapter.raw_state
-        ))
+        adapter.step(
+            factored_to_engine_action(
+                FactoredAction(action_type=ActionType.SelectBlind), adapter.raw_state
+            )
+        )
         gs = adapter.raw_state
 
         obs = encode_observation(gs)
@@ -707,10 +702,515 @@ class TestPolicySmokeTest:
         batch = collate_policy_inputs([pi], device="cpu")
 
         with torch.no_grad():
-            actions, log_probs = policy.sample_action(batch)
+            actions, log_probs, _ = policy.sample_action(batch)
 
         assert len(actions) == 1
         fa = actions[0]
         assert isinstance(fa, FactoredAction)
         assert 0 <= fa.action_type < 21
         assert torch.isfinite(log_probs["total"]).all()
+
+
+# ---------------------------------------------------------------------------
+# (h) Full episode with RandomAgent — end-to-end pipeline validation
+# ---------------------------------------------------------------------------
+
+
+def _run_full_episode(adapter, agent, *, max_steps=MAX_STEPS, collect_rewards=False):
+    """Run a full episode returning rich diagnostics.
+
+    Returns dict with: steps, won, done, ante, observations, rewards,
+    reward_finite, masks_valid, action_conversions_ok.
+    """
+    agent.reset()
+    reward_wrapper = DenseRewardWrapper() if collect_rewards else None
+    if reward_wrapper:
+        reward_wrapper.reset()
+
+    gs = adapter.raw_state
+    steps = 0
+    obs_list: list[Observation] = []
+    rewards: list[float] = []
+    masks_valid: list[bool] = []
+    action_ok: list[bool] = []
+
+    for _ in range(max_steps):
+        if adapter.done:
+            break
+        phase = gs.get("phase")
+        if adapter.won and phase == GamePhase.SHOP:
+            break
+
+        legal = adapter.get_legal_actions()
+        if not legal:
+            break
+
+        # Observation
+        obs = encode_observation(gs)
+        obs_list.append(obs)
+
+        # Action mask
+        mask = get_action_mask(gs)
+        has_legal_type = mask.type_mask.sum() > 0
+        masks_valid.append(has_legal_type)
+
+        info = {"raw_state": gs, "legal_actions": legal}
+        fa = agent.act({}, mask, info)
+
+        # Action conversion
+        prev_gs = gs
+        try:
+            engine_action = factored_to_engine_action(fa, gs)
+            action_ok.append(True)
+        except ValueError:
+            action_ok.append(False)
+            break
+
+        adapter.step(engine_action)
+        gs = adapter.raw_state
+        steps += 1
+
+        if collect_rewards and reward_wrapper:
+            r = reward_wrapper.reward(prev_gs, fa, gs)
+            rewards.append(r)
+
+    rr = gs.get("round_resets", {})
+    return {
+        "steps": steps,
+        "won": adapter.won,
+        "done": adapter.done,
+        "ante": rr.get("ante", 1),
+        "observations": obs_list,
+        "rewards": rewards,
+        "masks_valid": masks_valid,
+        "action_ok": action_ok,
+    }
+
+
+class TestFullEpisodeRandomAgent:
+    """Run RandomAgent for 20 seeds — validates full pipeline end-to-end."""
+
+    N_SEEDS = 20
+
+    def _seeds(self):
+        return [f"RANDOM_E2E_{i}" for i in range(self.N_SEEDS)]
+
+    @pytest.mark.slow
+    def test_no_crashes(self):
+        """Primary goal: no crashes across 20 episodes."""
+        for seed in self._seeds():
+            adapter = DirectAdapter()
+            adapter.reset(BACK, STAKE, seed)
+            agent = RandomAgent()
+            result = _run_full_episode(adapter, agent)
+            assert result["steps"] > 0, f"seed={seed}: zero steps"
+
+    @pytest.mark.slow
+    def test_observations_valid(self):
+        """Every observation has correct shapes and no NaN."""
+        for seed in self._seeds():
+            adapter = DirectAdapter()
+            adapter.reset(BACK, STAKE, seed)
+            agent = RandomAgent()
+            result = _run_full_episode(adapter, agent)
+
+            for i, obs in enumerate(result["observations"]):
+                assert obs.global_context.shape == (D_GLOBAL,), (
+                    f"seed={seed} step={i}: bad global_context shape"
+                )
+                assert np.isfinite(obs.global_context).all(), (
+                    f"seed={seed} step={i}: NaN in global_context"
+                )
+                if obs.hand_cards.shape[0] > 0:
+                    assert obs.hand_cards.shape[1] == D_PLAYING_CARD
+                    assert np.isfinite(obs.hand_cards).all()
+                if obs.jokers.shape[0] > 0:
+                    assert obs.jokers.shape[1] == D_JOKER
+                    assert np.isfinite(obs.jokers).all()
+
+    @pytest.mark.slow
+    def test_masks_have_legal_type(self):
+        """Every ActionMask has at least one legal type until game over."""
+        for seed in self._seeds():
+            adapter = DirectAdapter()
+            adapter.reset(BACK, STAKE, seed)
+            agent = RandomAgent()
+            result = _run_full_episode(adapter, agent)
+            assert all(result["masks_valid"]), (
+                f"seed={seed}: mask with zero legal types before game end"
+            )
+
+    @pytest.mark.slow
+    def test_action_conversions_valid(self):
+        """Every FactoredAction converts to engine action without ValueError."""
+        for seed in self._seeds():
+            adapter = DirectAdapter()
+            adapter.reset(BACK, STAKE, seed)
+            agent = RandomAgent()
+            result = _run_full_episode(adapter, agent)
+            assert all(result["action_ok"]), f"seed={seed}: action conversion failed"
+
+    @pytest.mark.slow
+    def test_episodes_terminate(self):
+        """Every episode terminates within max_steps."""
+        for seed in self._seeds():
+            adapter = DirectAdapter()
+            adapter.reset(BACK, STAKE, seed)
+            agent = RandomAgent()
+            result = _run_full_episode(adapter, agent)
+            assert result["done"] or result["won"], f"seed={seed}: episode did not terminate"
+
+    @pytest.mark.slow
+    def test_rewards_finite(self):
+        """Every reward is a finite float (no NaN/inf)."""
+        for seed in self._seeds():
+            adapter = DirectAdapter()
+            adapter.reset(BACK, STAKE, seed)
+            agent = RandomAgent()
+            result = _run_full_episode(adapter, agent, collect_rewards=True)
+            for i, r in enumerate(result["rewards"]):
+                assert math.isfinite(r), f"seed={seed} step={i}: non-finite reward {r}"
+
+
+# ---------------------------------------------------------------------------
+# (i) Full episode with HeuristicAgent — exercises shop/consumable/discard
+# ---------------------------------------------------------------------------
+
+
+class TestFullEpisodeHeuristicAgent:
+    """HeuristicAgent end-to-end: exercises buy, sell, consumable, discard logic."""
+
+    N_SEEDS = 20
+
+    def _seeds(self):
+        return [f"HEURISTIC_E2E_{i}" for i in range(self.N_SEEDS)]
+
+    @pytest.mark.slow
+    def test_no_crashes(self):
+        for seed in self._seeds():
+            adapter = DirectAdapter()
+            adapter.reset(BACK, STAKE, seed)
+            agent = HeuristicAgent()
+            result = _run_full_episode(adapter, agent)
+            assert result["steps"] > 0, f"seed={seed}: zero steps"
+
+    @pytest.mark.slow
+    def test_observations_valid(self):
+        for seed in self._seeds():
+            adapter = DirectAdapter()
+            adapter.reset(BACK, STAKE, seed)
+            agent = HeuristicAgent()
+            result = _run_full_episode(adapter, agent)
+
+            for i, obs in enumerate(result["observations"]):
+                assert obs.global_context.shape == (D_GLOBAL,)
+                assert np.isfinite(obs.global_context).all(), (
+                    f"seed={seed} step={i}: NaN in global_context"
+                )
+                if obs.hand_cards.shape[0] > 0:
+                    assert obs.hand_cards.shape[1] == D_PLAYING_CARD
+                    assert np.isfinite(obs.hand_cards).all()
+                if obs.jokers.shape[0] > 0:
+                    assert obs.jokers.shape[1] == D_JOKER
+                    assert np.isfinite(obs.jokers).all()
+                if obs.consumables.shape[0] > 0:
+                    assert obs.consumables.shape[1] == D_CONSUMABLE
+                    assert np.isfinite(obs.consumables).all()
+                if obs.shop_cards.shape[0] > 0:
+                    assert obs.shop_cards.shape[1] == D_SHOP
+                    assert np.isfinite(obs.shop_cards).all()
+
+    @pytest.mark.slow
+    def test_action_conversions_valid(self):
+        for seed in self._seeds():
+            adapter = DirectAdapter()
+            adapter.reset(BACK, STAKE, seed)
+            agent = HeuristicAgent()
+            result = _run_full_episode(adapter, agent)
+            assert all(result["action_ok"]), f"seed={seed}: action conversion failed"
+
+    @pytest.mark.slow
+    def test_rewards_finite(self):
+        for seed in self._seeds():
+            adapter = DirectAdapter()
+            adapter.reset(BACK, STAKE, seed)
+            agent = HeuristicAgent()
+            result = _run_full_episode(adapter, agent, collect_rewards=True)
+            for i, r in enumerate(result["rewards"]):
+                assert math.isfinite(r), f"seed={seed} step={i}: non-finite reward {r}"
+
+
+# ---------------------------------------------------------------------------
+# (j) Action roundtrip fidelity — comprehensive per-step test
+# ---------------------------------------------------------------------------
+
+
+class TestActionRoundtripFidelity:
+    """For every step of a full episode, verify all legal actions roundtrip."""
+
+    @pytest.mark.slow
+    def test_all_legal_actions_roundtrip(self):
+        """For every legal action at every step, convert to factored and back."""
+        adapter = DirectAdapter()
+        adapter.reset(BACK, STAKE, "ROUNDTRIP_FULL")
+        agent = HeuristicAgent()
+        agent.reset()
+
+        gs = adapter.raw_state
+        total_tested = 0
+        total_skipped = 0
+        failures: list[str] = []
+
+        for step_idx in range(MAX_STEPS):
+            if adapter.done:
+                break
+            phase = gs.get("phase")
+            if adapter.won and phase == GamePhase.SHOP:
+                break
+
+            legal = adapter.get_legal_actions()
+            if not legal:
+                break
+
+            for engine_action in legal:
+                try:
+                    fa = engine_action_to_factored(engine_action, gs)
+                    recovered = factored_to_engine_action(fa, gs)
+
+                    # Type must match
+                    if not isinstance(recovered, type(engine_action)):
+                        failures.append(
+                            f"step={step_idx} type mismatch: "
+                            f"{type(engine_action).__name__} != "
+                            f"{type(recovered).__name__}"
+                        )
+
+                    # For actions with card_indices, verify exact match
+                    orig_ci = getattr(engine_action, "card_indices", None)
+                    recov_ci = getattr(recovered, "card_indices", None)
+                    if orig_ci is not None and recov_ci is not None:
+                        if tuple(orig_ci) != tuple(recov_ci):
+                            failures.append(
+                                f"step={step_idx} card_indices mismatch: {orig_ci} != {recov_ci}"
+                            )
+
+                    total_tested += 1
+                except ValueError:
+                    # Complex permutations are expected to fail
+                    total_skipped += 1
+
+            mask = get_action_mask(gs)
+            info = {"raw_state": gs, "legal_actions": legal}
+            fa = agent.act({}, mask, info)
+            engine_action = factored_to_engine_action(fa, gs)
+            adapter.step(engine_action)
+            gs = adapter.raw_state
+
+        assert total_tested > 0, "No actions roundtrip-tested"
+        assert not failures, (
+            f"{len(failures)} roundtrip failures "
+            f"(tested={total_tested}, skipped={total_skipped}):\n" + "\n".join(failures[:20])
+        )
+
+
+# ---------------------------------------------------------------------------
+# (k) Observation encoding stress test
+# ---------------------------------------------------------------------------
+
+
+class TestObservationEncodingStress:
+    """Run 50 seeds through HeuristicAgent, encode at every step."""
+
+    N_SEEDS = 50
+    VALUE_LIMIT = 1e9  # no astronomically large numbers
+
+    @pytest.mark.slow
+    def test_no_nan_correct_shapes_reasonable_values(self):
+        seeds = [f"OBS_STRESS_{i}" for i in range(self.N_SEEDS)]
+        total_obs_checked = 0
+
+        for seed in seeds:
+            adapter = DirectAdapter()
+            adapter.reset(BACK, STAKE, seed)
+            agent = HeuristicAgent()
+            agent.reset()
+            gs = adapter.raw_state
+
+            for _ in range(MAX_STEPS):
+                if adapter.done:
+                    break
+                phase = gs.get("phase")
+                if adapter.won and phase == GamePhase.SHOP:
+                    break
+
+                legal = adapter.get_legal_actions()
+                if not legal:
+                    break
+
+                obs = encode_observation(gs)
+
+                # Shape checks
+                assert obs.global_context.shape == (D_GLOBAL,), (
+                    f"seed={seed}: global_context shape {obs.global_context.shape}"
+                )
+
+                hand = gs.get("hand", [])
+                assert obs.hand_cards.shape[0] == len(hand), (
+                    f"seed={seed}: hand_cards rows {obs.hand_cards.shape[0]} "
+                    f"!= hand size {len(hand)}"
+                )
+                if len(hand) > 0:
+                    assert obs.hand_cards.shape[1] == D_PLAYING_CARD
+
+                jokers = gs.get("jokers", [])
+                assert obs.jokers.shape[0] == len(jokers), (
+                    f"seed={seed}: jokers rows {obs.jokers.shape[0]} != joker count {len(jokers)}"
+                )
+                if len(jokers) > 0:
+                    assert obs.jokers.shape[1] == D_JOKER
+
+                # No NaN/Inf
+                assert np.isfinite(obs.global_context).all(), (
+                    f"seed={seed}: NaN/Inf in global_context"
+                )
+                if obs.hand_cards.shape[0] > 0:
+                    assert np.isfinite(obs.hand_cards).all(), f"seed={seed}: NaN/Inf in hand_cards"
+                if obs.jokers.shape[0] > 0:
+                    assert np.isfinite(obs.jokers).all(), f"seed={seed}: NaN/Inf in jokers"
+                if obs.consumables.shape[0] > 0:
+                    assert np.isfinite(obs.consumables).all(), (
+                        f"seed={seed}: NaN/Inf in consumables"
+                    )
+                if obs.shop_cards.shape[0] > 0:
+                    assert np.isfinite(obs.shop_cards).all(), f"seed={seed}: NaN/Inf in shop_cards"
+                if obs.pack_cards.shape[0] > 0:
+                    assert np.isfinite(obs.pack_cards).all(), f"seed={seed}: NaN/Inf in pack_cards"
+
+                # No astronomically large values (catches log-scale overflow)
+                assert np.abs(obs.global_context).max() < self.VALUE_LIMIT, (
+                    f"seed={seed}: global_context has value > {self.VALUE_LIMIT}"
+                )
+                if obs.hand_cards.shape[0] > 0:
+                    assert np.abs(obs.hand_cards).max() < self.VALUE_LIMIT
+                if obs.jokers.shape[0] > 0:
+                    assert np.abs(obs.jokers).max() < self.VALUE_LIMIT
+
+                total_obs_checked += 1
+
+                mask = get_action_mask(gs)
+                info = {"raw_state": gs, "legal_actions": legal}
+                fa = agent.act({}, mask, info)
+                engine_action = factored_to_engine_action(fa, gs)
+                adapter.step(engine_action)
+                gs = adapter.raw_state
+
+        assert total_obs_checked > 1000, (
+            f"Only checked {total_obs_checked} observations "
+            f"(expected >1000 across {self.N_SEEDS} seeds)"
+        )
+
+
+# ---------------------------------------------------------------------------
+# (l) Reward determinism — same seed, same agent, identical rewards
+# ---------------------------------------------------------------------------
+
+
+class TestRewardDeterminismFullEpisode:
+    """Run the same seed twice with the same agent. Rewards must be identical."""
+
+    def test_identical_rewards_across_runs(self):
+        seed = "DETERMINISM_CHECK_42"
+
+        def _run_collecting_rewards():
+            adapter = DirectAdapter()
+            adapter.reset(BACK, STAKE, seed)
+            agent = HeuristicAgent()
+            agent.reset()
+            wrapper = DenseRewardWrapper()
+            wrapper.reset()
+
+            gs = adapter.raw_state
+            rewards = []
+
+            for _ in range(MAX_STEPS):
+                if adapter.done:
+                    break
+                phase = gs.get("phase")
+                if adapter.won and phase == GamePhase.SHOP:
+                    break
+
+                legal = adapter.get_legal_actions()
+                if not legal:
+                    break
+
+                mask = get_action_mask(gs)
+                info = {"raw_state": gs, "legal_actions": legal}
+                fa = agent.act({}, mask, info)
+
+                prev_gs = gs
+                engine_action = factored_to_engine_action(fa, gs)
+                adapter.step(engine_action)
+                gs = adapter.raw_state
+
+                r = wrapper.reward(prev_gs, fa, gs)
+                rewards.append(r)
+
+            return rewards
+
+        rewards_1 = _run_collecting_rewards()
+        rewards_2 = _run_collecting_rewards()
+
+        assert len(rewards_1) > 0, "No rewards collected"
+        assert len(rewards_1) == len(rewards_2), (
+            f"Different episode lengths: {len(rewards_1)} vs {len(rewards_2)}"
+        )
+        for i, (r1, r2) in enumerate(zip(rewards_1, rewards_2)):
+            assert r1 == r2, f"Step {i}: reward mismatch {r1} != {r2}"
+
+
+# ---------------------------------------------------------------------------
+# (m) Multi-deck, multi-stake stress test
+# ---------------------------------------------------------------------------
+
+
+ALL_DECK_KEYS = [
+    "b_red",
+    "b_blue",
+    "b_yellow",
+    "b_green",
+    "b_black",
+    "b_magic",
+    "b_nebula",
+    "b_ghost",
+    "b_abandoned",
+    "b_checkered",
+    "b_zodiac",
+    "b_painted",
+    "b_anaglyph",
+    "b_plasma",
+    "b_erratic",
+]
+
+
+class TestMultiDeckMultiStake:
+    """Run RandomAgent on all 15 decks × 3 seeds = 45 episodes. No crashes."""
+
+    N_SEEDS_PER_DECK = 3
+
+    @pytest.mark.slow
+    def test_all_decks_no_crashes(self):
+        failures: list[str] = []
+
+        for deck in ALL_DECK_KEYS:
+            for seed_idx in range(self.N_SEEDS_PER_DECK):
+                seed = f"DECK_{deck}_{seed_idx}"
+                try:
+                    adapter = DirectAdapter()
+                    adapter.reset(deck, STAKE, seed)
+                    agent = RandomAgent()
+                    result = _run_full_episode(adapter, agent, max_steps=MAX_STEPS)
+                    assert result["steps"] > 0, "zero steps"
+                except Exception as e:
+                    failures.append(f"{deck} seed={seed}: {type(e).__name__}: {e}")
+
+        assert not failures, f"{len(failures)}/45 episodes crashed:\n" + "\n".join(failures[:10])

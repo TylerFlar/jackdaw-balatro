@@ -63,23 +63,32 @@ class PolicyInput:
 
 
 def _pad_2d(arrays: list[np.ndarray], max_n: int, d: int) -> torch.Tensor:
-    """Pad and stack variable-length 2D arrays into ``(B, max_n, d)``."""
+    """Pad and stack variable-length 2D arrays into ``(B, max_n, d)``.
+
+    Uses a single numpy buffer + one zero-copy ``torch.from_numpy`` call
+    instead of B individual tensor conversions.
+    """
     B = len(arrays)
-    out = torch.zeros(B, max(max_n, 0), d)
+    mn = max(max_n, 0)
+    buf = np.zeros((B, mn, d), dtype=np.float32)
     for i, arr in enumerate(arrays):
         n = arr.shape[0]
         if n > 0:
-            out[i, :n] = torch.from_numpy(arr)
-    return out
+            buf[i, :n] = arr
+    return torch.from_numpy(buf.copy())
 
 
 def _make_mask(arrays: list[np.ndarray], max_n: int) -> torch.Tensor:
-    """Create ``(B, max_n)`` bool mask from variable-length arrays."""
+    """Create ``(B, max_n)`` bool mask from variable-length arrays.
+
+    Uses numpy buffer for batch construction.
+    """
     B = len(arrays)
-    mask = torch.zeros(B, max(max_n, 0), dtype=torch.bool)
+    mn = max(max_n, 0)
+    buf = np.zeros((B, mn), dtype=np.bool_)
     for i, arr in enumerate(arrays):
-        mask[i, : arr.shape[0]] = True
-    return mask
+        buf[i, : arr.shape[0]] = True
+    return torch.from_numpy(buf.copy())
 
 
 def collate_policy_inputs(
@@ -123,18 +132,20 @@ def collate_policy_inputs(
     shop_mask = _make_mask([i.obs.shop_cards for i in inputs], max_shop)
     pack_mask = _make_mask([i.obs.pack_cards for i in inputs], max_pack)
 
-    # Global context
-    global_ctx = torch.stack([torch.from_numpy(inp.obs.global_context) for inp in inputs])
+    # Global context — stack in numpy then single conversion
+    global_ctx = torch.from_numpy(np.stack([inp.obs.global_context for inp in inputs]))
 
     # Type mask (B, 21)
-    type_mask = torch.stack([torch.from_numpy(inp.action_mask.type_mask.copy()) for inp in inputs])
+    type_mask = torch.from_numpy(np.stack([inp.action_mask.type_mask for inp in inputs]).copy())
 
     # Card mask (B, max_hand)
-    card_mask = torch.zeros(B, max(max_hand, 0), dtype=torch.bool)
+    mh = max(max_hand, 0)
+    card_mask_np = np.zeros((B, mh), dtype=np.bool_)
     for i, inp in enumerate(inputs):
         n = len(inp.action_mask.card_mask)
         if n > 0:
-            card_mask[i, :n] = torch.from_numpy(inp.action_mask.card_mask)
+            card_mask_np[i, :n] = inp.action_mask.card_mask
+    card_mask = torch.from_numpy(card_mask_np.copy())
 
     # Card selection limits
     max_card_select = torch.tensor(
@@ -262,7 +273,7 @@ def _pointer_to_entity_target(
     if sub == "vouchers":
         result -= int(shop_splits[0].item())
     elif sub == "boosters":
-        result -= int(shop_splits[0].item()) - int(shop_splits[1].item())
+        result -= int(shop_splits[0].item()) + int(shop_splits[1].item())
     return result
 
 
@@ -421,56 +432,58 @@ class BalatroPolicy(nn.Module):
     @torch.no_grad()
     def sample_action(
         self, batch: dict[str, Any]
-    ) -> tuple[list[FactoredAction], dict[str, torch.Tensor]]:
+    ) -> tuple[list[FactoredAction], dict[str, torch.Tensor], torch.Tensor]:
         """Sample actions autoregressively: type -> entity -> cards.
 
-        Returns ``(actions, log_probs_dict)`` where log_probs_dict has keys
-        ``"type"``, ``"entity"``, ``"card"``, ``"total"``.
+        Returns ``(actions, log_probs_dict, values)`` where log_probs_dict has
+        keys ``"type"``, ``"entity"``, ``"card"``, ``"total"``, and values is
+        ``(B,)`` state value estimates.
         """
         self.eval()
         out = self.forward(batch)
         B = out["type_logits"].shape[0]
         device = out["type_logits"].device
 
-        actions: list[FactoredAction] = []
-        type_lps: list[torch.Tensor] = []
-        entity_lps: list[torch.Tensor] = []
-        card_lps: list[torch.Tensor] = []
+        # Stage 1: batch type sampling
+        type_dist = Categorical(logits=out["type_logits"])
+        sampled_types = type_dist.sample()              # (B,)
+        type_lp = type_dist.log_prob(sampled_types)     # (B,)
+        at_list = sampled_types.tolist()
 
-        for b in range(B):
-            # Stage 1: action type
-            type_dist = Categorical(logits=out["type_logits"][b])
-            action_type = type_dist.sample()
-            type_lps.append(type_dist.log_prob(action_type))
-            at = action_type.item()
+        # Stage 2: entity targets — grouped by action type
+        entity_lp = torch.zeros(B, device=device)
+        entity_targets: list[int | None] = [None] * B
 
-            # Stage 2: entity target
-            entity_target: int | None = None
-            e_lp = torch.zeros((), device=device)
-
+        entity_groups: dict[int, list[int]] = {}
+        for b, at in enumerate(at_list):
             if at in NEEDS_ENTITY:
                 pmask = batch["pointer_masks"][b, at]
                 if pmask.any():
-                    e_lgts = self.action_heads.entity_logits(
-                        out["global_repr"][b : b + 1],
-                        out["entity_reprs"][b : b + 1],
-                        pmask.unsqueeze(0),
-                    ).squeeze(0)
-                    e_dist = Categorical(logits=e_lgts)
-                    e_idx = e_dist.sample()
-                    e_lp = e_dist.log_prob(e_idx)
-                    entity_target = _pointer_to_entity_target(
-                        e_idx.item(),
-                        at,
-                        batch["entity_offsets"],
-                        batch["shop_splits"][b],
-                    )
-            entity_lps.append(e_lp)
+                    entity_groups.setdefault(at, []).append(b)
 
-            # Stage 3: card targets
-            card_target: tuple[int, ...] | None = None
-            c_lp = torch.zeros((), device=device)
+        for at, indices in entity_groups.items():
+            idx_t = torch.tensor(indices, dtype=torch.long, device=device)
+            g_repr = out["global_repr"][idx_t]
+            e_repr = out["entity_reprs"][idx_t]
+            pmask = batch["pointer_masks"][idx_t, at]
+            e_lgts = self.action_heads.entity_logits(g_repr, e_repr, pmask)
+            e_dist = Categorical(logits=e_lgts)
+            e_idx = e_dist.sample()
+            entity_lp[idx_t] = e_dist.log_prob(e_idx)
 
+            e_idx_list = e_idx.tolist()
+            for i, b in enumerate(indices):
+                entity_targets[b] = _pointer_to_entity_target(
+                    e_idx_list[i], at,
+                    batch["entity_offsets"],
+                    batch["shop_splits"][b],
+                )
+
+        # Stage 3: card targets (per-item — constraint logic is hard to batch)
+        card_lp = torch.zeros(B, device=device)
+        card_targets: list[tuple[int, ...] | None] = [None] * B
+
+        for b, at in enumerate(at_list):
             if at in NEEDS_CARDS and batch["card_mask"][b].any():
                 min_c = int(batch["min_card_select"][b].item())
                 max_c = int(batch["max_card_select"][b].item())
@@ -480,26 +493,29 @@ class BalatroPolicy(nn.Module):
                     min_c,
                     max_c,
                 )
+                card_lp[b] = c_lp
                 indices = selected.nonzero(as_tuple=True)[0]
                 if len(indices) > 0:
-                    card_target = tuple(int(i) for i in indices)
-            card_lps.append(c_lp)
+                    card_targets[b] = tuple(int(i) for i in indices)
 
-            actions.append(
-                FactoredAction(
-                    action_type=at,
-                    card_target=card_target,
-                    entity_target=entity_target,
-                )
+        actions = [
+            FactoredAction(
+                action_type=at,
+                card_target=card_targets[b],
+                entity_target=entity_targets[b],
             )
+            for b, at in enumerate(at_list)
+        ]
 
+        total = type_lp + entity_lp + card_lp
         log_probs = {
-            "type": torch.stack(type_lps),
-            "entity": torch.stack(entity_lps),
-            "card": torch.stack(card_lps),
-            "total": (torch.stack(type_lps) + torch.stack(entity_lps) + torch.stack(card_lps)),
+            "type": type_lp,
+            "entity": entity_lp,
+            "card": card_lp,
+            "total": total,
         }
-        return actions, log_probs
+        values = out["value"].squeeze(-1)
+        return actions, log_probs, values
 
     # ------------------------------------------------------------------
     # Action evaluation (for PPO loss)
@@ -532,7 +548,7 @@ class BalatroPolicy(nn.Module):
         B = out["type_logits"].shape[0]
         device = out["type_logits"].device
 
-        # Vectorised type log-prob + entropy
+        # -- Vectorised type log-prob + entropy --
         action_types = torch.tensor(
             [fa.action_type for fa in actions], dtype=torch.long, device=device
         )
@@ -540,56 +556,62 @@ class BalatroPolicy(nn.Module):
         type_lp = type_dist.log_prob(action_types)  # (B,)
         type_ent = type_dist.entropy()  # (B,)
 
-        # Per-item entity + card (loop — hard to vectorise due to varying masks)
-        entity_lps: list[torch.Tensor] = []
-        entity_ents: list[torch.Tensor] = []
-        card_lps: list[torch.Tensor] = []
+        # -- Entity log-probs: grouped by action type --
+        entity_lp = torch.zeros(B, device=device)
+        entity_ent = torch.zeros(B, device=device)
 
-        for b in range(B):
-            fa = actions[b]
-
-            # Entity
-            e_lp = torch.zeros((), device=device)
-            e_ent = torch.zeros((), device=device)
+        # Group batch indices by action type for batched entity_logits calls
+        entity_groups: dict[int, list[tuple[int, int]]] = {}  # at -> [(b, ptr)]
+        for b, fa in enumerate(actions):
             if fa.action_type in NEEDS_ENTITY and fa.entity_target is not None:
-                pmask = batch["pointer_masks"][b, fa.action_type]
-                if pmask.any():
-                    e_lgts = self.action_heads.entity_logits(
-                        out["global_repr"][b : b + 1],
-                        out["entity_reprs"][b : b + 1],
-                        pmask.unsqueeze(0),
-                    ).squeeze(0)
-                    e_dist = Categorical(logits=e_lgts)
-                    ptr = _entity_target_to_pointer(
-                        fa.entity_target,
-                        fa.action_type,
-                        batch["entity_offsets"],
-                        batch["shop_splits"][b],
-                    )
-                    e_lp = e_dist.log_prob(torch.tensor(ptr, dtype=torch.long, device=device))
-                    e_ent = e_dist.entropy()
-            entity_lps.append(e_lp)
-            entity_ents.append(e_ent)
+                ptr = _entity_target_to_pointer(
+                    fa.entity_target,
+                    fa.action_type,
+                    batch["entity_offsets"],
+                    batch["shop_splits"][b],
+                )
+                entity_groups.setdefault(fa.action_type, []).append((b, ptr))
 
-            # Card
-            c_lp = torch.zeros((), device=device)
+        for at, items in entity_groups.items():
+            indices = [b for b, _ in items]
+            ptrs = torch.tensor([p for _, p in items], dtype=torch.long, device=device)
+            idx_t = torch.tensor(indices, dtype=torch.long, device=device)
+            g_repr = out["global_repr"][idx_t]          # (G, E)
+            e_repr = out["entity_reprs"][idx_t]          # (G, N, E)
+            pmask = batch["pointer_masks"][idx_t, at]    # (G, N)
+            e_lgts = self.action_heads.entity_logits(g_repr, e_repr, pmask)  # (G, N)
+            e_dist = Categorical(logits=e_lgts)
+            entity_lp[idx_t] = e_dist.log_prob(ptrs)
+            entity_ent[idx_t] = e_dist.entropy()
+
+        # -- Card log-probs + entropy: fully vectorised --
+        max_hand = out["card_logits"].shape[1]
+        selected = torch.zeros(B, max_hand, device=device)
+        needs_cards = torch.zeros(B, device=device)
+
+        for b, fa in enumerate(actions):
             if fa.action_type in NEEDS_CARDS and fa.card_target:
-                c_lgts = out["card_logits"][b]
-                c_mask = batch["card_mask"][b]
-                selected = torch.zeros(c_lgts.shape[0], device=device)
+                needs_cards[b] = 1.0
                 for idx in fa.card_target:
-                    if idx < len(selected):
-                        selected[idx] = 1.0
-                lp = F.logsigmoid(c_lgts) * selected + F.logsigmoid(-c_lgts) * (1.0 - selected)
-                c_lp = (lp * c_mask.float()).sum()
-            card_lps.append(c_lp)
+                    if idx < max_hand:
+                        selected[b, idx] = 1.0
 
-        entity_lp = torch.stack(entity_lps)
-        entity_ent = torch.stack(entity_ents)
-        card_lp = torch.stack(card_lps)
+        c_lgts = out["card_logits"]                     # (B, max_hand)
+        c_mask_f = batch["card_mask"].float()            # (B, max_hand)
+
+        # Bernoulli log-prob: sum over cards per batch item
+        lp_pos = F.logsigmoid(c_lgts)                   # log(sigmoid(x))
+        lp_neg = F.logsigmoid(-c_lgts)                  # log(1 - sigmoid(x))
+        card_lp_all = (lp_pos * selected + lp_neg * (1.0 - selected)) * c_mask_f
+        card_lp = card_lp_all.sum(dim=1) * needs_cards  # (B,)
+
+        # Bernoulli entropy: -p*log(p) - (1-p)*log(1-p), masked
+        p = torch.sigmoid(c_lgts)
+        per_card_ent = lp_pos * p + lp_neg * (1.0 - p)  # negative entropy per card
+        card_ent = -(per_card_ent * c_mask_f).sum(dim=1) * needs_cards  # (B,)
 
         total_lp = type_lp + entity_lp + card_lp
-        total_ent = type_ent + entity_ent
+        total_ent = type_ent + entity_ent + card_ent
         values = out["value"].squeeze(-1)
 
         return total_lp, total_ent, values
