@@ -33,26 +33,57 @@ from jackdaw.engine.runner import greedy_play_agent
 
 ALL_TAGS = {
     # Ante 1+
-    "tag_economy", "tag_skip", "tag_charm", "tag_boss",
-    "tag_d_six", "tag_juggle", "tag_coupon", "tag_voucher",
-    "tag_double", "tag_investment",
-    "tag_uncommon", "tag_rare",
-    "tag_foil", "tag_holo", "tag_polychrome",
+    "tag_economy",
+    "tag_skip",
+    "tag_charm",
+    "tag_boss",
+    "tag_d_six",
+    "tag_juggle",
+    "tag_coupon",
+    "tag_voucher",
+    "tag_double",
+    "tag_investment",
+    "tag_uncommon",
+    "tag_rare",
+    "tag_foil",
+    "tag_holo",
+    "tag_polychrome",
     # Ante 2+
-    "tag_garbage", "tag_handy", "tag_orbital", "tag_top_up",
-    "tag_buffoon", "tag_ethereal", "tag_meteor", "tag_standard",
+    "tag_garbage",
+    "tag_handy",
+    "tag_orbital",
+    "tag_top_up",
+    "tag_buffoon",
+    "tag_ethereal",
+    "tag_meteor",
+    "tag_standard",
     "tag_negative",
 }
 
 ALL_BOSSES = {
     # Ante 1+
-    "bl_club", "bl_goad", "bl_head", "bl_hook",
-    "bl_manacle", "bl_pillar", "bl_psychic", "bl_window",
+    "bl_club",
+    "bl_goad",
+    "bl_head",
+    "bl_hook",
+    "bl_manacle",
+    "bl_pillar",
+    "bl_psychic",
+    "bl_window",
     # Ante 2+
-    "bl_arm", "bl_fish", "bl_flint", "bl_house", "bl_mark",
-    "bl_mouth", "bl_needle", "bl_wall", "bl_water", "bl_wheel",
+    "bl_arm",
+    "bl_fish",
+    "bl_flint",
+    "bl_house",
+    "bl_mark",
+    "bl_mouth",
+    "bl_needle",
+    "bl_wall",
+    "bl_water",
+    "bl_wheel",
     # Ante 3+
-    "bl_tooth", "bl_eye",
+    "bl_tooth",
+    "bl_eye",
     # Ante 4+
     "bl_plant",
     # Ante 5+
@@ -60,8 +91,11 @@ ALL_BOSSES = {
     # Ante 6+
     "bl_ox",
     # Showdown (ante 8)
-    "bl_final_acorn", "bl_final_bell", "bl_final_heart",
-    "bl_final_leaf", "bl_final_vessel",
+    "bl_final_acorn",
+    "bl_final_bell",
+    "bl_final_heart",
+    "bl_final_leaf",
+    "bl_final_vessel",
 }
 
 
@@ -185,8 +219,7 @@ def find_minimal_seeds(
             print(f"  {i + 1}/{max_seeds} ({rate:.0f} seeds/sec)")
 
     elapsed = time.time() - t0
-    print(f"  Scanned {max_seeds} seeds in {elapsed:.1f}s "
-          f"({max_seeds / elapsed:.0f} seeds/sec)")
+    print(f"  Scanned {max_seeds} seeds in {elapsed:.1f}s ({max_seeds / elapsed:.0f} seeds/sec)")
 
     # Phase 2: greedy set cover
     selected: list[dict[str, Any]] = []
@@ -212,25 +245,29 @@ def find_minimal_seeds(
 
         uncovered_tags -= best_new_tags
         uncovered_bosses -= best_new_bosses
-        selected.append({
-            "seed": best_seed["seed"],
-            "new_tags": sorted(best_new_tags),
-            "new_bosses": sorted(best_new_bosses),
-            "tag_ante": {k: best_seed["tag_ante"][k] for k in best_new_tags},
-            "tag_pos": {k: best_seed["tag_pos"][k] for k in best_new_tags},
-            "boss_ante": {k: best_seed["boss_ante"][k] for k in best_new_bosses},
-            "max_ante_needed": max(
-                max((best_seed["tag_ante"].get(t, 1) for t in best_new_tags), default=1),
-                max((best_seed["boss_ante"].get(b, 1) for b in best_new_bosses), default=1),
-            ),
-        })
+        selected.append(
+            {
+                "seed": best_seed["seed"],
+                "new_tags": sorted(best_new_tags),
+                "new_bosses": sorted(best_new_bosses),
+                "tag_ante": {k: best_seed["tag_ante"][k] for k in best_new_tags},
+                "tag_pos": {k: best_seed["tag_pos"][k] for k in best_new_tags},
+                "boss_ante": {k: best_seed["boss_ante"][k] for k in best_new_bosses},
+                "max_ante_needed": max(
+                    max((best_seed["tag_ante"].get(t, 1) for t in best_new_tags), default=1),
+                    max((best_seed["boss_ante"].get(b, 1) for b in best_new_bosses), default=1),
+                ),
+            }
+        )
 
         seed_data.remove(best_seed)
 
     covered_tags = ALL_TAGS - uncovered_tags
     covered_bosses = ALL_BOSSES - uncovered_bosses
-    print(f"\nCoverage: {len(covered_tags)}/{len(ALL_TAGS)} tags, "
-          f"{len(covered_bosses)}/{len(ALL_BOSSES)} bosses")
+    print(
+        f"\nCoverage: {len(covered_tags)}/{len(ALL_TAGS)} tags, "
+        f"{len(covered_bosses)}/{len(ALL_BOSSES)} bosses"
+    )
 
     if uncovered_tags:
         print(f"  Missing tags: {sorted(uncovered_tags)}")
@@ -241,21 +278,24 @@ def find_minimal_seeds(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Find seeds covering all tags and boss blinds"
-    )
+    parser = argparse.ArgumentParser(description="Find seeds covering all tags and boss blinds")
     parser.add_argument(
-        "--max-seeds", type=int, default=5000,
+        "--max-seeds",
+        type=int,
+        default=5000,
         help="Seeds to scan (default: 5000)",
     )
     parser.add_argument(
-        "--max-ante", type=int, default=8,
+        "--max-ante",
+        type=int,
+        default=8,
         help="Max ante to simulate (default: 8)",
     )
     args = parser.parse_args()
 
     selected = find_minimal_seeds(
-        max_seeds=args.max_seeds, max_ante=args.max_ante,
+        max_seeds=args.max_seeds,
+        max_ante=args.max_ante,
     )
 
     print(f"\n{'=' * 70}")

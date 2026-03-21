@@ -192,9 +192,7 @@ for _key, _desc, _preset in _JOKER_CONFIGS:
 
     def _make_fn(key: str = _key, preset: str | None = _preset):  # noqa: B023
         def fn(sim: Handle, live: Handle, *, delay: float = 0.3) -> ScenarioResult:
-            return run_joker_with_setup(
-                sim, live, joker_key=key, hand_preset=preset, delay=delay
-            )
+            return run_joker_with_setup(sim, live, joker_key=key, hand_preset=preset, delay=delay)
 
         return fn
 
@@ -245,7 +243,8 @@ def _joker_acrobat(sim: Handle, live: Handle, *, delay: float = 0.3) -> Scenario
     play_hand(sim, live, [0, 1, 2, 3, 4], delay=delay)
     diffs = compare_state(sim, live, label="acrobat final hand")
     return ScenarioResult(
-        passed=not diffs, diffs=diffs,
+        passed=not diffs,
+        diffs=diffs,
         details=f"Acrobat: {'PASS' if not diffs else 'FAIL'}",
     )
 
@@ -263,7 +262,8 @@ def _joker_dusk(sim: Handle, live: Handle, *, delay: float = 0.3) -> ScenarioRes
     play_hand(sim, live, [0, 1, 2, 3, 4], delay=delay)
     diffs = compare_state(sim, live, label="dusk final hand")
     return ScenarioResult(
-        passed=not diffs, diffs=diffs,
+        passed=not diffs,
+        diffs=diffs,
         details=f"Dusk: {'PASS' if not diffs else 'FAIL'}",
     )
 
@@ -273,9 +273,7 @@ def _joker_dusk(sim: Handle, live: Handle, *, delay: float = 0.3) -> ScenarioRes
     category="jokers",
     description="+15 Mult when 0 discards left",
 )
-def _joker_mystic_summit(
-    sim: Handle, live: Handle, *, delay: float = 0.3
-) -> ScenarioResult:
+def _joker_mystic_summit(sim: Handle, live: Handle, *, delay: float = 0.3) -> ScenarioResult:
     start_both(sim, live, seed="J_MYSTIC_SUMMIT", delay=delay)
     select_blind(sim, live, delay=delay)
     add_both(sim, live, key="j_mystic_summit")
@@ -283,7 +281,8 @@ def _joker_mystic_summit(
     play_hand(sim, live, [0, 1, 2, 3, 4], delay=delay)
     diffs = compare_state(sim, live, label="mystic_summit 0 discards")
     return ScenarioResult(
-        passed=not diffs, diffs=diffs,
+        passed=not diffs,
+        diffs=diffs,
         details=f"Mystic Summit: {'PASS' if not diffs else 'FAIL'}",
     )
 
@@ -293,9 +292,7 @@ def _joker_mystic_summit(
     category="jokers",
     description="+13 Mult per Queen held in hand",
 )
-def _joker_shoot_the_moon(
-    sim: Handle, live: Handle, *, delay: float = 0.3
-) -> ScenarioResult:
+def _joker_shoot_the_moon(sim: Handle, live: Handle, *, delay: float = 0.3) -> ScenarioResult:
     """Inject Queens but play non-Queens so Queens remain held."""
     start_both(sim, live, seed="J_SHOOT_THE_MOON", delay=delay)
     select_blind(sim, live, delay=delay)
@@ -309,7 +306,8 @@ def _joker_shoot_the_moon(
     play_hand(sim, live, play_indices, delay=delay)
     diffs = compare_state(sim, live, label="shoot_the_moon queens held")
     return ScenarioResult(
-        passed=not diffs, diffs=diffs,
+        passed=not diffs,
+        diffs=diffs,
         details=f"Shoot the Moon: {'PASS' if not diffs else 'FAIL'}",
     )
 
@@ -319,9 +317,7 @@ def _joker_shoot_the_moon(
     category="jokers",
     description="Destroys first played 6 for Spectral (first hand only)",
 )
-def _joker_sixth_sense(
-    sim: Handle, live: Handle, *, delay: float = 0.3
-) -> ScenarioResult:
+def _joker_sixth_sense(sim: Handle, live: Handle, *, delay: float = 0.3) -> ScenarioResult:
     return run_joker_with_setup(
         sim, live, joker_key="j_sixth_sense", hand_preset="WITH_SIXES", delay=delay
     )
@@ -340,7 +336,8 @@ def _joker_vagabond(sim: Handle, live: Handle, *, delay: float = 0.3) -> Scenari
     play_hand(sim, live, [0, 1, 2, 3, 4], delay=delay)
     diffs = compare_state(sim, live, label="vagabond low money")
     return ScenarioResult(
-        passed=not diffs, diffs=diffs,
+        passed=not diffs,
+        diffs=diffs,
         details=f"Vagabond: {'PASS' if not diffs else 'FAIL'}",
     )
 
@@ -355,7 +352,8 @@ def _joker_vagabond(sim: Handle, live: Handle, *, delay: float = 0.3) -> Scenari
 )
 def _joker_faceless(sim: Handle, live: Handle, *, delay: float = 0.3) -> ScenarioResult:
     return run_joker_with_setup(
-        sim, live,
+        sim,
+        live,
         joker_key="j_faceless",
         hand_preset="HIGH_CARD",
         pre_discard=["H_J", "D_Q", "S_K"],
@@ -376,7 +374,8 @@ def _joker_mail(sim: Handle, live: Handle, *, delay: float = 0.3) -> ScenarioRes
     play_hand(sim, live, [0, 1, 2, 3, 4], delay=delay)
     diffs = compare_state(sim, live, label="mail after discard+play")
     return ScenarioResult(
-        passed=not diffs, diffs=diffs,
+        passed=not diffs,
+        diffs=diffs,
         details=f"Mail: {'PASS' if not diffs else 'FAIL'}",
     )
 
@@ -394,7 +393,8 @@ def _joker_trading(sim: Handle, live: Handle, *, delay: float = 0.3) -> Scenario
     play_hand(sim, live, [0, 1, 2, 3, 4], delay=delay)
     diffs = compare_state(sim, live, label="trading after discard+play")
     return ScenarioResult(
-        passed=not diffs, diffs=diffs,
+        passed=not diffs,
+        diffs=diffs,
         details=f"Trading: {'PASS' if not diffs else 'FAIL'}",
     )
 
@@ -404,11 +404,10 @@ def _joker_trading(sim: Handle, live: Handle, *, delay: float = 0.3) -> Scenario
     category="jokers",
     description="x0.5 Mult per Jack discarded this round",
 )
-def _joker_hit_the_road(
-    sim: Handle, live: Handle, *, delay: float = 0.3
-) -> ScenarioResult:
+def _joker_hit_the_road(sim: Handle, live: Handle, *, delay: float = 0.3) -> ScenarioResult:
     return run_joker_with_setup(
-        sim, live,
+        sim,
+        live,
         joker_key="j_hit_the_road",
         hand_preset="HIGH_CARD",
         pre_discard=["H_J", "D_J", "S_J", "C_J"],
@@ -423,7 +422,8 @@ def _joker_hit_the_road(
 )
 def _joker_castle(sim: Handle, live: Handle, *, delay: float = 0.3) -> ScenarioResult:
     return run_joker_with_setup(
-        sim, live,
+        sim,
+        live,
         joker_key="j_castle",
         hand_preset="HIGH_CARD",
         pre_discard=["H_2", "H_3", "H_4"],
@@ -438,7 +438,8 @@ def _joker_castle(sim: Handle, live: Handle, *, delay: float = 0.3) -> ScenarioR
 )
 def _joker_burnt(sim: Handle, live: Handle, *, delay: float = 0.3) -> ScenarioResult:
     return run_joker_with_setup(
-        sim, live,
+        sim,
+        live,
         joker_key="j_burnt",
         hand_preset="PAIR",
         pre_discard=["H_A", "D_A"],  # discard a pair to level up Pair
@@ -460,7 +461,8 @@ def _joker_yorick(sim: Handle, live: Handle, *, delay: float = 0.3) -> ScenarioR
     play_hand(sim, live, [0, 1, 2, 3, 4], delay=delay)
     diffs = compare_state(sim, live, label="yorick after discard+play")
     return ScenarioResult(
-        passed=not diffs, diffs=diffs,
+        passed=not diffs,
+        diffs=diffs,
         details=f"Yorick: {'PASS' if not diffs else 'FAIL'}",
     )
 
@@ -477,7 +479,8 @@ def _joker_todo_list(sim: Handle, live: Handle, *, delay: float = 0.3) -> Scenar
     play_hand(sim, live, [0, 1, 2, 3, 4], delay=delay)
     diffs = compare_state(sim, live, label="todo_list after play")
     return ScenarioResult(
-        passed=not diffs, diffs=diffs,
+        passed=not diffs,
+        diffs=diffs,
         details=f"Todo List: {'PASS' if not diffs else 'FAIL'}",
     )
 

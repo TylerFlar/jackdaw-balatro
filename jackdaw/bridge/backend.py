@@ -205,8 +205,7 @@ class SimBackend:
         elif phase not in (GamePhase.SELECTING_HAND, GamePhase.SHOP, GamePhase.ROUND_EVAL):
             raise RPCError(
                 INVALID_STATE,
-                "Method 'add' requires one of these states: "
-                "SELECTING_HAND, SHOP, ROUND_EVAL",
+                "Method 'add' requires one of these states: SELECTING_HAND, SHOP, ROUND_EVAL",
             )
 
         from jackdaw.engine.card_factory import (
@@ -244,7 +243,8 @@ class SimBackend:
             if rng is not None:
                 ante = self._gs.get("round_resets", {}).get("ante", 1)
                 polled = poll_edition(
-                    "edi" + str(ante), rng,
+                    "edi" + str(ante),
+                    rng,
                     rate=self._gs.get("edition_rate", 1.0),
                 )
                 if edition is None:
@@ -266,10 +266,7 @@ class SimBackend:
                     cr["discards_left"] = cr.get("discards_left", 0) + d_size
             # If hand_size increased mid-round, draw cards to fill the new
             # size — matches balatrobot which immediately fills on add.
-            if (
-                self._gs.get("hand_size", 8) > old_hand_size
-                and phase == GamePhase.SELECTING_HAND
-            ):
+            if self._gs.get("hand_size", 8) > old_hand_size and phase == GamePhase.SELECTING_HAND:
                 from jackdaw.engine.game import _draw_hand
 
                 _draw_hand(self._gs)
@@ -385,13 +382,9 @@ class LiveBackend:
                 params["enhancement"], params["enhancement"]
             )
         if "edition" in params:
-            params["edition"] = self._EDITION_TO_BOT.get(
-                params["edition"], params["edition"]
-            )
+            params["edition"] = self._EDITION_TO_BOT.get(params["edition"], params["edition"])
         if "seal" in params:
-            params["seal"] = self._SEAL_TO_BOT.get(
-                params["seal"], params["seal"]
-            )
+            params["seal"] = self._SEAL_TO_BOT.get(params["seal"], params["seal"])
         return params
 
     def handle(self, method: str, params: dict[str, Any] | None) -> dict[str, Any]:

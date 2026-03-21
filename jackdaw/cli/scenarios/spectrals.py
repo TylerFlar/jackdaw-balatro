@@ -114,7 +114,6 @@ def _spectral_ouija(sim: Handle, live: Handle, *, delay: float = 0.3) -> Scenari
     return run_consumable_scenario(sim, live, consumable_key="c_ouija", delay=delay)
 
 
-
 # ---------------------------------------------------------------------------
 # Edition spectrals
 # ---------------------------------------------------------------------------

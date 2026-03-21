@@ -201,9 +201,7 @@ def _tag_scenario(
                 details=f"Tag {tag_key}: SKIP (balatrobot crash at Small)",
             )
         if not beat:
-            return ScenarioResult(
-                passed=True, details=f"Tag {tag_key}: SKIP (lost at Small)"
-            )
+            return ScenarioResult(passed=True, details=f"Tag {tag_key}: SKIP (lost at Small)")
 
     # Skip the blind to trigger the tag
     _wait_for_state(live, "BLIND_SELECT")
@@ -290,13 +288,16 @@ _TAG_DESCS: dict[str, str] = {
 for _key, (_seed, _ante, _pos) in _TAG_SEEDS.items():
     _desc = _TAG_DESCS.get(_key, _key)
 
-    def _make_fn(
-        key: str = _key, seed: str = _seed, ante: int = _ante, pos: str = _pos
-    ):
+    def _make_fn(key: str = _key, seed: str = _seed, ante: int = _ante, pos: str = _pos):
         def fn(sim: Handle, live: Handle, *, delay: float = 0.3) -> ScenarioResult:
             return _tag_scenario(
-                sim, live, tag_key=key, seed=seed, ante=ante,
-                blind_pos=pos, delay=delay,
+                sim,
+                live,
+                tag_key=key,
+                seed=seed,
+                ante=ante,
+                blind_pos=pos,
+                delay=delay,
             )
 
         return fn

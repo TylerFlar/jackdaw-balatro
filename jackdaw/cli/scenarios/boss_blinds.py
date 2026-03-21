@@ -219,38 +219,42 @@ def _boss_group_scenario(
 
     for idx, (boss_key, target_ante) in enumerate(bosses):
         if aborted:
-            sub_results.append((
-                f"boss_{boss_key[3:]}",
-                ScenarioResult(passed=True, details=f"{boss_key}: SKIP (earlier abort)"),
-            ))
+            sub_results.append(
+                (
+                    f"boss_{boss_key[3:]}",
+                    ScenarioResult(passed=True, details=f"{boss_key}: SKIP (earlier abort)"),
+                )
+            )
             continue
 
         # Advance to target ante (playing through intermediate antes)
         while current_ante < target_ante:
             if not _advance_ante(sim, live, delay=delay):
                 # Game ended — skip this and remaining bosses
-                sub_results.append((
-                    f"boss_{boss_key[3:]}",
-                    ScenarioResult(
-                        passed=True,
-                        details=f"{boss_key}: SKIP (game ended at ante {current_ante})",
-                    ),
-                ))
+                sub_results.append(
+                    (
+                        f"boss_{boss_key[3:]}",
+                        ScenarioResult(
+                            passed=True,
+                            details=f"{boss_key}: SKIP (game ended at ante {current_ante})",
+                        ),
+                    )
+                )
                 aborted = True
                 break
 
-            diffs = compare_state(
-                sim, live, label=f"after ante {current_ante}", check_round=False
-            )
+            diffs = compare_state(sim, live, label=f"after ante {current_ante}", check_round=False)
             if diffs:
-                sub_results.append((
-                    f"boss_{boss_key[3:]}",
-                    ScenarioResult(
-                        passed=False,
-                        diffs=diffs,
-                        details=f"{boss_key}: DIVERGED during advance (ante {current_ante})",
-                    ),
-                ))
+                sub_results.append(
+                    (
+                        f"boss_{boss_key[3:]}",
+                        ScenarioResult(
+                            passed=False,
+                            diffs=diffs,
+                            details=f"{boss_key}: DIVERGED during advance (ante {current_ante})",
+                        ),
+                    )
+                )
                 aborted = True
                 break
 
@@ -365,9 +369,7 @@ for _seed in _SEED_GROUPS:
     _SEED_GROUPS[_seed].sort(key=lambda x: x[1])
 
 for _seed, _bosses in _SEED_GROUPS.items():
-    _boss_desc = ", ".join(
-        f"{_BOSS_NAMES[k][0]}@{a}" for k, a in _bosses
-    )
+    _boss_desc = ", ".join(f"{_BOSS_NAMES[k][0]}@{a}" for k, a in _bosses)
 
     def _make_fn(seed: str = _seed, bosses: list[tuple[str, int]] = _bosses):
         def fn(sim: Handle, live: Handle, *, delay: float = 0.3) -> ScenarioResult:
