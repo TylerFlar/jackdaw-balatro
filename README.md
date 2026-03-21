@@ -3,6 +3,8 @@
 Bit-exact headless Balatro v1.0.1o simulator for reinforcement learning
 research. 1,400+ runs/sec, pure Python, no game client needed.
 
+**[Documentation](https://tylerflar.github.io/jackdaw-balatro/)**
+
 ## Install
 ```bash
 pip install jackdaw
@@ -59,12 +61,11 @@ jackdaw/
 
   bridge/           Validation bridge for cross-checking against live Balatro
 
-  env/              RL environment — observation encoding, action space, rewards
+  env/              RL environment — observation encoding, action space
     balatro_env.py    BalatroEnvironment: Gymnasium-style env wrapper
     observation.py    Entity-based observation encoding (211-dim global + variable entities)
     action_space.py   21-type factored action space with pointer network targeting
     game_interface.py GameAdapter protocol (DirectAdapter, BridgeAdapter)
-    rewards.py        Dense/sparse reward shaping
     agents.py         Agent protocol + RandomAgent baseline
 ```
 

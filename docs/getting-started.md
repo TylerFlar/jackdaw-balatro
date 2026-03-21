@@ -30,7 +30,7 @@ obs, mask, info = env.reset()
 
 while not info.get("done"):
     action = your_model.act(obs, mask)   # FactoredAction
-    obs, mask, info = env.step(action)
+    obs, terminated, truncated, mask, info = env.step(action)
 ```
 
 `DirectAdapter` runs the engine in-process at ~1,400 runs/sec.
@@ -56,7 +56,7 @@ ruff format .
 ```
 jackdaw/
   engine/       Deterministic game simulator (30 modules)
-  env/          RL environment — observations, actions, rewards
+  env/          RL environment — observations, actions
   bridge/       Validation bridge to live Balatro
   cli/          CLI tools & 250+ validation scenarios
 tests/          Test suite & benchmarks

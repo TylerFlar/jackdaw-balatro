@@ -24,7 +24,7 @@ obs, mask, info = env.reset()
 
 while not info.get("done"):
     action = your_model.act(obs, mask)
-    obs, mask, info = env.step(action)
+    obs, terminated, truncated, mask, info = env.step(action)
 ```
 
 Swap one line to validate against real Balatro:
@@ -56,4 +56,4 @@ Same observations, same masks, same interface.
 
 - [Getting Started](getting-started) — Install, first training loop, project structure
 - [Engine](engine) — State machine, RNG, scoring, jokers
-- [RL Environment](environment) — Observations, actions, rewards, validation
+- [RL Environment](environment) — Observations, actions, validation

@@ -22,14 +22,28 @@ env = BalatroEnvironment(
 obs, mask, info = env.reset()
 while not info.get("done"):
     action = agent.act(obs, mask)
-    obs, mask, info = env.step(action)
+    obs, terminated, truncated, mask, info = env.step(action)
 ```
 
-| Return | Type | Description |
-|--------|------|-------------|
-| `obs` | `dict[str, np.ndarray]` | Entity-based observation |
-| `mask` | `dict[str, np.ndarray]` | Legal action masks |
-| `info` | `dict` | Phase, ante, round, reward, done flag |
+### `reset()` returns
+
+| Value | Type | Description |
+|-------|------|-------------|
+| `obs` | `GameObservation` | Entity-based observation |
+| `mask` | `GameActionMask` | Legal action masks |
+| `info` | `dict` | `raw_state`, `observation`, `action_mask`, `shop_splits` |
+
+### `step()` returns
+
+| Value | Type | Description |
+|-------|------|-------------|
+| `obs` | `GameObservation` | Entity-based observation |
+| `terminated` | `bool` | Game over (win or loss) |
+| `truncated` | `bool` | Hit `max_steps` limit |
+| `mask` | `GameActionMask` | Legal action masks |
+| `info` | `dict` | `raw_state`, `prev_raw_state`, `observation`, `action_mask`, `shop_splits` |
+
+Reward computation is left to the user. Use `info["prev_raw_state"]` and `info["raw_state"]` to compute your own reward function.
 
 ## Adapters
 
