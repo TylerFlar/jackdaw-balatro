@@ -49,12 +49,6 @@ from jackdaw.env.observation import (
     Observation,
     encode_observation,
 )
-from jackdaw.env.rewards import (
-    DenseRewardWrapper,
-    RewardCalculator,
-    RewardConfig,
-    SparseRewardWrapper,
-)
 
 __all__ = [
     "ActionMask",
@@ -68,7 +62,6 @@ __all__ = [
     "D_JOKER",
     "D_PLAYING_CARD",
     "D_SHOP",
-    "DenseRewardWrapper",
     "DirectAdapter",
     "FactoredAction",
     "GameActionMask",
@@ -80,9 +73,6 @@ __all__ = [
     "NUM_CENTER_KEYS",
     "Observation",
     "RandomAgent",
-    "RewardCalculator",
-    "RewardConfig",
-    "SparseRewardWrapper",
     "balatro_game_spec",
     "encode_observation",
     "engine_action_to_factored",

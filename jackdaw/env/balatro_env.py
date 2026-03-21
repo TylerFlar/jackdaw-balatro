@@ -1,9 +1,8 @@
 """BalatroEnvironment: GameEnvironment implementation for Balatro.
 
-Wraps a :class:`GameAdapter` together with observation encoding, action
-masking, and reward shaping behind the game-agnostic :class:`GameEnvironment`
-protocol.  This is the bridge between the Balatro engine and the generic RL
-training loop.
+Wraps a :class:`GameAdapter` together with observation encoding and action
+masking behind the game-agnostic :class:`GameEnvironment` protocol.  This is
+the bridge between the Balatro engine and the generic RL training loop.
 """
 
 from __future__ import annotations
@@ -22,7 +21,6 @@ from jackdaw.env.balatro_spec import balatro_game_spec
 from jackdaw.env.game_interface import GameAdapter
 from jackdaw.env.game_spec import GameActionMask, GameObservation, GameSpec
 from jackdaw.env.observation import encode_observation
-from jackdaw.env.rewards import DenseRewardWrapper, RewardConfig
 
 
 def _compute_shop_splits(gs: dict[str, Any]) -> tuple[int, int, int]:
@@ -45,8 +43,6 @@ class BalatroEnvironment:
     ----------
     adapter_factory:
         Callable that creates a fresh :class:`GameAdapter` instance.
-    reward_config:
-        Reward shaping configuration.  ``None`` uses defaults.
     back_keys:
         List of deck back keys to sample from on each reset.
     stakes:
@@ -60,7 +56,6 @@ class BalatroEnvironment:
     def __init__(
         self,
         adapter_factory: Callable[[], GameAdapter],
-        reward_config: RewardConfig | None = None,
         back_keys: list[str] | None = None,
         stakes: list[int] | None = None,
         max_steps: int = 10_000,
@@ -68,7 +63,6 @@ class BalatroEnvironment:
     ) -> None:
         self._adapter_factory = adapter_factory
         self._adapter = adapter_factory()
-        self._reward = DenseRewardWrapper(reward_config)
         self._back_keys = back_keys or ["b_red"]
         self._stakes = stakes or [1]
         self._max_steps = max_steps
@@ -79,7 +73,6 @@ class BalatroEnvironment:
         self._step_count = 0
 
         # Episode tracking
-        self.episode_return: float = 0.0
         self.episode_length: int = 0
         self.episode_won: bool = False
         self.episode_ante: int = 1
@@ -87,11 +80,6 @@ class BalatroEnvironment:
     @property
     def spec(self) -> GameSpec:
         return self._spec
-
-    @property
-    def reward_wrapper(self) -> DenseRewardWrapper:
-        """Access the reward wrapper (e.g. for curriculum config updates)."""
-        return self._reward
 
     def reset(
         self,
@@ -101,7 +89,6 @@ class BalatroEnvironment:
         seed = str(kwargs.get("seed", f"{self._seed_prefix}_{self._episode_count}"))
         self._episode_count += 1
         self._step_count = 0
-        self.episode_return = 0.0
         self.episode_length = 0
         self.episode_won = False
         self.episode_ante = 1
@@ -112,7 +99,6 @@ class BalatroEnvironment:
         )
         stake = random.choice(self._stakes) if len(self._stakes) > 1 else self._stakes[0]
         self._adapter.reset(back_key, stake, seed)
-        self._reward.reset()
 
         gs = self._adapter.raw_state
         obs = encode_observation(gs)
@@ -130,15 +116,13 @@ class BalatroEnvironment:
     def step(
         self,
         action: FactoredAction,
-    ) -> tuple[GameObservation, float, bool, bool, GameActionMask, dict[str, object]]:
-        """Execute an action and return (obs, reward, terminated, truncated, mask, info)."""
+    ) -> tuple[GameObservation, bool, bool, GameActionMask, dict[str, object]]:
+        """Execute an action and return (obs, terminated, truncated, mask, info)."""
         gs_prev = self._adapter.raw_state
         engine_action = factored_to_engine_action(action, gs_prev)
         self._adapter.step(engine_action)
 
         gs = self._adapter.raw_state
-        reward = self._reward.reward(gs_prev, action, gs)
-        self.episode_return += reward
         self.episode_length += 1
         self._step_count += 1
 
@@ -156,11 +140,12 @@ class BalatroEnvironment:
         game_mask = _action_mask_to_game(mask)
         info: dict[str, object] = {
             "raw_state": gs,
+            "prev_raw_state": gs_prev,
             "shop_splits": _compute_shop_splits(gs),
             "observation": obs,
             "action_mask": mask,
         }
-        return game_obs, reward, terminated, truncated, game_mask, info
+        return game_obs, terminated, truncated, game_mask, info
 
 
 def _action_mask_to_game(mask: ActionMask) -> GameActionMask:

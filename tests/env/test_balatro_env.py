@@ -86,7 +86,6 @@ class TestReset:
 
     def test_episode_tracking_reset(self, env: BalatroEnvironment) -> None:
         env.reset()
-        assert env.episode_return == 0.0
         assert env.episode_length == 0
         assert env.episode_won is False
 
@@ -99,10 +98,9 @@ class TestStep:
         # Find a valid action
         action = _pick_valid_action(game_mask, info)
         result = env.step(action)
-        assert len(result) == 6
-        obs2, reward, terminated, truncated, mask2, info2 = result
+        assert len(result) == 5
+        obs2, terminated, truncated, mask2, info2 = result
         assert isinstance(obs2, GameObservation)
-        assert isinstance(reward, float)
         assert isinstance(terminated, bool)
         assert isinstance(truncated, bool)
         assert isinstance(mask2, GameActionMask)
@@ -125,7 +123,7 @@ class TestIntegration:
 
         while steps < max_steps:
             action = _pick_valid_action(game_mask, info, rng)
-            game_obs, reward, terminated, truncated, game_mask, info = env.step(action)
+            game_obs, terminated, truncated, game_mask, info = env.step(action)
             steps += 1
 
             # Verify observation consistency

@@ -5,20 +5,16 @@ End-to-end tests that exercise the full stack:
 - Multi-seed stress testing for crash resilience
 - Observation consistency with engine state
 - Action roundtrip fidelity
-- Reward determinism
 - Policy network smoke test (if torch available)
 """
 
 from __future__ import annotations
-
-import math
 
 import numpy as np
 import pytest
 
 from jackdaw.engine.actions import GamePhase
 from jackdaw.env.action_space import (
-    FactoredAction,
     engine_action_to_factored,
     factored_to_engine_action,
     get_action_mask,
@@ -34,7 +30,6 @@ from jackdaw.env.observation import (
     Observation,
     encode_observation,
 )
-from jackdaw.env.rewards import DenseRewardWrapper, RewardConfig
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -57,20 +52,15 @@ def _run_episode_collecting(
     *,
     max_steps: int = MAX_STEPS,
     collect_obs: bool = False,
-    collect_rewards: bool = False,
 ):
-    """Run a full episode, optionally collecting observations and rewards.
+    """Run a full episode, optionally collecting observations.
 
     Returns a dict with episode metadata and optionally collected data.
     """
     agent.reset()
 
     observations: list[Observation] = []
-    rewards: list[float] = []
     mask_checks: list[bool] = []
-    reward_wrapper = DenseRewardWrapper() if collect_rewards else None
-    if reward_wrapper:
-        reward_wrapper.reset()
 
     gs = adapter.raw_state
     steps = 0
@@ -101,16 +91,11 @@ def _run_episode_collecting(
             mask_checks.append(mask_ok)
 
         fa = agent.act({}, mask, info)
-        prev_gs = gs
 
         engine_action = factored_to_engine_action(fa, gs)
         adapter.step(engine_action)
         gs = adapter.raw_state
         steps += 1
-
-        if collect_rewards and reward_wrapper:
-            r = reward_wrapper.reward(prev_gs, fa, gs)
-            rewards.append(r)
 
     rr = gs.get("round_resets", {})
     return {
@@ -119,7 +104,6 @@ def _run_episode_collecting(
         "done": adapter.done,
         "ante": rr.get("ante", 1),
         "observations": observations,
-        "rewards": rewards,
         "mask_checks": mask_checks,
     }
 
@@ -136,7 +120,7 @@ class TestFullEpisodeDirectAdapter:
         adapter = DirectAdapter()
         adapter.reset(BACK, STAKE, SEED)
         agent = RandomAgent()
-        result = _run_episode_collecting(adapter, agent, collect_obs=True, collect_rewards=True)
+        result = _run_episode_collecting(adapter, agent, collect_obs=True)
 
         # Episode must terminate
         assert result["done"] or result["won"], "Episode did not terminate"
@@ -182,16 +166,6 @@ class TestFullEpisodeDirectAdapter:
         result = _run_episode_collecting(adapter, agent, collect_obs=True)
 
         assert all(result["mask_checks"]), "Action mask inconsistent with legal actions"
-
-    def test_rewards_finite_and_bounded(self):
-        adapter = DirectAdapter()
-        adapter.reset(BACK, STAKE, SEED)
-        agent = RandomAgent()
-        result = _run_episode_collecting(adapter, agent, collect_rewards=True)
-
-        for r in result["rewards"]:
-            assert math.isfinite(r), f"Non-finite reward: {r}"
-            assert abs(r) < 100, f"Unbounded reward: {r}"
 
 
 # ---------------------------------------------------------------------------
@@ -521,81 +495,21 @@ class TestActionRoundtrip:
 
 
 # ---------------------------------------------------------------------------
-# (f) Reward determinism test
-# ---------------------------------------------------------------------------
-
-
-class TestRewardDeterminism:
-    """Same (prev_state, action, next_state) must always produce same reward."""
-
-    def test_deterministic_rewards(self):
-        adapter = DirectAdapter()
-        adapter.reset(BACK, STAKE, SEED)
-        agent = RandomAgent()
-        agent.reset()
-
-        gs = adapter.raw_state
-        config = RewardConfig()
-
-        # Collect some transitions
-        transitions: list[tuple[dict, FactoredAction, dict]] = []
-
-        for _ in range(200):
-            if adapter.done:
-                break
-            phase = gs.get("phase")
-            if adapter.won and phase == GamePhase.SHOP:
-                break
-
-            legal = adapter.get_legal_actions()
-            if not legal:
-                break
-
-            mask = get_action_mask(gs)
-            info = {"raw_state": gs, "legal_actions": legal}
-            fa = agent.act({}, mask, info)
-
-            prev_gs = gs
-            engine_action = factored_to_engine_action(fa, gs)
-            adapter.step(engine_action)
-            gs = adapter.raw_state
-
-            transitions.append((prev_gs, fa, gs))
-
-        assert len(transitions) > 0, "No transitions collected"
-
-        # Compute rewards twice with fresh calculators and compare
-        wrapper1 = DenseRewardWrapper(config)
-        wrapper1.reset()
-        wrapper2 = DenseRewardWrapper(config)
-        wrapper2.reset()
-
-        for prev, action, nxt in transitions:
-            r1 = wrapper1.reward(prev, action, nxt)
-            r2 = wrapper2.reward(prev, action, nxt)
-            assert r1 == r2, f"Reward not deterministic: {r1} != {r2}"
-
-
-# ---------------------------------------------------------------------------
 # (h) Full episode with RandomAgent — end-to-end pipeline validation
 # ---------------------------------------------------------------------------
 
 
-def _run_full_episode(adapter, agent, *, max_steps=MAX_STEPS, collect_rewards=False):
+def _run_full_episode(adapter, agent, *, max_steps=MAX_STEPS):
     """Run a full episode returning rich diagnostics.
 
-    Returns dict with: steps, won, done, ante, observations, rewards,
-    reward_finite, masks_valid, action_conversions_ok.
+    Returns dict with: steps, won, done, ante, observations,
+    masks_valid, action_conversions_ok.
     """
     agent.reset()
-    reward_wrapper = DenseRewardWrapper() if collect_rewards else None
-    if reward_wrapper:
-        reward_wrapper.reset()
 
     gs = adapter.raw_state
     steps = 0
     obs_list: list[Observation] = []
-    rewards: list[float] = []
     masks_valid: list[bool] = []
     action_ok: list[bool] = []
 
@@ -623,7 +537,6 @@ def _run_full_episode(adapter, agent, *, max_steps=MAX_STEPS, collect_rewards=Fa
         fa = agent.act({}, mask, info)
 
         # Action conversion
-        prev_gs = gs
         try:
             engine_action = factored_to_engine_action(fa, gs)
             action_ok.append(True)
@@ -635,10 +548,6 @@ def _run_full_episode(adapter, agent, *, max_steps=MAX_STEPS, collect_rewards=Fa
         gs = adapter.raw_state
         steps += 1
 
-        if collect_rewards and reward_wrapper:
-            r = reward_wrapper.reward(prev_gs, fa, gs)
-            rewards.append(r)
-
     rr = gs.get("round_resets", {})
     return {
         "steps": steps,
@@ -646,7 +555,6 @@ def _run_full_episode(adapter, agent, *, max_steps=MAX_STEPS, collect_rewards=Fa
         "done": adapter.done,
         "ante": rr.get("ante", 1),
         "observations": obs_list,
-        "rewards": rewards,
         "masks_valid": masks_valid,
         "action_ok": action_ok,
     }
@@ -724,17 +632,6 @@ class TestFullEpisodeRandomAgent:
             agent = RandomAgent()
             result = _run_full_episode(adapter, agent)
             assert result["done"] or result["won"], f"seed={seed}: episode did not terminate"
-
-    @pytest.mark.slow
-    def test_rewards_finite(self):
-        """Every reward is a finite float (no NaN/inf)."""
-        for seed in self._seeds():
-            adapter = DirectAdapter()
-            adapter.reset(BACK, STAKE, seed)
-            agent = RandomAgent()
-            result = _run_full_episode(adapter, agent, collect_rewards=True)
-            for i, r in enumerate(result["rewards"]):
-                assert math.isfinite(r), f"seed={seed} step={i}: non-finite reward {r}"
 
 
 # ---------------------------------------------------------------------------
@@ -905,67 +802,6 @@ class TestObservationEncodingStress:
             f"Only checked {total_obs_checked} observations "
             f"(expected >1000 across {self.N_SEEDS} seeds)"
         )
-
-
-# ---------------------------------------------------------------------------
-# (l) Reward determinism — same seed, same agent, identical rewards
-# ---------------------------------------------------------------------------
-
-
-class TestRewardDeterminismFullEpisode:
-    """Run the same seed twice with the same agent. Rewards must be identical."""
-
-    def test_identical_rewards_across_runs(self):
-        import random as _random
-
-        seed = "DETERMINISM_CHECK_42"
-
-        def _run_collecting_rewards():
-            _random.seed(42)
-            adapter = DirectAdapter()
-            adapter.reset(BACK, STAKE, seed)
-            agent = RandomAgent()
-            agent.reset()
-            wrapper = DenseRewardWrapper()
-            wrapper.reset()
-
-            gs = adapter.raw_state
-            rewards = []
-
-            for _ in range(MAX_STEPS):
-                if adapter.done:
-                    break
-                phase = gs.get("phase")
-                if adapter.won and phase == GamePhase.SHOP:
-                    break
-
-                legal = adapter.get_legal_actions()
-                if not legal:
-                    break
-
-                mask = get_action_mask(gs)
-                info = {"raw_state": gs, "legal_actions": legal}
-                fa = agent.act({}, mask, info)
-
-                prev_gs = gs
-                engine_action = factored_to_engine_action(fa, gs)
-                adapter.step(engine_action)
-                gs = adapter.raw_state
-
-                r = wrapper.reward(prev_gs, fa, gs)
-                rewards.append(r)
-
-            return rewards
-
-        rewards_1 = _run_collecting_rewards()
-        rewards_2 = _run_collecting_rewards()
-
-        assert len(rewards_1) > 0, "No rewards collected"
-        assert len(rewards_1) == len(rewards_2), (
-            f"Different episode lengths: {len(rewards_1)} vs {len(rewards_2)}"
-        )
-        for i, (r1, r2) in enumerate(zip(rewards_1, rewards_2)):
-            assert r1 == r2, f"Step {i}: reward mismatch {r1} != {r2}"
 
 
 # ---------------------------------------------------------------------------
