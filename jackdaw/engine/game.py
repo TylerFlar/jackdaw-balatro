@@ -23,7 +23,6 @@ from typing import Any
 
 from jackdaw.engine.actions import (
     Action,
-    BuyAndUse,
     BuyCard,
     CashOut,
     Discard,
@@ -33,8 +32,10 @@ from jackdaw.engine.actions import (
     PickPackCard,
     PlayHand,
     RedeemVoucher,
-    ReorderHand,
-    ReorderJokers,
+    SwapHandLeft,
+    SwapHandRight,
+    SwapJokersLeft,
+    SwapJokersRight,
     Reroll,
     SelectBlind,
     SellCard,
@@ -73,8 +74,6 @@ def step(game_state: dict[str, Any], action: Action) -> dict[str, Any]:
             return _handle_cash_out(game_state)
         case BuyCard(shop_index=idx):
             return _handle_buy_card(game_state, idx)
-        case BuyAndUse(shop_index=idx, target_indices=targets):
-            return _handle_buy_and_use(game_state, idx, targets)
         case SellCard(area=area, card_index=idx):
             return _handle_sell_card(game_state, area, idx)
         case UseConsumable(card_index=idx, target_indices=targets):
@@ -93,10 +92,14 @@ def step(game_state: dict[str, Any], action: Action) -> dict[str, Any]:
             return _handle_next_round(game_state)
         case SortHand(mode=mode):
             return _handle_sort_hand(game_state, mode)
-        case ReorderHand(new_order=order):
-            return _handle_reorder_hand(game_state, order)
-        case ReorderJokers(new_order=order):
-            return _handle_reorder_jokers(game_state, order)
+        case SwapHandLeft(idx=idx):
+            return _handle_swap_hand(game_state, idx, -1)
+        case SwapHandRight(idx=idx):
+            return _handle_swap_hand(game_state, idx, +1)
+        case SwapJokersLeft(idx=idx):
+            return _handle_swap_jokers(game_state, idx, -1)
+        case SwapJokersRight(idx=idx):
+            return _handle_swap_jokers(game_state, idx, +1)
         case _:
             raise IllegalActionError(f"Unknown action type: {type(action).__name__}")
 
@@ -219,10 +222,149 @@ def _handle_select_blind(gs: dict[str, Any]) -> dict[str, Any]:
         blind.debuff_card(card, pareidolia=pareidolia)
 
     # ------------------------------------------------------------------
-    # 7. Phase → SELECTING_HAND
+    # 7b. Boss drawn_to_hand effects (Cerulean Bell, Crimson Heart)
+    # ------------------------------------------------------------------
+    if blind.boss and not blind.disabled:
+        dth = blind.drawn_to_hand(
+            hand_cards=gs.get("hand", []),
+            joker_cards=gs.get("jokers"),
+            rng=rng,
+        )
+        if dth.get("forced_card_index") is not None:
+            hand = gs.get("hand", [])
+            idx = dth["forced_card_index"]
+            if 0 <= idx < len(hand):
+                hand[idx].ability["forced_selection"] = True
+
+    # ------------------------------------------------------------------
+    # 8. Phase → SELECTING_HAND
     # ------------------------------------------------------------------
     gs["phase"] = GamePhase.SELECTING_HAND
     return gs
+
+
+def _fire_new_blind_choice_tags(gs: dict[str, Any]) -> None:
+    """Fire new_blind_choice context for any awarded tags that need it.
+
+    In Lua, new_blind_choice tags fire when entering the blind select screen
+    after a skip.  Pack-creating tags (buffoon, charm, ethereal, meteor,
+    standard) open a pack for the player to pick from.  The boss tag rerolls
+    the boss blind.
+
+    Since the engine has no interactive player, pack-creating tags populate
+    ``gs["pack_cards"]`` and set the phase to PACK_OPENING so the caller
+    (or agent) can pick or skip.
+    """
+    from jackdaw.engine.tags import Tag
+
+    awarded: list[dict] = gs.get("awarded_tags", [])
+    rng = gs.get("rng")
+    rr = gs.get("round_resets", {})
+
+    for entry in awarded:
+        tag_key = entry.get("key", "")
+        # Only fire tags that haven't been processed for new_blind_choice yet
+        if entry.get("nbc_fired"):
+            continue
+
+        tag = Tag(tag_key)
+        result = tag.apply("new_blind_choice", gs, rng=rng)
+        entry["nbc_fired"] = True
+
+        if result is None:
+            continue
+
+        if result.reroll_boss:
+            from jackdaw.engine.blind import get_new_boss
+
+            bosses_used = gs.setdefault("bosses_used", {})
+            ante = rr.get("ante", 1)
+            new_boss = get_new_boss(ante, bosses_used, rng)
+            rr.setdefault("blind_choices", {})["Boss"] = new_boss
+
+        if result.create_pack:
+            _open_tag_pack(gs, result.create_pack)
+
+
+def _open_tag_pack(gs: dict[str, Any], pack_key: str) -> None:
+    """Open a pack from a tag reward, populating pack_cards.
+
+    The caller (or agent) must then pick from the pack or skip it.
+    For the engine-only path (no interactive player), we store the pack
+    state so that get_legal_actions returns PickPackCard/SkipPack options.
+    """
+    from jackdaw.engine.data.prototypes import BOOSTERS
+    from jackdaw.engine.packs import generate_pack_cards
+
+    rng = gs.get("rng")
+    ante = gs.get("round_resets", {}).get("ante", 1)
+
+    pack_cards, choices = generate_pack_cards(pack_key, rng, ante, gs)
+    gs["pack_cards"] = pack_cards
+    gs["pack_choices_remaining"] = choices
+
+    # Determine pack kind from prototype
+    proto = BOOSTERS.get(pack_key)
+    pack_kind = proto.kind if proto else ""
+    gs["pack_type"] = pack_kind
+
+    # Save current phase and switch to pack opening
+    gs["shop_return_phase"] = gs.get("phase", GamePhase.BLIND_SELECT)
+
+    # For Arcana/Spectral packs: deal hand from deck for targeting
+    # Matches _handle_open_booster behavior
+    if pack_kind in ("Arcana", "Spectral"):
+        deck: list = gs.get("deck", [])
+        hand: list = gs.get("hand", [])
+        hand_size = gs.get("hand_size", 8)
+        to_deal = min(len(deck), hand_size - len(hand))
+        pack_hand: list = []
+        for _ in range(to_deal):
+            if deck:
+                card = deck.pop()
+                pack_hand.append(card)
+        gs["pack_hand"] = pack_hand
+        combined_hand = hand + pack_hand
+        _sort_hand_desc(combined_hand)
+        gs["hand"] = combined_hand
+
+    gs["phase"] = GamePhase.PACK_OPENING
+
+
+def _apply_tag_result(gs: dict[str, Any], result: Any) -> None:
+    """Apply a TagResult's effects to the game state.
+
+    Handles all TagResult fields that produce immediate side-effects.
+    """
+    if result.dollars:
+        gs["dollars"] = gs.get("dollars", 0) + result.dollars
+
+    if result.create_jokers:
+        from jackdaw.engine.card_factory import create_card
+
+        jokers = gs.get("jokers", [])
+        joker_slots = gs.get("joker_slots", 5)
+        rng = gs.get("rng")
+        ante = gs.get("round_resets", {}).get("ante", 1)
+        for _ in range(result.create_jokers):
+            if len(jokers) >= joker_slots:
+                break
+            card = create_card(
+                "Joker",
+                rng,
+                ante,
+                area="",
+                forced_rarity=1,
+                game_state=gs,
+            )
+            jokers.append(card)
+
+    if result.level_up is not None:
+        hand_type, levels = result.level_up
+        hand_levels = gs.get("hand_levels")
+        if hand_levels is not None:
+            for _ in range(levels):
+                hand_levels.level_up(hand_type)
 
 
 def _handle_skip_blind(gs: dict[str, Any]) -> dict[str, Any]:
@@ -276,8 +418,7 @@ def _handle_skip_blind(gs: dict[str, Any]) -> dict[str, Any]:
 
         # Apply immediate tag effects
         if tag_result is not None:
-            if tag_result.dollars:
-                gs["dollars"] = gs.get("dollars", 0) + tag_result.dollars
+            _apply_tag_result(gs, tag_result)
 
     # ------------------------------------------------------------------
     # 4. Fire joker skip_blind context
@@ -315,7 +456,17 @@ def _handle_skip_blind(gs: dict[str, Any]) -> dict[str, Any]:
     if tag_key:
         _check_double_tag(gs, tag_key)
 
-    gs["phase"] = GamePhase.BLIND_SELECT
+    # ------------------------------------------------------------------
+    # 7. Fire new_blind_choice tags from awarded (deferred) tags
+    # ------------------------------------------------------------------
+    # In Lua, new_blind_choice tags fire when the blind select screen
+    # appears after a skip.  Tags like tag_buffoon, tag_charm, etc.
+    # open packs; tag_boss rerolls the boss blind.
+    _fire_new_blind_choice_tags(gs)
+
+    # Only return to BLIND_SELECT if a tag didn't open a pack
+    if gs.get("phase") != GamePhase.PACK_OPENING:
+        gs["phase"] = GamePhase.BLIND_SELECT
     return gs
 
 
@@ -396,6 +547,34 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
     jokers = gs.get("jokers", [])
     hand_levels = gs.get("hand_levels")
 
+    # Populate snapshot values that score_hand reads from game_state.
+    # These are stored in nested structures but score_hand expects them
+    # at the top level.
+    gs["hands_left"] = cr.get("hands_left", 0)
+    gs["hands_played"] = cr.get("hands_played", 0)
+    gs["discards_left"] = cr.get("discards_left", 0)
+    gs["discards_used"] = cr.get("discards_used", 0)
+    gs["money"] = gs.get("dollars", 0)
+    gs["deck_cards_remaining"] = len(gs.get("deck", []))
+
+    # Card tallies for jokers that reference full-deck counts
+    all_cards = gs.get("deck", []) + gs.get("hand", []) + gs.get("discard_pile", []) + played
+    gs["playing_cards_count"] = len(all_cards)
+    gs["stone_tally"] = sum(1 for c in all_cards if getattr(c, "center_key", None) == "m_stone")
+    gs["steel_tally"] = sum(1 for c in all_cards if getattr(c, "center_key", None) == "m_steel")
+    gs["enhanced_card_count"] = sum(
+        1 for c in all_cards if getattr(c, "center_key", "") not in ("", "c_base")
+    )
+
+    # Targeting card values (from current_round)
+    gs["mail_card_id"] = cr.get("mail_card", {}).get("id")
+    gs["idol_card"] = cr.get("idol_card")
+    gs["ancient_suit"] = cr.get("ancient_card", {}).get("suit")
+
+    # Consumable usage tally
+    usage = gs.get("consumable_usage_total", {})
+    gs["consumable_usage_tarot"] = usage.get("tarot", 0)
+
     result = score_hand(
         played_cards=played,
         held_cards=held,
@@ -429,6 +608,30 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
     destroyed_set = set(id(c) for c in result.cards_destroyed)
     played = [c for c in played if id(c) not in destroyed_set]
 
+    # Joker card creation (Vagabond, 8-Ball, Superposition, etc.)
+    if result.joker_creates:
+        _resolve_create_descriptors(
+            gs, [{"type": c.get("type", "Tarot"), **c} for c in result.joker_creates]
+        )
+
+    # The Ox: set money to $0 if most-played hand type is played
+    # (blind.lua:debuff_hand fires during scoring in Lua)
+    if (
+        getattr(blind, "name", "") == "The Ox"
+        and not getattr(blind, "disabled", False)
+        and hand_levels is not None
+        and result.hand_type != "NULL"
+    ):
+        from jackdaw.engine.data.hands import HandType as _HT
+
+        try:
+            played_ht = _HT(result.hand_type)
+            if played_ht == hand_levels.most_played():
+                blind.triggered = True
+                gs["dollars"] = 0
+        except ValueError:
+            pass
+
     # ------------------------------------------------------------------
     # 8. Move surviving played cards to discard pile
     #
@@ -459,7 +662,19 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
         # ------------------------------------------------------------------
         # 11. More hands — draw cards and stay in SELECTING_HAND
         # ------------------------------------------------------------------
-        _draw_hand(gs)
+        # The Serpent: draw only 3 cards instead of filling to hand_size
+        serpent_play = getattr(blind, "name", "") == "The Serpent" and not getattr(
+            blind, "disabled", False
+        )
+        if serpent_play:
+            deck: list = gs.get("deck", [])
+            hand_out: list = gs.get("hand", [])
+            for _ in range(min(3, len(deck))):
+                if deck:
+                    hand_out.append(deck.pop())
+            _sort_hand_desc(hand_out)
+        else:
+            _draw_hand(gs)
 
         # Re-debuff hand cards for boss blind (new cards from deck)
         if blind.boss and not blind.disabled:
@@ -474,6 +689,19 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
         if getattr(blind, "name", "") == "The Fish" and getattr(blind, "prepped", False):
             for card in gs.get("hand", []):
                 card.facing = "back"
+
+        # Boss drawn_to_hand effects on redraw (Cerulean Bell, Crimson Heart)
+        if blind.boss and not blind.disabled:
+            dth = blind.drawn_to_hand(
+                hand_cards=gs.get("hand", []),
+                joker_cards=jokers,
+                rng=rng,
+            )
+            if dth.get("forced_card_index") is not None:
+                hand = gs.get("hand", [])
+                idx = dth["forced_card_index"]
+                if 0 <= idx < len(hand):
+                    hand[idx].ability["forced_selection"] = True
 
     return gs
 
@@ -652,7 +880,7 @@ def _handle_discard(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str, A
         blind is not None
         and getattr(blind, "name", "") == "The Serpent"
         and not getattr(blind, "disabled", False)
-        and (cr.get("hands_played", 0) > 0 or cr.get("discards_used", 0) > 1)
+        and (cr.get("hands_played", 0) > 0 or cr.get("discards_used", 0) > 0)
     )
     if serpent:
         # The Serpent: draw only 3 after first action
@@ -676,6 +904,19 @@ def _handle_discard(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str, A
         )
         for card in gs.get("hand", []):
             blind.debuff_card(card, pareidolia=pareidolia)
+
+        # Boss drawn_to_hand effects on discard redraw
+        rng = gs.get("rng")
+        dth = blind.drawn_to_hand(
+            hand_cards=gs.get("hand", []),
+            joker_cards=jokers,
+            rng=rng,
+        )
+        if dth.get("forced_card_index") is not None:
+            hand = gs.get("hand", [])
+            idx = dth["forced_card_index"]
+            if 0 <= idx < len(hand):
+                hand[idx].ability["forced_selection"] = True
 
     return gs
 
@@ -777,27 +1018,6 @@ def _handle_buy_card(gs: dict[str, Any], idx: int) -> dict[str, Any]:
     return gs
 
 
-def _handle_buy_and_use(
-    gs: dict[str, Any], idx: int, targets: tuple[int, ...] | None
-) -> dict[str, Any]:
-    """Buy a consumable and immediately use it."""
-    _require_phase(gs, GamePhase.SHOP)
-
-    shop_cards: list = gs.get("shop_cards", [])
-    if idx < 0 or idx >= len(shop_cards):
-        raise IllegalActionError(f"Invalid shop index {idx}")
-
-    card = shop_cards[idx]
-    if card.cost > gs.get("dollars", 0):
-        raise IllegalActionError("Cannot afford card")
-
-    gs["dollars"] -= card.cost
-    shop_cards.pop(idx)
-
-    _use_consumable_card(gs, card, targets)
-    return gs
-
-
 def _handle_sell_card(gs: dict[str, Any], area: str, idx: int) -> dict[str, Any]:
     """Sell a card for its sell value.
 
@@ -849,7 +1069,29 @@ def _handle_use_consumable(
     if idx < 0 or idx >= len(consumables):
         raise IllegalActionError(f"Invalid consumable index {idx}")
 
-    card = consumables.pop(idx)
+    card = consumables[idx]
+
+    # Validate can_use before consuming (matches Balatro's can_use_consumeable)
+    from jackdaw.engine.consumables import can_use_consumable
+
+    hand: list = gs.get("hand", [])
+    highlighted: list = []
+    if targets:
+        highlighted = [hand[i] for i in targets if i < len(hand)]
+
+    if not can_use_consumable(
+        card,
+        highlighted=highlighted,
+        hand_cards=hand,
+        jokers=gs.get("jokers", []),
+        consumables=consumables,
+        joker_limit=gs.get("joker_slots", 5),
+        consumable_limit=gs.get("consumable_slots", 2),
+    ):
+        consumable_name = card.ability.get("name", card.center_key)
+        raise IllegalActionError(f"Consumable {consumable_name!r} cannot be used at this time")
+
+    consumables.pop(idx)
     _use_consumable_card(gs, card, targets)
 
     # Phase does NOT change — returns to whatever it was
@@ -1122,35 +1364,36 @@ def _handle_sort_hand(gs: dict[str, Any], mode: str) -> dict[str, Any]:
     return gs
 
 
-def _handle_reorder_hand(gs: dict[str, Any], order: tuple[int, ...]) -> dict[str, Any]:
-    """Reorder cards in the player's hand.
+def _handle_swap_hand(gs: dict[str, Any], idx: int, direction: int) -> dict[str, Any]:
+    """Swap a hand card with its neighbor.
 
+    *direction* is ``-1`` (left) or ``+1`` (right).
     Free action — no cost, doesn't consume hands or discards.
-    Left-to-right order affects scoring (Photograph, Hanging Chad).
     """
     _require_phase(gs, GamePhase.SELECTING_HAND)
 
     hand: list = gs.get("hand", [])
-    if not order:
-        return gs  # marker action, no-op
-    if sorted(order) != list(range(len(hand))):
-        raise IllegalActionError("Invalid hand permutation")
+    other = idx + direction
+    if not (0 <= idx < len(hand) and 0 <= other < len(hand)):
+        raise IllegalActionError("Swap index out of range")
 
-    gs["hand"] = [hand[i] for i in order]
+    hand[idx], hand[other] = hand[other], hand[idx]
     return gs
 
 
-def _handle_reorder_jokers(gs: dict[str, Any], order: tuple[int, ...]) -> dict[str, Any]:
-    """Reorder jokers by permutation."""
+def _handle_swap_jokers(gs: dict[str, Any], idx: int, direction: int) -> dict[str, Any]:
+    """Swap a joker with its neighbor.
+
+    *direction* is ``-1`` (left) or ``+1`` (right).
+    """
     _require_phase(gs, GamePhase.SELECTING_HAND, GamePhase.SHOP)
 
     jokers: list = gs.get("jokers", [])
-    if not order:
-        return gs  # marker action, no-op
-    if sorted(order) != list(range(len(jokers))):
-        raise IllegalActionError("Invalid joker permutation")
+    other = idx + direction
+    if not (0 <= idx < len(jokers) and 0 <= other < len(jokers)):
+        raise IllegalActionError("Swap index out of range")
 
-    gs["jokers"] = [jokers[i] for i in order]
+    jokers[idx], jokers[other] = jokers[other], jokers[idx]
     return gs
 
 
@@ -1317,9 +1560,10 @@ def _round_won(gs: dict[str, Any]) -> None:
                 card.debuff = False
 
     # ------------------------------------------------------------------
-    # 6. Track unused discards (for Garbage Tag)
+    # 6. Track unused discards / hands played (for Garbage/Handy Tags)
     # ------------------------------------------------------------------
     gs["unused_discards"] = cr.get("discards_left", 0)
+    gs["hands_played_this_round"] = cr.get("hands_played", 0)
 
     # ------------------------------------------------------------------
     # 7. Mark blind as Defeated
@@ -1562,7 +1806,7 @@ def _apply_boss_blind_effects(gs: dict[str, Any], blind: Any) -> None:
 
     # The Mouth: reset only_hand
     elif name == "The Mouth":
-        blind.only_hand = False
+        blind.only_hand = None
 
     # The House / The Mark: flip cards face-down (blind.lua:200-203)
     # Cards are flipped at draw_to_hand time, not set_blind time.
@@ -1731,19 +1975,26 @@ def _apply_consumable_result(
 
     # k. Add playing cards to deck
     if getattr(result, "add_to_deck", None):
+        import copy as _copy
+
+        from jackdaw.engine.card import Card as _Card
+
         deck_list: list = gs.setdefault("deck", [])
         for card_spec in result.add_to_deck:
-            from jackdaw.engine.card import Card as _Card
-
-            new_card = _Card()
-            if "suit" in card_spec and "rank" in card_spec:
-                new_card.set_base(
-                    card_spec.get("key", ""),
-                    card_spec["suit"],
-                    card_spec["rank"],
-                )
-            if "enhancement" in card_spec:
-                new_card.set_ability(card_spec["enhancement"])
+            # Cryptid: copy an existing card
+            copy_source = card_spec.get("copy_of")
+            if copy_source is not None:
+                new_card = _copy.deepcopy(copy_source)
+            else:
+                new_card = _Card()
+                if "suit" in card_spec and "rank" in card_spec:
+                    new_card.set_base(
+                        card_spec.get("key", ""),
+                        card_spec["suit"],
+                        card_spec["rank"],
+                    )
+                if "enhancement" in card_spec:
+                    new_card.set_ability(card_spec["enhancement"])
             deck_list.append(new_card)
 
     # ---- Joker effects ----
@@ -1776,35 +2027,48 @@ def _resolve_create_descriptors(gs: dict[str, Any], descriptors: list[dict[str, 
     Each descriptor is ``{'type': ..., 'count': ..., 'seed': ...,
     'forced_key': ...}``.  Creates the actual Card objects and adds
     them to the appropriate area.
-    """
-    from jackdaw.engine.card import Card as _Card
 
+    Delegates to :func:`~jackdaw.engine.card_factory.resolve_create_descriptor`
+    for actual card creation.
+    """
+    from jackdaw.engine.card_factory import resolve_create_descriptor
+
+    rng = gs.get("rng")
+    ante = gs.get("round_resets", {}).get("ante", 1)
     consumables: list = gs.setdefault("consumables", [])
     consumable_limit = gs.get("consumable_slots", 2)
+    jokers: list = gs.setdefault("jokers", [])
+    joker_slots = gs.get("joker_slots", 5)
+    deck: list = gs.setdefault("deck", [])
 
     for desc in descriptors:
-        ctype = desc.get("type", "")
         count = desc.get("count", 1)
 
         for _ in range(count):
-            if ctype in ("Tarot", "Planet", "Spectral", "Tarot_Planet"):
+            card = resolve_create_descriptor(desc, rng, ante, gs)
+            if card is None:
+                continue
+
+            card_set = card.ability.get("set", "")
+            if card_set == "Joker":
+                negative = card.edition and card.edition.get("negative")
+                if len(jokers) < joker_slots + (1 if negative else 0):
+                    jokers.append(card)
+            elif card_set in ("Tarot", "Planet", "Spectral"):
                 if len(consumables) < consumable_limit:
-                    forced = desc.get("forced_key")
-                    key = forced or f"c_{'fool' if ctype == 'Tarot' else 'pluto'}"
-                    c = _Card(center_key=key)
-                    c.ability = {"set": ctype.split("_")[0], "effect": ""}
-                    consumables.append(c)
-            elif ctype == "Joker":
-                jokers: list = gs.setdefault("jokers", [])
-                joker_slots = gs.get("joker_slots", 5)
-                if len(jokers) < joker_slots:
-                    c = _Card(center_key="j_joker")
-                    c.ability = {
-                        "set": "Joker",
-                        "effect": "",
-                        "name": "Joker",
-                    }
-                    jokers.append(c)
+                    consumables.append(card)
+            elif card_set in ("Default", "Enhanced", ""):
+                # Playing card — add to hand if mid-round, otherwise deck.
+                # Matches Balatro which routes spectral-created cards to
+                # the hand area during SELECTING_HAND.
+                if gs.get("phase") == GamePhase.SELECTING_HAND:
+                    gs.setdefault("hand", []).append(card)
+                else:
+                    deck.append(card)
+
+    # Re-sort hand if any cards were added during SELECTING_HAND
+    if gs.get("phase") == GamePhase.SELECTING_HAND:
+        _sort_hand_desc(gs.get("hand", []))
 
 
 # ---------------------------------------------------------------------------
@@ -2006,8 +2270,11 @@ def _close_pack(gs: dict[str, Any]) -> None:
         # Only return cards that are still in the hand (not destroyed)
         surviving = [c for c in pack_hand if id(c) in hand_set]
         deck[:0] = list(reversed(surviving))
+        # Remove only the pack_hand cards from hand, preserving any
+        # cards that were there before the pack opened.
+        pack_ids = set(id(c) for c in pack_hand)
+        gs["hand"] = [c for c in hand if id(c) not in pack_ids]
         gs["pack_hand"] = []
-        gs["hand"] = []
 
     # Restore phase
     gs["phase"] = gs.get("shop_return_phase", GamePhase.SHOP)

@@ -12,7 +12,6 @@ from typing import Any
 
 from jackdaw.engine.actions import (
     Action,
-    BuyAndUse,
     BuyCard,
     CashOut,
     Discard,
@@ -22,14 +21,16 @@ from jackdaw.engine.actions import (
     PickPackCard,
     PlayHand,
     RedeemVoucher,
-    ReorderHand,
-    ReorderJokers,
     Reroll,
     SelectBlind,
     SellCard,
     SkipBlind,
     SkipPack,
     SortHand,
+    SwapHandLeft,
+    SwapHandRight,
+    SwapJokersLeft,
+    SwapJokersRight,
     UseConsumable,
 )
 
@@ -47,11 +48,14 @@ _STATE_MAP = {
 }
 
 
-def action_to_rpc(action: Action) -> dict[str, Any]:
+def action_to_rpc(action: Action, game_state: dict[str, Any] | None = None) -> dict[str, Any]:
     """Convert a jackdaw Action to a balatrobot JSON-RPC method + params.
 
     Returns ``{"method": str, "params": dict}`` suitable for sending
     as a JSON-RPC 2.0 request body (minus jsonrpc/id fields).
+
+    *game_state* is required for swap actions so that the full
+    permutation array can be constructed for the balatrobot RPC.
     """
     match action:
         case PlayHand(card_indices=indices):
@@ -67,11 +71,6 @@ def action_to_rpc(action: Action) -> dict[str, Any]:
             return {"method": "skip", "params": {}}
 
         case BuyCard(shop_index=idx):
-            return {"method": "buy", "params": {"card": idx}}
-
-        case BuyAndUse(shop_index=idx, target_indices=targets):
-            # Buy then use — balatrobot requires two separate calls
-            # Return the buy call; use must be sent separately
             return {"method": "buy", "params": {"card": idx}}
 
         case SellCard(area=area, card_index=idx):
@@ -110,16 +109,24 @@ def action_to_rpc(action: Action) -> dict[str, Any]:
         case CashOut():
             return {"method": "cash_out", "params": {}}
 
-        case SortHand(mode=_mode):
-            # Balatrobot doesn't have a sort action — use rearrange
-            # The caller must compute the sorted permutation
-            return {"method": "rearrange", "params": {"hand": []}}
+        case SortHand(mode=mode):
+            return {"method": "rearrange", "params": {"sort": mode}}
 
-        case ReorderHand(new_order=order):
-            return {"method": "rearrange", "params": {"hand": list(order)}}
+        case SwapHandLeft(idx=idx) | SwapHandRight(idx=idx):
+            assert game_state is not None, "game_state required for swap actions"
+            n = len(game_state.get("hand", []))
+            order = list(range(n))
+            other = idx - 1 if isinstance(action, SwapHandLeft) else idx + 1
+            order[idx], order[other] = order[other], order[idx]
+            return {"method": "rearrange", "params": {"hand": order}}
 
-        case ReorderJokers(new_order=order):
-            return {"method": "rearrange", "params": {"jokers": list(order)}}
+        case SwapJokersLeft(idx=idx) | SwapJokersRight(idx=idx):
+            assert game_state is not None, "game_state required for swap actions"
+            n = len(game_state.get("jokers", []))
+            order = list(range(n))
+            other = idx - 1 if isinstance(action, SwapJokersLeft) else idx + 1
+            order[idx], order[other] = order[other], order[idx]
+            return {"method": "rearrange", "params": {"jokers": order}}
 
         case _:
             raise ValueError(f"Unknown action type: {type(action).__name__}")

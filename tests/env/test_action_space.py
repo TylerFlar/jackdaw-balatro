@@ -50,12 +50,6 @@ from jackdaw.engine.actions import (
     RedeemVoucher as EngineRedeemVoucher,
 )
 from jackdaw.engine.actions import (
-    ReorderHand as EngineReorderHand,
-)
-from jackdaw.engine.actions import (
-    ReorderJokers as EngineReorderJokers,
-)
-from jackdaw.engine.actions import (
     Reroll as EngineReroll,
 )
 from jackdaw.engine.actions import (
@@ -72,6 +66,18 @@ from jackdaw.engine.actions import (
 )
 from jackdaw.engine.actions import (
     SortHand as EngineSortHand,
+)
+from jackdaw.engine.actions import (
+    SwapHandLeft as EngineSwapHandLeft,
+)
+from jackdaw.engine.actions import (
+    SwapHandRight as EngineSwapHandRight,
+)
+from jackdaw.engine.actions import (
+    SwapJokersLeft as EngineSwapJokersLeft,
+)
+from jackdaw.engine.actions import (
+    SwapJokersRight as EngineSwapJokersRight,
 )
 from jackdaw.engine.actions import (
     UseConsumable as EngineUseConsumable,
@@ -710,34 +716,34 @@ class TestFactoredToEngine:
 # =========================================================================
 
 
-class TestSwapPermutations:
+class TestSwapConversion:
     def test_swap_jokers_left(self):
-        """SwapJokersLeft(idx=2) swaps jokers[2] with jokers[1]."""
+        """SwapJokersLeft(idx=2) produces EngineSwapJokersLeft(idx=2)."""
         gs = {"jokers": _make_jokers(4)}
         fa = FactoredAction(ActionType.SwapJokersLeft, entity_target=2)
         action = factored_to_engine_action(fa, gs)
-        assert isinstance(action, EngineReorderJokers)
-        assert action.new_order == (0, 2, 1, 3)
+        assert isinstance(action, EngineSwapJokersLeft)
+        assert action.idx == 2
 
     def test_swap_jokers_right(self):
-        """SwapJokersRight(idx=1) swaps jokers[1] with jokers[2]."""
+        """SwapJokersRight(idx=1) produces EngineSwapJokersRight(idx=1)."""
         gs = {"jokers": _make_jokers(4)}
         fa = FactoredAction(ActionType.SwapJokersRight, entity_target=1)
         action = factored_to_engine_action(fa, gs)
-        assert isinstance(action, EngineReorderJokers)
-        assert action.new_order == (0, 2, 1, 3)
+        assert isinstance(action, EngineSwapJokersRight)
+        assert action.idx == 1
 
-    def test_swap_jokers_left_first_raises(self):
-        """SwapJokersLeft(idx=0) is invalid (nothing to the left)."""
+    def test_swap_jokers_left_no_target_raises(self):
+        """SwapJokersLeft without entity_target raises."""
         gs = {"jokers": _make_jokers(3)}
-        fa = FactoredAction(ActionType.SwapJokersLeft, entity_target=0)
+        fa = FactoredAction(ActionType.SwapJokersLeft, entity_target=None)
         with pytest.raises(ValueError):
             factored_to_engine_action(fa, gs)
 
-    def test_swap_jokers_right_last_raises(self):
-        """SwapJokersRight(idx=last) is invalid (nothing to the right)."""
+    def test_swap_jokers_right_no_target_raises(self):
+        """SwapJokersRight without entity_target raises."""
         gs = {"jokers": _make_jokers(3)}
-        fa = FactoredAction(ActionType.SwapJokersRight, entity_target=2)
+        fa = FactoredAction(ActionType.SwapJokersRight, entity_target=None)
         with pytest.raises(ValueError):
             factored_to_engine_action(fa, gs)
 
@@ -745,15 +751,15 @@ class TestSwapPermutations:
         gs = {"hand": _make_hand(5)}
         fa = FactoredAction(ActionType.SwapHandLeft, entity_target=3)
         action = factored_to_engine_action(fa, gs)
-        assert isinstance(action, EngineReorderHand)
-        assert action.new_order == (0, 1, 3, 2, 4)
+        assert isinstance(action, EngineSwapHandLeft)
+        assert action.idx == 3
 
     def test_swap_hand_right(self):
         gs = {"hand": _make_hand(5)}
         fa = FactoredAction(ActionType.SwapHandRight, entity_target=0)
         action = factored_to_engine_action(fa, gs)
-        assert isinstance(action, EngineReorderHand)
-        assert action.new_order == (1, 0, 2, 3, 4)
+        assert isinstance(action, EngineSwapHandRight)
+        assert action.idx == 0
 
     def test_swap_at_boundary(self):
         """Swap the last-but-one left and first right to edge positions."""
@@ -761,12 +767,14 @@ class TestSwapPermutations:
         # Swap left: move index 1 to index 0
         fa = FactoredAction(ActionType.SwapJokersLeft, entity_target=1)
         action = factored_to_engine_action(fa, gs)
-        assert action.new_order == (1, 0)
+        assert isinstance(action, EngineSwapJokersLeft)
+        assert action.idx == 1
 
         # Swap right: move index 0 to index 1
         fa = FactoredAction(ActionType.SwapJokersRight, entity_target=0)
         action = factored_to_engine_action(fa, gs)
-        assert action.new_order == (1, 0)
+        assert isinstance(action, EngineSwapJokersRight)
+        assert action.idx == 0
 
     def test_swap_requires_entity_target(self):
         gs = {"jokers": _make_jokers(3)}
@@ -866,57 +874,30 @@ class TestEngineToFactored:
         fa = engine_action_to_factored(action, {})
         assert fa.action_type == ActionType.SortHandSuit
 
-    def test_reorder_jokers_adjacent_swap(self):
-        """ReorderJokers with adjacent swap → SwapJokersLeft."""
-        action = EngineReorderJokers(new_order=(0, 2, 1, 3))
+    def test_swap_jokers_left_roundtrip(self):
+        """EngineSwapJokersLeft → SwapJokersLeft factored action."""
+        action = EngineSwapJokersLeft(idx=2)
         fa = engine_action_to_factored(action, {})
         assert fa.action_type == ActionType.SwapJokersLeft
-        assert fa.entity_target == 2  # element at index 2 moved left
+        assert fa.entity_target == 2
 
-    def test_reorder_hand_adjacent_swap(self):
-        action = EngineReorderHand(new_order=(1, 0, 2))
+    def test_swap_jokers_right_roundtrip(self):
+        action = EngineSwapJokersRight(idx=1)
         fa = engine_action_to_factored(action, {})
-        assert fa.action_type == ActionType.SwapHandLeft
-        assert fa.entity_target == 1  # element at index 1 moved left
-
-    def test_reorder_non_adjacent_decomposed(self):
-        """Non-adjacent permutations decompose into first adjacent swap."""
-        # (2, 1, 0) = reverse → first bubble-sort swap is at (0,1) since 2>1
-        action = EngineReorderJokers(new_order=(2, 1, 0))
-        fa = engine_action_to_factored(action, {})
-        assert fa.action_type == ActionType.SwapJokersLeft
-        assert fa.entity_target == 1  # element at index 1 moves left
-
-    def test_reorder_complex_permutation_decomposed(self):
-        """3-cycle permutation decompose into first adjacent swap."""
-        # (1, 2, 0) → first inversion: 1>0 at comparison of perm[1]=2 vs perm[2]=0
-        action = EngineReorderJokers(new_order=(1, 2, 0))
-        fa = engine_action_to_factored(action, {})
-        assert fa.action_type == ActionType.SwapJokersLeft
-        assert fa.entity_target is not None
-
-    def test_reorder_jokers_empty_marker(self):
-        """Empty joker permutation marker converts to swap marker."""
-        action = EngineReorderJokers(new_order=())
-        fa = engine_action_to_factored(action, {})
-        assert fa.action_type == ActionType.SwapJokersLeft
-        assert fa.entity_target is None  # marker — not directly executable
-
-    def test_reorder_hand_empty_marker(self):
-        """Empty hand permutation marker converts to swap marker."""
-        action = EngineReorderHand(new_order=())
-        fa = engine_action_to_factored(action, {})
-        assert fa.action_type == ActionType.SwapHandLeft
-        assert fa.entity_target is None  # marker — not directly executable
-
-    def test_buy_and_use_converts_to_buy_card(self):
-        """BuyAndUse composite action maps to BuyCard."""
-        from jackdaw.engine.actions import BuyAndUse
-
-        action = BuyAndUse(shop_index=1)
-        fa = engine_action_to_factored(action, {})
-        assert fa.action_type == ActionType.BuyCard
+        assert fa.action_type == ActionType.SwapJokersRight
         assert fa.entity_target == 1
+
+    def test_swap_hand_left_roundtrip(self):
+        action = EngineSwapHandLeft(idx=3)
+        fa = engine_action_to_factored(action, {})
+        assert fa.action_type == ActionType.SwapHandLeft
+        assert fa.entity_target == 3
+
+    def test_swap_hand_right_roundtrip(self):
+        action = EngineSwapHandRight(idx=0)
+        fa = engine_action_to_factored(action, {})
+        assert fa.action_type == ActionType.SwapHandRight
+        assert fa.entity_target == 0
 
     def test_sell_unknown_area_raises(self):
         action = EngineSellCard(area="unknown", card_index=0)
@@ -989,13 +970,8 @@ class TestFullRoundtrip:
     def test_swap_jokers_right_roundtrip(self):
         gs = {"jokers": _make_jokers(5)}
         fa = FactoredAction(ActionType.SwapJokersRight, entity_target=2)
-        # SwapRight(2) → permutation (0,1,3,2,4) → detected as SwapLeft(3)
-        engine = factored_to_engine_action(fa, gs)
-        assert engine.new_order == (0, 1, 3, 2, 4)
-        result = engine_action_to_factored(engine, gs)
-        # engine_action_to_factored always returns SwapLeft for an adjacent swap
-        assert result.action_type == ActionType.SwapJokersLeft
-        assert result.entity_target == 3
+        result = self._roundtrip(fa, gs)
+        assert result == fa
 
     def test_swap_hand_left_roundtrip(self):
         gs = {"hand": _make_hand(4)}
@@ -1006,11 +982,8 @@ class TestFullRoundtrip:
     def test_swap_hand_right_roundtrip(self):
         gs = {"hand": _make_hand(4)}
         fa = FactoredAction(ActionType.SwapHandRight, entity_target=1)
-        engine = factored_to_engine_action(fa, gs)
-        assert engine.new_order == (0, 2, 1, 3)
-        result = engine_action_to_factored(engine, gs)
-        assert result.action_type == ActionType.SwapHandLeft
-        assert result.entity_target == 2
+        result = self._roundtrip(fa, gs)
+        assert result == fa
 
 
 # =========================================================================
@@ -1382,13 +1355,8 @@ def _write_coverage_report(
     else:
         lines.append("All action types achieve 100% forward conversion.")
         lines.append("")
-        lines.append("**ReorderHand / ReorderJokers:** Empty-permutation markers from")
-        lines.append("`get_legal_actions()` map to SwapLeft markers. Full permutations")
-        lines.append("decompose into the first adjacent swap of a bubble-sort pass.")
-        lines.append("The RL agent achieves arbitrary reorderings through repeated swaps.")
-        lines.append("")
-        lines.append("**BuyAndUse:** Composite engine action maps to BuyCard. The RL")
-        lines.append("agent achieves the same result via separate BuyCard + UseConsumable.")
+        lines.append("**SwapHand/SwapJokers:** Engine now uses native swap actions that")
+        lines.append("map 1:1 to the factored action space. No permutation decomposition needed.")
         lines.append("")
 
     lines.append("## Reverse: Factored → Engine")
@@ -1421,7 +1389,21 @@ class TestActionCoverageEmpirical:
 
     def test_forward_coverage(self):
         """Every engine legal action converts to factored (except reorder perms)."""
-        result = _run_coverage_episodes(RandomAgent(), self.N_EPISODES)
+        from jackdaw.engine.runner import greedy_play_agent
+
+        # Use a greedy driver agent that survives long enough to reach
+        # SHOP/ROUND_EVAL phases (RandomAgent often dies in the first blind).
+        class _GreedyDriver:
+            def reset(self):
+                pass
+
+            def act(self, obs, action_mask, info):
+                gs = info["raw_state"]
+                legal = info["legal_actions"]
+                engine_action = greedy_play_agent(gs, legal)
+                return engine_action_to_factored(engine_action, gs)
+
+        result = _run_coverage_episodes(_GreedyDriver(), self.N_EPISODES)
 
         all_stats: dict[str, dict[str, int]] = defaultdict(lambda: {"seen": 0, "ok": 0, "fail": 0})
         all_failures: dict[str, list[str]] = defaultdict(list)
@@ -1448,26 +1430,10 @@ class TestActionCoverageEmpirical:
                 f"Examples: {all_failures.get(type_name, [])[:5]}"
             )
 
-        # ReorderHand/ReorderJokers: the engine generates full permutations
-        # in get_legal_actions (not adjacent swaps), so 0% forward conversion
-        # is expected. The RL agent uses SwapHandLeft/Right and SwapJokersLeft/Right
-        # which produce adjacent-swap permutations via factored_to_engine_action.
-        for type_name in ("ReorderHand", "ReorderJokers"):
-            if type_name in all_stats and all_stats[type_name]["seen"] > 0:
-                print(
-                    f"  {type_name}: {all_stats[type_name]['seen']} seen, "
-                    f"{all_stats[type_name]['fail']} non-adjacent (expected)"
-                )
-
         # Assert: we actually saw a good variety of action types
         assert len(all_stats) >= 10, (
             f"Only saw {len(all_stats)} action types — expected at least 10"
         )
-
-        # Write report
-        reverse_stats = _run_reverse_coverage(n_per_type=50)
-        report_path = Path(__file__).resolve().parent.parent.parent / "docs" / "action-coverage.md"
-        _write_coverage_report(dict(all_stats), dict(all_failures), reverse_stats, report_path)
 
     def test_reverse_coverage(self):
         """Random valid FactoredActions convert to engine actions."""
@@ -1493,7 +1459,7 @@ class TestSwapHandRoundtrip:
 
     def test_swap_hand_roundtrip(self):
         """All valid entity_targets for both swap directions produce
-        valid adjacent-swap ReorderHand permutations."""
+        the correct engine swap actions."""
         rng = random.Random(42)
         total_tested = 0
         failures: list[str] = []
@@ -1511,15 +1477,8 @@ class TestSwapHandRoundtrip:
                     failures.append(f"SwapLeft(idx={idx}, n={n}): {e}")
                     continue
                 total_tested += 1
-                assert isinstance(action, EngineReorderHand)
-                perm = action.new_order
-                assert len(perm) == n
-                # Exactly one adjacent swap: positions idx and idx-1 swapped
-                expected = list(range(n))
-                expected[idx], expected[idx - 1] = expected[idx - 1], expected[idx]
-                assert list(perm) == expected, (
-                    f"SwapLeft(idx={idx}, n={n}): expected {expected}, got {list(perm)}"
-                )
+                assert isinstance(action, EngineSwapHandLeft)
+                assert action.idx == idx
 
             # SwapHandRight: valid targets are 0..n-2
             for idx in range(0, n - 1):
@@ -1530,15 +1489,8 @@ class TestSwapHandRoundtrip:
                     failures.append(f"SwapRight(idx={idx}, n={n}): {e}")
                     continue
                 total_tested += 1
-                assert isinstance(action, EngineReorderHand)
-                perm = action.new_order
-                assert len(perm) == n
-                # Exactly one adjacent swap: positions idx and idx+1 swapped
-                expected = list(range(n))
-                expected[idx], expected[idx + 1] = expected[idx + 1], expected[idx]
-                assert list(perm) == expected, (
-                    f"SwapRight(idx={idx}, n={n}): expected {expected}, got {list(perm)}"
-                )
+                assert isinstance(action, EngineSwapHandRight)
+                assert action.idx == idx
 
         assert not failures, f"{len(failures)} failures:\n" + "\n".join(failures[:20])
         assert total_tested > 200, f"Only tested {total_tested} cases"

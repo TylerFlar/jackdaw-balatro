@@ -19,13 +19,13 @@ from jackdaw.engine.actions import (
     OpenBooster,
     PickPackCard,
     PlayHand,
-    ReorderJokers,
     Reroll,
     SelectBlind,
     SellCard,
     SkipBlind,
     SkipPack,
     SortHand,
+    SwapJokersLeft,
     UseConsumable,
     get_legal_actions,
 )
@@ -244,20 +244,20 @@ class TestSortHand:
 
 
 # ---------------------------------------------------------------------------
-# ReorderJokers
+# SwapJokers
 # ---------------------------------------------------------------------------
 
 
-class TestReorderJokers:
-    def test_jokers_reordered(self):
+class TestSwapJokers:
+    def test_swap_joker_left(self):
         gs = _init_gs()
         gs["phase"] = GamePhase.SHOP
         j0 = _joker_card("j_a")
         j1 = _joker_card("j_b")
         j2 = _joker_card("j_c")
         gs["jokers"] = [j0, j1, j2]
-        step(gs, ReorderJokers(new_order=(2, 0, 1)))
-        assert gs["jokers"] == [j2, j0, j1]
+        step(gs, SwapJokersLeft(idx=2))
+        assert gs["jokers"] == [j0, j2, j1]
 
 
 # ---------------------------------------------------------------------------

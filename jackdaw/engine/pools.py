@@ -559,12 +559,10 @@ def _filter_tag(
 
     # requires: in Lua, this checks G.P_CENTERS[v.requires].discovered —
     # whether the item has been SEEN in a previous run, not purchased.
-    # If discovered is None, all items are treated as undiscovered
-    # (matching a fresh profile).  Pass discovered={"all"} to treat
-    # all items as discovered.
-    if proto.requires:
-        if discovered is None:
-            return UNAVAILABLE
+    # The engine assumes a fully-unlocked profile (consistent with the
+    # joker unlock skip at line 377), so if discovered is None we treat
+    # all items as discovered.  Pass an explicit set to restrict.
+    if proto.requires and discovered is not None:
         if "all" not in discovered and proto.requires not in discovered:
             return UNAVAILABLE
 

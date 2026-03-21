@@ -22,9 +22,12 @@ from jackdaw.engine.actions import (
     Discard,
     GamePhase,
     PlayHand,
-    ReorderJokers,
     SelectBlind,
     SortHand,
+    SwapHandLeft,
+    SwapHandRight,
+    SwapJokersLeft,
+    SwapJokersRight,
 )
 from jackdaw.env.game_interface import DirectAdapter
 from jackdaw.env.observation import (
@@ -349,7 +352,13 @@ class TestNoNaNInf:
                 break
 
             # Pick a random non-utility action
-            progress = [a for a in legal if not isinstance(a, (SortHand, ReorderJokers))]
+            progress = [
+                a
+                for a in legal
+                if not isinstance(
+                    a, (SortHand, SwapHandLeft, SwapHandRight, SwapJokersLeft, SwapJokersRight)
+                )
+            ]
             pool = progress if progress else legal
             action = random.choice(pool)
 

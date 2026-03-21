@@ -347,7 +347,6 @@ def _pick_consumable_targets(
 def smart_agent(gs: dict[str, Any], legal_actions: list[Any]) -> Any:
     """Smart agent targeting deep runs (ante 8+)."""
     from jackdaw.engine.actions import (
-        BuyAndUse,
         BuyCard,
         CashOut,
         Discard,
@@ -385,10 +384,6 @@ def smart_agent(gs: dict[str, Any], legal_actions: list[Any]) -> Any:
         jokers = gs.get("jokers", [])
         hand_levels = gs.get("hand_levels")
         cr = gs.get("current_round", {})
-        blind = gs.get("blind")
-        blind_target = getattr(blind, "chips", 0) if blind else 0
-        chips_so_far = gs.get("chips", 0)
-        chips_needed = max(0, blind_target - chips_so_far)
         hands_left = cr.get("hands_left", 4)
         discards_left = cr.get("discards_left", 0)
 
@@ -554,15 +549,7 @@ def smart_agent(gs: dict[str, Any], legal_actions: list[Any]) -> Any:
                     if _card_set(card) == "Planet" and card.cost <= spendable:
                         return a
 
-        # 8. Buy-and-use planets when slots full
-        for a in legal_actions:
-            if isinstance(a, BuyAndUse):
-                if a.shop_index < len(shop_cards):
-                    card = shop_cards[a.shop_index]
-                    if _card_set(card) == "Planet" and card.cost <= spendable:
-                        return a
-
-        # 9. Buy tarots if we have slots
+        # 8. Buy tarots if we have slots
         if buy_actions and len(consumables) < consumable_slots:
             for a in buy_actions:
                 if a.shop_index < len(shop_cards):
@@ -570,15 +557,7 @@ def smart_agent(gs: dict[str, Any], legal_actions: list[Any]) -> Any:
                     if _card_set(card) == "Tarot" and card.cost <= spendable:
                         return a
 
-        # 10. Buy-and-use tarots
-        for a in legal_actions:
-            if isinstance(a, BuyAndUse):
-                if a.shop_index < len(shop_cards):
-                    card = shop_cards[a.shop_index]
-                    if _card_set(card) == "Tarot" and card.cost <= spendable:
-                        return a
-
-        # 11. Sell weak jokers to make room for better ones (late game)
+        # 9. Sell weak jokers to make room for better ones (late game)
         if not has_joker_room and ante >= 3:
             great_in_shop = any(
                 a.shop_index < len(shop_cards)

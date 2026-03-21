@@ -757,7 +757,9 @@ class Card:
         if self.ability.get("h_size", 0) != 0:
             game_state["hand_size"] = game_state.get("hand_size", 0) + self.ability["h_size"]
         if self.ability.get("d_size", 0) > 0:
-            game_state["discards"] = game_state.get("discards", 0) + self.ability["d_size"]
+            rr = game_state.get("round_resets")
+            if rr is not None:
+                rr["discards"] = rr.get("discards", 0) + self.ability["d_size"]
 
         if name == "Credit Card":
             amount = extra if isinstance(extra, int) else 0
@@ -773,9 +775,9 @@ class Card:
             game_state["interest_amount"] = game_state.get("interest_amount", 0) + amount
         if name == "Troubadour" and isinstance(extra, dict):
             game_state["hand_size"] = game_state.get("hand_size", 0) + extra.get("h_size", 0)
-            game_state["hands_per_round"] = game_state.get("hands_per_round", 0) + extra.get(
-                "h_plays", 0
-            )
+            rr = game_state.get("round_resets")
+            if rr is not None:
+                rr["hands"] = rr.get("hands", 0) + extra.get("h_plays", 0)
         if name == "Stuntman" and isinstance(extra, dict):
             game_state["hand_size"] = game_state.get("hand_size", 0) - extra.get("h_size", 0)
 
@@ -793,7 +795,9 @@ class Card:
         if self.ability.get("h_size", 0) != 0:
             game_state["hand_size"] = game_state.get("hand_size", 0) - self.ability["h_size"]
         if self.ability.get("d_size", 0) > 0:
-            game_state["discards"] = game_state.get("discards", 0) - self.ability["d_size"]
+            rr = game_state.get("round_resets")
+            if rr is not None:
+                rr["discards"] = rr.get("discards", 0) - self.ability["d_size"]
 
         if name == "Credit Card":
             amount = extra if isinstance(extra, int) else 0
@@ -811,9 +815,9 @@ class Card:
             game_state["interest_amount"] = game_state.get("interest_amount", 0) - amount
         if name == "Troubadour" and isinstance(extra, dict):
             game_state["hand_size"] = game_state.get("hand_size", 0) - extra.get("h_size", 0)
-            game_state["hands_per_round"] = game_state.get("hands_per_round", 0) - extra.get(
-                "h_plays", 0
-            )
+            rr = game_state.get("round_resets")
+            if rr is not None:
+                rr["hands"] = rr.get("hands", 0) - extra.get("h_plays", 0)
         if name == "Stuntman" and isinstance(extra, dict):
             game_state["hand_size"] = game_state.get("hand_size", 0) + extra.get("h_size", 0)
 

@@ -213,7 +213,7 @@ class Tag:
                 return TagResult(dollars=unused * self.config["dollars_per_discard"])
 
             if self.key == "tag_handy":
-                played = game_state.get("hands_played", 0)
+                played = game_state.get("hands_played_this_round", 0)
                 return TagResult(dollars=played * self.config["dollars_per_hand"])
 
             if self.key == "tag_skip":

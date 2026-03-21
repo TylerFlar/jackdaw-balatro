@@ -16,13 +16,13 @@ from jackdaw.engine.actions import (
     PickPackCard,
     PlayHand,
     RedeemVoucher,
-    ReorderHand,
-    ReorderJokers,
     Reroll,
     SelectBlind,
     SellCard,
     SkipBlind,
     SkipPack,
+    SwapHandRight,
+    SwapJokersRight,
     UseConsumable,
 )
 
@@ -196,15 +196,25 @@ class TestSerializerDeserializerRoundtrip:
             PickPackCard(card_index=0),
             PickPackCard(card_index=2, target_indices=(0, 1)),
             SkipPack(),
-            ReorderHand(new_order=(4, 3, 2, 1, 0)),
-            ReorderHand(new_order=()),
-            ReorderJokers(new_order=(2, 0, 1)),
-            ReorderJokers(new_order=(0,)),
         ],
         ids=lambda a: f"{type(a).__name__}_{hash(a)}",
     )
     def test_roundtrip(self, action):
         rpc = action_to_rpc(action)
+        recovered = rpc_to_action(rpc["method"], rpc["params"])
+        assert recovered == action
+
+    def test_roundtrip_swap_hand(self):
+        gs = {"hand": [None] * 5}
+        action = SwapHandRight(idx=2)
+        rpc = action_to_rpc(action, gs)
+        recovered = rpc_to_action(rpc["method"], rpc["params"])
+        assert recovered == action
+
+    def test_roundtrip_swap_jokers(self):
+        gs = {"jokers": [None] * 3}
+        action = SwapJokersRight(idx=1)
+        rpc = action_to_rpc(action, gs)
         recovered = rpc_to_action(rpc["method"], rpc["params"])
         assert recovered == action
 

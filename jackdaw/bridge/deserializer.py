@@ -16,13 +16,14 @@ from jackdaw.engine.actions import (
     PickPackCard,
     PlayHand,
     RedeemVoucher,
-    ReorderHand,
-    ReorderJokers,
     Reroll,
     SelectBlind,
     SellCard,
     SkipBlind,
     SkipPack,
+    SortHand,
+    SwapHandRight,
+    SwapJokersRight,
     UseConsumable,
 )
 
@@ -113,10 +114,49 @@ def rpc_to_action(method: str, params: dict | None = None) -> Action | None:
         raise ValueError(f"pack: unrecognized params {params!r}")
 
     if method == "rearrange":
+        if "sort" in params:
+            return SortHand(mode=params["sort"])
         if "hand" in params:
-            return ReorderHand(new_order=tuple(params["hand"]))
+            return _permutation_to_swap(params["hand"], "hand")
         if "jokers" in params:
-            return ReorderJokers(new_order=tuple(params["jokers"]))
+            return _permutation_to_swap(params["jokers"], "jokers")
         raise ValueError(f"rearrange: unrecognized params {params!r}")
 
     raise ValueError(f"Unknown RPC method: {method!r}")
+
+
+def _permutation_to_swap(perm: list[int], area: str) -> Action:
+    """Convert a permutation array to a swap action.
+
+    For adjacent swaps, returns the canonical ``SwapRight(lower_idx)`` form.
+    For non-adjacent permutations (legacy), decomposes to the first adjacent
+    swap needed via a bubble-sort scan.
+    """
+    n = len(perm)
+
+    # Find positions that differ from identity
+    diffs = [i for i in range(n) if perm[i] != i]
+
+    if len(diffs) == 2:
+        lo, hi = diffs
+        if hi - lo == 1:
+            # Adjacent swap — use canonical SwapRight(lower_idx)
+            if area == "hand":
+                return SwapHandRight(idx=lo)
+            return SwapJokersRight(idx=lo)
+
+    # Non-adjacent or complex permutation: find first bubble-sort inversion
+    for i in range(n - 1):
+        if perm[i] > perm[i + 1]:
+            if area == "hand":
+                return SwapHandRight(idx=i)
+            return SwapJokersRight(idx=i)
+
+    # No inversion found — find first out-of-place element and swap right
+    for i in range(n):
+        if perm[i] != i:
+            if area == "hand":
+                return SwapHandRight(idx=i)
+            return SwapJokersRight(idx=i)
+
+    raise ValueError(f"Identity permutation passed to _permutation_to_swap: {perm!r}")

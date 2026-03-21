@@ -15,13 +15,13 @@ from jackdaw.engine.actions import (
     PickPackCard,
     PlayHand,
     RedeemVoucher,
-    ReorderHand,
-    ReorderJokers,
     Reroll,
     SelectBlind,
     SellCard,
     SkipBlind,
     SkipPack,
+    SwapHandRight,
+    SwapJokersRight,
     UseConsumable,
 )
 
@@ -128,13 +128,13 @@ class TestPack:
 
 
 class TestRearrange:
-    def test_rearrange_hand(self):
-        result = rpc_to_action("rearrange", {"hand": [3, 1, 0, 2]})
-        assert result == ReorderHand(new_order=(3, 1, 0, 2))
+    def test_rearrange_hand_adjacent(self):
+        result = rpc_to_action("rearrange", {"hand": [0, 2, 1, 3]})
+        assert result == SwapHandRight(idx=1)
 
-    def test_rearrange_jokers(self):
-        result = rpc_to_action("rearrange", {"jokers": [2, 0, 1]})
-        assert result == ReorderJokers(new_order=(2, 0, 1))
+    def test_rearrange_jokers_adjacent(self):
+        result = rpc_to_action("rearrange", {"jokers": [1, 0, 2]})
+        assert result == SwapJokersRight(idx=0)
 
     def test_rearrange_no_params(self):
         with pytest.raises(ValueError, match="rearrange"):
@@ -199,9 +199,8 @@ class TestRoundtrip:
     """Verify that action_to_rpc followed by rpc_to_action recovers the
     original Action for all types that have a clean 1:1 mapping.
 
-    BuyAndUse and SortHand are excluded because they don't have direct
-    balatrobot equivalents (BuyAndUse maps to buy only; SortHand maps
-    to rearrange with empty hand list).
+    SortHand is excluded because it doesn't have a direct balatrobot
+    equivalent (SortHand maps to rearrange with empty hand list).
     """
 
     @pytest.mark.parametrize(
@@ -224,12 +223,24 @@ class TestRoundtrip:
             PickPackCard(card_index=0),
             PickPackCard(card_index=1, target_indices=(0, 3)),
             SkipPack(),
-            ReorderHand(new_order=(2, 0, 1, 3)),
-            ReorderJokers(new_order=(1, 0)),
         ],
         ids=lambda a: type(a).__name__,
     )
     def test_roundtrip(self, action):
         rpc = action_to_rpc(action)
+        recovered = rpc_to_action(rpc["method"], rpc["params"])
+        assert recovered == action
+
+    def test_roundtrip_swap_hand(self):
+        gs = {"hand": [None] * 5}
+        action = SwapHandRight(idx=2)
+        rpc = action_to_rpc(action, gs)
+        recovered = rpc_to_action(rpc["method"], rpc["params"])
+        assert recovered == action
+
+    def test_roundtrip_swap_jokers(self):
+        gs = {"jokers": [None] * 3}
+        action = SwapJokersRight(idx=1)
+        rpc = action_to_rpc(action, gs)
         recovered = rpc_to_action(rpc["method"], rpc["params"])
         assert recovered == action

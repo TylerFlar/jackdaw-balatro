@@ -233,7 +233,7 @@ class BridgeAdapter:
     def step(self, action: Action) -> GameState:
         from jackdaw.bridge.balatrobot_adapter import action_to_rpc
 
-        rpc = action_to_rpc(action)
+        rpc = action_to_rpc(action, self._last_gs)
         self._last_response = self._backend.handle(rpc["method"], rpc["params"])
         self._last_gs = self._build_gs()
         return _snapshot(self._last_gs)

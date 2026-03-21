@@ -1076,11 +1076,16 @@ def _blackboard(card: Card, ctx: JokerContext) -> JokerResult | None:
 def _stencil(card: Card, ctx: JokerContext) -> JokerResult | None:
     """Joker Stencil: xMult = empty joker slots. Source: card.lua:3966.
 
-    x_mult is pre-computed as ``joker_slots - joker_count + stencil_count``
-    and stored on card.ability.x_mult (source line 4203-4206).
+    Formula: ``joker_slots - joker_count + stencil_count`` where stencil_count
+    includes this stencil (so stencils don't count against empty slots).
     """
     if ctx.joker_main:
-        x = card.ability.get("x_mult", 0)
+        stencil_count = sum(
+            1
+            for j in (ctx.jokers or [])
+            if getattr(j, "center_key", None) == "j_stencil" and not getattr(j, "debuff", False)
+        )
+        x = ctx.game.joker_slots - ctx.game.joker_count + stencil_count
         if x > 1:
             return JokerResult(Xmult_mod=x)
     return None

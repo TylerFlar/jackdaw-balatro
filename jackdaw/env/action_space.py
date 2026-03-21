@@ -47,9 +47,6 @@ from jackdaw.engine.actions import (
     GamePhase,
 )
 from jackdaw.engine.actions import (
-    BuyAndUse as EngineBuyAndUse,
-)
-from jackdaw.engine.actions import (
     BuyCard as EngineBuyCard,
 )
 from jackdaw.engine.actions import (
@@ -74,10 +71,16 @@ from jackdaw.engine.actions import (
     RedeemVoucher as EngineRedeemVoucher,
 )
 from jackdaw.engine.actions import (
-    ReorderHand as EngineReorderHand,
+    SwapHandLeft as EngineSwapHandLeft,
 )
 from jackdaw.engine.actions import (
-    ReorderJokers as EngineReorderJokers,
+    SwapHandRight as EngineSwapHandRight,
+)
+from jackdaw.engine.actions import (
+    SwapJokersLeft as EngineSwapJokersLeft,
+)
+from jackdaw.engine.actions import (
+    SwapJokersRight as EngineSwapJokersRight,
 )
 from jackdaw.engine.actions import (
     Reroll as EngineReroll,
@@ -260,7 +263,10 @@ def get_action_mask(game_state: dict[str, Any]) -> ActionMask:
     elif phase == GamePhase.PACK_OPENING:
         pack_cards = game_state.get("pack_cards", [])
         remaining = game_state.get("pack_choices_remaining", 0)
-        if remaining > 0 and pack_cards:
+        pack_type = game_state.get("pack_type", "")
+        # Spectral packs: balatrobot cannot handle Spectral card
+        # highlighting via RPC, so only SkipPack is valid.
+        if remaining > 0 and pack_cards and pack_type != "Spectral":
             type_mask[ActionType.PickPackCard] = True
             entity_masks[ActionType.PickPackCard] = np.ones(len(pack_cards), dtype=bool)
         type_mask[ActionType.SkipPack] = True
@@ -487,7 +493,7 @@ def factored_to_engine_action(
     fa:
         The factored action from the policy network.
     game_state:
-        Current game state dict (needed for swap→permutation conversion).
+        Current game state dict.
 
     Returns
     -------
@@ -569,16 +575,24 @@ def factored_to_engine_action(
         return EnginePickPackCard(card_index=fa.entity_target)
 
     if at == ActionType.SwapJokersLeft:
-        return _swap_to_reorder_jokers(fa, game_state, direction=-1)
+        if fa.entity_target is None:
+            raise ValueError("SwapJokersLeft requires entity_target")
+        return EngineSwapJokersLeft(idx=fa.entity_target)
 
     if at == ActionType.SwapJokersRight:
-        return _swap_to_reorder_jokers(fa, game_state, direction=1)
+        if fa.entity_target is None:
+            raise ValueError("SwapJokersRight requires entity_target")
+        return EngineSwapJokersRight(idx=fa.entity_target)
 
     if at == ActionType.SwapHandLeft:
-        return _swap_to_reorder_hand(fa, game_state, direction=-1)
+        if fa.entity_target is None:
+            raise ValueError("SwapHandLeft requires entity_target")
+        return EngineSwapHandLeft(idx=fa.entity_target)
 
     if at == ActionType.SwapHandRight:
-        return _swap_to_reorder_hand(fa, game_state, direction=1)
+        if fa.entity_target is None:
+            raise ValueError("SwapHandRight requires entity_target")
+        return EngineSwapHandRight(idx=fa.entity_target)
 
     if at == ActionType.SortHandRank:
         return EngineSortHand(mode="rank")
@@ -587,48 +601,6 @@ def factored_to_engine_action(
         return EngineSortHand(mode="suit")
 
     raise ValueError(f"Unknown action type: {fa.action_type}")
-
-
-def _swap_to_reorder_jokers(
-    fa: FactoredAction,
-    game_state: dict[str, Any],
-    direction: int,
-) -> EngineReorderJokers:
-    """Convert a swap operation to a ReorderJokers permutation.
-
-    ``direction=-1`` swaps index i with i-1 (left).
-    ``direction=+1`` swaps index i with i+1 (right).
-    """
-    if fa.entity_target is None:
-        raise ValueError("Swap requires entity_target")
-    jokers = game_state.get("jokers", [])
-    n = len(jokers)
-    idx = fa.entity_target
-    swap_with = idx + direction
-    if not (0 <= idx < n and 0 <= swap_with < n):
-        raise ValueError(f"Invalid swap: index {idx} direction {direction} with {n} jokers")
-    order = list(range(n))
-    order[idx], order[swap_with] = order[swap_with], order[idx]
-    return EngineReorderJokers(new_order=tuple(order))
-
-
-def _swap_to_reorder_hand(
-    fa: FactoredAction,
-    game_state: dict[str, Any],
-    direction: int,
-) -> EngineReorderHand:
-    """Convert a swap operation to a ReorderHand permutation."""
-    if fa.entity_target is None:
-        raise ValueError("Swap requires entity_target")
-    hand = game_state.get("hand", [])
-    n = len(hand)
-    idx = fa.entity_target
-    swap_with = idx + direction
-    if not (0 <= idx < n and 0 <= swap_with < n):
-        raise ValueError(f"Invalid swap: index {idx} direction {direction} with {n} hand cards")
-    order = list(range(n))
-    order[idx], order[swap_with] = order[swap_with], order[idx]
-    return EngineReorderHand(new_order=tuple(order))
 
 
 # ---------------------------------------------------------------------------
@@ -642,16 +614,12 @@ def engine_action_to_factored(
 ) -> FactoredAction:
     """Convert an engine Action back to a FactoredAction.
 
-    Primarily for logging/debugging.  Note that ReorderJokers and
-    ReorderHand with complex permutations cannot be perfectly decomposed
-    into a single swap — only adjacent swaps are representable.
-
     Parameters
     ----------
     action:
         Engine action dataclass.
     game_state:
-        Current game state dict (needed for permutation→swap detection).
+        Current game state dict.
 
     Returns
     -------
@@ -661,8 +629,7 @@ def engine_action_to_factored(
     Raises
     ------
     ValueError
-        If the action type is not recognized or a permutation cannot
-        be represented as a single swap.
+        If the action type is not recognized.
     """
     if isinstance(action, EnginePlayHand):
         return FactoredAction(
@@ -695,15 +662,6 @@ def engine_action_to_factored(
         return FactoredAction(action_type=ActionType.SkipPack)
 
     if isinstance(action, EngineBuyCard):
-        return FactoredAction(
-            action_type=ActionType.BuyCard,
-            entity_target=action.shop_index,
-        )
-
-    if isinstance(action, EngineBuyAndUse):
-        # Composite action: buy consumable + use immediately.
-        # The factored space decomposes this into BuyCard + UseConsumable.
-        # Map to BuyCard — the RL agent can UseConsumable in a later step.
         return FactoredAction(
             action_type=ActionType.BuyCard,
             entity_target=action.shop_index,
@@ -753,92 +711,28 @@ def engine_action_to_factored(
             return FactoredAction(action_type=ActionType.SortHandRank)
         return FactoredAction(action_type=ActionType.SortHandSuit)
 
-    if isinstance(action, EngineReorderJokers):
-        if not action.new_order:
-            # Marker from get_legal_actions — "joker reordering is available".
-            # Map to SwapJokersLeft marker (entity_target=None), matching how
-            # PlayHand(card_indices=()) → PlayHand(card_target=None).
-            return FactoredAction(action_type=ActionType.SwapJokersLeft)
-        return _permutation_to_swap(
-            action.new_order,
-            ActionType.SwapJokersLeft,
-            ActionType.SwapJokersRight,
+    if isinstance(action, EngineSwapJokersLeft):
+        return FactoredAction(
+            action_type=ActionType.SwapJokersLeft,
+            entity_target=action.idx,
         )
 
-    if isinstance(action, EngineReorderHand):
-        if not action.new_order:
-            return FactoredAction(action_type=ActionType.SwapHandLeft)
-        return _permutation_to_swap(
-            action.new_order,
-            ActionType.SwapHandLeft,
-            ActionType.SwapHandRight,
+    if isinstance(action, EngineSwapJokersRight):
+        return FactoredAction(
+            action_type=ActionType.SwapJokersRight,
+            entity_target=action.idx,
+        )
+
+    if isinstance(action, EngineSwapHandLeft):
+        return FactoredAction(
+            action_type=ActionType.SwapHandLeft,
+            entity_target=action.idx,
+        )
+
+    if isinstance(action, EngineSwapHandRight):
+        return FactoredAction(
+            action_type=ActionType.SwapHandRight,
+            entity_target=action.idx,
         )
 
     raise ValueError(f"Unknown engine action type: {type(action).__name__}")
-
-
-def _decompose_permutation(perm: tuple[int, ...]) -> tuple[int, int]:
-    """Find the first adjacent swap needed to sort a permutation.
-
-    Uses a single pass of bubble sort: find the leftmost position ``i``
-    where ``perm[i] > perm[i+1]`` and return ``(i, i+1)``.  If no such
-    position exists, scan for any out-of-place element and swap it toward
-    its target.
-
-    Returns ``(lower_idx, higher_idx)`` of the swap to perform.
-    """
-    n = len(perm)
-    # Bubble-sort pass: find leftmost inversion
-    for i in range(n - 1):
-        if perm[i] > perm[i + 1]:
-            return (i, i + 1)
-    # No inversion in bubble order — find first out-of-place element
-    for i in range(n):
-        if perm[i] != i:
-            # Move it toward its target
-            target = perm[i]
-            if target > i:
-                return (i, i + 1)
-            else:
-                return (i - 1, i)
-    # Identity permutation — shouldn't happen, but return first pair
-    return (0, 1)
-
-
-def _permutation_to_swap(
-    new_order: tuple[int, ...],
-    left_type: ActionType,
-    right_type: ActionType,
-) -> FactoredAction:
-    """Convert a permutation to the first adjacent swap needed to reach it.
-
-    For single adjacent swaps, returns the exact swap.  For complex
-    permutations (multi-element rearrangements), decomposes into the
-    first adjacent swap of a bubble-sort pass toward the target order.
-
-    The RL agent achieves arbitrary reorderings through repeated
-    single-swap actions, matching the balatrobot ``rearrange`` API.
-
-    Empty-tuple markers are handled by the caller before reaching here.
-    """
-    n = len(new_order)
-
-    # Find positions that differ from identity
-    diffs = [i for i in range(n) if new_order[i] != i]
-
-    if len(diffs) == 0:
-        # Identity permutation — no-op, return first valid swap as fallback
-        if n >= 2:
-            return FactoredAction(action_type=left_type, entity_target=1)
-        raise ValueError("Single-element permutation cannot be swapped")
-
-    if len(diffs) == 2:
-        i, j = diffs
-        if abs(i - j) == 1 and new_order[i] == j and new_order[j] == i:
-            # Single adjacent swap — exact conversion
-            return FactoredAction(action_type=left_type, entity_target=j)
-
-    # Complex permutation: decompose into first adjacent swap
-    lo, hi = _decompose_permutation(new_order)
-    # SwapLeft with the higher index (the element at hi moves left)
-    return FactoredAction(action_type=left_type, entity_target=hi)

@@ -166,6 +166,9 @@ class ScoreResult:
     saved: bool = False
     """True if Mr. Bones (or similar) prevented a game over."""
 
+    joker_creates: list[dict] = field(default_factory=list)
+    """Card creation descriptors from joker effects (Vagabond, 8-Ball, etc.)."""
+
 
 # ---------------------------------------------------------------------------
 # Base scoring pipeline (Phases 1-4, 6-8, 12 without joker effects)
@@ -507,6 +510,14 @@ def score_hand(
     ):
         hand_levels.level_up(hand_type, amount=-1)
 
+    # === Phase 3c: Splash — all played cards score ===
+    splash_active = any(
+        getattr(j, "center_key", None) == "j_splash" and not getattr(j, "debuff", False)
+        for j in jokers
+    )
+    if splash_active:
+        scoring_cards = list(played_cards)
+
     # === Phase 4: Base chips/mult from hand level ===
     base_chips, base_mult = hand_levels.get(hand_type)
     hand_chips = float(base_chips)
@@ -698,6 +709,7 @@ def score_hand(
                 mult *= ihe_result.Xmult_mod
 
     # === Phase 9: Joker main effects (left to right) ===
+    joker_creates: list[dict] = []
     for joker in jokers:
         if joker.debuff:
             continue
@@ -720,6 +732,8 @@ def score_hand(
                 mult *= result.Xmult_mod
             if result.dollars:
                 dollars += result.dollars
+            if result.extra and "create" in result.extra:
+                joker_creates.append(result.extra["create"])
 
         # 9c: Joker-on-joker (other_joker context)
         for other in jokers:
@@ -836,4 +850,5 @@ def score_hand(
         jokers_removed=jokers_removed,
         cards_destroyed=cards_destroyed,
         saved=saved,
+        joker_creates=joker_creates,
     )

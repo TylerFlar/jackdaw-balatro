@@ -343,6 +343,7 @@ def create_card(
             ante,
             append=append,
             rarity=forced_rarity,
+            legendary=(card_type == "Joker" and forced_rarity == 4),
             used_jokers=gs.get("used_jokers"),
             used_vouchers=gs.get("used_vouchers"),
             banned_keys=gs.get("banned_keys"),

@@ -24,10 +24,13 @@ from jackdaw.engine.actions import (
     GamePhase,
     NextRound,
     PlayHand,
-    ReorderJokers,
     SelectBlind,
     SkipPack,
     SortHand,
+    SwapHandLeft,
+    SwapHandRight,
+    SwapJokersLeft,
+    SwapJokersRight,
     get_legal_actions,
 )
 from jackdaw.engine.game import IllegalActionError, step
@@ -125,7 +128,7 @@ def random_agent(
     progress: list[Action] = []
     utility: list[Action] = []
     for a in legal_actions:
-        if isinstance(a, (SortHand, ReorderJokers)):
+        if isinstance(a, (SortHand, SwapHandLeft, SwapHandRight, SwapJokersLeft, SwapJokersRight)):
             utility.append(a)
         else:
             progress.append(a)

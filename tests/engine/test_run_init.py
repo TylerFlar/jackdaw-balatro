@@ -12,7 +12,6 @@ from jackdaw.engine.challenges import CHALLENGES
 from jackdaw.engine.data.prototypes import BLINDS, TAGS
 from jackdaw.engine.pools import UNAVAILABLE, get_current_pool
 from jackdaw.engine.profile import (
-    _get_locked_items,
     fresh_profile,
 )
 from jackdaw.engine.rng import PseudoRandom
@@ -198,25 +197,22 @@ class TestFreshProfile:
 class TestPoolFilteringWithProfile:
     def test_locked_joker_available_all_unlocked(self):
         """Sim assumes fully-unlocked profile: locked jokers are available."""
-        locked = _get_locked_items()
-        from jackdaw.engine.data.prototypes import JOKERS
-
-        locked_joker = None
-        for k in locked:
-            if k in JOKERS and JOKERS[k].rarity != 4:
-                locked_joker = k
-                break
-        assert locked_joker is not None, "No locked non-legendary joker found"
+        # j_hanging_chad is a locked Common joker (unlocked=false in centers.json)
+        # with no enhancement_gate or pool_flag restrictions.
+        # The engine skips unlock checks, so it should appear in the pool.
+        locked_joker = "j_hanging_chad"
 
         rng = PseudoRandom("PROFILE_TEST")
-        pool, _ = get_current_pool(
-            "Joker",
-            rng,
-            1,
-            rarity=JOKERS[locked_joker].rarity,
-        )
-        # Unlock check is skipped — locked jokers are always available
+        pool, _ = get_current_pool("Joker", rng, 1, rarity=1)
         assert locked_joker in pool and pool[pool.index(locked_joker)] != UNAVAILABLE
+
+    def test_discovery_gated_tags_available_by_default(self):
+        """Tags with 'requires' fields are available when discovered is not set."""
+        # tag_foil requires e_foil to be discovered.  The engine defaults to
+        # everything discovered, so it should appear in the Tag pool at ante 1.
+        rng = PseudoRandom("TAG_DISC_TEST")
+        pool, _ = get_current_pool("Tag", rng, 1)
+        assert "tag_foil" in pool and pool[pool.index("tag_foil")] != UNAVAILABLE
 
 
 # ============================================================================

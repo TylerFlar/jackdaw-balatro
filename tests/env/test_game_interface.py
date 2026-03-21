@@ -20,10 +20,13 @@ from jackdaw.engine.actions import (
     GamePhase,
     NextRound,
     PlayHand,
-    ReorderJokers,
     SelectBlind,
     SkipPack,
     SortHand,
+    SwapHandLeft,
+    SwapHandRight,
+    SwapJokersLeft,
+    SwapJokersRight,
 )
 from jackdaw.env.game_interface import (
     BridgeAdapter,
@@ -49,7 +52,7 @@ def _random_agent_step(adapter: GameAdapter) -> None:
     hand = adapter.raw_state.get("hand", [])
 
     # Separate progress-making from utility
-    progress = [a for a in legal if not isinstance(a, (SortHand, ReorderJokers))]
+    progress = [a for a in legal if not isinstance(a, (SortHand, SwapHandLeft, SwapHandRight, SwapJokersLeft, SwapJokersRight))]
     pool = progress if progress else legal
 
     action = random.choice(pool)

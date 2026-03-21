@@ -15,11 +15,10 @@ Each phase permits a specific subset of actions:
 | BLIND_SELECT        | SelectBlind, SkipBlind                               |
 +---------------------+------------------------------------------------------+
 | SELECTING_HAND      | PlayHand, Discard, SortHand, UseConsumable,          |
-|                     | ReorderJokers                                        |
+|                     | SwapHandLeft/Right, SwapJokersLeft/Right             |
 +---------------------+------------------------------------------------------+
-| SHOP                | BuyCard, BuyAndUse, SellCard, UseConsumable,         |
-|                     | RedeemVoucher, OpenBooster, Reroll, ReorderJokers,   |
-|                     | NextRound                                            |
+| SHOP                | BuyCard, SellCard, UseConsumable, RedeemVoucher,     |
+|                     | OpenBooster, Reroll, SwapJokersLeft/Right, NextRound |
 +---------------------+------------------------------------------------------+
 | PACK_OPENING        | PickPackCard, SkipPack                               |
 +---------------------+------------------------------------------------------+
@@ -112,19 +111,6 @@ class BuyCard:
     """
 
     shop_index: int
-
-
-@dataclass(frozen=True)
-class BuyAndUse:
-    """Purchase a consumable and immediately use it.
-
-    Equivalent to buying a tarot/planet/spectral and applying it in one
-    step.  ``target_indices`` are hand card indices for targeted effects
-    (e.g. The Magician targets up to 2 cards).
-    """
-
-    shop_index: int
-    target_indices: tuple[int, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -225,30 +211,48 @@ class SortHand:
 
 
 @dataclass(frozen=True)
-class ReorderHand:
-    """Reorder cards in the player's hand.
+class SwapHandLeft:
+    """Swap a hand card one position to the left.
 
-    ``new_order`` is a tuple of 0-based hand card indices in the desired
-    order.  This is a free action — no cost, doesn't consume hands or
-    discards.  Left-to-right order affects which card is "first scored"
-    for jokers like Photograph and Hanging Chad.
+    Swaps ``hand[idx]`` with ``hand[idx - 1]``.  Free action — no cost,
+    doesn't consume hands or discards.  Left-to-right order affects which
+    card is "first scored" for jokers like Photograph and Hanging Chad.
     """
 
-    new_order: tuple[int, ...]
+    idx: int
 
 
 @dataclass(frozen=True)
-class ReorderJokers:
-    """Reorder jokers by specifying a permutation of indices.
+class SwapHandRight:
+    """Swap a hand card one position to the right.
 
-    ``new_order`` is a tuple of 0-based joker indices in the desired
-    order (e.g. ``(2, 0, 1)`` moves the third joker to the front).
+    Swaps ``hand[idx]`` with ``hand[idx + 1]``.  Free action.
+    """
+
+    idx: int
+
+
+@dataclass(frozen=True)
+class SwapJokersLeft:
+    """Swap a joker one position to the left.
+
+    Swaps ``jokers[idx]`` with ``jokers[idx - 1]``.
     Left-to-right order affects Phase 9 scoring (additive before
     multiplicative), Blueprint (copies right neighbor), Brainstorm
     (copies leftmost), Ceremonial Dagger (destroys right neighbor).
     """
 
-    new_order: tuple[int, ...]
+    idx: int
+
+
+@dataclass(frozen=True)
+class SwapJokersRight:
+    """Swap a joker one position to the right.
+
+    Swaps ``jokers[idx]`` with ``jokers[idx + 1]``.
+    """
+
+    idx: int
 
 
 # ---------------------------------------------------------------------------
@@ -261,7 +265,6 @@ Action = (
     | SelectBlind
     | SkipBlind
     | BuyCard
-    | BuyAndUse
     | SellCard
     | UseConsumable
     | RedeemVoucher
@@ -272,8 +275,10 @@ Action = (
     | NextRound
     | CashOut
     | SortHand
-    | ReorderHand
-    | ReorderJokers
+    | SwapHandLeft
+    | SwapHandRight
+    | SwapJokersLeft
+    | SwapJokersRight
 )
 
 
@@ -375,19 +380,25 @@ def _legal_selecting_hand(gs: dict[str, Any]) -> list[Action]:
     if hand and cr.get("discards_left", 0) > 0:
         actions.append(Discard(card_indices=()))
 
-    # Sort and reorder
+    # Sort and reorder hand
     if len(hand) > 1:
         actions.append(SortHand(mode="rank"))
         actions.append(SortHand(mode="suit"))
-        actions.append(ReorderHand(new_order=()))
+        for i in range(1, len(hand)):
+            actions.append(SwapHandLeft(idx=i))
+        for i in range(len(hand) - 1):
+            actions.append(SwapHandRight(idx=i))
 
     # Consumables usable during hand selection
     actions.extend(_usable_consumables(gs))
 
-    # Reorder jokers
+    # Swap jokers
     jokers: list[Card] = gs.get("jokers", [])
     if len(jokers) > 1:
-        actions.append(ReorderJokers(new_order=()))
+        for i in range(1, len(jokers)):
+            actions.append(SwapJokersLeft(idx=i))
+        for i in range(len(jokers) - 1):
+            actions.append(SwapJokersRight(idx=i))
 
     return actions
 
@@ -419,9 +430,7 @@ def _legal_shop(gs: dict[str, Any]) -> list[Action]:
                 continue
         elif card_set in ("Tarot", "Planet", "Spectral"):
             if len(consumables) >= consumable_slots:
-                # BuyAndUse is still possible for immediately-usable consumables
-                actions.append(BuyAndUse(shop_index=i))
-                continue
+                continue  # No room — agent must use/sell a consumable first
         actions.append(BuyCard(shop_index=i))
 
     # Sell jokers (non-eternal)
@@ -458,9 +467,12 @@ def _legal_shop(gs: dict[str, Any]) -> list[Action]:
     # Next round (always available in shop)
     actions.append(NextRound())
 
-    # Reorder jokers
+    # Swap jokers
     if len(jokers) > 1:
-        actions.append(ReorderJokers(new_order=()))
+        for i in range(1, len(jokers)):
+            actions.append(SwapJokersLeft(idx=i))
+        for i in range(len(jokers) - 1):
+            actions.append(SwapJokersRight(idx=i))
 
     return actions
 
@@ -469,8 +481,12 @@ def _legal_pack_opening(gs: dict[str, Any]) -> list[Action]:
     actions: list[Action] = []
     pack_cards: list[Card] = gs.get("pack_cards", [])
     remaining: int = gs.get("pack_choices_remaining", 0)
+    pack_type: str = gs.get("pack_type", "")
 
-    if remaining > 0:
+    # Spectral packs: balatrobot cannot handle Spectral card highlighting
+    # via RPC, so only SkipPack is offered.  RNG stays in sync because
+    # the pack is generated normally — we just force the agent to skip.
+    if remaining > 0 and pack_type != "Spectral":
         for i in range(len(pack_cards)):
             actions.append(PickPackCard(card_index=i))
 

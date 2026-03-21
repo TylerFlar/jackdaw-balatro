@@ -37,11 +37,10 @@ env = BalatroEnvironment(
 
 ## CLI
 ```bash
-jackdaw serve          # Start bridge server
-jackdaw play           # Play interactively
-jackdaw validate crash --count 200      # Crash test 200 random seeds
-jackdaw validate benchmark --count 1000 # Benchmark throughput
-jackdaw validate seed --seed TESTSEED   # Validate specific seed
+jackdaw validate                          # Run all validation scenarios
+jackdaw validate --category jokers        # Run only joker scenarios
+jackdaw validate --scenario joker_joker   # Run a single scenario
+jackdaw validate --host 127.0.0.1 --port 12346  # Custom balatrobot connection
 ```
 
 ## Architecture
@@ -72,18 +71,22 @@ jackdaw/
 ## Validation
 
 ```bash
-# Run the test suite (~1,400 tests)
+# Run the test suite
 pytest
 
-# Crash-test 200 random games
-jackdaw validate crash --count 200
-
-# Benchmark throughput
-jackdaw validate benchmark --count 1000
-
-# Compare against live Balatro via balatrobot (requires balatrobot running)
-jackdaw validate seed --seed TESTSEED --back b_red --stake 1
+# Validate engine against live Balatro (requires balatrobot running)
+jackdaw validate                          # All ~250 scenarios
+jackdaw validate --category jokers        # All 150 joker scenarios
+jackdaw validate --category tarots        # All 22 tarot scenarios
+jackdaw validate --category planets       # All 13 planet scenarios
+jackdaw validate --category spectrals     # All 18 spectral scenarios
+jackdaw validate --category boss_blinds   # All 28 boss blind scenarios
+jackdaw validate --category modifiers     # All 20 modifier scenarios
 ```
+
+Scenarios use the balatrobot `add`/`set` debug API to inject specific game
+state (jokers, consumables, card modifiers) on both the sim engine and the
+live game, then compare results after each action.
 
 ## Development
 
