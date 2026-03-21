@@ -100,6 +100,7 @@ def scan_seed(seed: str, max_ante: int) -> dict[str, Any]:
     tags_seen: set[str] = set()
     bosses_seen: set[str] = set()
     tag_ante: dict[str, int] = {}
+    tag_pos: dict[str, str] = {}  # tag_key -> "Small" or "Big"
     boss_ante: dict[str, int] = {}
 
     max_actions = 10000
@@ -121,10 +122,11 @@ def scan_seed(seed: str, max_ante: int) -> dict[str, Any]:
             # Record tags (available when Small/Big are on deck)
             if blind_on_deck in ("Small", "Big"):
                 blind_tags = gs.get("round_resets", {}).get("blind_tags", {})
-                for _, tag_key in blind_tags.items():
+                for pos, tag_key in blind_tags.items():
                     if tag_key and tag_key not in tags_seen:
                         tags_seen.add(tag_key)
                         tag_ante[tag_key] = ante
+                        tag_pos[tag_key] = pos
 
             # Record boss (available when Boss is on deck)
             if blind_on_deck == "Boss":
@@ -151,6 +153,7 @@ def scan_seed(seed: str, max_ante: int) -> dict[str, Any]:
         "tags": tags_seen,
         "bosses": bosses_seen,
         "tag_ante": tag_ante,
+        "tag_pos": tag_pos,
         "boss_ante": boss_ante,
     }
 
@@ -214,6 +217,7 @@ def find_minimal_seeds(
             "new_tags": sorted(best_new_tags),
             "new_bosses": sorted(best_new_bosses),
             "tag_ante": {k: best_seed["tag_ante"][k] for k in best_new_tags},
+            "tag_pos": {k: best_seed["tag_pos"][k] for k in best_new_tags},
             "boss_ante": {k: best_seed["boss_ante"][k] for k in best_new_bosses},
             "max_ante_needed": max(
                 max((best_seed["tag_ante"].get(t, 1) for t in best_new_tags), default=1),
@@ -263,7 +267,7 @@ def main() -> None:
         if s["new_tags"]:
             print(f"  Tags ({len(s['new_tags'])}):")
             for t in s["new_tags"]:
-                print(f"    {t} (ante {s['tag_ante'][t]})")
+                print(f"    {t} (ante {s['tag_ante'][t]}, {s['tag_pos'][t]})")
         if s["new_bosses"]:
             print(f"  Bosses ({len(s['new_bosses'])}):")
             for b in s["new_bosses"]:

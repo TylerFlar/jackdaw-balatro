@@ -308,8 +308,8 @@ are set/incremented by joker ability application.
         cards_purchased    int               Total cards purchased.
     hands_played       int               Total hands played across all rounds.
                                          Set by init (0), game (+1 per play).
-    unused_discards    int               Discards not used last round (Garbage Tag).
-                                         Set by game (_round_won).
+    unused_discards    int               Cumulative unused discards across all rounds
+                                         (Garbage Tag).  Set by game (_round_won +=).
     actions_taken      int               Total step() calls.  Set by runner.
     previous_round     dict              Snapshot: {'dollars': int} from end of last round.
 

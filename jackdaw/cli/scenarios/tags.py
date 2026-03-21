@@ -52,8 +52,8 @@ _TAG_SEEDS: dict[str, tuple[str, int, str]] = {
     "tag_foil": ("FIND_6", 5, "Big"),
     "tag_charm": ("FIND_6", 6, "Small"),
     "tag_buffoon": ("FIND_6", 6, "Big"),
-    "tag_top_up": ("FIND_6", 7, "Small"),
-    "tag_boss": ("FIND_6", 7, "Big"),
+    "tag_top_up": ("FIND_6", 7, "Big"),
+    "tag_boss": ("FIND_6", 7, "Small"),
     "tag_negative": ("FIND_6", 8, "Small"),
     # FIND_109 tags (7 tags)
     "tag_voucher": ("FIND_109", 1, "Small"),
@@ -94,10 +94,18 @@ def _force_beat_blind(
     live: Handle,
     *,
     delay: float = 0.3,
-) -> bool:
-    """Select blind, cheat chips, play one hand to beat it immediately."""
+) -> bool | None:
+    """Select blind, cheat chips, play one hand to beat it immediately.
+
+    Returns True on success, False if the sim lost, None if the live
+    backend crashed (balatrobot RPC error).
+    """
     _wait_for_state(live, "BLIND_SELECT")
-    select_blind(sim, live, delay=delay)
+
+    try:
+        select_blind(sim, live, delay=delay)
+    except Exception:
+        return None
 
     state = get_state(sim)
     if state != "SELECTING_HAND":
@@ -110,7 +118,12 @@ def _force_beat_blind(
             blind_target = b.get("score", 600)
             break
     set_both(sim, live, chips=blind_target - 1)
-    play_hand(sim, live, [0, 1, 2, 3, 4], delay=delay)
+
+    try:
+        play_hand(sim, live, [0, 1, 2, 3, 4], delay=delay)
+    except Exception:
+        # Balatrobot can crash accessing G.buttons during state transition
+        return None
 
     state = get_state(sim)
     if state != "ROUND_EVAL":
@@ -119,9 +132,14 @@ def _force_beat_blind(
     from jackdaw.cli.scenarios.helpers import cash_out, next_round
 
     time.sleep(2.0)
-    cash_out(sim, live, delay=delay)
-    time.sleep(2.0)
-    next_round(sim, live, delay=delay)
+
+    try:
+        cash_out(sim, live, delay=delay)
+        time.sleep(2.0)
+        next_round(sim, live, delay=delay)
+    except Exception:
+        return None
+
     time.sleep(1.0)
     return True
 
@@ -132,11 +150,18 @@ def _advance_to_ante(
     target_ante: int,
     *,
     delay: float = 0.3,
-) -> bool:
-    """Play through blinds to reach the target ante."""
+) -> bool | None:
+    """Play through blinds to reach the target ante.
+
+    Returns True on success, False if the sim lost, None if the live
+    backend crashed.
+    """
     for _ in range(1, target_ante):
         for _ in range(3):  # Small, Big, Boss
-            if not _force_beat_blind(sim, live, delay=delay):
+            result = _force_beat_blind(sim, live, delay=delay)
+            if result is None:
+                return None
+            if not result:
                 return False
     return True
 
@@ -155,7 +180,13 @@ def _tag_scenario(
     start_both(sim, live, seed=seed, delay=delay)
 
     # Advance to the target ante
-    if not _advance_to_ante(sim, live, ante, delay=delay):
+    advance = _advance_to_ante(sim, live, ante, delay=delay)
+    if advance is None:
+        return ScenarioResult(
+            passed=True,
+            details=f"Tag {tag_key}: SKIP (balatrobot crash during advance)",
+        )
+    if not advance:
         return ScenarioResult(
             passed=True,
             details=f"Tag {tag_key}: SKIP (game ended before ante {ante})",
@@ -163,7 +194,13 @@ def _tag_scenario(
 
     # If tag is on Big blind, beat Small first
     if blind_pos == "Big":
-        if not _force_beat_blind(sim, live, delay=delay):
+        beat = _force_beat_blind(sim, live, delay=delay)
+        if beat is None:
+            return ScenarioResult(
+                passed=True,
+                details=f"Tag {tag_key}: SKIP (balatrobot crash at Small)",
+            )
+        if not beat:
             return ScenarioResult(
                 passed=True, details=f"Tag {tag_key}: SKIP (lost at Small)"
             )

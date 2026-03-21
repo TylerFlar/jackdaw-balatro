@@ -440,7 +440,7 @@ def score_hand(
         steel_tally=gs.get("steel_tally", 0),
         enhanced_card_count=gs.get("enhanced_card_count", 0),
         hands_left=gs.get("hands_left", 0),
-        hands_played=gs.get("hands_played", 0),
+        hands_played=gs.get("current_round_hands_played", 0),
         discards_left=gs.get("discards_left", 0),
         discards_used=gs.get("discards_used", 0),
         probabilities_normal=probabilities_normal,

@@ -52,7 +52,13 @@ def _random_agent_step(adapter: GameAdapter) -> None:
     hand = adapter.raw_state.get("hand", [])
 
     # Separate progress-making from utility
-    progress = [a for a in legal if not isinstance(a, (SortHand, SwapHandLeft, SwapHandRight, SwapJokersLeft, SwapJokersRight))]
+    progress = [
+        a
+        for a in legal
+        if not isinstance(
+            a, (SortHand, SwapHandLeft, SwapHandRight, SwapJokersLeft, SwapJokersRight)
+        )
+    ]
     pool = progress if progress else legal
 
     action = random.choice(pool)

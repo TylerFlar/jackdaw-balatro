@@ -32,16 +32,16 @@ from jackdaw.engine.actions import (
     PickPackCard,
     PlayHand,
     RedeemVoucher,
-    SwapHandLeft,
-    SwapHandRight,
-    SwapJokersLeft,
-    SwapJokersRight,
     Reroll,
     SelectBlind,
     SellCard,
     SkipBlind,
     SkipPack,
     SortHand,
+    SwapHandLeft,
+    SwapHandRight,
+    SwapJokersLeft,
+    SwapJokersRight,
     UseConsumable,
 )
 
@@ -551,7 +551,7 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
     # These are stored in nested structures but score_hand expects them
     # at the top level.
     gs["hands_left"] = cr.get("hands_left", 0)
-    gs["hands_played"] = cr.get("hands_played", 0)
+    gs["current_round_hands_played"] = cr.get("hands_played", 0)
     gs["discards_left"] = cr.get("discards_left", 0)
     gs["discards_used"] = cr.get("discards_used", 0)
     gs["money"] = gs.get("dollars", 0)
@@ -1561,9 +1561,11 @@ def _round_won(gs: dict[str, Any]) -> None:
 
     # ------------------------------------------------------------------
     # 6. Track unused discards / hands played (for Garbage/Handy Tags)
+    #    These are run-level cumulative totals matching Lua:
+    #    - G.GAME.unused_discards += current_round.discards_left  (state_events.lua:124)
+    #    - G.GAME.hands_played += 1 per hand  (state_events.lua:523, tracked at line 522)
     # ------------------------------------------------------------------
-    gs["unused_discards"] = cr.get("discards_left", 0)
-    gs["hands_played_this_round"] = cr.get("hands_played", 0)
+    gs["unused_discards"] = gs.get("unused_discards", 0) + cr.get("discards_left", 0)
 
     # ------------------------------------------------------------------
     # 7. Mark blind as Defeated
