@@ -143,6 +143,8 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         self._prev_ante: int = 1
         self._prev_round: int = 0
         self._prev_chips: int = 0
+        self._episode_max_ante: int = 1
+        self._episode_max_round: int = 0
 
     # ------------------------------------------------------------------
     # Gymnasium API
@@ -166,6 +168,8 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         self._prev_ante = self._inner.episode_ante
         self._prev_round = 0
         self._prev_chips = 0
+        self._episode_max_ante = 1
+        self._episode_max_round = 0
         self._action_table = self._enumerate_actions(game_mask, info)
         obs = self._build_obs(game_obs)
         return obs, {"action_mask": self.action_masks()}
@@ -185,7 +189,12 @@ class BalatroGymnasiumEnv(gymnasium.Env):
             self._action_table = []
 
         obs = self._build_obs(game_obs)
-        return obs, reward, terminated, truncated, {"action_mask": self.action_masks()}
+        step_info: dict[str, Any] = {"action_mask": self.action_masks()}
+        if terminated or truncated:
+            step_info["balatro/ante_reached"] = self._episode_max_ante
+            step_info["balatro/rounds_beaten"] = self._episode_max_round
+            step_info["balatro/won"] = self._inner.episode_won
+        return obs, reward, terminated, truncated, step_info
 
     def action_masks(self) -> np.ndarray:
         """Return bool mask of shape ``(MAX_ACTIONS,)`` for MaskablePPO."""
@@ -207,7 +216,11 @@ class BalatroGymnasiumEnv(gymnasium.Env):
             return 0.0
 
         gs: dict[str, Any] = info.get("raw_state", {})
-        reward = 0.0
+        phase = gs.get("phase")
+
+        # Step cost — discourages stalling; doubled in shop phase
+        reward = -0.002 if phase == "shop" else -0.001
+
         ante = gs.get("round_resets", {}).get("ante", 1)
         round_num = gs.get("round", 0)
         chips = gs.get("chips", 0)
@@ -238,6 +251,8 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         self._prev_round = round_num
         self._prev_ante = ante
         self._prev_chips = chips
+        self._episode_max_ante = max(self._episode_max_ante, ante)
+        self._episode_max_round = max(self._episode_max_round, round_num)
 
         return reward
 
