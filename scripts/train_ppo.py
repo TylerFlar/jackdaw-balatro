@@ -80,6 +80,10 @@ def main() -> None:
         verbose=1,
         seed=args.seed,
         tensorboard_log=str(log_path),
+        ent_coef=0.05,
+        learning_rate=1e-4,
+        n_steps=4096,
+        clip_range=0.15,
     )
 
     print(f"Training for {args.total_timesteps} timesteps...")
