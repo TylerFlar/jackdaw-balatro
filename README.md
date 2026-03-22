@@ -1,6 +1,6 @@
 <div align="center">
   <h1>Jackdaw</h1>
-  <div><img src="jackdaw.png" alt="Jackdaw Logo"/></div>
+  <div><img src="jackdaw.png" alt="Jackdaw Logo" width="300" height="300"/></div>
 </div>
 
 ---
