@@ -1,17 +1,19 @@
 <div align="center">
   <h1>Jackdaw</h1>
-  <div><img src="jackdaw.png" alt="Jackdaw Logo" width="300" height="300"/></div>
+  <div><img src="docs/jackdaw.png" alt="Jackdaw Logo" width="300" height="300"/></div>
+  <br/>
+  <a href="https://tylerflar.github.io/jackdaw-balatro/"><img src="https://img.shields.io/badge/docs-GitHub%20Pages-blue" alt="Documentation"/></a>
 </div>
 
 ---
 
-Jackdaw is a Balatro simulator build for RL research. It features a 1:1 Python reimplementation of the Balatro engine, a Gymnasium-style environment with entity-based observations and a factored action space, and a validation bridge to play against live Balatro via [BalatroBot](https://github.com/coder/balatrobot).
+Jackdaw is a Balatro simulator built for RL research. It features a 1:1 Python reimplementation of the Balatro engine, a Gymnasium-style environment with entity-based observations and a factored action space, and a validation bridge to play against live Balatro via [BalatroBot](https://github.com/coder/balatrobot).
 
 ## Motivation
 
-One might ask with the existance of [BalatroBot](https://github.com/coder/balatrobot), why build a separate simulator?
+With [BalatroBot](https://github.com/coder/balatrobot) already existing, why build a separate simulator?
 
-An interesting thing with Balatro is that while BalatroBot lets you input actions with no latency (minus network time), this can cause race conditions and actually crash the game. Secondly, parallizting the game is obviously important for RL training, and while you can run multiple instances of BalatroBot, it's a bit more overhead and complexity than just running multiple simulators in Python. Finally, having a pure Python implementation allows for easier debugging, introspection, and customization of the game logic, which can be really helpful for research purposes.
+While BalatroBot lets you input actions with no latency (minus network time), this can cause race conditions and actually crash the game. Parallelizing is also important for RL training — you can run multiple instances of BalatroBot, but it's more overhead and complexity than just running multiple simulators in Python. Finally, having a pure Python implementation allows for easier debugging, introspection, and customization of the game logic, which is really helpful for research.
 
 ## Install
 
@@ -82,14 +84,14 @@ jackdaw/
 
 ## CLI
 
-
-
 ```bash
 jackdaw validate                          # Run all ~250 validation scenarios
 jackdaw validate --category jokers        # Joker scenarios only
 jackdaw validate --scenario joker_jolly   # Single scenario
 jackdaw validate --host 127.0.0.1 --port 12346
 ```
+
+> One of the biggest ways to contribute is by writing custom validation scenarios! See the [validation docs](https://tylerflar.github.io/jackdaw-balatro/validation) to get started.
 
 ## Development
 
