@@ -90,7 +90,9 @@ class BalatroGymnasiumEnv(gymnasium.Env):
     back_keys, stakes, max_steps, seed_prefix:
         Forwarded to :class:`BalatroEnvironment`.
     reward_shaping:
-        If True, add +0.1 per ante increase as intermediate reward shaping.
+        If True, use dense multi-signal reward: blind-beaten bonuses scaled
+        by ante, score-progress within blinds, efficient-clear bonuses, and
+        reduced terminal rewards.  When False, use sparse ±1.0 at terminal.
     """
 
     metadata: dict[str, Any] = {"render_modes": []}
@@ -139,6 +141,8 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         self._action_table: list[FactoredAction] = []
         self._rng = np.random.default_rng()
         self._prev_ante: int = 1
+        self._prev_round: int = 0
+        self._prev_chips: int = 0
 
     # ------------------------------------------------------------------
     # Gymnasium API
@@ -160,6 +164,8 @@ class BalatroGymnasiumEnv(gymnasium.Env):
 
         game_obs, game_mask, info = self._inner.reset(**kwargs)
         self._prev_ante = self._inner.episode_ante
+        self._prev_round = 0
+        self._prev_chips = 0
         self._action_table = self._enumerate_actions(game_mask, info)
         obs = self._build_obs(game_obs)
         return obs, {"action_mask": self.action_masks()}
@@ -170,15 +176,7 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         factored = self._action_table[action]
         game_obs, terminated, truncated, game_mask, info = self._inner.step(factored)
 
-        # Reward
-        reward = 0.0
-        if terminated or truncated:
-            reward = 1.0 if self._inner.episode_won else -1.0
-        if self._reward_shaping:
-            ante_now = self._inner.episode_ante
-            if ante_now > self._prev_ante:
-                reward += 0.1 * (ante_now - self._prev_ante)
-            self._prev_ante = ante_now
+        reward = self._compute_reward(info, terminated, truncated)
 
         # Rebuild action table for next step
         if not (terminated or truncated):
@@ -198,6 +196,50 @@ class BalatroGymnasiumEnv(gymnasium.Env):
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
+
+    def _compute_reward(
+        self, info: dict[str, Any], terminated: bool, truncated: bool
+    ) -> float:
+        """Compute step reward from game state deltas."""
+        if not self._reward_shaping:
+            if terminated or truncated:
+                return 1.0 if self._inner.episode_won else -1.0
+            return 0.0
+
+        gs: dict[str, Any] = info.get("raw_state", {})
+        reward = 0.0
+        ante = gs.get("round_resets", {}).get("ante", 1)
+        round_num = gs.get("round", 0)
+        chips = gs.get("chips", 0)
+        ante_scale = ante / 8.0
+
+        # 1. Blind beaten: round increased → +0.15 * ante_scale
+        if round_num > self._prev_round:
+            reward += 0.15 * ante_scale
+            # 2. Boss blind beaten (ante increased) → extra +0.1 * ante_scale
+            if ante > self._prev_ante:
+                reward += 0.1 * ante_scale
+            # 3. Efficient clear: hands remaining bonus
+            hands_left = gs.get("current_round", {}).get("hands_left", 0)
+            reward += 0.01 * hands_left
+
+        # 4. Score progress within a blind: chips gained toward target
+        blind = gs.get("blind")
+        blind_target = getattr(blind, "chips", 0) if blind is not None else 0
+        if blind_target > 0 and chips > self._prev_chips:
+            chip_delta = chips - self._prev_chips
+            reward += 0.02 * min(chip_delta / blind_target, 1.0)
+
+        # 5. Terminal
+        if terminated or truncated:
+            reward += 0.5 if self._inner.episode_won else -0.2
+
+        # Update trackers
+        self._prev_round = round_num
+        self._prev_ante = ante
+        self._prev_chips = chips
+
+        return reward
 
     def _build_obs(self, game_obs: GameObservation) -> dict[str, np.ndarray]:
         obs: dict[str, np.ndarray] = {

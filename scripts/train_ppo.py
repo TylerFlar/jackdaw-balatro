@@ -32,7 +32,7 @@ def make_env(seed: int = 0, max_steps: int = 10_000) -> BalatroGymnasiumEnv:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train MaskablePPO on Balatro")
-    parser.add_argument("--total-timesteps", type=int, default=100_000)
+    parser.add_argument("--total-timesteps", type=int, default=500_000)
     parser.add_argument("--log-dir", type=str, default="runs/balatro_ppo")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--max-steps", type=int, default=10_000)
