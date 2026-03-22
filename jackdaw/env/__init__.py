@@ -21,6 +21,7 @@ from jackdaw.env.action_space import (
 )
 from jackdaw.env.agents import Agent, RandomAgent
 from jackdaw.env.balatro_env import BalatroEnvironment
+from jackdaw.env.gymnasium_wrapper import BalatroGymnasiumEnv
 from jackdaw.env.balatro_spec import balatro_game_spec
 from jackdaw.env.consumable_targets import (
     ConsumableTargetSpec,
@@ -55,6 +56,7 @@ __all__ = [
     "ActionType",
     "Agent",
     "BalatroEnvironment",
+    "BalatroGymnasiumEnv",
     "BridgeAdapter",
     "ConsumableTargetSpec",
     "D_CONSUMABLE",
