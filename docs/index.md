@@ -14,5 +14,5 @@ Bit-exact headless Balatro v1.0.1o simulator for reinforcement learning research
 
 ## Pages
 
-- [RL Project Guide](rl-guide) — Setting up a training project: observations, actions, masks, rewards, and a demo agent
+- [RL Project Guide](rl-guide) — Observations, actions, masks, rewards, the Gymnasium wrapper, and training with MaskablePPO
 - [Validation & Scenarios](validation) — Validating the engine against live Balatro, writing your own test scenarios

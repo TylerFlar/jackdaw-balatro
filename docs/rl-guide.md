@@ -221,6 +221,109 @@ class MyAgent:
         )
 ```
 
+## Gymnasium Wrapper (SB3 / MaskablePPO)
+
+If you want to use standard RL libraries like Stable-Baselines3 instead of writing a custom training loop, Jackdaw provides `BalatroGymnasiumEnv` — a `gymnasium.Env` subclass with a flat `Discrete(500)` action space and action masking for [MaskablePPO](https://sb3-contrib.readthedocs.io/en/master/modules/ppo_mask.html).
+
+### Install
+
+```bash
+uv sync --extra train   # installs sb3-contrib, stable-baselines3, torch, tensorboard
+```
+
+### How It Works
+
+The wrapper sits between SB3 and the factored `BalatroEnvironment`:
+
+1. **Action flattening**: Each step, it enumerates all legal `FactoredAction` instances from the `ActionMask` into a flat list. The agent picks an index into this list. Card-selecting actions (PlayHand, Discard) enumerate all legal card combinations up to a budget of 200 per action type; if the combinatorial space exceeds the budget, subsets are randomly sampled.
+
+2. **Action masking**: The `action_masks()` method returns a `bool[500]` array — `True` for indices that map to a legal action, `False` for padding. MaskablePPO uses this to zero out logits for illegal actions.
+
+3. **Observation space**: `gymnasium.spaces.Dict` with zero-padded entity arrays:
+
+| Key | Shape | Description |
+|-----|-------|-------------|
+| `global` | `(235,)` | Fixed-size game state vector |
+| `hand_card` | `(8, 15)` | Hand cards, zero-padded to max 8 |
+| `joker` | `(5, 15)` | Jokers, zero-padded to max 5 |
+| `consumable` | `(2, 7)` | Consumables, zero-padded to max 2 |
+| `shop_item` | `(10, 9)` | Shop items, zero-padded to max 10 |
+| `pack_card` | `(5, 15)` | Pack cards, zero-padded to max 5 |
+| `entity_counts` | `(5,)` | Actual count per entity type |
+
+### Basic Usage
+
+```python
+from jackdaw.env import BalatroGymnasiumEnv, DirectAdapter
+
+env = BalatroGymnasiumEnv(
+    adapter_factory=DirectAdapter,
+    reward_shaping=True,   # dense multi-signal reward (recommended for training)
+    max_steps=10_000,
+)
+
+obs, info = env.reset()
+mask = env.action_masks()  # bool[500]
+
+# Pick a legal action
+import numpy as np
+legal = np.nonzero(mask)[0]
+action = int(np.random.choice(legal))
+obs, reward, terminated, truncated, info = env.step(action)
+```
+
+### Training with MaskablePPO
+
+```python
+from sb3_contrib import MaskablePPO
+from jackdaw.env import BalatroGymnasiumEnv, DirectAdapter
+
+env = BalatroGymnasiumEnv(adapter_factory=DirectAdapter, reward_shaping=True)
+
+model = MaskablePPO("MultiInputPolicy", env, verbose=1, tensorboard_log="runs/balatro_ppo")
+model.learn(total_timesteps=500_000)
+model.save("balatro_ppo")
+```
+
+Or use the included training script:
+
+```bash
+python scripts/train_ppo.py --total-timesteps 500000 --seed 42
+tensorboard --logdir runs/balatro_ppo
+```
+
+The training script logs Balatro-specific metrics to tensorboard: `balatro/mean_ante_reached`, `balatro/max_ante_reached`, `balatro/mean_rounds_beaten`, and `balatro/win_rate`.
+
+### Reward Shaping
+
+When `reward_shaping=True`, the wrapper computes a dense reward signal:
+
+| Component | Trigger | Value |
+|-----------|---------|-------|
+| Step penalty | Every step | -0.001 (-0.002 in shop) |
+| Blind beaten | Round number increases | +0.15 × (ante / 8) |
+| Boss blind beaten | Ante number increases | +0.10 × (ante / 8) |
+| Efficient clear | Hands remaining when blind beaten | +0.01 × hands_left |
+| Score progress | Chips increase toward blind target | +0.02 × min(delta / target, 1.0) |
+| Win | Game won | +0.5 |
+| Loss | Game lost or truncated | -0.2 |
+
+The step penalty discourages stalling in shops/menus, while the blind-beaten and score-progress signals give the agent credit for partial progress even when it fails to clear a blind.
+
+When `reward_shaping=False` (default), rewards are sparse: +1 for winning, -1 for losing.
+
+### Episode-End Metrics
+
+At episode end, the `info` dict returned by `step()` includes:
+
+```python
+info["balatro/ante_reached"]    # int — highest ante reached this episode
+info["balatro/rounds_beaten"]   # int — total rounds (blinds) beaten
+info["balatro/won"]             # bool — whether the run was won
+```
+
+These are useful for custom callbacks or logging.
+
 ## Live Validation Adapter
 
 To validate your agent against real Balatro, swap the adapter:
