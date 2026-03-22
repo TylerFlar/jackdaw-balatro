@@ -27,7 +27,15 @@ class TestSpaces:
 
     def test_observation_space_keys(self, env: BalatroGymnasiumEnv) -> None:
         assert isinstance(env.observation_space, spaces.Dict)
-        expected = {"global", "hand_card", "joker", "consumable", "shop_item", "pack_card", "entity_counts"}
+        expected = {
+            "global",
+            "hand_card",
+            "joker",
+            "consumable",
+            "shop_item",
+            "pack_card",
+            "entity_counts",
+        }
         assert set(env.observation_space.spaces.keys()) == expected
 
 

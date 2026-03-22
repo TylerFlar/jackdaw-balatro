@@ -15,7 +15,6 @@ Example::
 
 from __future__ import annotations
 
-import random as stdlib_random
 from collections.abc import Callable
 from itertools import combinations
 from typing import Any
@@ -118,7 +117,9 @@ class BalatroGymnasiumEnv(gymnasium.Env):
 
         # Observation space
         obs_spaces: dict[str, spaces.Space] = {
-            "global": spaces.Box(-np.inf, np.inf, shape=(_SPEC.global_feature_dim,), dtype=np.float32),
+            "global": spaces.Box(
+                -np.inf, np.inf, shape=(_SPEC.global_feature_dim,), dtype=np.float32
+            ),
         }
         max_counts: list[int] = []
         for name, max_count, feat_dim in _ENTITY_INFO:
@@ -174,9 +175,7 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         obs = self._build_obs(game_obs)
         return obs, {"action_mask": self.action_masks()}
 
-    def step(
-        self, action: int
-    ) -> tuple[dict[str, np.ndarray], float, bool, bool, dict[str, Any]]:
+    def step(self, action: int) -> tuple[dict[str, np.ndarray], float, bool, bool, dict[str, Any]]:
         factored = self._action_table[action]
         game_obs, terminated, truncated, game_mask, info = self._inner.step(factored)
 
@@ -206,9 +205,7 @@ class BalatroGymnasiumEnv(gymnasium.Env):
     # Internals
     # ------------------------------------------------------------------
 
-    def _compute_reward(
-        self, info: dict[str, Any], terminated: bool, truncated: bool
-    ) -> float:
+    def _compute_reward(self, info: dict[str, Any], terminated: bool, truncated: bool) -> float:
         """Compute step reward from game state deltas."""
         if not self._reward_shaping:
             if terminated or truncated:
