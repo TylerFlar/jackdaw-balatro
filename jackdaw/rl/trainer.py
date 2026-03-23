@@ -52,9 +52,7 @@ def _masks_to_numpy(
     return type_mask, card_mask, entity_masks, mask.min_card_select, mask.max_card_select
 
 
-def _obs_to_device(
-    obs: dict[str, np.ndarray], device: torch.device
-) -> dict[str, torch.Tensor]:
+def _obs_to_device(obs: dict[str, np.ndarray], device: torch.device) -> dict[str, torch.Tensor]:
     """Convert single obs dict to batched (B=1) tensors."""
     return {k: torch.from_numpy(v).float().unsqueeze(0).to(device) for k, v in obs.items()}
 
@@ -145,13 +143,10 @@ class BalatroTrainer:
         self.optimizer = torch.optim.Adam(self.network.parameters(), lr=lr, eps=1e-5)
 
         total_updates = total_timesteps // n_steps
-        self.lr_scheduler = torch.optim.lr_scheduler.OneCycleLR(
+        self.lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             self.optimizer,
-            max_lr=lr,
-            total_steps=total_updates,
-            pct_start=0.05,
-            anneal_strategy="cos",
-            final_div_factor=10.0,
+            T_max=total_updates,
+            eta_min=lr / 10,  # decay to 3e-5
         )
 
         self.writer = SummaryWriter(log_dir)
@@ -194,7 +189,9 @@ class BalatroTrainer:
 
             # Forward pass (no grad)
             obs_t = _obs_to_device(obs, self.device)
-            masks_t = _masks_to_device(type_mask, card_mask, entity_masks, min_cs, max_cs, self.device)
+            masks_t = _masks_to_device(
+                type_mask, card_mask, entity_masks, min_cs, max_cs, self.device
+            )
 
             with torch.no_grad():
                 out = self.network(obs_t, masks_t)
@@ -222,21 +219,23 @@ class BalatroTrainer:
             next_obs, reward, terminated, truncated, next_mask, info = self.env.step(fa)
             done = terminated or truncated
 
-            buf.add(Transition(
-                obs=obs,
-                action_type=action_type,
-                entity_target=entity_target,
-                card_target=card_target_arr,
-                log_prob=log_prob,
-                value=value,
-                reward=reward,
-                done=done,
-                type_mask=type_mask,
-                card_mask=card_mask,
-                entity_masks=entity_masks,
-                min_card_select=min_cs,
-                max_card_select=max_cs,
-            ))
+            buf.add(
+                Transition(
+                    obs=obs,
+                    action_type=action_type,
+                    entity_target=entity_target,
+                    card_target=card_target_arr,
+                    log_prob=log_prob,
+                    value=value,
+                    reward=reward,
+                    done=done,
+                    type_mask=type_mask,
+                    card_mask=card_mask,
+                    entity_masks=entity_masks,
+                    min_card_select=min_cs,
+                    max_card_select=max_cs,
+                )
+            )
 
             self._ep_reward_accum += reward
             self._ep_len_accum += 1
@@ -259,16 +258,16 @@ class BalatroTrainer:
             obs_t = _obs_to_device(self._obs, self.device)
             # Just need the value, but we need masks too for the forward pass
             type_mask, card_mask, entity_masks, min_cs, max_cs = _masks_to_numpy(self._mask)
-            masks_t = _masks_to_device(type_mask, card_mask, entity_masks, min_cs, max_cs, self.device)
+            masks_t = _masks_to_device(
+                type_mask, card_mask, entity_masks, min_cs, max_cs, self.device
+            )
             # Use _encode + value_head directly to avoid sampling
             state, _ = self.network._encode(obs_t)
             last_value = self.network.value_head(state).item()
 
         return buf, last_value
 
-    def train_epoch(
-        self, data: dict[str, Any]
-    ) -> dict[str, float]:
+    def train_epoch(self, data: dict[str, Any]) -> dict[str, float]:
         """One epoch of PPO updates over the buffer."""
         self.network.train()
         N = data["action_type"].shape[0]
@@ -312,9 +311,7 @@ class BalatroTrainer:
             adv_b = (adv_b - adv_b.mean()) / (adv_b.std() + 1e-8)
 
             # Re-evaluate
-            new_lp, new_val, entropy = self.network.evaluate(
-                obs_b, masks_b, at_b, et_b, ct_b
-            )
+            new_lp, new_val, entropy = self.network.evaluate(obs_b, masks_b, at_b, et_b, ct_b)
 
             # NaN guard — skip batch if network produced NaN
             if torch.isnan(new_lp).any() or torch.isnan(new_val).any():
