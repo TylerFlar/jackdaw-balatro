@@ -109,7 +109,7 @@ class BalatroTrainer:
         gamma: float = 0.99,
         gae_lambda: float = 0.95,
         clip_range: float = 0.15,
-        ent_coef: float = 0.08,
+        ent_coef: float = 0.05,
         vf_coef: float = 0.5,
         n_steps: int = 4096,
         n_epochs: int = 10,

@@ -317,7 +317,7 @@ class FactoredBalatroEnv:
         ante_scale = ante / 8.0
 
         if round_num > self._prev_round:
-            reward += 0.15 * ante_scale
+            reward += 0.15 * max(ante / 8, 0.5)
             if ante > self._prev_ante:
                 reward += 0.1 * ante_scale
             hands_left = gs.get("current_round", {}).get("hands_left", 0)
