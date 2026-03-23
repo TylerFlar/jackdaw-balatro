@@ -280,6 +280,9 @@ class BalatroTrainer:
         total_approx_kl = 0.0
         total_clip_frac = 0.0
         total_grad_norm = 0.0
+        total_max_ratio = 0.0
+        total_lr_clipped_frac = 0.0
+        total_effective_ent_coef = 0.0
         n_batches = 0
 
         for start in range(0, N, self.batch_size):
@@ -318,19 +321,33 @@ class BalatroTrainer:
                 continue
 
             # PPO policy loss — clamp ratio to prevent exp() overflow
-            log_ratio = (new_lp - old_lp_b).clamp(-20.0, 20.0)
+            raw_log_ratio = new_lp - old_lp_b
+            log_ratio = raw_log_ratio.clamp(-5.0, 5.0)
             ratio = log_ratio.exp()
             surr1 = ratio * adv_b
             surr2 = ratio.clamp(1.0 - self.clip_range, 1.0 + self.clip_range) * adv_b
             policy_loss = -torch.min(surr1, surr2).mean()
 
             # Clipped value loss
-            value_loss = (new_val - ret_b).pow(2).mean()
+            old_val_b = data["old_values"][idx_t]
+            value_clipped = old_val_b + (new_val - old_val_b).clamp(
+                -self.clip_range, self.clip_range
+            )
+            value_loss_unclipped = (new_val - ret_b).pow(2)
+            value_loss_clipped = (value_clipped - ret_b).pow(2)
+            value_loss = torch.max(value_loss_unclipped, value_loss_clipped).mean()
 
-            # Entropy bonus
+            # Entropy bonus with adaptive floor
             entropy_mean = entropy.mean()
+            ent_floor = 2.0
+            if entropy_mean.item() < ent_floor:
+                adaptive_ent_coef = self.ent_coef * (
+                    1.0 + 2.0 * (ent_floor - entropy_mean.item()) / ent_floor
+                )
+            else:
+                adaptive_ent_coef = self.ent_coef
 
-            loss = policy_loss + self.vf_coef * value_loss - self.ent_coef * entropy_mean
+            loss = policy_loss + self.vf_coef * value_loss - adaptive_ent_coef * entropy_mean
 
             if torch.isnan(loss) or torch.isinf(loss):
                 continue
@@ -347,12 +364,20 @@ class BalatroTrainer:
                 approx_kl = (old_lp_b - new_lp).mean().item()
                 clip_frac = ((ratio - 1.0).abs() > self.clip_range).float().mean().item()
 
+            # Ratio diagnostics
+            with torch.no_grad():
+                batch_max_ratio = ratio.max().item()
+                batch_lr_clipped_frac = (raw_log_ratio.abs() > 5.0).float().mean().item()
+
             total_policy_loss += policy_loss.item()
             total_value_loss += value_loss.item()
             total_entropy += entropy_mean.item()
             total_approx_kl += approx_kl
             total_clip_frac += clip_frac
             total_grad_norm += grad_norm.item()
+            total_max_ratio = max(total_max_ratio, batch_max_ratio)
+            total_lr_clipped_frac += batch_lr_clipped_frac
+            total_effective_ent_coef += adaptive_ent_coef
             n_batches += 1
 
         n_batches = max(n_batches, 1)
@@ -363,6 +388,9 @@ class BalatroTrainer:
             "approx_kl": total_approx_kl / n_batches,
             "clip_fraction": total_clip_frac / n_batches,
             "grad_norm": total_grad_norm / n_batches,
+            "max_ratio": total_max_ratio,
+            "log_ratio_clipped_frac": total_lr_clipped_frac / n_batches,
+            "effective_ent_coef": total_effective_ent_coef / n_batches,
         }
 
     def load_checkpoint(self, path: str) -> int:
@@ -409,7 +437,7 @@ class BalatroTrainer:
             for epoch_idx in range(self.n_epochs):
                 epoch_stats = self.train_epoch(data)
                 epochs_used = epoch_idx + 1
-                if epoch_stats["approx_kl"] > 0.15:
+                if epoch_stats["approx_kl"] > 0.05:
                     break
 
             # Step LR scheduler
@@ -428,6 +456,17 @@ class BalatroTrainer:
             self.writer.add_scalar("train/learning_rate", current_lr, global_step)
             self.writer.add_scalar("train/epochs_used", epochs_used, global_step)
             self.writer.add_scalar("train/grad_norm", epoch_stats["grad_norm"], global_step)
+            self.writer.add_scalar(
+                "train/effective_ent_coef", epoch_stats["effective_ent_coef"], global_step
+            )
+            self.writer.add_scalar(
+                "train/max_ratio", epoch_stats["max_ratio"], global_step
+            )
+            self.writer.add_scalar(
+                "train/log_ratio_clipped_frac",
+                epoch_stats["log_ratio_clipped_frac"],
+                global_step,
+            )
             self.writer.add_scalar("perf/fps", fps, global_step)
             self.writer.add_scalar("balatro/ep_per_rollout", n_episodes, global_step)
 

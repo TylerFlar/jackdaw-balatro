@@ -109,6 +109,9 @@ class RolloutBuffer:
         old_log_prob = torch.tensor(
             [t.log_prob for t in self._transitions], dtype=torch.float32, device=device
         )
+        old_values = torch.tensor(
+            [t.value for t in self._transitions], dtype=torch.float32, device=device
+        )
 
         # Action masks
         type_mask = torch.from_numpy(
@@ -158,6 +161,7 @@ class RolloutBuffer:
             "entity_target": entity_target,
             "card_target": card_target,
             "old_log_prob": old_log_prob,
+            "old_values": old_values,
             "advantages": torch.from_numpy(advantages).to(device),
             "returns": torch.from_numpy(returns).to(device),
             "action_masks": action_masks_dict,

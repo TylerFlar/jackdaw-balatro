@@ -210,6 +210,8 @@ class FactoredBalatroEnv:
         )
         self._reward_shaping = reward_shaping
         self._shop_splits: tuple[int, int, int] = (0, 0, 0)
+        self.max_episode_steps = 500
+        self._step_count = 0
 
         # Reward-shaping trackers
         self._prev_ante: int = 1
@@ -225,6 +227,7 @@ class FactoredBalatroEnv:
     def reset(self, **kwargs: Any) -> tuple[dict[str, np.ndarray], GameActionMask, dict[str, Any]]:
         """Reset and return (obs_dict, action_mask, info)."""
         game_obs, game_mask, info = self._inner.reset(**kwargs)
+        self._step_count = 0
         self._prev_ante = self._inner.episode_ante
         self._prev_round = 0
         self._prev_chips = 0
@@ -255,6 +258,11 @@ class FactoredBalatroEnv:
             return obs, -0.1, False, False, game_mask, info
         self._shop_splits = info.get("shop_splits", (0, 0, 0))
         game_mask = _remap_shop_masks(game_mask, self._shop_splits)
+
+        self._step_count += 1
+        if not terminated and self._step_count >= self.max_episode_steps:
+            truncated = True
+
         reward = self._compute_reward(info, terminated, truncated)
         obs = self._build_obs(game_obs)
 

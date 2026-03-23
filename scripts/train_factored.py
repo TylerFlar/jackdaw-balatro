@@ -35,7 +35,7 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--max-steps", type=int, default=10_000)
     parser.add_argument("--lr", type=float, default=3e-4)
-    parser.add_argument("--ent-coef", type=float, default=0.08)
+    parser.add_argument("--ent-coef", type=float, default=0.05)
     parser.add_argument("--clip-range", type=float, default=0.15)
     parser.add_argument("--n-steps", type=int, default=4096)
     parser.add_argument("--n-epochs", type=int, default=10)
