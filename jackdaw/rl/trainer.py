@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from collections import deque
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -98,6 +99,8 @@ class BalatroTrainer:
     max_grad_norm : gradient clipping
     device : "auto", "cpu", or "cuda"
     log_dir : tensorboard log directory
+    total_timesteps : total env steps (used for LR schedule length)
+    checkpoint_interval : save checkpoint every N updates
     """
 
     def __init__(
@@ -108,7 +111,7 @@ class BalatroTrainer:
         gamma: float = 0.99,
         gae_lambda: float = 0.95,
         clip_range: float = 0.15,
-        ent_coef: float = 0.05,
+        ent_coef: float = 0.08,
         vf_coef: float = 0.5,
         n_steps: int = 4096,
         n_epochs: int = 10,
@@ -116,6 +119,8 @@ class BalatroTrainer:
         max_grad_norm: float = 0.5,
         device: str = "auto",
         log_dir: str = "runs/balatro_factored",
+        total_timesteps: int = 5_000_000,
+        checkpoint_interval: int = 50,
     ) -> None:
         self.env = env
         self.network = network
@@ -128,6 +133,8 @@ class BalatroTrainer:
         self.n_epochs = n_epochs
         self.batch_size = batch_size
         self.max_grad_norm = max_grad_norm
+        self.log_dir = log_dir
+        self.checkpoint_interval = checkpoint_interval
 
         if device == "auto":
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -136,6 +143,17 @@ class BalatroTrainer:
 
         self.network.to(self.device)
         self.optimizer = torch.optim.Adam(self.network.parameters(), lr=lr, eps=1e-5)
+
+        total_updates = total_timesteps // n_steps
+        self.lr_scheduler = torch.optim.lr_scheduler.OneCycleLR(
+            self.optimizer,
+            max_lr=lr,
+            total_steps=total_updates,
+            pct_start=0.05,
+            anneal_strategy="cos",
+            final_div_factor=10.0,
+        )
+
         self.writer = SummaryWriter(log_dir)
 
         # Episode tracking
@@ -262,6 +280,7 @@ class BalatroTrainer:
         total_entropy = 0.0
         total_approx_kl = 0.0
         total_clip_frac = 0.0
+        total_grad_norm = 0.0
         n_batches = 0
 
         for start in range(0, N, self.batch_size):
@@ -321,7 +340,9 @@ class BalatroTrainer:
 
             self.optimizer.zero_grad()
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.network.parameters(), self.max_grad_norm)
+            grad_norm = torch.nn.utils.clip_grad_norm_(
+                self.network.parameters(), self.max_grad_norm
+            )
             self.optimizer.step()
 
             # Diagnostics
@@ -334,6 +355,7 @@ class BalatroTrainer:
             total_entropy += entropy_mean.item()
             total_approx_kl += approx_kl
             total_clip_frac += clip_frac
+            total_grad_norm += grad_norm.item()
             n_batches += 1
 
         n_batches = max(n_batches, 1)
@@ -343,19 +365,38 @@ class BalatroTrainer:
             "entropy": total_entropy / n_batches,
             "approx_kl": total_approx_kl / n_batches,
             "clip_fraction": total_clip_frac / n_batches,
+            "grad_norm": total_grad_norm / n_batches,
         }
 
-    def train(self, total_timesteps: int, log_interval: int = 1) -> None:
+    def load_checkpoint(self, path: str) -> int:
+        """Load a checkpoint and return the global step to resume from."""
+        ckpt = torch.load(path, map_location=self.device, weights_only=False)
+        self.network.load_state_dict(ckpt["network"])
+        self.optimizer.load_state_dict(ckpt["optimizer"])
+        self.lr_scheduler.load_state_dict(ckpt["scheduler"])
+        global_step = ckpt["global_step"]
+        print(f"Resumed from checkpoint: {path} (global_step={global_step})")
+        return global_step
+
+    def train(
+        self,
+        total_timesteps: int,
+        log_interval: int = 1,
+        resume_step: int = 0,
+    ) -> None:
         """Main training loop."""
         num_updates = total_timesteps // self.n_steps
-        global_step = 0
+        global_step = resume_step
+        start_update = resume_step // self.n_steps
 
         print(f"Device: {self.device}")
         print(f"Network parameters: {sum(p.numel() for p in self.network.parameters()):,}")
         print(f"Training for {total_timesteps} timesteps ({num_updates} updates)")
+        if resume_step > 0:
+            print(f"Resuming from step {resume_step} (update {start_update})")
         print(f"Rollout: {self.n_steps} steps, {self.n_epochs} epochs, batch={self.batch_size}")
 
-        for update in range(1, num_updates + 1):
+        for update in range(start_update + 1, num_updates + 1):
             t0 = time.time()
 
             # Collect rollout
@@ -363,11 +404,20 @@ class BalatroTrainer:
             advantages, returns = buf.compute_gae(last_value, self.gamma, self.gae_lambda)
             data = buf.to_tensors(self.device, advantages, returns)
             global_step += self.n_steps
+            n_episodes = len(self._ep_rewards)
 
-            # PPO epochs
+            # PPO epochs with KL early stopping
             epoch_stats: dict[str, float] = {}
-            for _ in range(self.n_epochs):
+            epochs_used = 0
+            for epoch_idx in range(self.n_epochs):
                 epoch_stats = self.train_epoch(data)
+                epochs_used = epoch_idx + 1
+                if epoch_stats["approx_kl"] > 0.15:
+                    break
+
+            # Step LR scheduler
+            self.lr_scheduler.step()
+            current_lr = self.lr_scheduler.get_last_lr()[0]
 
             dt = time.time() - t0
             fps = self.n_steps / dt
@@ -378,7 +428,11 @@ class BalatroTrainer:
             self.writer.add_scalar("train/entropy", epoch_stats["entropy"], global_step)
             self.writer.add_scalar("train/approx_kl", epoch_stats["approx_kl"], global_step)
             self.writer.add_scalar("train/clip_fraction", epoch_stats["clip_fraction"], global_step)
+            self.writer.add_scalar("train/learning_rate", current_lr, global_step)
+            self.writer.add_scalar("train/epochs_used", epochs_used, global_step)
+            self.writer.add_scalar("train/grad_norm", epoch_stats["grad_norm"], global_step)
             self.writer.add_scalar("perf/fps", fps, global_step)
+            self.writer.add_scalar("balatro/ep_per_rollout", n_episodes, global_step)
 
             # Log episode metrics
             if self._ep_rewards:
@@ -416,12 +470,27 @@ class BalatroTrainer:
                     f"Update {update}/{num_updates} | "
                     f"step={global_step} | "
                     f"fps={fps:.0f} | "
+                    f"lr={current_lr:.2e} "
+                    f"epochs={epochs_used}/{self.n_epochs} | "
                     f"ploss={epoch_stats['policy_loss']:.4f} "
                     f"vloss={epoch_stats['value_loss']:.4f} "
                     f"ent={epoch_stats['entropy']:.3f} "
                     f"kl={epoch_stats['approx_kl']:.4f}"
                     f"{ep_info}"
                 )
+
+            # Checkpoint
+            if update % self.checkpoint_interval == 0:
+                ckpt = {
+                    "network": self.network.state_dict(),
+                    "optimizer": self.optimizer.state_dict(),
+                    "scheduler": self.lr_scheduler.state_dict(),
+                    "global_step": global_step,
+                    "update": update,
+                }
+                ckpt_path = Path(self.log_dir) / f"checkpoint_{global_step}.pt"
+                torch.save(ckpt, ckpt_path)
+                print(f"  Checkpoint saved: {ckpt_path}")
 
             # Clear per-rollout episode stats
             self._ep_rewards.clear()

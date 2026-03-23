@@ -30,18 +30,20 @@ from jackdaw.rl.trainer import BalatroTrainer
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train Balatro with factored policy PPO")
-    parser.add_argument("--total-timesteps", type=int, default=1_000_000)
+    parser.add_argument("--total-timesteps", type=int, default=5_000_000)
     parser.add_argument("--log-dir", type=str, default="runs/balatro_factored")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--max-steps", type=int, default=10_000)
     parser.add_argument("--lr", type=float, default=3e-4)
-    parser.add_argument("--ent-coef", type=float, default=0.05)
+    parser.add_argument("--ent-coef", type=float, default=0.08)
     parser.add_argument("--clip-range", type=float, default=0.15)
     parser.add_argument("--n-steps", type=int, default=4096)
     parser.add_argument("--n-epochs", type=int, default=10)
     parser.add_argument("--batch-size", type=int, default=512)
     parser.add_argument("--device", type=str, default="auto")
     parser.add_argument("--save-path", type=str, default=None)
+    parser.add_argument("--resume", type=str, default=None, help="Path to checkpoint .pt file")
+    parser.add_argument("--checkpoint-interval", type=int, default=50)
     args = parser.parse_args()
 
     # Seed everything
@@ -74,9 +76,15 @@ def main() -> None:
         batch_size=args.batch_size,
         device=args.device,
         log_dir=args.log_dir,
+        total_timesteps=args.total_timesteps,
+        checkpoint_interval=args.checkpoint_interval,
     )
 
-    trainer.train(total_timesteps=args.total_timesteps)
+    resume_step = 0
+    if args.resume:
+        resume_step = trainer.load_checkpoint(args.resume)
+
+    trainer.train(total_timesteps=args.total_timesteps, resume_step=resume_step)
 
     # Save model
     save_path = args.save_path or str(log_path / "factored_policy.pt")
