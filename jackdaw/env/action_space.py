@@ -355,8 +355,16 @@ def _mask_consumables(
 
     mask = np.zeros(len(consumables), dtype=bool)
     for i, card in enumerate(consumables):
+        # For consumables needing card targets, pass dummy highlighted from
+        # hand so the check reflects "can be used if agent selects cards".
+        min_cards, _max_cards, needs_targets = get_consumable_target_info(card)
+        if needs_targets:
+            highlighted = hand[:min_cards] if len(hand) >= min_cards else []
+        else:
+            highlighted = []
         if can_use_consumable(
             card,
+            highlighted=highlighted,
             hand_cards=hand,
             jokers=jokers,
             consumables=consumables,

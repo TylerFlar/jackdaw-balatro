@@ -232,7 +232,7 @@ class TestResetRoundTargets:
     def test_idol_card_ante1(self):
         gs = _make_target_gs()
         idol = gs["current_round"]["idol_card"]
-        assert idol == {"suit": "Clubs", "rank": "6"}
+        assert idol == {"suit": "Clubs", "rank": "6", "id": 6}
 
 
 # ============================================================================

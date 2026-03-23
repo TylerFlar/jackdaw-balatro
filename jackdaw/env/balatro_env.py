@@ -148,6 +148,22 @@ class BalatroEnvironment:
         return game_obs, terminated, truncated, game_mask, info
 
 
+    def reobserve(self) -> tuple[GameObservation, GameActionMask, dict[str, object]]:
+        """Re-encode the current state without stepping. Used for error recovery."""
+        gs = self._adapter.raw_state
+        obs = encode_observation(gs)
+        mask = get_action_mask(gs)
+        game_obs = obs.to_game_observation()
+        game_mask = _action_mask_to_game(mask)
+        info: dict[str, object] = {
+            "raw_state": gs,
+            "shop_splits": _compute_shop_splits(gs),
+            "observation": obs,
+            "action_mask": mask,
+        }
+        return game_obs, game_mask, info
+
+
 def _action_mask_to_game(mask: ActionMask) -> GameActionMask:
     """Convert a Balatro ActionMask to a game-agnostic GameActionMask."""
     return GameActionMask(
