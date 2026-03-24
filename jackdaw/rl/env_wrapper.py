@@ -210,7 +210,7 @@ class FactoredBalatroEnv:
         )
         self._reward_shaping = reward_shaping
         self._shop_splits: tuple[int, int, int] = (0, 0, 0)
-        self.max_episode_steps = 500
+        self.max_episode_steps = 200
         self._step_count = 0
 
         # Reward-shaping trackers
@@ -315,19 +315,17 @@ class FactoredBalatroEnv:
             return 0.0
 
         gs: dict[str, Any] = info.get("raw_state", {})
-        phase = gs.get("phase")
 
-        reward = -0.002 if phase == "shop" else -0.001
+        reward = -0.001
 
         ante = gs.get("round_resets", {}).get("ante", 1)
         round_num = gs.get("round", 0)
         chips = gs.get("chips", 0)
-        ante_scale = ante / 8.0
 
         if round_num > self._prev_round:
             reward += 0.15 * max(ante / 8, 0.5)
             if ante > self._prev_ante:
-                reward += 0.1 * ante_scale
+                reward += 0.2 * ante
             hands_left = gs.get("current_round", {}).get("hands_left", 0)
             reward += 0.01 * hands_left
 

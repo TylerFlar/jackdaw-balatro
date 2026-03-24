@@ -34,12 +34,13 @@ def main() -> None:
     parser.add_argument("--log-dir", type=str, default="runs/balatro_factored")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--max-steps", type=int, default=10_000)
-    parser.add_argument("--lr", type=float, default=3e-4)
-    parser.add_argument("--ent-coef", type=float, default=0.05)
+    parser.add_argument("--lr", type=float, default=2e-4)
+    parser.add_argument("--ent-coef", type=float, default=0.2)
+    parser.add_argument("--entropy-target", type=float, default=2.0)
     parser.add_argument("--clip-range", type=float, default=0.15)
     parser.add_argument("--n-steps", type=int, default=4096)
     parser.add_argument("--n-epochs", type=int, default=10)
-    parser.add_argument("--batch-size", type=int, default=512)
+    parser.add_argument("--batch-size", type=int, default=1024)
     parser.add_argument("--device", type=str, default="auto")
     parser.add_argument("--save-path", type=str, default=None)
     parser.add_argument("--resume", type=str, default=None, help="Path to checkpoint .pt file")
@@ -71,6 +72,7 @@ def main() -> None:
         lr=args.lr,
         clip_range=args.clip_range,
         ent_coef=args.ent_coef,
+        entropy_target=args.entropy_target,
         n_steps=args.n_steps,
         n_epochs=args.n_epochs,
         batch_size=args.batch_size,

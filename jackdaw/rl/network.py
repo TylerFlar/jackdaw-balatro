@@ -49,20 +49,16 @@ D_GLOBAL = _SPEC.global_feature_dim  # 235
 
 # Encoder output dims
 GLOBAL_EMBED = 128
-ENTITY_EMBED = 64  # hand_card, joker, pack_card
-SMALL_ENTITY_EMBED = 32  # consumable, shop_item
+ENTITY_EMBED = 64  # all entity types (unified for cross-attention)
 STATE_EMBED = 256
 
-# Which entity types use which embed dim
-_EMBED_DIMS = {
-    0: ENTITY_EMBED,   # hand_card (15 -> 64)
-    1: ENTITY_EMBED,   # joker (15 -> 64)
-    2: SMALL_ENTITY_EMBED,  # consumable (7 -> 32)
-    3: SMALL_ENTITY_EMBED,  # shop_item (9 -> 32)
-    4: ENTITY_EMBED,   # pack_card (15 -> 64)
-}
-
 POINTER_DIM = 64  # query/key dim for pointer attention
+
+# Cross-entity attention config
+NUM_ATTN_LAYERS = 2
+NUM_ATTN_HEADS = 4
+ATTN_FFN_DIM = 128
+MAX_ENTITIES = sum(et.max_count for et in _SPEC.entity_types)  # 30
 
 # Logits are clamped to [-_LOGIT_CLAMP, _LOGIT_CLAMP] before masking, then
 # illegal positions are set to _MASK_VALUE.  _MASK_VALUE must be well below
@@ -77,6 +73,28 @@ def _mlp(in_dim: int, hidden: int, out_dim: int) -> nn.Sequential:
         nn.ReLU(),
         nn.Linear(hidden, out_dim),
     )
+
+
+class _TransformerBlock(nn.Module):
+    """Pre-norm transformer block (no dropout — RL setting)."""
+
+    def __init__(self, d_model: int, n_heads: int, ffn_dim: int) -> None:
+        super().__init__()
+        self.ln1 = nn.LayerNorm(d_model)
+        self.attn = nn.MultiheadAttention(d_model, n_heads, batch_first=True)
+        self.ln2 = nn.LayerNorm(d_model)
+        self.ffn = nn.Sequential(
+            nn.Linear(d_model, ffn_dim),
+            nn.ReLU(),
+            nn.Linear(ffn_dim, d_model),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        h = self.ln1(x)
+        h, _ = self.attn(h, h, h)
+        x = x + h
+        x = x + self.ffn(self.ln2(x))
+        return x
 
 
 class FactoredPolicy(nn.Module):
@@ -95,17 +113,29 @@ class FactoredPolicy(nn.Module):
     def __init__(self) -> None:
         super().__init__()
 
-        # --- Entity encoders (separate weights per type) ---
+        # --- Entity encoders (separate weights per type, unified output dim) ---
         self.entity_encoders = nn.ModuleDict()
         for i, (name, _, feat_dim) in enumerate(_ENTITY_INFO):
-            embed_dim = _EMBED_DIMS[i]
-            self.entity_encoders[name] = _mlp(feat_dim, embed_dim, embed_dim)
+            self.entity_encoders[name] = _mlp(feat_dim, ENTITY_EMBED, ENTITY_EMBED)
 
         # --- Global encoder ---
         self.global_encoder = _mlp(D_GLOBAL, GLOBAL_EMBED, GLOBAL_EMBED)
 
+        # --- Cross-entity attention ---
+        self.entity_type_embed = nn.Embedding(len(_ENTITY_INFO), ENTITY_EMBED)
+        self.cross_attn_layers = nn.ModuleList([
+            _TransformerBlock(ENTITY_EMBED, NUM_ATTN_HEADS, ATTN_FFN_DIM)
+            for _ in range(NUM_ATTN_LAYERS)
+        ])
+
+        # --- Attention pooling queries (one per entity type) ---
+        self.pool_queries = nn.ParameterDict({
+            name: nn.Parameter(torch.randn(1, 1, ENTITY_EMBED) * 0.02)
+            for name, _, _ in _ENTITY_INFO
+        })
+
         # --- Combiner: concat pooled entities + global -> state embedding ---
-        pool_total = GLOBAL_EMBED + sum(_EMBED_DIMS[i] for i in range(len(_ENTITY_INFO)))
+        pool_total = GLOBAL_EMBED + ENTITY_EMBED * len(_ENTITY_INFO)
         self.combiner = _mlp(pool_total, STATE_EMBED, STATE_EMBED)
 
         # --- Action type head ---
@@ -114,8 +144,7 @@ class FactoredPolicy(nn.Module):
         # --- Entity pointer head (one query projection per entity type) ---
         self.pointer_queries = nn.ModuleDict()
         for i, name in enumerate(ENTITY_NAMES):
-            embed_dim = _EMBED_DIMS[i]
-            self.pointer_queries[name] = nn.Linear(STATE_EMBED, embed_dim)
+            self.pointer_queries[name] = nn.Linear(STATE_EMBED, ENTITY_EMBED)
 
         # --- Card selection head ---
         # query from state, score via MLP on concat(query, card_embed)
@@ -128,7 +157,9 @@ class FactoredPolicy(nn.Module):
 
         # --- Value head ---
         self.value_head = nn.Sequential(
-            nn.Linear(STATE_EMBED, 64),
+            nn.Linear(STATE_EMBED, 128),
+            nn.ReLU(),
+            nn.Linear(128, 64),
             nn.ReLU(),
             nn.Linear(64, 1),
         )
@@ -137,6 +168,8 @@ class FactoredPolicy(nn.Module):
 
     def _init_weights(self) -> None:
         for m in self.modules():
+            if isinstance(m, (nn.LayerNorm, nn.MultiheadAttention)):
+                continue  # use default init for these
             if isinstance(m, nn.Linear):
                 nn.init.orthogonal_(m.weight, gain=0.01 if m is self.action_type_head else 1.0)
                 if m.bias is not None:
@@ -154,29 +187,63 @@ class FactoredPolicy(nn.Module):
         Returns
         -------
         state : (B, STATE_EMBED)
-        entity_embeds : {entity_name: (B, max_count, embed_dim)}
+        entity_embeds : {entity_name: (B, max_count, ENTITY_EMBED)}
         """
         B = obs["global"].shape[0]
+        device = obs["global"].device
         counts = obs["entity_counts"]  # (B, 5)
 
         # Global
         g = self.global_encoder(obs["global"])  # (B, GLOBAL_EMBED)
 
-        # Encode entities + masked mean pool
-        pooled_parts: list[torch.Tensor] = [g]
-        entity_embeds: dict[str, torch.Tensor] = {}
+        # 1. Encode each entity type independently
+        all_embeds: list[torch.Tensor] = []
+        all_masks: list[torch.Tensor] = []
+        offsets: list[tuple[int, int]] = []
+        offset = 0
 
         for i, (name, max_count, _) in enumerate(_ENTITY_INFO):
             raw = obs[name]  # (B, max_count, feat_dim)
-            embed = self.entity_encoders[name](raw)  # (B, max_count, embed_dim)
-            entity_embeds[name] = embed
+            embed = self.entity_encoders[name](raw)  # (B, max_count, ENTITY_EMBED)
+            embed = embed + self.entity_type_embed.weight[i]  # add type embedding
+            all_embeds.append(embed)
 
-            # Masked mean pool
-            c = counts[:, i].long()  # (B,)
-            mask = torch.arange(max_count, device=raw.device).unsqueeze(0) < c.unsqueeze(1)  # (B, max_count)
-            mask_f = mask.unsqueeze(-1).float()  # (B, max_count, 1)
-            denom = c.float().clamp(min=1.0).unsqueeze(-1)  # (B, 1)
-            pooled = (embed * mask_f).sum(dim=1) / denom  # (B, embed_dim)
+            c = counts[:, i].long()
+            mask = torch.arange(max_count, device=device).unsqueeze(0) < c.unsqueeze(1)
+            all_masks.append(mask)
+            offsets.append((offset, offset + max_count))
+            offset += max_count
+
+        # 2. Concatenate all entities into single sequence for cross-attention
+        seq = torch.cat(all_embeds, dim=1)  # (B, MAX_ENTITIES, ENTITY_EMBED)
+        # MHA convention: True = padded/ignored
+        pad_mask = ~torch.cat(all_masks, dim=1)  # (B, MAX_ENTITIES)
+
+        # 3. Cross-entity self-attention
+        # Zero padded positions instead of using key_padding_mask to avoid
+        # NaN gradients from all-masked attention rows in MHA.
+        valid_mask = (~pad_mask).unsqueeze(-1)  # (B, MAX_ENTITIES, 1)
+        seq = seq * valid_mask
+        for layer in self.cross_attn_layers:
+            seq = layer(seq)
+            seq = seq * valid_mask
+
+        # 4. Split back into per-type and attention-pool
+        entity_embeds: dict[str, torch.Tensor] = {}
+        pooled_parts: list[torch.Tensor] = [g]
+
+        for i, (name, max_count, _) in enumerate(_ENTITY_INFO):
+            start, end = offsets[i]
+            ent_seq = seq[:, start:end, :]  # (B, max_count, ENTITY_EMBED)
+            entity_embeds[name] = ent_seq
+
+            # Attention pooling: learned query attends over entities
+            query = self.pool_queries[name].expand(B, -1, -1)  # (B, 1, ENTITY_EMBED)
+            scores = (query @ ent_seq.transpose(-1, -2)) / (ENTITY_EMBED ** 0.5)
+            scores = scores.masked_fill(~all_masks[i].unsqueeze(1), float("-inf"))
+            weights = torch.softmax(scores, dim=-1)  # (B, 1, max_count)
+            weights = weights.nan_to_num(0.0)  # handle all-padded types
+            pooled = (weights @ ent_seq).squeeze(1)  # (B, ENTITY_EMBED)
             pooled_parts.append(pooled)
 
         combined = torch.cat(pooled_parts, dim=-1)  # (B, pool_total)
