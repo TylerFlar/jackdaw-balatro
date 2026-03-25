@@ -554,6 +554,12 @@ def encode_shop_item(
     return v
 
 
+# Cache for _compute_hand_analysis to avoid duplicate calls within
+# a single encode_observation() invocation.
+_hand_analysis_cache_key: tuple[int, int, int, int] | None = None
+_hand_analysis_cache_val: tuple[np.ndarray, str, set[int]] | None = None
+
+
 def _compute_hand_analysis(
     hand: list[Card],
     jokers: list[Card],
@@ -566,12 +572,21 @@ def _compute_hand_analysis(
         best_hand_name: name of the best detected hand type
         scoring_ids: set of id() values for cards in the best hand
     """
+    global _hand_analysis_cache_key, _hand_analysis_cache_val
+
+    key = (id(hand), len(hand), id(jokers), len(jokers))
+    if key == _hand_analysis_cache_key and _hand_analysis_cache_val is not None:
+        return _hand_analysis_cache_val
+
     hand_type_vec = np.zeros(NUM_HAND_TYPES, dtype=np.float32)
     scoring_ids: set[int] = set()
     best_hand_name = ""
 
     if not hand:
-        return hand_type_vec, best_hand_name, scoring_ids
+        result = (hand_type_vec, best_hand_name, scoring_ids)
+        _hand_analysis_cache_key = key
+        _hand_analysis_cache_val = result
+        return result
 
     # Get joker modifier flags
     flags = get_hand_eval_flags(jokers)
@@ -593,7 +608,10 @@ def _compute_hand_analysis(
     # Track which cards are in the best hand
     scoring_ids = {id(c) for c in scoring_cards}
 
-    return hand_type_vec, best_hand_name, scoring_ids
+    result = (hand_type_vec, best_hand_name, scoring_ids)
+    _hand_analysis_cache_key = key
+    _hand_analysis_cache_val = result
+    return result
 
 
 @dataclass

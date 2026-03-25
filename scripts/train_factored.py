@@ -10,12 +10,14 @@ Requires the ``train`` optional dependency group::
 Usage::
 
     python scripts/train_factored.py --total-timesteps 1000000
-    python scripts/train_factored.py --lr 1e-4 --ent-coef 0.01 --device cuda
+    python scripts/train_factored.py --n-envs 8 --total-timesteps 50000000
+    python scripts/train_factored.py --resume runs/balatro_factored/checkpoint_1000000.pt
 """
 
 from __future__ import annotations
 
 import argparse
+import functools
 import random
 from pathlib import Path
 
@@ -26,6 +28,19 @@ from jackdaw.env.game_interface import DirectAdapter
 from jackdaw.rl.env_wrapper import FactoredBalatroEnv
 from jackdaw.rl.network import FactoredPolicy
 from jackdaw.rl.trainer import BalatroTrainer
+from jackdaw.rl.vec_env import SubprocVecEnv
+
+
+def _make_env(
+    max_steps: int, seed_prefix: str, env_idx: int
+) -> FactoredBalatroEnv:
+    """Top-level factory function (must be picklable for multiprocessing)."""
+    return FactoredBalatroEnv(
+        adapter_factory=DirectAdapter,
+        reward_shaping=True,
+        max_steps=max_steps,
+        seed_prefix=f"{seed_prefix}_ENV{env_idx}",
+    )
 
 
 def main() -> None:
@@ -41,6 +56,7 @@ def main() -> None:
     parser.add_argument("--n-steps", type=int, default=4096)
     parser.add_argument("--n-epochs", type=int, default=10)
     parser.add_argument("--batch-size", type=int, default=1024)
+    parser.add_argument("--n-envs", type=int, default=8)
     parser.add_argument("--device", type=str, default="auto")
     parser.add_argument("--save-path", type=str, default=None)
     parser.add_argument("--resume", type=str, default=None, help="Path to checkpoint .pt file")
@@ -57,17 +73,18 @@ def main() -> None:
     log_path = Path(args.log_dir)
     log_path.mkdir(parents=True, exist_ok=True)
 
-    env = FactoredBalatroEnv(
-        adapter_factory=DirectAdapter,
-        reward_shaping=True,
-        max_steps=args.max_steps,
-        seed_prefix=f"FACTORED_{args.seed}",
-    )
+    # Create env factories (functools.partial is picklable, lambdas are not)
+    seed_prefix = f"FACTORED_{args.seed}"
+    env_fns = [
+        functools.partial(_make_env, args.max_steps, seed_prefix, i)
+        for i in range(args.n_envs)
+    ]
+    vec_env = SubprocVecEnv(env_fns)
 
     network = FactoredPolicy()
 
     trainer = BalatroTrainer(
-        env=env,
+        vec_env=vec_env,
         network=network,
         lr=args.lr,
         clip_range=args.clip_range,

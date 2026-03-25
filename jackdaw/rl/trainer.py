@@ -13,15 +13,14 @@ from torch.utils.tensorboard import SummaryWriter
 
 from jackdaw.env.balatro_spec import balatro_game_spec
 from jackdaw.env.game_spec import FactoredAction, GameActionMask
-from jackdaw.rl.env_wrapper import FactoredBalatroEnv
 from jackdaw.rl.network import (
     ENTITY_MAX_COUNTS,
-    ENTITY_NAMES,
     FactoredPolicy,
     NEEDS_CARDS,
     NEEDS_ENTITY,
 )
 from jackdaw.rl.rollout import RolloutBuffer, Transition
+from jackdaw.rl.vec_env import SubprocVecEnv
 
 _SPEC = balatro_game_spec()
 HAND_CARD_MAX = _SPEC.entity_types[0].max_count  # 8
@@ -52,46 +51,75 @@ def _masks_to_numpy(
     return type_mask, card_mask, entity_masks, mask.min_card_select, mask.max_card_select
 
 
-def _obs_to_device(obs: dict[str, np.ndarray], device: torch.device) -> dict[str, torch.Tensor]:
-    """Convert single obs dict to batched (B=1) tensors."""
-    return {k: torch.from_numpy(v).float().unsqueeze(0).to(device) for k, v in obs.items()}
+def _batch_obs_to_device(
+    obs_list: list[dict[str, np.ndarray]], device: torch.device
+) -> dict[str, torch.Tensor]:
+    """Stack N obs dicts into batched (B=N) tensors."""
+    keys = list(obs_list[0].keys())
+    return {
+        k: torch.from_numpy(np.stack([o[k] for o in obs_list])).float().to(device)
+        for k in keys
+    }
 
 
-def _masks_to_device(
-    type_mask: np.ndarray,
-    card_mask: np.ndarray,
-    entity_masks: dict[int, np.ndarray],
-    min_card_select: int,
-    max_card_select: int,
+def _batch_masks_to_device(
+    masks_np: list[tuple[np.ndarray, np.ndarray, dict[int, np.ndarray], int, int]],
     device: torch.device,
 ) -> dict[str, Any]:
-    """Convert single-step masks to batched (B=1) tensors."""
-    em = {
-        atype: torch.from_numpy(m).bool().unsqueeze(0).to(device)
-        for atype, m in entity_masks.items()
-    }
+    """Stack N mask tuples into batched tensors."""
+    type_masks = torch.from_numpy(np.stack([m[0] for m in masks_np])).bool().to(device)
+    card_masks = torch.from_numpy(np.stack([m[1] for m in masks_np])).bool().to(device)
+
+    min_cs = torch.tensor([m[3] for m in masks_np], dtype=torch.long, device=device)
+    max_cs = torch.tensor([m[4] for m in masks_np], dtype=torch.long, device=device)
+
+    # Entity masks: union of all keys across envs
+    all_keys: set[int] = set()
+    for m in masks_np:
+        all_keys.update(m[2].keys())
+
+    entity_masks: dict[int, torch.Tensor] = {}
+    for atype in all_keys:
+        arrs = []
+        ref_shape: tuple[int, ...] | None = None
+        for m in masks_np:
+            if atype in m[2]:
+                arrs.append(m[2][atype])
+                if ref_shape is None:
+                    ref_shape = m[2][atype].shape
+            else:
+                arrs.append(None)
+        # Fill None entries with zeros
+        assert ref_shape is not None
+        filled = [a if a is not None else np.zeros(ref_shape, dtype=bool) for a in arrs]
+        entity_masks[atype] = torch.from_numpy(np.stack(filled)).bool().to(device)
+
     return {
-        "type_mask": torch.from_numpy(type_mask).bool().unsqueeze(0).to(device),
-        "card_mask": torch.from_numpy(card_mask).bool().unsqueeze(0).to(device),
-        "entity_masks": em,
-        "min_card_select": torch.tensor([min_card_select], dtype=torch.long, device=device),
-        "max_card_select": torch.tensor([max_card_select], dtype=torch.long, device=device),
+        "type_mask": type_masks,
+        "card_mask": card_masks,
+        "entity_masks": entity_masks,
+        "min_card_select": min_cs,
+        "max_card_select": max_cs,
     }
 
 
 class BalatroTrainer:
     """PPO trainer for the factored Balatro policy.
 
+    Supports both single-env and multi-env (SubprocVecEnv) collection.
+
     Parameters
     ----------
-    env : FactoredBalatroEnv
+    vec_env : SubprocVecEnv
+        Vectorized environment with N workers.
     network : FactoredPolicy
     lr : learning rate
     gamma, gae_lambda : GAE parameters
     clip_range : PPO clipping epsilon
-    ent_coef : entropy bonus coefficient
+    ent_coef : entropy targeting coefficient
+    entropy_target : target entropy for quadratic penalty
     vf_coef : value loss coefficient
-    n_steps : rollout length per update
+    n_steps : total rollout transitions per update (across all envs)
     n_epochs : PPO epochs per rollout
     batch_size : minibatch size for PPO updates
     max_grad_norm : gradient clipping
@@ -103,7 +131,7 @@ class BalatroTrainer:
 
     def __init__(
         self,
-        env: FactoredBalatroEnv,
+        vec_env: SubprocVecEnv,
         network: FactoredPolicy,
         lr: float = 2e-4,
         gamma: float = 0.99,
@@ -121,7 +149,8 @@ class BalatroTrainer:
         total_timesteps: int = 5_000_000,
         checkpoint_interval: int = 50,
     ) -> None:
-        self.env = env
+        self.vec_env = vec_env
+        self.n_envs = vec_env.n_envs
         self.network = network
         self.gamma = gamma
         self.gae_lambda = gae_lambda
@@ -148,7 +177,7 @@ class BalatroTrainer:
         self.lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             self.optimizer,
             T_max=total_updates,
-            eta_min=lr / 10,  # decay to 3e-5
+            eta_min=lr / 10,
         )
 
         self.writer = SummaryWriter(log_dir)
@@ -159,115 +188,130 @@ class BalatroTrainer:
         self._ep_antes: list[int] = []
         self._ep_rounds: list[int] = []
         self._ep_wins: list[bool] = []
-        # Rolling stats
         self._recent_wins: deque[bool] = deque(maxlen=100)
 
-        # Env state (persists across rollouts)
-        self._obs: dict[str, np.ndarray] | None = None
-        self._mask: GameActionMask | None = None
-        self._ep_reward_accum: float = 0.0
-        self._ep_len_accum: int = 0
+        # Per-env state
+        self._env_obs: list[dict[str, np.ndarray] | None] = [None] * self.n_envs
+        self._env_masks: list[GameActionMask | None] = [None] * self.n_envs
+        self._env_ep_reward: list[float] = [0.0] * self.n_envs
+        self._env_ep_len: list[int] = [0] * self.n_envs
 
-    def _reset_env(self) -> None:
-        obs, mask, info = self.env.reset()
-        self._obs = obs
-        self._mask = mask
-        self._ep_reward_accum = 0.0
-        self._ep_len_accum = 0
+    def _reset_all(self) -> None:
+        """Reset all environments."""
+        obs_list, mask_list = self.vec_env.reset_all()
+        for i in range(self.n_envs):
+            self._env_obs[i] = obs_list[i]
+            self._env_masks[i] = mask_list[i]
+            self._env_ep_reward[i] = 0.0
+            self._env_ep_len[i] = 0
 
-    def collect_rollout(self) -> RolloutBuffer:
-        """Run n_steps in the environment, collecting transitions."""
-        buf = RolloutBuffer()
+    def collect_rollout(self) -> tuple[RolloutBuffer, list[float]]:
+        """Collect n_steps transitions across all environments.
+
+        Returns (buffer, last_values) where last_values is per-env bootstrap values.
+        """
+        buf = RolloutBuffer(n_envs=self.n_envs)
         self.network.eval()
 
-        if self._obs is None:
-            self._reset_env()
+        if self._env_obs[0] is None:
+            self._reset_all()
 
-        for _ in range(self.n_steps):
-            obs = self._obs
-            assert obs is not None and self._mask is not None
+        steps_per_env = self.n_steps // self.n_envs
+        for _ in range(steps_per_env):
+            # Prepare batched numpy masks for storage
+            masks_np = []
+            for i in range(self.n_envs):
+                masks_np.append(_masks_to_numpy(self._env_masks[i]))
 
-            type_mask, card_mask, entity_masks, min_cs, max_cs = _masks_to_numpy(self._mask)
-
-            # Forward pass (no grad)
-            obs_t = _obs_to_device(obs, self.device)
-            masks_t = _masks_to_device(
-                type_mask, card_mask, entity_masks, min_cs, max_cs, self.device
-            )
+            # Batch observations and masks for network
+            obs_t = _batch_obs_to_device(self._env_obs, self.device)
+            masks_t = _batch_masks_to_device(masks_np, self.device)
 
             with torch.no_grad():
                 out = self.network(obs_t, masks_t)
 
-            action_type = out["action_type"].item()
-            entity_target = out["entity_target"].item()
-            card_target_arr = out["card_target"][0].cpu().numpy()  # (max_hand,) bool
-            log_prob = out["log_prob"].item()
-            value = out["value"].item()
+            # Extract per-env actions
+            action_types = out["action_type"].cpu().numpy()  # (N,)
+            entity_targets = out["entity_target"].cpu().numpy()  # (N,)
+            card_targets = out["card_target"].cpu().numpy()  # (N, max_hand)
+            log_probs = out["log_prob"].cpu().numpy()  # (N,)
+            values = out["value"].cpu().numpy()  # (N,)
 
-            # Convert to FactoredAction
-            ct: tuple[int, ...] | None = None
-            et: int | None = None
+            # Build FactoredActions for each env
+            actions: list[FactoredAction] = []
+            for i in range(self.n_envs):
+                at = int(action_types[i])
+                et_val = int(entity_targets[i])
+                ct_arr = card_targets[i]
 
-            if action_type in NEEDS_ENTITY and entity_target >= 0:
-                et = entity_target
-            if action_type in NEEDS_CARDS:
-                selected = np.nonzero(card_target_arr)[0]
-                if len(selected) > 0:
-                    ct = tuple(int(i) for i in selected)
+                ct: tuple[int, ...] | None = None
+                et: int | None = None
 
-            fa = FactoredAction(action_type=action_type, card_target=ct, entity_target=et)
+                if at in NEEDS_ENTITY and et_val >= 0:
+                    et = et_val
+                if at in NEEDS_CARDS:
+                    selected = np.nonzero(ct_arr)[0]
+                    if len(selected) > 0:
+                        ct = tuple(int(j) for j in selected)
 
-            # Step environment
-            next_obs, reward, terminated, truncated, next_mask, info = self.env.step(fa)
-            done = terminated or truncated
+                actions.append(FactoredAction(action_type=at, card_target=ct, entity_target=et))
 
-            buf.add(
-                Transition(
-                    obs=obs,
-                    action_type=action_type,
-                    entity_target=entity_target,
-                    card_target=card_target_arr,
-                    log_prob=log_prob,
-                    value=value,
-                    reward=reward,
-                    done=done,
-                    type_mask=type_mask,
-                    card_mask=card_mask,
-                    entity_masks=entity_masks,
-                    min_card_select=min_cs,
-                    max_card_select=max_cs,
+            # Step all envs
+            results = self.vec_env.step(actions)
+
+            # Record transitions
+            for i in range(self.n_envs):
+                obs, reward, done, mask, terminal_info, new_obs, new_mask = results[i]
+
+                buf.add(
+                    Transition(
+                        obs=self._env_obs[i],
+                        action_type=int(action_types[i]),
+                        entity_target=int(entity_targets[i]),
+                        card_target=card_targets[i].astype(bool),
+                        log_prob=float(log_probs[i]),
+                        value=float(values[i]),
+                        reward=reward,
+                        done=done,
+                        type_mask=masks_np[i][0],
+                        card_mask=masks_np[i][1],
+                        entity_masks=masks_np[i][2],
+                        min_card_select=masks_np[i][3],
+                        max_card_select=masks_np[i][4],
+                    ),
+                    env_idx=i,
                 )
-            )
 
-            self._ep_reward_accum += reward
-            self._ep_len_accum += 1
+                self._env_ep_reward[i] += reward
+                self._env_ep_len[i] += 1
 
-            if done:
-                self._ep_rewards.append(self._ep_reward_accum)
-                self._ep_lengths.append(self._ep_len_accum)
-                self._ep_antes.append(info.get("balatro/ante_reached", 1))
-                self._ep_rounds.append(info.get("balatro/rounds_beaten", 0))
-                won = info.get("balatro/won", False)
-                self._ep_wins.append(won)
-                self._recent_wins.append(won)
-                self._reset_env()
-            else:
-                self._obs = next_obs
-                self._mask = next_mask
+                if done:
+                    self._ep_rewards.append(self._env_ep_reward[i])
+                    self._ep_lengths.append(self._env_ep_len[i])
+                    if terminal_info:
+                        self._ep_antes.append(terminal_info.get("balatro/ante_reached", 1))
+                        self._ep_rounds.append(terminal_info.get("balatro/rounds_beaten", 0))
+                        won = terminal_info.get("balatro/won", False)
+                        self._ep_wins.append(won)
+                        self._recent_wins.append(won)
+                    # Auto-reset: worker already reset, use new obs/mask
+                    self._env_obs[i] = new_obs
+                    self._env_masks[i] = new_mask
+                    self._env_ep_reward[i] = 0.0
+                    self._env_ep_len[i] = 0
+                else:
+                    self._env_obs[i] = obs
+                    self._env_masks[i] = mask
 
-        # Bootstrap value for the last step
+        # Bootstrap values for all envs
         with torch.no_grad():
-            obs_t = _obs_to_device(self._obs, self.device)
-            # Just need the value, but we need masks too for the forward pass
-            type_mask, card_mask, entity_masks, min_cs, max_cs = _masks_to_numpy(self._mask)
-            masks_t = _masks_to_device(
-                type_mask, card_mask, entity_masks, min_cs, max_cs, self.device
-            )
-            # Use _encode + value_head directly to avoid sampling
+            obs_t = _batch_obs_to_device(self._env_obs, self.device)
+            masks_np = [_masks_to_numpy(self._env_masks[i]) for i in range(self.n_envs)]
+            masks_t = _batch_masks_to_device(masks_np, self.device)
             state, _ = self.network._encode(obs_t)
-            last_value = self.network.value_head(state).item()
+            last_values = self.network.value_head(state).squeeze(-1).cpu().numpy().tolist()
 
-        return buf, last_value
+        return buf, last_values
 
     def train_epoch(self, data: dict[str, Any]) -> dict[str, float]:
         """One epoch of PPO updates over the buffer."""
@@ -414,6 +458,7 @@ class BalatroTrainer:
         print(f"Device: {self.device}")
         print(f"Network parameters: {sum(p.numel() for p in self.network.parameters()):,}")
         print(f"Training for {total_timesteps} timesteps ({num_updates} updates)")
+        print(f"Environments: {self.n_envs}")
         if resume_step > 0:
             print(f"Resuming from step {resume_step} (update {start_update})")
         print(f"Rollout: {self.n_steps} steps, {self.n_epochs} epochs, batch={self.batch_size}")
@@ -422,8 +467,8 @@ class BalatroTrainer:
             t0 = time.time()
 
             # Collect rollout
-            buf, last_value = self.collect_rollout()
-            advantages, returns = buf.compute_gae(last_value, self.gamma, self.gae_lambda)
+            buf, last_values = self.collect_rollout()
+            advantages, returns = buf.compute_gae(last_values, self.gamma, self.gae_lambda)
             data = buf.to_tensors(self.device, advantages, returns)
             global_step += self.n_steps
             n_episodes = len(self._ep_rewards)
@@ -534,5 +579,6 @@ class BalatroTrainer:
 
             buf.clear()
 
+        self.vec_env.close()
         self.writer.close()
         print("Training complete.")
