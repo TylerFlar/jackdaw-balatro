@@ -147,7 +147,6 @@ class BalatroEnvironment:
         }
         return game_obs, terminated, truncated, game_mask, info
 
-
     def reobserve(self) -> tuple[GameObservation, GameActionMask, dict[str, object]]:
         """Re-encode the current state without stepping. Used for error recovery."""
         gs = self._adapter.raw_state

@@ -15,9 +15,9 @@ from jackdaw.env.balatro_spec import balatro_game_spec
 from jackdaw.env.game_spec import FactoredAction, GameActionMask
 from jackdaw.rl.network import (
     ENTITY_MAX_COUNTS,
-    FactoredPolicy,
     NEEDS_CARDS,
     NEEDS_ENTITY,
+    FactoredPolicy,
 )
 from jackdaw.rl.rollout import RolloutBuffer, Transition
 from jackdaw.rl.vec_env import SubprocVecEnv
@@ -57,8 +57,7 @@ def _batch_obs_to_device(
     """Stack N obs dicts into batched (B=N) tensors."""
     keys = list(obs_list[0].keys())
     return {
-        k: torch.from_numpy(np.stack([o[k] for o in obs_list])).float().to(device)
-        for k in keys
+        k: torch.from_numpy(np.stack([o[k] for o in obs_list])).float().to(device) for k in keys
     }
 
 
@@ -501,9 +500,7 @@ class BalatroTrainer:
             self.writer.add_scalar(
                 "train/entropy_deviation", epoch_stats["entropy_deviation"], global_step
             )
-            self.writer.add_scalar(
-                "train/max_ratio", epoch_stats["max_ratio"], global_step
-            )
+            self.writer.add_scalar("train/max_ratio", epoch_stats["max_ratio"], global_step)
             self.writer.add_scalar(
                 "train/log_ratio_clipped_frac",
                 epoch_stats["log_ratio_clipped_frac"],

@@ -31,9 +31,7 @@ from jackdaw.rl.trainer import BalatroTrainer
 from jackdaw.rl.vec_env import SubprocVecEnv
 
 
-def _make_env(
-    max_steps: int, seed_prefix: str, env_idx: int
-) -> FactoredBalatroEnv:
+def _make_env(max_steps: int, seed_prefix: str, env_idx: int) -> FactoredBalatroEnv:
     """Top-level factory function (must be picklable for multiprocessing)."""
     return FactoredBalatroEnv(
         adapter_factory=DirectAdapter,
@@ -76,8 +74,7 @@ def main() -> None:
     # Create env factories (functools.partial is picklable, lambdas are not)
     seed_prefix = f"FACTORED_{args.seed}"
     env_fns = [
-        functools.partial(_make_env, args.max_steps, seed_prefix, i)
-        for i in range(args.n_envs)
+        functools.partial(_make_env, args.max_steps, seed_prefix, i) for i in range(args.n_envs)
     ]
     vec_env = SubprocVecEnv(env_fns)
 

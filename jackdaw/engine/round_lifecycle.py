@@ -208,17 +208,14 @@ def reset_round_targets(
     # Lua uses G.playing_cards which is ALL playing cards in the run
     # (deck + hand + discard), not just the draw pile.
     all_playing_cards: list[Card] = (
-        game_state.get("deck", [])
-        + game_state.get("hand", [])
-        + game_state.get("discard_pile", [])
+        game_state.get("deck", []) + game_state.get("hand", []) + game_state.get("discard_pile", [])
     )
 
     # Filter out Stone cards — matches Lua: v.ability.effect ~= 'Stone Card'
     # Also guard against non-playing cards (base=None) that may have been
     # added to deck/hand/discard by consumable or joker effects.
     valid_cards = [
-        c for c in all_playing_cards
-        if c.base is not None and _card_effect(c) != "Stone Card"
+        c for c in all_playing_cards if c.base is not None and _card_effect(c) != "Stone Card"
     ]
 
     # ------------------------------------------------------------------

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numpy as np
 import torch
@@ -114,7 +114,7 @@ class RolloutBuffer:
         Returns a dict of tensors, all with leading dim N.
         """
         transitions = self._all_transitions()
-        N = len(transitions)
+        len(transitions)
 
         # Stack observations
         obs_keys = list(transitions[0].obs.keys())
@@ -130,9 +130,9 @@ class RolloutBuffer:
         entity_target = torch.tensor(
             [t.entity_target for t in transitions], dtype=torch.long, device=device
         )
-        card_target = torch.from_numpy(
-            np.stack([t.card_target for t in transitions])
-        ).bool().to(device)
+        card_target = (
+            torch.from_numpy(np.stack([t.card_target for t in transitions])).bool().to(device)
+        )
 
         # Old log probs and values
         old_log_prob = torch.tensor(
@@ -143,13 +143,9 @@ class RolloutBuffer:
         )
 
         # Action masks
-        type_mask = torch.from_numpy(
-            np.stack([t.type_mask for t in transitions])
-        ).bool().to(device)
+        type_mask = torch.from_numpy(np.stack([t.type_mask for t in transitions])).bool().to(device)
 
-        card_mask = torch.from_numpy(
-            np.stack([t.card_mask for t in transitions])
-        ).bool().to(device)
+        card_mask = torch.from_numpy(np.stack([t.card_mask for t in transitions])).bool().to(device)
 
         min_card_select = torch.tensor(
             [t.min_card_select for t in transitions], dtype=torch.long, device=device

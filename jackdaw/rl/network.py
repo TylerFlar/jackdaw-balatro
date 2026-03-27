@@ -123,16 +123,20 @@ class FactoredPolicy(nn.Module):
 
         # --- Cross-entity attention ---
         self.entity_type_embed = nn.Embedding(len(_ENTITY_INFO), ENTITY_EMBED)
-        self.cross_attn_layers = nn.ModuleList([
-            _TransformerBlock(ENTITY_EMBED, NUM_ATTN_HEADS, ATTN_FFN_DIM)
-            for _ in range(NUM_ATTN_LAYERS)
-        ])
+        self.cross_attn_layers = nn.ModuleList(
+            [
+                _TransformerBlock(ENTITY_EMBED, NUM_ATTN_HEADS, ATTN_FFN_DIM)
+                for _ in range(NUM_ATTN_LAYERS)
+            ]
+        )
 
         # --- Attention pooling queries (one per entity type) ---
-        self.pool_queries = nn.ParameterDict({
-            name: nn.Parameter(torch.randn(1, 1, ENTITY_EMBED) * 0.02)
-            for name, _, _ in _ENTITY_INFO
-        })
+        self.pool_queries = nn.ParameterDict(
+            {
+                name: nn.Parameter(torch.randn(1, 1, ENTITY_EMBED) * 0.02)
+                for name, _, _ in _ENTITY_INFO
+            }
+        )
 
         # --- Combiner: concat pooled entities + global -> state embedding ---
         pool_total = GLOBAL_EMBED + ENTITY_EMBED * len(_ENTITY_INFO)
@@ -179,9 +183,7 @@ class FactoredPolicy(nn.Module):
     # Encoding
     # ------------------------------------------------------------------
 
-    def _encode(
-        self, obs: dict[str, torch.Tensor]
-    ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+    def _encode(self, obs: dict[str, torch.Tensor]) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
         """Encode observation into state embedding + per-entity embeddings.
 
         Returns
@@ -239,7 +241,7 @@ class FactoredPolicy(nn.Module):
 
             # Attention pooling: learned query attends over entities
             query = self.pool_queries[name].expand(B, -1, -1)  # (B, 1, ENTITY_EMBED)
-            scores = (query @ ent_seq.transpose(-1, -2)) / (ENTITY_EMBED ** 0.5)
+            scores = (query @ ent_seq.transpose(-1, -2)) / (ENTITY_EMBED**0.5)
             scores = scores.masked_fill(~all_masks[i].unsqueeze(1), float("-inf"))
             weights = torch.softmax(scores, dim=-1)  # (B, 1, max_count)
             weights = weights.nan_to_num(0.0)  # handle all-padded types
@@ -303,14 +305,16 @@ class FactoredPolicy(nn.Module):
             # Which batch elements chose one of these action types?
             batch_mask = torch.zeros(B, dtype=torch.bool, device=device)
             for a in relevant_actions:
-                batch_mask |= (action_type == a)
+                batch_mask |= action_type == a
             if not batch_mask.any():
                 continue
 
             idx = batch_mask.nonzero(as_tuple=True)[0]
             query = self.pointer_queries[name](state[idx])  # (n, embed_dim)
             keys = entity_embeds[name][idx]  # (n, max_count, embed_dim)
-            scores = ((query.unsqueeze(1) * keys).sum(-1) / (query.shape[-1] ** 0.5)).clamp(-_LOGIT_CLAMP, _LOGIT_CLAMP)
+            scores = ((query.unsqueeze(1) * keys).sum(-1) / (query.shape[-1] ** 0.5)).clamp(
+                -_LOGIT_CLAMP, _LOGIT_CLAMP
+            )
 
             # Build entity mask for these batch elements
             max_count = ENTITY_MAX_COUNTS[etype_idx]
@@ -333,13 +337,15 @@ class FactoredPolicy(nn.Module):
             entity_lp[idx] = edist.log_prob(etgt)
 
         # --- Card selection (conditional) ---
-        card_target = torch.zeros(B, ENTITY_MAX_COUNTS[HAND_CARD_IDX], dtype=torch.bool, device=device)
+        card_target = torch.zeros(
+            B, ENTITY_MAX_COUNTS[HAND_CARD_IDX], dtype=torch.bool, device=device
+        )
         card_lp = torch.zeros(B, device=device)
         card_entropy = torch.zeros(B, device=device)
 
         needs_cards_mask = torch.zeros(B, dtype=torch.bool, device=device)
         for a in NEEDS_CARDS:
-            needs_cards_mask |= (action_type == a)
+            needs_cards_mask |= action_type == a
 
         if needs_cards_mask.any():
             idx = needs_cards_mask.nonzero(as_tuple=True)[0]
@@ -392,11 +398,11 @@ class FactoredPolicy(nn.Module):
         total_lp = type_lp + entity_lp + card_lp
 
         return {
-            "action_type": action_type,         # (B,) int
-            "entity_target": entity_target,     # (B,) int, -1 if unused
-            "card_target": card_target,         # (B, max_hand) bool
-            "log_prob": total_lp,               # (B,)
-            "value": value,                     # (B,)
+            "action_type": action_type,  # (B,) int
+            "entity_target": entity_target,  # (B,) int, -1 if unused
+            "card_target": card_target,  # (B, max_hand) bool
+            "log_prob": total_lp,  # (B,)
+            "value": value,  # (B,)
             "entropy": type_entropy + card_entropy,  # (B,)
         }
 
@@ -408,9 +414,9 @@ class FactoredPolicy(nn.Module):
         self,
         obs: dict[str, torch.Tensor],
         action_masks: dict[str, Any],
-        action_type: torch.Tensor,      # (B,)
-        entity_target: torch.Tensor,    # (B,)  -1 if unused
-        card_target: torch.Tensor,      # (B, max_hand) bool
+        action_type: torch.Tensor,  # (B,)
+        entity_target: torch.Tensor,  # (B,)  -1 if unused
+        card_target: torch.Tensor,  # (B, max_hand) bool
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Re-evaluate log_prob, value, and entropy for given actions.
 
@@ -440,7 +446,7 @@ class FactoredPolicy(nn.Module):
                 continue
             batch_mask = torch.zeros(B, dtype=torch.bool, device=device)
             for a in relevant_actions:
-                batch_mask |= (action_type == a)
+                batch_mask |= action_type == a
             if not batch_mask.any():
                 continue
 
@@ -482,7 +488,7 @@ class FactoredPolicy(nn.Module):
 
         needs_cards_mask = torch.zeros(B, dtype=torch.bool, device=device)
         for a in NEEDS_CARDS:
-            needs_cards_mask |= (action_type == a)
+            needs_cards_mask |= action_type == a
 
         if needs_cards_mask.any():
             idx = needs_cards_mask.nonzero(as_tuple=True)[0]
@@ -526,11 +532,11 @@ class FactoredPolicy(nn.Module):
 
     @staticmethod
     def _enforce_card_counts(
-        selected: torch.Tensor,   # (n, max_hand) bool
-        logits: torch.Tensor,     # (n, max_hand)
-        mask: torch.Tensor,       # (n, max_hand) bool
-        min_sel: torch.Tensor,    # (n,)
-        max_sel: torch.Tensor,    # (n,)
+        selected: torch.Tensor,  # (n, max_hand) bool
+        logits: torch.Tensor,  # (n, max_hand)
+        mask: torch.Tensor,  # (n, max_hand) bool
+        min_sel: torch.Tensor,  # (n,)
+        max_sel: torch.Tensor,  # (n,)
     ) -> torch.Tensor:
         """Clamp card selection counts to [min_sel, max_sel] per sample.
 

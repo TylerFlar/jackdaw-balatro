@@ -323,7 +323,7 @@ class FactoredBalatroEnv:
         chips = gs.get("chips", 0)
 
         if round_num > self._prev_round:
-            reward += 0.15 * max(ante / 8, 0.5)
+            reward += 0.15 * max(ante / 4, 0.5)
             if ante > self._prev_ante:
                 reward += 0.2 * ante
             hands_left = gs.get("current_round", {}).get("hands_left", 0)
@@ -333,7 +333,16 @@ class FactoredBalatroEnv:
         blind_target = getattr(blind, "chips", 0) if blind is not None else 0
         if blind_target > 0 and chips > self._prev_chips:
             chip_delta = chips - self._prev_chips
-            reward += 0.02 * min(chip_delta / blind_target, 1.0)
+            progress = chip_delta / blind_target
+            reward += 0.02 * min(progress, 1.0)
+            # Over-clearing bonus: reward high-scoring hands
+            if progress > 1.0:
+                reward += 0.01 * min(progress - 1.0, 3.0)
+
+        # Economy signal: gentle pull toward saving for interest
+        dollars = gs.get("dollars", 0)
+        if dollars >= 5:
+            reward += 0.001 * min(dollars // 5, 5)
 
         if terminated or truncated:
             reward += 0.5 if self._inner.episode_won else -0.2

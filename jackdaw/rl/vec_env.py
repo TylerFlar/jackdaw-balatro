@@ -5,7 +5,6 @@ from __future__ import annotations
 import multiprocessing as mp
 import multiprocessing.connection
 from collections.abc import Callable
-from typing import Any
 
 import numpy as np
 
@@ -30,9 +29,7 @@ def _worker(
                 done = terminated or truncated
                 if done:
                     # Auto-reset: send terminal info + fresh obs
-                    terminal_info = {
-                        k: v for k, v in info.items() if k.startswith("balatro/")
-                    }
+                    terminal_info = {k: v for k, v in info.items() if k.startswith("balatro/")}
                     new_obs, new_mask, _ = env.reset()
                     pipe.send(("step", obs, reward, done, mask, terminal_info, new_obs, new_mask))
                 else:
@@ -82,8 +79,21 @@ class SubprocVecEnv:
 
     def step(
         self, actions: list[FactoredAction]
-    ) -> list[tuple[dict[str, np.ndarray], float, bool, GameActionMask, dict | None, dict[str, np.ndarray] | None, GameActionMask | None]]:
-        """Step all environments. Returns list of (obs, reward, done, mask, terminal_info, reset_obs, reset_mask)."""
+    ) -> list[
+        tuple[
+            dict[str, np.ndarray],
+            float,
+            bool,
+            GameActionMask,
+            dict | None,
+            dict[str, np.ndarray] | None,
+            GameActionMask | None,
+        ]
+    ]:
+        """Step all environments.
+
+        Returns list of (obs, reward, done, mask, terminal_info, reset_obs, reset_mask).
+        """
         for pipe, action in zip(self._parent_pipes, actions):
             pipe.send(("step", action))
         results = []

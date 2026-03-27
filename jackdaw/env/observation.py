@@ -60,6 +60,108 @@ def center_key_id(key: str) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Joker semantic features (loaded once at module init from centers.json)
+# ---------------------------------------------------------------------------
+
+_SUIT_TO_IDX: dict[str, int] = {"Hearts": 0, "Diamonds": 1, "Clubs": 2, "Spades": 3}
+
+_HAND_TYPE_TO_IDX: dict[str, int] = {
+    "Pair": 0,
+    "Two Pair": 1,
+    "Three of a Kind": 2,
+    "Straight": 3,
+    "Flush": 4,
+    "Four of a Kind": 5,
+}
+
+# Number of semantic features prepended to each joker encoding
+_N_JOKER_SEMANTIC = 17  # 6 category flags + 4 suit + 6 hand type + 1 rarity
+
+
+def _build_joker_semantics() -> dict[str, np.ndarray]:
+    """Parse centers.json to build semantic feature vectors for each joker.
+
+    Returns dict mapping center_key -> (17,) float32 array with:
+        [0]: provides_mult
+        [1]: provides_chips
+        [2]: provides_x_mult
+        [3]: provides_economy
+        [4]: provides_retrigger
+        [5]: is_conditional
+        [6:10]: target_suit one-hot (H/D/C/S)
+        [10:16]: target_hand_type one-hot (Pair/2P/3oK/Str/Fl/4oK)
+        [16]: rarity / 4
+    """
+    with open(_CENTERS_PATH) as f:
+        data: dict[str, Any] = json.load(f)
+
+    result: dict[str, np.ndarray] = {}
+    for key, entry in data.items():
+        if entry.get("set") != "Joker":
+            continue
+
+        v = np.zeros(_N_JOKER_SEMANTIC, dtype=np.float32)
+        cfg = entry.get("config", {}) or {}
+        if not isinstance(cfg, dict):
+            cfg = {}
+        effect = entry.get("effect") or ""
+        extra = cfg.get("extra", {})
+        if not isinstance(extra, dict):
+            extra_dict: dict[str, Any] = {}
+        else:
+            extra_dict = extra
+
+        # Category flags from config structure and effect field
+        if cfg.get("t_mult") or cfg.get("mult"):
+            v[0] = 1.0  # provides_mult
+        if cfg.get("t_chips") or cfg.get("bonus"):
+            v[1] = 1.0  # provides_chips
+        if cfg.get("Xmult") or cfg.get("x_mult") or extra_dict.get("Xmult"):
+            v[2] = 1.0  # provides_x_mult
+        if "dollar" in effect.lower() or extra_dict.get("dollars"):
+            v[3] = 1.0  # provides_economy
+        if "retrigger" in effect.lower():
+            v[4] = 1.0  # provides_retrigger
+        if extra_dict.get("odds") or cfg.get("odds"):
+            v[5] = 1.0  # is_conditional
+
+        # Heuristic for no-effect jokers: detect from config values
+        if not v[0] and not v[1] and not v[2]:
+            raw_extra = cfg.get("extra")
+            if isinstance(raw_extra, (int, float)):
+                if raw_extra > 10:
+                    v[1] = 1.0  # likely chips
+                elif raw_extra > 0:
+                    v[0] = 1.0  # likely mult
+            elif isinstance(raw_extra, dict):
+                if extra_dict.get("s_mult"):
+                    v[0] = 1.0
+                if extra_dict.get("Xmult") or extra_dict.get("x_mult"):
+                    v[2] = 1.0
+
+        # Target suit (from config.extra.suit)
+        suit = extra_dict.get("suit")
+        if isinstance(suit, str) and suit in _SUIT_TO_IDX:
+            v[6 + _SUIT_TO_IDX[suit]] = 1.0
+
+        # Target hand type (from config.type)
+        hand_type = cfg.get("type")
+        if isinstance(hand_type, str) and hand_type in _HAND_TYPE_TO_IDX:
+            v[10 + _HAND_TYPE_TO_IDX[hand_type]] = 1.0
+
+        # Rarity
+        rarity = entry.get("rarity", 1)
+        v[16] = min(rarity / 4.0, 1.0)
+
+        result[key] = v
+
+    return result
+
+
+_JOKER_SEMANTIC: dict[str, np.ndarray] = _build_joker_semantics()
+
+
+# ---------------------------------------------------------------------------
 # Categorical index tables
 # ---------------------------------------------------------------------------
 
@@ -252,9 +354,9 @@ _DEBUFF_SUIT_IDX: dict[str, int] = {
 # ---------------------------------------------------------------------------
 
 D_PLAYING_CARD: int = 15
-D_JOKER: int = 15
+D_JOKER: int = _N_JOKER_SEMANTIC + 12  # 17 semantic + 12 runtime = 29
 D_CONSUMABLE: int = 7
-D_SHOP: int = 9
+D_SHOP: int = 20
 # Global layout:
 #   [0:6]      phase one-hot (6)
 #   [6:10]     blind_on_deck one-hot (4)
@@ -398,55 +500,42 @@ def encode_joker(
 
     Returns shape ``(D_JOKER,)`` float32 array.
 
-    Features (15):
-        0: center_key_id (normalized / NUM_CENTER_KEYS)
-        1: rarity (ordinal 1-4, normalized /4)
-        2: edition (ordinal 0-4, normalized /4)
-        3: sell_value (log-scaled)
-        4: eternal (0/1)
-        5: perishable (0/1)
-        6: perish_tally (normalized /5)
-        7: rental (0/1)
-        8: debuffed (0/1)
-        9: position (normalized /20)
-       10: ability_mult (log-scaled)
-       11: ability_x_mult (raw — typically 1-5)
-       12: ability_chips (log-scaled)
-       13: ability_extra (log-scaled — meaning varies per joker)
-       14: condition_met (0/1 — simplified: not debuffed)
+    Features (29):
+        0-16: semantic features from centers.json (category flags, target suit/hand type, rarity)
+        17: edition (ordinal 0-4, normalized /4)
+        18: sell_value (log-scaled)
+        19: eternal (0/1)
+        20: perishable (0/1)
+        21: perish_tally (normalized /5)
+        22: rental (0/1)
+        23: debuffed (0/1)
+        24: position (normalized /20)
+        25: ability_mult (log-scaled)
+        26: ability_x_mult (raw — typically 1-5)
+        27: ability_chips (log-scaled)
+        28: condition_met (0/1 — simplified: not debuffed)
     """
     v = np.zeros(D_JOKER, dtype=np.float32)
+    S = _N_JOKER_SEMANTIC  # 17
 
-    v[0] = center_key_id(card.center_key) / max(NUM_CENTER_KEYS, 1)
-    card.ability.get("extra", {})
-    # Rarity from center data — ability dict doesn't store it, use cost heuristic
-    # or look it up. For now use a simple cost-based proxy.
-    v[1] = min(card.base_cost / 20.0, 1.0) if card.base_cost else 0.0
-    v[2] = _edition_idx(card.edition) / 4.0
-    v[3] = _log_scale(card.sell_cost)
-    v[4] = float(card.eternal)
-    v[5] = float(card.perishable)
-    v[6] = card.perish_tally / 5.0 if card.perishable else 1.0
-    v[7] = float(card.rental)
-    v[8] = float(card.debuff)
-    v[9] = position / 20.0
-    v[10] = _log_scale(card.ability.get("mult", 0) + card.ability.get("t_mult", 0))
-    v[11] = card.ability.get("x_mult", 1.0)
-    v[12] = _log_scale(card.ability.get("t_chips", 0) + card.ability.get("bonus", 0))
+    # Semantic features from static lookup
+    sem = _JOKER_SEMANTIC.get(card.center_key)
+    if sem is not None:
+        v[:S] = sem
 
-    # ability_extra — flatten to a single float
-    extra = card.ability.get("extra")
-    if isinstance(extra, (int, float)):
-        v[13] = _log_scale(extra)
-    elif isinstance(extra, dict):
-        # Sum numeric values as a generic signal
-        total = 0.0
-        for val in extra.values():
-            if isinstance(val, (int, float)):
-                total += val
-        v[13] = _log_scale(total)
-
-    v[14] = float(not card.debuff)
+    # Runtime features
+    v[S + 0] = _edition_idx(card.edition) / 4.0
+    v[S + 1] = _log_scale(card.sell_cost)
+    v[S + 2] = float(card.eternal)
+    v[S + 3] = float(card.perishable)
+    v[S + 4] = card.perish_tally / 5.0 if card.perishable else 1.0
+    v[S + 5] = float(card.rental)
+    v[S + 6] = float(card.debuff)
+    v[S + 7] = position / 20.0
+    v[S + 8] = _log_scale(card.ability.get("mult", 0) + card.ability.get("t_mult", 0))
+    v[S + 9] = card.ability.get("x_mult", 1.0)
+    v[S + 10] = _log_scale(card.ability.get("t_chips", 0) + card.ability.get("bonus", 0))
+    v[S + 11] = float(not card.debuff)
 
     return v
 
@@ -511,26 +600,33 @@ def encode_shop_item(
 
     Returns shape ``(D_SHOP,)`` float32 array.
 
-    Features (9):
-        0: center_key_id (normalized)
-        1: card_set (ordinal, normalized /9)
-        2: cost (log-scaled)
-        3: affordable (0/1)
-        4: has_slot (0/1)
-        5: edition (ordinal 0-4, normalized /4)
-        6: eternal (0/1)
-        7: perishable (0/1)
-        8: rental (0/1)
+    Features (20):
+        0: card_set (ordinal, normalized /9)
+        1: cost (log-scaled)
+        2: affordable (0/1)
+        3: has_slot (0/1)
+        4: edition (ordinal 0-4, normalized /4)
+        5: eternal (0/1)
+        6: perishable (0/1)
+        7: rental (0/1)
+        8: provides_mult (joker category, 0 for non-jokers)
+        9: provides_chips
+       10: provides_x_mult
+       11: provides_economy
+       12: is_conditional
+       13-16: target_suit one-hot (H/D/C/S)
+       17: targets_any_hand_type
+       18: rarity / 4
+       19: [reserved]
     """
     v = np.zeros(D_SHOP, dtype=np.float32)
 
-    v[0] = center_key_id(card.center_key) / max(NUM_CENTER_KEYS, 1)
     card_set = card.ability.get("set", "")
-    v[1] = _CARD_SET_IDX.get(card_set, 0) / 9.0
-    v[2] = _log_scale(card.cost)
+    v[0] = _CARD_SET_IDX.get(card_set, 0) / 9.0
+    v[1] = _log_scale(card.cost)
 
     dollars = gs.get("dollars", 0)
-    v[3] = float(card.cost <= dollars)
+    v[2] = float(card.cost <= dollars)
 
     # Has slot check
     jokers: list[Card] = gs.get("jokers", [])
@@ -540,16 +636,28 @@ def encode_shop_item(
 
     if card_set == "Joker":
         is_negative = isinstance(card.edition, dict) and bool(card.edition.get("negative"))
-        v[4] = float(len(jokers) < joker_slots or is_negative)
+        v[3] = float(len(jokers) < joker_slots or is_negative)
     elif card_set in ("Tarot", "Planet", "Spectral"):
-        v[4] = float(len(consumables) < consumable_slots)
+        v[3] = float(len(consumables) < consumable_slots)
     else:
-        v[4] = 1.0  # Vouchers, boosters, playing cards always "have slot"
+        v[3] = 1.0  # Vouchers, boosters, playing cards always "have slot"
 
-    v[5] = _edition_idx(card.edition) / 4.0
-    v[6] = float(card.eternal)
-    v[7] = float(card.perishable)
-    v[8] = float(card.rental)
+    v[4] = _edition_idx(card.edition) / 4.0
+    v[5] = float(card.eternal)
+    v[6] = float(card.perishable)
+    v[7] = float(card.rental)
+
+    # Joker category features for shop jokers
+    sem = _JOKER_SEMANTIC.get(card.center_key)
+    if sem is not None:
+        v[8] = sem[0]  # provides_mult
+        v[9] = sem[1]  # provides_chips
+        v[10] = sem[2]  # provides_x_mult
+        v[11] = sem[3]  # provides_economy
+        v[12] = sem[5]  # is_conditional
+        v[13:17] = sem[6:10]  # target_suit
+        v[17] = float(sem[10:16].any())  # targets_any_hand_type
+        v[18] = sem[16]  # rarity
 
     return v
 
@@ -1047,33 +1155,29 @@ def encode_jokers_batch(
     if n == 0:
         return _EMPTY_JOKER
     buf = _get_joker_buf(n)
-    nck = max(NUM_CENTER_KEYS, 1)
 
+    S = _N_JOKER_SEMANTIC  # 17
     for i, card in enumerate(jokers):
         row = buf[i]
-        row[0] = center_key_id(card.center_key) / nck
-        row[1] = min(card.base_cost / 20.0, 1.0) if card.base_cost else 0.0
-        row[2] = _edition_idx(card.edition) / 4.0
-        row[3] = _log_scale(card.sell_cost)
-        row[4] = float(card.eternal)
-        row[5] = float(card.perishable)
-        row[6] = card.perish_tally / 5.0 if card.perishable else 1.0
-        row[7] = float(card.rental)
-        row[8] = float(card.debuff)
-        row[9] = i / 20.0
-        row[10] = _log_scale(card.ability.get("mult", 0) + card.ability.get("t_mult", 0))
-        row[11] = card.ability.get("x_mult", 1.0)
-        row[12] = _log_scale(card.ability.get("t_chips", 0) + card.ability.get("bonus", 0))
-        extra = card.ability.get("extra")
-        if isinstance(extra, (int, float)):
-            row[13] = _log_scale(extra)
-        elif isinstance(extra, dict):
-            total = 0.0
-            for val in extra.values():
-                if isinstance(val, (int, float)):
-                    total += val
-            row[13] = _log_scale(total)
-        row[14] = float(not card.debuff)
+
+        # Semantic features from static lookup
+        sem = _JOKER_SEMANTIC.get(card.center_key)
+        if sem is not None:
+            row[:S] = sem
+
+        # Runtime features
+        row[S + 0] = _edition_idx(card.edition) / 4.0
+        row[S + 1] = _log_scale(card.sell_cost)
+        row[S + 2] = float(card.eternal)
+        row[S + 3] = float(card.perishable)
+        row[S + 4] = card.perish_tally / 5.0 if card.perishable else 1.0
+        row[S + 5] = float(card.rental)
+        row[S + 6] = float(card.debuff)
+        row[S + 7] = i / 20.0
+        row[S + 8] = _log_scale(card.ability.get("mult", 0) + card.ability.get("t_mult", 0))
+        row[S + 9] = card.ability.get("x_mult", 1.0)
+        row[S + 10] = _log_scale(card.ability.get("t_chips", 0) + card.ability.get("bonus", 0))
+        row[S + 11] = float(not card.debuff)
 
     return buf.copy()
 
