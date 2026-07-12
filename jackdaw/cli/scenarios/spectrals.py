@@ -46,13 +46,26 @@ for _key, _name, _seal in _SEAL_SPECTRALS:
 
 # ---------------------------------------------------------------------------
 # Creation / destruction spectrals
+#
+# NOTE on familiar / grim / incantation: these are EXPECTED to fail against
+# a live game running Steamodded.  smods take_ownership()s all three and
+# reimplements the card creation drawing suit-before-rank from SMODS.Suits /
+# SMODS.Ranks (game_object.lua, marked "TODO preserve suit vanilla RNG"),
+# which consumes the '<name>_create' streams differently than vanilla
+# card.lua:1316-1337.  The sim intentionally matches VANILLA semantics —
+# verified draw-by-draw against the extracted game source — because
+# BalatroBot cannot run without Steamodded, no live oracle exists for the
+# vanilla path.
 # ---------------------------------------------------------------------------
 
 
 @register(
     name="spectral_familiar",
     category="spectrals",
-    description="Familiar: destroy 1 random card, create 3 random Enhanced face cards",
+    description=(
+        "Familiar: destroy 1 random card, create 3 random Enhanced face cards "
+        "[EXPECTED-FAIL under smods: modded RNG diverges from vanilla; sim is vanilla-correct]"
+    ),
 )
 def _spectral_familiar(sim: Handle, live: Handle, *, delay: float = 0.3) -> ScenarioResult:
     return run_consumable_scenario(sim, live, consumable_key="c_familiar", targets=[0], delay=delay)
@@ -61,7 +74,10 @@ def _spectral_familiar(sim: Handle, live: Handle, *, delay: float = 0.3) -> Scen
 @register(
     name="spectral_grim",
     category="spectrals",
-    description="Grim: destroy 1 random card, create 2 random Enhanced Aces",
+    description=(
+        "Grim: destroy 1 random card, create 2 random Enhanced Aces "
+        "[EXPECTED-FAIL under smods: modded RNG diverges from vanilla; sim is vanilla-correct]"
+    ),
 )
 def _spectral_grim(sim: Handle, live: Handle, *, delay: float = 0.3) -> ScenarioResult:
     return run_consumable_scenario(sim, live, consumable_key="c_grim", targets=[0], delay=delay)
@@ -70,7 +86,10 @@ def _spectral_grim(sim: Handle, live: Handle, *, delay: float = 0.3) -> Scenario
 @register(
     name="spectral_incantation",
     category="spectrals",
-    description="Incantation: destroy 1 random card, create 4 random Enhanced number cards",
+    description=(
+        "Incantation: destroy 1 random card, create 4 random Enhanced number cards "
+        "[EXPECTED-FAIL under smods: modded RNG diverges from vanilla; sim is vanilla-correct]"
+    ),
 )
 def _spectral_incantation(sim: Handle, live: Handle, *, delay: float = 0.3) -> ScenarioResult:
     return run_consumable_scenario(
