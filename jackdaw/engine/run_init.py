@@ -416,12 +416,11 @@ def start_round(game_state: dict[str, Any]) -> None:
     if hand_levels is not None:
         hand_levels.reset_round_counts()
 
-    # Reset targeting cards (idol, mail, ancient, castle) — state_events.lua:273-276
-    # These are re-rolled every round from the current deck state.
-    rng = game_state.get("rng")
-    ante = rr.get("ante", 1)
-    if rng is not None:
-        reset_round_targets(rng, ante, game_state)
+    # NOTE: targeting cards (idol, mail, ancient, castle) are NOT re-rolled
+    # here.  Vanilla rolls them once at run start (game.lua:2385-2389) and
+    # then at each round END (state_events.lua:273-276) — never at round
+    # start.  Rolling here would double-advance the 'idol/mail/anc/cas'
+    # streams.  See _handle_cash_out in game.py for the round-end roll.
 
 
 # ---------------------------------------------------------------------------

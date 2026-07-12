@@ -106,7 +106,7 @@
           "set": "Planet"
         },
         {
-          "key": "c_uranus",
+          "key": "c_neptune",
           "cost": 3,
           "set": "Planet"
         }
@@ -143,7 +143,7 @@
           "set": "Tarot"
         },
         {
-          "key": "c_eris",
+          "key": "c_uranus",
           "cost": 3,
           "set": "Planet"
         }
@@ -156,7 +156,7 @@
       "voucher": "v_hieroglyph",
       "jokers": [
         {
-          "key": "c_ceres",
+          "key": "c_pluto",
           "cost": 3,
           "set": "Planet"
         },

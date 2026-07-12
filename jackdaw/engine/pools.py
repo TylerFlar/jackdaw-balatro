@@ -521,23 +521,22 @@ def _is_softlocked_planet(key: str, visible_hand_types: set[str]) -> bool:
     return hand_type not in visible_hand_types
 
 
+_SOFTLOCK_PLANETS: dict[str, str] = {
+    "c_planet_x": "Five of a Kind",
+    "c_ceres": "Flush House",
+    "c_eris": "Flush Five",
+}
+
+
 def _filter_planet(*, key: str, played_hand_types: set[str]) -> str:
-    """Exclude planet if its hand type has never been played (softlock guard).
+    """Exclude softlock planets until their hand type has been played this run.
 
-    The hand-type association is encoded in the planet key itself:
-    ``c_mercury`` → ``"High Card"``, etc.  We only apply the softlock filter
-    when ``played_hand_types`` is non-empty (caller opted in).
+    common_events.lua:2008-2011 gates only planets with ``config.softlock``
+    (Planet X / Ceres / Eris) on ``G.GAME.hands[hand_type].played > 0``.
+    All other planets are always eligible regardless of play history.
     """
-    if not played_hand_types:
-        return key
-
-    hand_type = _PLANET_HAND.get(key)
-    if hand_type is None:
-        # Unknown planet key — allow through
-        return key
-    if hand_type == "all":
-        return key
-    if hand_type not in played_hand_types:
+    hand_type = _SOFTLOCK_PLANETS.get(key)
+    if hand_type is not None and hand_type not in played_hand_types:
         return UNAVAILABLE
     return key
 
