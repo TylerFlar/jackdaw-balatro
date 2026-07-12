@@ -55,6 +55,7 @@ class GameSnapshot:
     mail_card_id: int | None = None
     idol_card: dict[str, Any] | None = None
     ancient_suit: str | None = None
+    castle_card_suit: str | None = None
     skips: int = 0
 
 
@@ -2420,7 +2421,11 @@ def _castle(card: Card, ctx: JokerContext) -> JokerResult | None:
     Fires in discard context.
     """
     if ctx.discard and ctx.other_card is not None and not ctx.blueprint:
-        castle_suit = card.ability.get("castle_card_suit")
+        # Suit lives on G.GAME.current_round.castle_card (card.lua:2857),
+        # not on the joker — read it from the game snapshot.
+        castle_suit = (ctx.game.castle_card_suit if ctx.game else None) or card.ability.get(
+            "castle_card_suit"
+        )
         if castle_suit and ctx.other_card.is_suit(castle_suit, smeared=ctx.smeared):
             extra = card.ability.get("extra", {})
             extra["chips"] = extra.get("chips", 0) + extra.get("chip_mod", 3)

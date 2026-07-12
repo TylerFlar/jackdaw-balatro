@@ -42,7 +42,7 @@
           "rental": true
         },
         {
-          "center_key": "c_ceres",
+          "center_key": "c_saturn",
           "set": "Planet"
         }
       ],
@@ -68,7 +68,7 @@
           "set": "Tarot"
         },
         {
-          "center_key": "c_eris",
+          "center_key": "c_uranus",
           "set": "Planet"
         }
       ],

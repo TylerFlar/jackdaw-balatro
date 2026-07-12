@@ -204,10 +204,17 @@ def reset_round_targets(
         and ``deck`` list of Card objects.
     """
     cr = game_state["current_round"]
-    deck: list[Card] = game_state.get("deck", [])
+    # Vanilla iterates G.playing_cards — every playing card in the run
+    # regardless of zone (deck / hand / discard).  rng.element re-sorts by
+    # sort_id, so zone concatenation order is irrelevant.
+    all_cards: list[Card] = [
+        *game_state.get("deck", []),
+        *game_state.get("hand", []),
+        *game_state.get("discard_pile", []),
+    ]
 
     # Filter out Stone cards — only non-Stone playing cards are eligible
-    valid_cards = [c for c in deck if _card_effect(c) != "Stone Card"]
+    valid_cards = [c for c in all_cards if _card_effect(c) != "Stone Card"]
 
     # ------------------------------------------------------------------
     # reset_idol_card — common_events.lua:2271-2286
