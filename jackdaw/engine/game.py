@@ -1727,17 +1727,51 @@ def _apply_setting_blind_mutations(
             create = mut["create"]
             ctype = create.get("type", "")
             if ctype == "playing_card":
-                # Marble Joker: add Stone Card; Certificate: add card with seal
-                deck: list = gs.setdefault("deck", [])
-                from jackdaw.engine.card import Card
+                # Marble Joker (card.lua:2580): front via 'marb_fr', Stone
+                # center, joins the playing cards. Certificate (card.lua:2462):
+                # front via 'cert_fr' emplaced into the HAND, seal via
+                # 'certsl' (>0.75 Red, >0.5 Blue, >0.25 Gold, else Purple).
+                # The old code appended a Card with NO front (base=None),
+                # which corrupted the playing-card pool and crashed the
+                # round-end targeting rolls (mail.base.id).
+                from jackdaw.engine.card_factory import (
+                    RANK_LETTER,
+                    SUIT_LETTER,
+                    create_playing_card,
+                )
 
-                c = Card()
-                enhancement = create.get("enhancement")
-                if enhancement:
-                    c.ability = {"effect": enhancement, "set": "Enhanced"}
-                if create.get("seal"):
-                    c.seal = "Gold"  # Certificate default
-                deck.append(c)
+                ckey = create.get("key", "")
+                stream = {"cert": "cert_fr", "marble": "marb_fr"}.get(ckey)
+                if rng is not None and stream is not None:
+                    p_cards = {
+                        f"{sl}_{rl}": (suit, rank)
+                        for sl, suit in SUIT_LETTER.items()
+                        for rl, rank in RANK_LETTER.items()
+                    }
+                    (c_suit, c_rank), _ = rng.element(p_cards, rng.seed(stream))
+                    seal = None
+                    if create.get("seal"):
+                        roll = rng.random(rng.seed("certsl"))
+                        if roll > 0.75:
+                            seal = "Red"
+                        elif roll > 0.5:
+                            seal = "Blue"
+                        elif roll > 0.25:
+                            seal = "Gold"
+                        else:
+                            seal = "Purple"
+                    c = create_playing_card(
+                        c_suit,
+                        c_rank,
+                        create.get("enhancement", "c_base"),
+                        seal=seal,
+                        hands_played=gs.get("hands_played", 0),
+                    )
+                    if ckey == "cert" and gs.get("phase") == GamePhase.SELECTING_HAND:
+                        gs.setdefault("hand", []).append(c)
+                        _sort_hand_desc(gs.get("hand", []))
+                    else:
+                        gs.setdefault("deck", []).append(c)
             elif ctype in ("Joker", "Tarot", "Planet", "Spectral"):
                 # Riff-raff ('rif', Common), Cartomancer ('car'), 8 Ball
                 # ('8ba'), etc. — roll the real pool with the descriptor's
