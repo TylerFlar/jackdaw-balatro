@@ -697,3 +697,42 @@ class TestFullPipelineOracle:
             assert val == entry["value"], (
                 f"element trial {entry['trial']}: val {val} != {entry['value']}"
             )
+
+
+# ============================================================================
+# Bugged seeds — nan collapse (e.g. erratic 7LB2WVPK)
+# ============================================================================
+
+
+class TestBuggedSeedNanCollapse:
+    """Seeds whose pseudohash hits num == 0 mid-loop must collapse to nan.
+
+    Lua semantics: 1.x/0 = inf, then inf % 1 = nan, and the nan survives the
+    %.13f string round-trip (LuaJIT tonumber("nan") = nan). math.randomseed(nan)
+    deterministically pins the TW223 stream, which is why community "bugged
+    seeds" like erratic 7LB2WVPK deal 52 identical cards. Ground truth from
+    LuaJIT 2.1: randomseed(nan) -> random(1, 52) == 52 on every draw, and the
+    second float draw is 0.44933739017092433.
+    """
+
+    def test_pseudohash_nan(self):
+        import math
+
+        assert math.isnan(pseudohash("erratic7LB2WVPK"))
+
+    def test_nan_stream_is_pinned(self):
+        prng = PseudoRandom("7LB2WVPK")
+        assert prng.random("erratic", 1, 52) == 52
+        assert prng.random("erratic", 1, 52) == 52
+        a = prng.random("erratic")
+        b = prng.random("erratic")
+        assert a == b  # stream is pinned: every reseed yields the same draw
+        assert a >= 51 / 52  # consistent with random(1, 52) == 52
+
+    def test_erratic_freak_deck(self):
+        from jackdaw.engine.run_init import initialize_run
+
+        gs = initialize_run("b_erratic", 1, "7LB2WVPK")
+        identities = {(c.base.suit, c.base.rank) for c in gs["deck"]}
+        assert len(gs["deck"]) == 52
+        assert len(identities) == 1  # the famous all-one-card deck
