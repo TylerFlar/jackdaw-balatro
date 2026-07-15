@@ -234,7 +234,15 @@ def pseudohash(s: str) -> float:
     num = 1.0
     for i in range(len(s), 0, -1):
         byte = ord(s[i - 1])
-        num = ((1.1239285023 / num) * byte * math.pi + math.pi * i) % 1
+        # Lua float semantics: x/0 = inf, and inf/nan propagate through
+        # `% 1` as nan instead of raising. Certain "bugged" seeds (e.g.
+        # erratic 7LB2WVPK) hit num == 0 mid-hash and depend on the nan
+        # collapse pinning the downstream PRNG to a constant.
+        try:
+            q = 1.1239285023 / num
+        except ZeroDivisionError:
+            q = math.copysign(math.inf, num)
+        num = (q * byte * math.pi + math.pi * i) % 1
     return num
 
 
