@@ -401,10 +401,10 @@ def start_round(game_state: dict[str, Any]) -> None:
     rb["next_hands"] = 0
     rb["discards"] = 0
 
-    # Temp hand size (Juggle Tag) — apply then clear
-    if rr.get("temp_handsize"):
-        game_state["hand_size"] = game_state.get("hand_size", 8) + rr["temp_handsize"]
-        rr["temp_handsize"] = None
+    # Temp hand size (Juggle Tag) is handled in _handle_select_blind /
+    # _round_won: the tag's round_start_bonus fires at DRAW_TO_HAND
+    # (game.lua:3215) recording the applied delta in rr["temp_handsize"],
+    # and round end reverts it (state_events.lua:270).
 
     # Temp reroll cost (D6 Tag) — clear after round start
     if rr.get("temp_reroll_cost") is not None:

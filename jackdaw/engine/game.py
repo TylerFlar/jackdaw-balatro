@@ -229,6 +229,24 @@ def _handle_select_blind(gs: dict[str, Any]) -> dict[str, Any]:
         rng.shuffle(deck_list, nr_seed)
 
     # ------------------------------------------------------------------
+    # 6b. round_start_bonus tags (Juggle: +3 hand size for this round).
+    #     Vanilla fires these at DRAW_TO_HAND, before the initial draw
+    #     (game.lua:3215, tag.lua:334), tracking the delta in
+    #     round_resets.temp_handsize and reverting it at round end.
+    # ------------------------------------------------------------------
+    from jackdaw.engine.tags import Tag
+
+    for entry in gs.get("awarded_tags", []):
+        if entry.get("rsb_fired"):
+            continue
+        rsb = Tag(entry.get("key", "")).apply("round_start_bonus", gs, rng=rng)
+        if rsb is not None and rsb.hand_size_delta:
+            gs["hand_size"] = gs.get("hand_size", 8) + rsb.hand_size_delta
+            # run_init seeds temp_handsize as None — `or 0`, not a default.
+            rr["temp_handsize"] = (rr.get("temp_handsize") or 0) + rsb.hand_size_delta
+            entry["rsb_fired"] = True
+
+    # ------------------------------------------------------------------
     # 7. Draw hand from deck
     # ------------------------------------------------------------------
     _draw_hand(gs)
@@ -1712,6 +1730,10 @@ def _round_won(gs: dict[str, Any]) -> None:
     # 7. Mark blind as Defeated
     # ------------------------------------------------------------------
     rr = gs["round_resets"]
+    # Revert Juggle Tag's one-round hand-size bonus
+    # (state_events.lua:270 — temp_handsize cleared at round end).
+    if rr.get("temp_handsize"):
+        gs["hand_size"] = gs.get("hand_size", 8) - rr.pop("temp_handsize")
     blind_on_deck = gs.get("blind_on_deck", "Small")
     rr["blind_states"][blind_on_deck] = "Defeated"
     # Remembered for cash-out tag hooks (Investment Tag pays after a boss).
