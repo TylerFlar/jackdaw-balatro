@@ -432,15 +432,20 @@ def _strength(card: Card, ctx: ConsumableContext) -> ConsumableResult:
 def _death(card: Card, ctx: ConsumableContext) -> ConsumableResult:
     """Death: copy the rightmost highlighted card onto the others.
 
-    Source: card.lua:1111. Rightmost by sort_id (position proxy).
+    Source: card.lua:1111. Rightmost = visual position, i.e. index in the
+    hand list (which swap/sort actions mutate); sort_id is only a
+    fallback when the hand is unavailable.
     The copy transfers: base (suit+rank), enhancement, edition, seal.
     """
     highlighted = ctx.highlighted or []
     if len(highlighted) < 2:
         return ConsumableResult()
 
-    # Find rightmost card (highest sort_id = rightmost position)
-    rightmost = max(highlighted, key=lambda c: c.sort_id)
+    hand = ctx.hand_cards or []
+    if all(c in hand for c in highlighted):
+        rightmost = max(highlighted, key=hand.index)
+    else:
+        rightmost = max(highlighted, key=lambda c: c.sort_id)
     targets = [c for c in highlighted if c is not rightmost]
 
     return ConsumableResult(

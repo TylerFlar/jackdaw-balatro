@@ -309,6 +309,20 @@ class TestDeath:
         assert source is right
         assert target is left
 
+    def test_direction_follows_hand_position_not_sort_id(self):
+        """Swap actions reorder the hand list; Death must honor that
+        order (vanilla: visual position), not creation-order sort_id."""
+        c = _consumable("c_death")
+        a = _card("Hearts", "5")     # created first -> lower sort_id
+        b = _card("Spades", "Ace")   # created second -> higher sort_id
+        result = use_consumable(
+            c,
+            ConsumableContext(card=c, highlighted=[a, b], hand_cards=[b, a]),
+        )
+        source, target = result.copy_card
+        assert source is a           # rightmost by hand position
+        assert target is b
+
 
 class TestHex:
     def test_adds_polychrome_to_chosen_joker(self):
