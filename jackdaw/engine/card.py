@@ -782,7 +782,14 @@ class Card:
             game_state["hand_size"] = game_state.get("hand_size", 0) - extra.get("h_size", 0)
 
         if self.edition and self.edition.get("negative"):
-            game_state["joker_slots"] = game_state.get("joker_slots", 0) + 1
+            # card.lua:568 routes the Negative slot bonus by card type:
+            # consumables raise the consumable limit, everything else jokers.
+            if self.ability.get("consumeable") or self.ability.get("set") in (
+                "Tarot", "Planet", "Spectral",
+            ):
+                game_state["consumable_slots"] = game_state.get("consumable_slots", 0) + 1
+            else:
+                game_state["joker_slots"] = game_state.get("joker_slots", 0) + 1
 
     def remove_from_deck(self, game_state: dict) -> None:
         """Reverse joker's passive effects when removed from deck (card.lua:Card:remove_from_deck).
@@ -822,7 +829,12 @@ class Card:
             game_state["hand_size"] = game_state.get("hand_size", 0) + extra.get("h_size", 0)
 
         if self.edition and self.edition.get("negative"):
-            game_state["joker_slots"] = game_state.get("joker_slots", 0) - 1
+            if self.ability.get("consumeable") or self.ability.get("set") in (
+                "Tarot", "Planet", "Spectral",
+            ):
+                game_state["consumable_slots"] = game_state.get("consumable_slots", 0) - 1
+            else:
+                game_state["joker_slots"] = game_state.get("joker_slots", 0) - 1
 
     def __repr__(self) -> str:
         if self.base:

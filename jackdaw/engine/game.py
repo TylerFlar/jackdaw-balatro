@@ -362,6 +362,7 @@ def _apply_tag_result(gs: dict[str, Any], result: Any) -> None:
                 game_state=gs,
             )
             jokers.append(card)
+            card.add_to_deck(gs)
 
     if result.level_up is not None:
         hand_type, levels = result.level_up
@@ -607,6 +608,7 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
     for removed in result.jokers_removed:
         if removed in jokers:
             jokers.remove(removed)
+            removed.remove_from_deck(gs)
 
     # Playing card destruction (Glass shatter, etc.)
     destroyed_set = set(id(c) for c in result.cards_destroyed)
@@ -847,6 +849,7 @@ def _handle_discard(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str, A
     for joker in jokers_to_remove:
         if joker in jokers:
             jokers.remove(joker)
+            joker.remove_from_deck(gs)
 
     # ------------------------------------------------------------------
     # 6. Discard cost (Golden Needle challenge)
@@ -1028,8 +1031,10 @@ def _handle_buy_card(gs: dict[str, Any], idx: int) -> dict[str, Any]:
     if card_set == "Joker":
         gs.setdefault("jokers", []).append(card)
         gs.setdefault("used_jokers", {})[card.center_key] = True
+        card.add_to_deck(gs)
     elif card_set in ("Tarot", "Planet", "Spectral"):
         gs.setdefault("consumables", []).append(card)
+        card.add_to_deck(gs)
     else:
         gs.setdefault("deck", []).append(card)
         added_playing_card = True
@@ -1063,6 +1068,7 @@ def _handle_sell_card(gs: dict[str, Any], area: str, idx: int) -> dict[str, Any]
 
     gs["dollars"] = gs.get("dollars", 0) + card.sell_cost
     cards.pop(idx)
+    card.remove_from_deck(gs)
 
     # Fire selling_card joker context (Campfire +xMult per card sold)
     _fire_shop_joker_context(gs, selling_card=True)
@@ -1119,6 +1125,7 @@ def _handle_use_consumable(
         raise IllegalActionError(f"Consumable {consumable_name!r} cannot be used at this time")
 
     consumables.pop(idx)
+    card.remove_from_deck(gs)
     _use_consumable_card(gs, card, targets)
 
     # Phase does NOT change — returns to whatever it was
@@ -1270,6 +1277,7 @@ def _handle_pick_pack_card(
         # Buffoon pack: add to joker slots
         gs.setdefault("jokers", []).append(card)
         gs.setdefault("used_jokers", {})[card.center_key] = True
+        card.add_to_deck(gs)
 
     else:
         # Standard pack: playing card → add to deck
@@ -1508,6 +1516,7 @@ def _round_won(gs: dict[str, Any]) -> None:
     for removed_joker in eor.get("jokers_removed", []):
         if removed_joker in jokers:
             jokers.remove(removed_joker)
+            removed_joker.remove_from_deck(gs)
 
     # ------------------------------------------------------------------
     # 2. Process perishable/rental
@@ -1729,6 +1738,7 @@ def _apply_setting_blind_mutations(
                     seed_val = rng.seed("madness")
                     target, _ = rng.element(candidates, seed_val)
                     jokers.remove(target)
+                    target.remove_from_deck(gs)
 
         # Burglar: set hands / remove discards
         if "set_hands" in mut:
@@ -2060,13 +2070,21 @@ def _apply_consumable_result(
 
     # ---- Joker effects ----
 
-    # l. Add edition (Wheel of Fortune, Aura)
+    # l. Add edition (Wheel of Fortune, Aura, Ectoplasm)
     if getattr(result, "add_edition", None):
         ae = result.add_edition
         target = ae.get("target")
         edition = ae.get("edition")
         if target and edition:
+            was_negative = bool(target.edition and target.edition.get("negative"))
             target.edition = edition
+            # card.lua:set_edition — going Negative while in play raises
+            # the owning area's slot cap.
+            if edition.get("negative") and not was_negative:
+                if target in gs.get("jokers", []):
+                    gs["joker_slots"] = gs.get("joker_slots", 5) + 1
+                elif target in gs.get("consumables", []):
+                    gs["consumable_slots"] = gs.get("consumable_slots", 2) + 1
 
     # m. Destroy jokers (Ankh: destroy all except one)
     if getattr(result, "destroy_jokers", None):
@@ -2074,6 +2092,7 @@ def _apply_consumable_result(
         for j in result.destroy_jokers:
             if j in jokers:
                 jokers.remove(j)
+                j.remove_from_deck(gs)
 
     # ---- Game state ----
 
@@ -2116,11 +2135,17 @@ def _resolve_create_descriptors(gs: dict[str, Any], descriptors: list[dict[str, 
             card_set = card.ability.get("set", "")
             if card_set == "Joker":
                 negative = card.edition and card.edition.get("negative")
+                # Re-read live: a Negative added this loop raises the cap.
+                joker_slots = gs.get("joker_slots", 5)
                 if len(jokers) < joker_slots + (1 if negative else 0):
                     jokers.append(card)
+                    card.add_to_deck(gs)
             elif card_set in ("Tarot", "Planet", "Spectral"):
-                if len(consumables) < consumable_limit:
+                negative = card.edition and card.edition.get("negative")
+                consumable_limit = gs.get("consumable_slots", 2)
+                if len(consumables) < consumable_limit + (1 if negative else 0):
                     consumables.append(card)
+                    card.add_to_deck(gs)
             elif card_set in ("Default", "Enhanced", ""):
                 # Playing card — add to hand if mid-round, otherwise deck.
                 # Matches Balatro which routes spectral-created cards to

@@ -611,3 +611,71 @@ class TestDoubleTag:
         awarded = gs.get("awarded_tags", [])
         economy_awards = [a for a in awarded if a["key"] == "tag_economy"]
         assert len(economy_awards) >= 2, f"Expected 2 economy tags, got {len(economy_awards)}"
+
+
+# ---------------------------------------------------------------------------
+# Joker passives on acquisition/removal (card.lua:564/648 wiring)
+# ---------------------------------------------------------------------------
+
+
+class TestJokerPassivesOnAcquisition:
+    """add_to_deck/remove_from_deck must fire on the step() path.
+
+    Regression: buy/pack-pick/create appended jokers without applying
+    passive effects, so Juggler granted no hand size and Negative
+    editions granted no extra slot (the bridge path was correct)."""
+
+    def test_buy_joker_applies_passive(self):
+        gs = _setup_shop()
+        before = gs["hand_size"]
+        juggler = _joker_card("j_juggler", cost=0)
+        juggler.ability["h_size"] = 1
+        gs["shop_cards"] = [juggler]
+        step(gs, BuyCard(shop_index=0))
+        assert gs["hand_size"] == before + 1
+
+    def test_sell_joker_reverts_passive(self):
+        gs = _setup_shop()
+        before = gs["hand_size"]
+        juggler = _joker_card("j_juggler", cost=0, sell_cost=1)
+        juggler.ability["h_size"] = 1
+        gs["shop_cards"] = [juggler]
+        step(gs, BuyCard(shop_index=0))
+        step(gs, SellCard(area="jokers", card_index=len(gs["jokers"]) - 1))
+        assert gs["hand_size"] == before
+
+    def test_buy_negative_joker_grants_and_revokes_slot(self):
+        gs = _setup_shop()
+        neg = _joker_card("j_neg_test", cost=0, sell_cost=1)
+        neg.edition = {"negative": True, "type": "negative"}
+        gs["shop_cards"] = [neg]
+        step(gs, BuyCard(shop_index=0))
+        assert gs["joker_slots"] == 6
+        step(gs, SellCard(area="jokers", card_index=len(gs["jokers"]) - 1))
+        assert gs["joker_slots"] == 5
+
+    def test_negative_on_board_allows_extra_buy(self):
+        """Five board entries incl. one Negative must still offer BuyCard."""
+        gs = _setup_shop()
+        gs["jokers"] = [_joker_card(f"j_filler_{i}") for i in range(4)]
+        neg = _joker_card("j_neg_test", cost=0)
+        neg.edition = {"negative": True, "type": "negative"}
+        gs["shop_cards"] = [neg]
+        step(gs, BuyCard(shop_index=0))
+        assert len(gs["jokers"]) == 5
+        gs["shop_cards"] = [_joker_card("j_sixth", cost=0)]
+        legal = get_legal_actions(gs)
+        assert any(isinstance(a, BuyCard) for a in legal)
+        step(gs, BuyCard(shop_index=0))
+        assert len(gs["jokers"]) == 6
+
+    def test_pack_pick_joker_applies_passive(self):
+        gs = _setup_shop()
+        before = gs["hand_size"]
+        juggler = _joker_card("j_juggler")
+        juggler.ability["h_size"] = 1
+        gs["phase"] = GamePhase.PACK_OPENING
+        gs["pack_cards"] = [juggler]
+        gs["pack_choices_remaining"] = 1
+        step(gs, PickPackCard(card_index=0))
+        assert gs["hand_size"] == before + 1
