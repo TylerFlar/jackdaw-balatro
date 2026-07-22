@@ -974,6 +974,20 @@ def _handle_cash_out(gs: dict[str, Any]) -> dict[str, Any]:
     if earnings:
         gs["dollars"] = gs.get("dollars", 0) + earnings.total
 
+    # eval-context tags (Investment: $25 once per tag, after a boss kill).
+    if gs.get("last_blind_was_boss"):
+        from jackdaw.engine.tags import Tag
+
+        for entry in gs.get("awarded_tags", []):
+            if entry.get("eval_fired"):
+                continue
+            result = Tag(entry.get("key", "")).apply(
+                "eval", gs, rng=rng, last_blind_is_boss=True
+            )
+            if result is not None and result.dollars:
+                gs["dollars"] = gs.get("dollars", 0) + result.dollars
+                entry["eval_fired"] = True
+
     gs["previous_round"] = {"dollars": gs.get("dollars", 0)}
 
     # Populate shop
@@ -1587,6 +1601,8 @@ def _round_won(gs: dict[str, Any]) -> None:
     blind_on_deck = gs.get("blind_on_deck", "Small")
     rr["blind_states"][blind_on_deck] = "Defeated"
     gs["round"] = gs.get("round", 0) + 1
+    # Remembered for cash-out tag hooks (Investment Tag pays after a boss).
+    gs["last_blind_was_boss"] = blind_on_deck == "Boss"
 
     # ------------------------------------------------------------------
     # 8-9. Advance blind progression
@@ -2168,6 +2184,73 @@ def _populate_shop(gs: dict[str, Any]) -> None:
     gs["shop_vouchers"] = [voucher] if voucher else []
     gs["shop_boosters"] = result.get("boosters", [])
 
+    _fire_shop_tags(gs, rerolled=False)
+
+
+def _fire_shop_tags(gs: dict[str, Any], rerolled: bool) -> None:
+    """Fire pending shop-context tag hooks on freshly stocked shop cards.
+
+    Wires the hooks :func:`~jackdaw.engine.shop.populate_shop` defers (its
+    "M11 tag system" note), consuming awarded tags FIFO:
+
+    * ``store_joker_modify`` — Foil/Holo/Polychrome/Negative Tag: the next
+      base-edition shop Joker gains the edition and becomes free
+      (tags.lua ``Tag:apply_to_run``). Applies to rerolled jokers too.
+    * ``shop_final_pass`` — Coupon Tag: initial shop cards and boosters
+      become free (shop entry only).
+    * ``shop_start`` — D6 Tag: rerolls start free (shop entry only).
+
+    ``store_joker_create`` (Rare/Uncommon Tag) and ``voucher_add``
+    (Voucher Tag) remain unwired: both replace RNG-consuming rolls at
+    creation time, so a faithful implementation needs live validation to
+    pin stream behavior first. Those tags stay pending and inert rather
+    than risking a new stream divergence.
+    """
+    from jackdaw.engine.tags import Tag
+
+    awarded: list[dict[str, Any]] = gs.get("awarded_tags", [])
+    rng = gs.get("rng")
+
+    for entry in awarded:
+        if entry.get("shop_fired"):
+            continue
+        tag = Tag(entry.get("key", ""))
+
+        result = tag.apply("store_joker_modify", gs, rng=rng)
+        if result is not None and result.force_edition:
+            target = None
+            for c in gs.get("shop_cards", []):
+                ability = getattr(c, "ability", None) or {}
+                if ability.get("set") == "Joker" and not getattr(c, "edition", None):
+                    target = c
+                    break
+            if target is None:
+                continue  # no eligible joker; tag stays pending for later
+            edition = {str(result.force_edition): True}
+            if hasattr(target, "set_edition"):
+                target.set_edition(edition)
+            else:
+                target.edition = edition
+            target.cost = 0  # vanilla: tag-edition shop jokers are free
+            entry["shop_fired"] = True
+            continue
+
+        if rerolled:
+            continue  # remaining hooks fire on shop entry only
+
+        result = tag.apply("shop_final_pass", gs, rng=rng)
+        if result is not None and result.coupon:
+            for c in gs.get("shop_cards", []) + gs.get("shop_boosters", []):
+                c.cost = 0
+            entry["shop_fired"] = True
+            continue
+
+        result = tag.apply("shop_start", gs, rng=rng)
+        if result is not None and result.free_rerolls:
+            cr = gs.setdefault("current_round", {})
+            cr["free_rerolls"] = cr.get("free_rerolls", 0) + result.free_rerolls
+            entry["shop_fired"] = True
+
 
 def _reroll_shop_cards(gs: dict[str, Any]) -> None:
     """Regenerate the shop joker/consumable cards (not voucher or boosters).
@@ -2209,6 +2292,8 @@ def _reroll_shop_cards(gs: dict[str, Any]) -> None:
         new_cards.append(card)
 
     gs["shop_cards"] = new_cards
+    # Pending edition tags also claim rerolled jokers (vanilla behavior).
+    _fire_shop_tags(gs, rerolled=True)
 
 
 def _get_card_set(card: Any) -> str:
