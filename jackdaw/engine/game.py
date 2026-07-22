@@ -1019,6 +1019,16 @@ def _handle_buy_card(gs: dict[str, Any], idx: int) -> dict[str, Any]:
     if card.cost > gs.get("dollars", 0):
         raise IllegalActionError("Cannot afford card")
 
+    # Space check — mirrors shop.py:buy_card; Negative cards need no room.
+    card_set = _get_card_set(card)
+    negative = bool(card.edition and card.edition.get("negative"))
+    if card_set == "Joker" and not negative:
+        if len(gs.get("jokers", [])) >= gs.get("joker_slots", 5):
+            raise IllegalActionError("No room for joker")
+    elif card_set in ("Tarot", "Planet", "Spectral") and not negative:
+        if len(gs.get("consumables", [])) >= gs.get("consumable_slots", 2):
+            raise IllegalActionError("No room for consumable")
+
     gs["dollars"] -= card.cost
     shop_cards.pop(idx)
     gs["current_round"]["jokers_purchased"] = (
@@ -1026,7 +1036,6 @@ def _handle_buy_card(gs: dict[str, Any], idx: int) -> dict[str, Any]:
     )
 
     # Place card in appropriate area
-    card_set = _get_card_set(card)
     added_playing_card = False
     if card_set == "Joker":
         gs.setdefault("jokers", []).append(card)
@@ -1260,11 +1269,18 @@ def _handle_pick_pack_card(
     if idx < 0 or idx >= len(pack_cards):
         raise IllegalActionError(f"Invalid pack card index {idx}")
 
-    card = pack_cards.pop(idx)
-    gs["pack_choices_remaining"] = remaining - 1
-
-    # Determine card type and handle accordingly
+    card = pack_cards[idx]
     card_set = _get_card_set(card)
+
+    # Space check — jokers need a slot (Negative exempt); pack consumables
+    # are used immediately, never stored, so they need no room.
+    if card_set == "Joker":
+        negative = bool(card.edition and card.edition.get("negative"))
+        if not negative and len(gs.get("jokers", [])) >= gs.get("joker_slots", 5):
+            raise IllegalActionError("No room for joker")
+
+    pack_cards.pop(idx)
+    gs["pack_choices_remaining"] = remaining - 1
 
     if card_set in ("Tarot", "Planet", "Spectral"):
         # Consumable: use immediately (Arcana/Spectral/Celestial pack)

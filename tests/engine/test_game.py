@@ -679,3 +679,46 @@ class TestJokerPassivesOnAcquisition:
         gs["pack_choices_remaining"] = 1
         step(gs, PickPackCard(card_index=0))
         assert gs["hand_size"] == before + 1
+
+
+class TestBuySpaceGuard:
+    """The executor must refuse no-room buys/picks itself, not just rely
+    on the legality mask hiding them (hand-built actions bypass the mask)."""
+
+    def test_buy_joker_full_board_refused(self):
+        gs = _setup_shop()
+        gs["jokers"] = [_joker_card(f"j_full_{i}") for i in range(5)]
+        gs["shop_cards"] = [_joker_card("j_sixth", cost=0)]
+        with pytest.raises(IllegalActionError, match="room"):
+            step(gs, BuyCard(shop_index=0))
+        assert len(gs["jokers"]) == 5
+        assert len(gs["shop_cards"]) == 1
+
+    def test_buy_negative_joker_full_board_allowed(self):
+        gs = _setup_shop()
+        gs["jokers"] = [_joker_card(f"j_full_{i}") for i in range(5)]
+        neg = _joker_card("j_neg_test", cost=0)
+        neg.edition = {"negative": True, "type": "negative"}
+        gs["shop_cards"] = [neg]
+        step(gs, BuyCard(shop_index=0))
+        assert len(gs["jokers"]) == 6
+        assert gs["joker_slots"] == 6
+
+    def test_buy_consumable_full_slots_refused(self):
+        gs = _setup_shop()
+        gs["consumables"] = [_make_consumable("c_fool"), _make_consumable("c_magician")]
+        gs["shop_cards"] = [_make_consumable("c_temperance")]
+        with pytest.raises(IllegalActionError, match="room"):
+            step(gs, BuyCard(shop_index=0))
+        assert len(gs["consumables"]) == 2
+
+    def test_pack_pick_joker_full_board_refused(self):
+        gs = _setup_shop()
+        gs["jokers"] = [_joker_card(f"j_full_{i}") for i in range(5)]
+        gs["phase"] = GamePhase.PACK_OPENING
+        gs["pack_cards"] = [_joker_card("j_sixth")]
+        gs["pack_choices_remaining"] = 1
+        with pytest.raises(IllegalActionError, match="room"):
+            step(gs, PickPackCard(card_index=0))
+        assert len(gs["jokers"]) == 5
+        assert gs["pack_choices_remaining"] == 1
