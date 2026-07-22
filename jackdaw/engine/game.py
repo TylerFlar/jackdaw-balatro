@@ -61,6 +61,18 @@ def step(game_state: dict[str, Any], action: Action) -> dict[str, Any]:
     Dispatches based on action type.  Raises :class:`IllegalActionError`
     if the action is not valid in the current phase.
     """
+    result = _dispatch(game_state, action)
+    # Vanilla recomputes shop prices continuously while shopping
+    # (Card:update → set_cost each frame), so cost-relevant changes —
+    # buying/selling Astronomer, coupon tags — reflect immediately.
+    if result.get("phase") == GamePhase.SHOP:
+        from jackdaw.engine.shop import reprice_shop
+
+        reprice_shop(result)
+    return result
+
+
+def _dispatch(game_state: dict[str, Any], action: Action) -> dict[str, Any]:
     match action:
         case SelectBlind():
             return _handle_select_blind(game_state)
@@ -166,6 +178,9 @@ def _handle_select_blind(gs: dict[str, Any]) -> dict[str, Any]:
     gs["chips"] = 0
     rr["blind_states"][blind_on_deck] = "Current"
     rr["blind"] = blind
+    # ease_round(1) fires in the select-blind callback
+    # (button_callbacks.lua:2533), not at blind defeat.
+    gs["round"] = gs.get("round", 0) + 1
 
     # ------------------------------------------------------------------
     # 2. Fire joker setting_blind context
@@ -518,6 +533,10 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
     played = [hand[i] for i in indices]
     held = [c for i, c in enumerate(hand) if i not in idx_set]
     gs["hand"] = held
+    # Played cards are revealed (face-down draws from The House / The
+    # Wheel / The Mark / The Fish flip up when they leave the hand).
+    for c in played:
+        c.facing = "front"
 
     # ------------------------------------------------------------------
     # 3. Decrement hands_left, increment hands_played
@@ -649,10 +668,12 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
     discard_pile.extend(played)
 
     # ------------------------------------------------------------------
-    # 9. Record hand type
+    # 9. Hand-type play counts are recorded INSIDE score_hand (Phase 4),
+    #    matching Lua's evaluate_play which increments played /
+    #    played_this_round before joker scoring (Supernova and Card Sharp
+    #    read the count mid-score, current play included).  Recording here
+    #    again double-counted every play (found by lockstep diff vs live).
     # ------------------------------------------------------------------
-    if hand_levels is not None and result.hand_type != "NULL":
-        hand_levels.record_play(result.hand_type)
 
     # ------------------------------------------------------------------
     # 10. Determine next phase
@@ -751,6 +772,9 @@ def _handle_discard(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str, A
     idx_set = set(indices)
     discarded = [hand[i] for i in sorted(indices)]
     gs["hand"] = [c for i, c in enumerate(hand) if i not in idx_set]
+    # Discarded cards flip face up on leaving the hand (see play handler).
+    for c in discarded:
+        c.facing = "front"
 
     # ------------------------------------------------------------------
     # 3. Fire joker pre_discard context (Burnt Joker: level up hand)
@@ -1509,9 +1533,37 @@ def _draw_hand(gs: dict[str, Any]) -> None:
     hand: list = gs.setdefault("hand", [])
     hand_size: int = gs.get("hand_size", 8)
     to_draw = min(len(deck), hand_size - len(hand))
+
+    # Boss face-down draws (Blind:stay_flipped, blind.lua:605-622): The
+    # Wheel (seeded 'wheel' roll per drawn card), The House (first hand of
+    # the round), The Mark (face cards).  The Fish flips on redraw via its
+    # prepped flag (handled at the redraw sites).  Evaluated per card in
+    # draw order BEFORE the hand sort, so The Wheel's stream consumption
+    # matches Lua exactly.
+    blind = gs.get("blind")
+    check_flip = blind is not None and getattr(blind, "boss", None) and not getattr(
+        blind, "disabled", False
+    )
+    if check_flip:
+        cr = gs.get("current_round", {})
+        pareidolia = any(
+            getattr(j, "center_key", None) == "j_pareidolia" and not getattr(j, "debuff", False)
+            for j in gs.get("jokers", [])
+        )
+
     for _ in range(to_draw):
         if deck:
-            hand.append(deck.pop())
+            card = deck.pop()
+            if check_flip and blind.stay_flipped(
+                card,
+                rng=gs.get("rng"),
+                probabilities_normal=gs.get("probabilities_normal", 1.0),
+                hands_played=gs.get("current_round", {}).get("hands_played", 0),
+                discards_used=gs.get("current_round", {}).get("discards_used", 0),
+                pareidolia=pareidolia,
+            ):
+                card.facing = "back"
+            hand.append(card)
     # Sort hand descending by nominal (matches Lua CardArea:sort 'desc')
     _sort_hand_desc(hand)
 
@@ -1550,6 +1602,10 @@ def _round_won(gs: dict[str, Any]) -> None:
         money=gs.get("dollars", 0),
         hands_left=cr.get("hands_left", 0),
         discards_left=cr.get("discards_left", 0),
+        # Delayed Gratification pays ONLY when no discard was used this
+        # round (card.lua:1675) — omitting this defaulted it to 0 and paid
+        # out every round with discards remaining.
+        discards_used=cr.get("discards_used", 0),
         joker_count=len(jokers),
     )
     eor = on_end_of_round(jokers, game_snap, rng)
@@ -1632,12 +1688,17 @@ def _round_won(gs: dict[str, Any]) -> None:
 
     # ------------------------------------------------------------------
     # 5. Un-debuff all playing cards (blind debuffs don't persist)
+    #    and flip everything face up (The Fish/House/Wheel/Mark flips and
+    #    Amber Acorn's joker flip last only for the blind).
     # ------------------------------------------------------------------
     for card in deck:
         # Only clear blind-applied debuffs; perishable debuffs are permanent
         if getattr(card, "debuff", False):
             if not (getattr(card, "perishable", False) and getattr(card, "perish_tally", 1) <= 0):
                 card.debuff = False
+        card.facing = "front"
+    for j in jokers:
+        j.facing = "front"
 
     # ------------------------------------------------------------------
     # 6. Track unused discards / hands played (for Garbage/Handy Tags)
@@ -1653,7 +1714,6 @@ def _round_won(gs: dict[str, Any]) -> None:
     rr = gs["round_resets"]
     blind_on_deck = gs.get("blind_on_deck", "Small")
     rr["blind_states"][blind_on_deck] = "Defeated"
-    gs["round"] = gs.get("round", 0) + 1
     # Remembered for cash-out tag hooks (Investment Tag pays after a boss).
     gs["last_blind_was_boss"] = blind_on_deck == "Boss"
 
@@ -2302,7 +2362,11 @@ def _fire_shop_tags(gs: dict[str, Any], rerolled: bool) -> None:
                 target.set_edition(edition)
             else:
                 target.edition = edition
-            target.cost = 0  # vanilla: tag-edition shop jokers are free
+            # Vanilla marks the joker couponed (tags.lua) — set_cost then
+            # zeroes it (card.lua:383).  The flag must live on the card so
+            # reprice_shop doesn't restore the price.
+            target.ability["couponed"] = True
+            target.cost = 0
             entry["shop_fired"] = True
             continue
 
@@ -2312,6 +2376,8 @@ def _fire_shop_tags(gs: dict[str, Any], rerolled: bool) -> None:
         result = tag.apply("shop_final_pass", gs, rng=rng)
         if result is not None and result.coupon:
             for c in gs.get("shop_cards", []) + gs.get("shop_boosters", []):
+                # couponed flag (not a bare cost=0) so reprice_shop keeps it.
+                c.ability["couponed"] = True
                 c.cost = 0
             entry["shop_fired"] = True
             continue

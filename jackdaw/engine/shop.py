@@ -27,6 +27,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from jackdaw.engine.card_utils import astronomer_active
 from jackdaw.engine.data.prototypes import BOOSTERS, CENTER_POOLS
 
 if TYPE_CHECKING:
@@ -377,6 +378,31 @@ def apply_store_joker_create_tag(gs, rng, ante):
     return None
 
 
+def reprice_shop(gs: dict[str, Any]) -> None:
+    """Recompute costs for everything currently offered in the shop.
+
+    Vanilla recalls ``Card:set_cost`` continuously while the shop is open
+    (``Card:update``), so price-affecting changes reflect immediately —
+    e.g. buying Astronomer zeroes Planet cards and Celestial Packs already
+    on offer, and selling it restores their prices.  ``step()`` calls this
+    after every action that leaves the game in the SHOP phase.
+    """
+    kwargs: dict[str, Any] = dict(
+        inflation=gs.get("inflation", 0),
+        discount_percent=gs.get("discount_percent", 0),
+        ante=gs.get("round_resets", {}).get("ante", 1),
+        booster_ante_scaling=gs.get("booster_ante_scaling", False),
+        has_astronomer=astronomer_active(gs),
+    )
+    for area in ("shop_cards", "shop_vouchers", "shop_boosters"):
+        for card in gs.get(area, []):
+            if hasattr(card, "set_cost"):
+                card.set_cost(
+                    is_couponed=bool(card.ability.get("couponed")),
+                    **kwargs,
+                )
+
+
 def populate_shop(
     rng: PseudoRandom,
     ante: int,
@@ -496,7 +522,7 @@ def populate_shop(
             discount_percent=gs.get("discount_percent", 0),
             ante=ante,
             booster_ante_scaling=gs.get("booster_ante_scaling", False),
-            has_astronomer=gs.get("has_astronomer", False),
+            has_astronomer=astronomer_active(gs),
         )
         boosters.append(pack_card)
 
@@ -675,7 +701,7 @@ def buy_card(
                     discount_percent=discount,
                     ante=ante,
                     booster_ante_scaling=game_state.get("booster_ante_scaling", False),
-                    has_astronomer=game_state.get("has_astronomer", False),
+                    has_astronomer=astronomer_active(game_state),
                 )
 
     # -- 9. Track --

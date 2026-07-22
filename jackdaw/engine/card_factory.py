@@ -399,12 +399,14 @@ def create_card(
     # ------------------------------------------------------------------
     # 4. Cost
     # ------------------------------------------------------------------
+    from jackdaw.engine.card_utils import astronomer_active
+
     card.set_cost(
         inflation=gs.get("inflation", 0),
         discount_percent=gs.get("discount_percent", 0),
         ante=ante,
         booster_ante_scaling=gs.get("booster_ante_scaling", False),
-        has_astronomer=gs.get("has_astronomer", False),
+        has_astronomer=astronomer_active(gs),
     )
 
     return card
