@@ -586,7 +586,9 @@ def factored_to_engine_action(
     if at == ActionType.PickPackCard:
         if fa.entity_target is None:
             raise ValueError("PickPackCard requires entity_target")
-        return EnginePickPackCard(card_index=fa.entity_target)
+        return EnginePickPackCard(
+            card_index=fa.entity_target, target_indices=fa.card_target
+        )
 
     if at == ActionType.SwapJokersLeft:
         if fa.entity_target is None:
