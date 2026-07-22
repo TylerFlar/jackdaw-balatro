@@ -334,7 +334,16 @@ def create_card(
         key = "c_base"
 
     if key is None and soulable:
-        key = check_soul_chance(card_type, rng, ante)
+        key = check_soul_chance(
+            card_type,
+            rng,
+            ante,
+            used_jokers=gs.get("used_jokers"),
+            has_showman=any(
+                getattr(j, "center_key", "") == "j_showman" and not getattr(j, "debuff", False)
+                for j in gs.get("jokers", [])
+            ),
+        )
 
     if key is None:
         key = pick_card_from_pool(

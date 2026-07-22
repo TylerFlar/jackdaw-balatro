@@ -185,61 +185,47 @@ def check_soul_chance(
     rng: PseudoRandom,
     ante: int,
     soulable: bool = True,
+    used_jokers: dict | None = None,
+    has_showman: bool = False,
 ) -> str | None:
     """Check for a forced Soul or Black Hole card (0.3% chance per roll).
 
-    This fires **before** pool selection in ``create_card``.  If it returns
-    a key, that key is used directly and pool generation is skipped entirely.
+    Vanilla-exact port of create_card's forced-key block
+    (common_events.lua:2088-2100).  Fires **before** pool selection; if it
+    returns a key, pool generation is skipped entirely (which is what makes
+    a Soul hit shift subsequent same-stream pool picks).
 
-    The roll key is ``'soul_' + pool_type + str(ante)`` (advances the named
-    stream via :meth:`~PseudoRandom.random`).
+    Two independent blocks, each with its own once-per-run gate:
 
-    * **Joker** — one roll; hit → ``'c_soul'``
-    * **Planet** — one roll; hit → ``'c_black_hole'``
-    * **Spectral** — *two* rolls on the same stream key; first hit → ``'c_soul'``,
-      second hit → ``'c_black_hole'``
-    * **All other types** — no roll is made
-
-    Parameters
-    ----------
-    pool_type:
-        Pool type string (``"Joker"``, ``"Planet"``, ``"Spectral"``, etc.).
-    rng:
-        Live ``PseudoRandom`` instance.
-    ante:
-        Current ante number (appended to the stream key).
-    soulable:
-        When ``False`` (e.g. for playing-card draws), the check is bypassed
-        entirely and ``None`` is returned without consuming any RNG state.
-
-    Returns
-    -------
-    str | None
-        ``'c_soul'``, ``'c_black_hole'``, or ``None``.
+    * ``Tarot`` / ``Spectral`` / ``Tarot_Planet`` — one ``'soul_<type><ante>'``
+      roll; hit → ``'c_soul'``.  Skipped WITHOUT consuming a roll when
+      ``c_soul`` is already in used_jokers (and no Showman).
+    * ``Planet`` / ``Spectral`` — one roll on the same stream key; hit →
+      ``'c_black_hole'`` (for Spectral this is a SECOND roll, always made,
+      and on a double hit Black Hole overwrites Soul — Lua assigns
+      forced_key unconditionally in the second block).  Skipped without a
+      roll when ``c_black_hole`` is already used (no Showman).
+    * **Joker and all other types** — no roll is ever made (shop jokers,
+      buffoon packs, etc. never produce The Soul in vanilla).
     """
     if not soulable:
         return None
 
+    used = used_jokers or {}
     roll_key = "soul_" + pool_type + str(ante)
+    forced: str | None = None
 
-    if pool_type == "Joker":
-        if rng.random(roll_key) > _SOUL_THRESHOLD:
-            return "c_soul"
-        return None
+    if pool_type in ("Tarot", "Spectral", "Tarot_Planet"):
+        if not (used.get("c_soul") and not has_showman):
+            if rng.random(roll_key) > _SOUL_THRESHOLD:
+                forced = "c_soul"
 
-    if pool_type == "Planet":
-        if rng.random(roll_key) > _SOUL_THRESHOLD:
-            return "c_black_hole"
-        return None
+    if pool_type in ("Planet", "Spectral"):
+        if not (used.get("c_black_hole") and not has_showman):
+            if rng.random(roll_key) > _SOUL_THRESHOLD:
+                forced = "c_black_hole"
 
-    if pool_type == "Spectral":
-        if rng.random(roll_key) > _SOUL_THRESHOLD:
-            return "c_soul"
-        if rng.random(roll_key) > _SOUL_THRESHOLD:
-            return "c_black_hole"
-        return None
-
-    return None
+    return forced
 
 
 # ---------------------------------------------------------------------------

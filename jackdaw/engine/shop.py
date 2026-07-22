@@ -491,6 +491,10 @@ def populate_shop(
             rng,
             ante,
             area="shop",
+            # Shop cards are created non-soulable (UI_definitions.lua:776
+            # passes soulable=nil): The Soul / Black Hole can never appear
+            # in a shop, and no 'soul_*' stream roll is consumed for them.
+            soulable=False,
             append=_SHOP_APPEND,
             game_state=gs,
         )
@@ -899,6 +903,8 @@ def reroll_shop(
             rng,
             ante,
             area="shop",
+            # Non-soulable, matching shop creation (see populate_shop).
+            soulable=False,
             append=_SHOP_APPEND,
             game_state=game_state,
         )

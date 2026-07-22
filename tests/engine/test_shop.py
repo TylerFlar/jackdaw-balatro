@@ -582,7 +582,35 @@ class _ScriptedRNG:
 
 
 class TestCheckSoulChanceThreshold:
-    """Boundary tests using a scripted RNG stub."""
+    """Boundary tests using a scripted RNG stub.
 
-    def test_joker_hit_at_boundary(self):
-        assert check_soul_chance("Joker", _ScriptedRNG(0.9971), 1) == "c_soul"
+    Vanilla (common_events.lua:2088-2100): Tarot/Spectral/Tarot_Planet roll
+    for The Soul; Planet/Spectral roll for Black Hole; Jokers never roll.
+    """
+
+    def test_joker_never_rolls(self):
+        # A consumed roll would raise StopIteration on the exhausted stub.
+        assert check_soul_chance("Joker", _ScriptedRNG(), 1) is None
+
+    def test_tarot_hit_at_boundary(self):
+        assert check_soul_chance("Tarot", _ScriptedRNG(0.9971), 1) == "c_soul"
+
+    def test_tarot_miss_below_boundary(self):
+        assert check_soul_chance("Tarot", _ScriptedRNG(0.9969), 1) is None
+
+    def test_planet_hit_is_black_hole(self):
+        assert check_soul_chance("Planet", _ScriptedRNG(0.9971), 1) == "c_black_hole"
+
+    def test_spectral_always_consumes_two_rolls(self):
+        # soul hit, black-hole miss -> Soul survives; both rolls consumed
+        assert check_soul_chance("Spectral", _ScriptedRNG(0.9971, 0.5), 1) == "c_soul"
+
+    def test_spectral_double_hit_black_hole_overwrites(self):
+        assert check_soul_chance("Spectral", _ScriptedRNG(0.9971, 0.9981), 1) == "c_black_hole"
+
+    def test_used_soul_skips_roll_entirely(self):
+        # gated: no roll consumed, empty stub doesn't raise
+        assert (
+            check_soul_chance("Tarot", _ScriptedRNG(), 1, used_jokers={"c_soul": True})
+            is None
+        )
