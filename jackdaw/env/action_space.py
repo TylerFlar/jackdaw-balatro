@@ -267,8 +267,22 @@ def get_action_mask(game_state: dict[str, Any]) -> ActionMask:
         # Spectral packs: balatrobot cannot handle Spectral card
         # highlighting via RPC, so only SkipPack is valid.
         if remaining > 0 and pack_cards and pack_type != "Spectral":
-            type_mask[ActionType.PickPackCard] = True
-            entity_masks[ActionType.PickPackCard] = np.ones(len(pack_cards), dtype=bool)
+            # Vanilla gate (button_callbacks.lua:2112): a Joker in a pack is
+            # selectable only if joker slots have room or it is negative.
+            pick_mask = np.ones(len(pack_cards), dtype=bool)
+            if len(game_state.get("jokers", [])) >= game_state.get("joker_slots", 5):
+                for i, card in enumerate(pack_cards):
+                    ability = getattr(card, "ability", None) or {}
+                    edition = getattr(card, "edition", None) or {}
+                    negative = (
+                        bool(edition.get("negative"))
+                        if isinstance(edition, dict) else False
+                    )
+                    if ability.get("set", "") == "Joker" and not negative:
+                        pick_mask[i] = False
+            if pick_mask.any():
+                type_mask[ActionType.PickPackCard] = True
+                entity_masks[ActionType.PickPackCard] = pick_mask
         type_mask[ActionType.SkipPack] = True
 
     return ActionMask(type_mask, card_mask, entity_masks, max_card_select, min_card_select)
