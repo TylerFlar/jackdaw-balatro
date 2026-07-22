@@ -722,3 +722,83 @@ class TestBuySpaceGuard:
             step(gs, PickPackCard(card_index=0))
         assert len(gs["jokers"]) == 5
         assert gs["pack_choices_remaining"] == 1
+
+
+# ---------------------------------------------------------------------------
+# used_jokers lifecycle (card.lua:4739-4749) and store_joker_create tags
+# ---------------------------------------------------------------------------
+
+
+class TestUsedKeyRelease:
+    """Removed cards must free their center key for future pool draws.
+
+    Regression: keys registered at creation were never released, so
+    pools exhausted permanently — 3-4 celestial packs marked all 12
+    planets and later packs collapsed to the all-Pluto fallback."""
+
+    def test_sell_releases_key(self):
+        gs = _setup_shop()
+        gs["jokers"] = [_joker_card("j_release_probe")]
+        gs.setdefault("used_jokers", {})["j_release_probe"] = True
+        step(gs, SellCard(area="jokers", card_index=0))
+        assert "j_release_probe" not in gs["used_jokers"]
+
+    def test_sell_keeps_key_while_copy_in_play(self):
+        gs = _setup_shop()
+        gs["jokers"] = [_joker_card("j_release_probe"), _joker_card("j_release_probe")]
+        gs.setdefault("used_jokers", {})["j_release_probe"] = True
+        step(gs, SellCard(area="jokers", card_index=0))
+        assert "j_release_probe" in gs["used_jokers"]
+
+    def test_pack_close_releases_unpicked(self):
+        gs = _setup_shop()
+        c = _make_consumable("c_probe_tarot")
+        c.center_key = "c_probe_tarot"
+        gs.setdefault("used_jokers", {})["c_probe_tarot"] = True
+        gs["phase"] = GamePhase.PACK_OPENING
+        gs["pack_cards"] = [c]
+        gs["pack_choices_remaining"] = 1
+        step(gs, SkipPack())
+        assert "c_probe_tarot" not in gs["used_jokers"]
+
+    def test_shop_close_releases_unsold(self):
+        gs = _setup_shop()
+        gs["shop_cards"] = [_joker_card("j_unsold_probe", cost=5)]
+        gs.setdefault("used_jokers", {})["j_unsold_probe"] = True
+        step(gs, NextRound())
+        assert "j_unsold_probe" not in gs["used_jokers"]
+
+
+class TestStoreJokerCreateTag:
+    """Rare/Uncommon Tags must deliver a free forced-rarity shop joker
+    (previously documented-inert on the step() path)."""
+
+    @staticmethod
+    def _skip_for_tag(tag_key):
+        gs = _init_gs(f"TAGT_{tag_key}")
+        gs["round_resets"]["blind_tags"]["Small"] = tag_key
+        step(gs, SkipBlind())
+        step(gs, SelectBlind())
+        gs["blind"].chips = 1
+        step(gs, PlayHand(card_indices=(0, 1, 2, 3, 4)))
+        step(gs, CashOut())
+        return gs
+
+    def test_rare_tag_free_rare_in_next_shop(self):
+        from jackdaw.engine.pools import JOKER_RARITY_POOLS
+
+        gs = self._skip_for_tag("tag_rare")
+        rares = set(JOKER_RARITY_POOLS[3])
+        free_rares = [c for c in gs["shop_cards"]
+                      if c.center_key in rares and c.cost == 0]
+        assert free_rares, [(c.center_key, c.cost) for c in gs["shop_cards"]]
+        assert gs["awarded_tags"][0].get("shop_fired") is True
+
+    def test_uncommon_tag_free_uncommon_in_next_shop(self):
+        from jackdaw.engine.pools import JOKER_RARITY_POOLS
+
+        gs = self._skip_for_tag("tag_uncommon")
+        uncommons = set(JOKER_RARITY_POOLS[2])
+        free_unc = [c for c in gs["shop_cards"]
+                    if c.center_key in uncommons and c.cost == 0]
+        assert free_unc, [(c.center_key, c.cost) for c in gs["shop_cards"]]

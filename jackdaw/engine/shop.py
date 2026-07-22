@@ -325,6 +325,58 @@ def get_pack(
 _SHOP_APPEND = "sho"
 
 
+
+def apply_store_joker_create_tag(gs, rng, ante):
+    """Fire a pending Rare/Uncommon Tag for one shop joker slot.
+
+    Vanilla ``create_card_for_shop`` (UI_definitions.lua:753-763): a
+    pending ``store_joker_create`` tag replaces the slot's normal type
+    and rarity rolls entirely — the joker is created with forced rarity
+    on its own stream ('rta'/'uta') and is free (couponed). The Rare Tag
+    no-ops, but is still consumed, when every rare is already owned
+    (tag.lua:346-368). Returns the tag card, or None for a normal roll.
+    """
+    from jackdaw.engine.card_factory import create_card
+    from jackdaw.engine.tags import Tag
+
+    for entry in gs.get("awarded_tags", []):
+        if entry.get("shop_fired"):
+            continue
+        tag = Tag(entry.get("key", ""))
+        result = tag.apply("store_joker_create", gs, rng=rng)
+        if result is None or not result.force_rarity:
+            continue
+        entry["shop_fired"] = True
+        if result.force_rarity == 3:
+            from jackdaw.engine.pools import JOKER_RARITY_POOLS
+
+            rare_pool = set(JOKER_RARITY_POOLS.get(3, []))
+            owned = {
+                c.center_key for c in gs.get("jokers", [])
+                if c.center_key in rare_pool
+            }
+            if len(owned) >= len(rare_pool):
+                continue  # vanilla nope(): consumed, slot rolls normally
+        append = "rta" if result.force_rarity == 3 else "uta"
+        card = create_card(
+            "Joker",
+            rng,
+            ante,
+            area="shop",
+            forced_rarity=result.force_rarity,
+            append=append,
+            game_state=gs,
+        )
+        card.ability["couponed"] = True
+        card.set_cost(
+            inflation=gs.get("inflation", 0),
+            discount_percent=gs.get("discount_percent", 0),
+            is_couponed=True,
+        )
+        return card
+    return None
+
+
 def populate_shop(
     rng: PseudoRandom,
     ante: int,
@@ -395,6 +447,10 @@ def populate_shop(
     # -- 1. Joker slots --
     jokers: list[_Card] = []
     for _ in range(shop_joker_max):
+        tag_card = apply_store_joker_create_tag(gs, rng, ante)
+        if tag_card is not None:
+            jokers.append(tag_card)
+            continue
         card_type = select_shop_card_type(
             rng,
             ante,

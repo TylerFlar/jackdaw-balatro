@@ -609,6 +609,7 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
         if removed in jokers:
             jokers.remove(removed)
             removed.remove_from_deck(gs)
+            _release_used_key(gs, removed)
 
     # Playing card destruction (Glass shatter, etc.)
     destroyed_set = set(id(c) for c in result.cards_destroyed)
@@ -850,6 +851,7 @@ def _handle_discard(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str, A
         if joker in jokers:
             jokers.remove(joker)
             joker.remove_from_deck(gs)
+            _release_used_key(gs, joker)
 
     # ------------------------------------------------------------------
     # 6. Discard cost (Golden Needle challenge)
@@ -1000,6 +1002,25 @@ def _handle_cash_out(gs: dict[str, Any]) -> dict[str, Any]:
     return gs
 
 
+def _release_used_key(gs: dict[str, Any], card: Any) -> None:
+    """Free a removed card's center key for future pool draws.
+
+    card.lua:4739-4749 (Card:remove): used_jokers[key] is cleared unless
+    another copy of the same center is still in play (joker board or
+    consumable slots). Without this, pools exhaust permanently — e.g.
+    3-4 celestial packs mark all 12 planets and every later draw
+    collapses to the empty-pool fallback (all-Pluto packs)."""
+    key = getattr(card, "center_key", None)
+    if not key:
+        return
+    for c in gs.get("jokers", []) + gs.get("consumables", []):
+        if c is not card and getattr(c, "center_key", None) == key:
+            return
+    used = gs.get("used_jokers")
+    if used:
+        used.pop(key, None)
+
+
 def _handle_buy_card(gs: dict[str, Any], idx: int) -> dict[str, Any]:
     """Purchase a card from the shop.
 
@@ -1078,6 +1099,7 @@ def _handle_sell_card(gs: dict[str, Any], area: str, idx: int) -> dict[str, Any]
     gs["dollars"] = gs.get("dollars", 0) + card.sell_cost
     cards.pop(idx)
     card.remove_from_deck(gs)
+    _release_used_key(gs, card)
 
     # Fire selling_card joker context (Campfire +xMult per card sold)
     _fire_shop_joker_context(gs, selling_card=True)
@@ -1135,6 +1157,7 @@ def _handle_use_consumable(
 
     consumables.pop(idx)
     card.remove_from_deck(gs)
+    _release_used_key(gs, card)
     _use_consumable_card(gs, card, targets)
 
     # Phase does NOT change — returns to whatever it was
@@ -1190,6 +1213,7 @@ def _handle_open_booster(gs: dict[str, Any], idx: int) -> dict[str, Any]:
 
     gs["dollars"] -= pack.cost
     boosters.pop(idx)
+    _release_used_key(gs, pack)
 
     # Generate pack cards
     from jackdaw.engine.data.prototypes import BOOSTERS
@@ -1285,6 +1309,7 @@ def _handle_pick_pack_card(
     if card_set in ("Tarot", "Planet", "Spectral"):
         # Consumable: use immediately (Arcana/Spectral/Celestial pack)
         _use_consumable_card(gs, card, targets)
+        _release_used_key(gs, card)
 
         # Fire using_consumeable joker context
         _fire_shop_joker_context(gs, using_consumeable=True)
@@ -1373,7 +1398,9 @@ def _handle_next_round(gs: dict[str, Any]) -> dict[str, Any]:
     mutations = _fire_shop_joker_context(gs, ending_shop=True)
     _apply_shop_mutations(gs, mutations)
 
-    # Clear shop areas
+    # Clear shop areas (unsold cards dissolve -> keys released)
+    for c in gs.get("shop_cards", []) + gs.get("shop_boosters", []):
+        _release_used_key(gs, c)
     gs["shop_cards"] = []
     gs["shop_vouchers"] = []
     gs["shop_boosters"] = []
@@ -1533,6 +1560,7 @@ def _round_won(gs: dict[str, Any]) -> None:
         if removed_joker in jokers:
             jokers.remove(removed_joker)
             removed_joker.remove_from_deck(gs)
+            _release_used_key(gs, removed_joker)
 
     # ------------------------------------------------------------------
     # 2. Process perishable/rental
@@ -1755,6 +1783,7 @@ def _apply_setting_blind_mutations(
                     target, _ = rng.element(candidates, seed_val)
                     jokers.remove(target)
                     target.remove_from_deck(gs)
+                    _release_used_key(gs, target)
 
         # Burglar: set hands / remove discards
         if "set_hands" in mut:
@@ -2109,6 +2138,7 @@ def _apply_consumable_result(
             if j in jokers:
                 jokers.remove(j)
                 j.remove_from_deck(gs)
+                _release_used_key(gs, j)
 
     # ---- Game state ----
 
@@ -2308,11 +2338,20 @@ def _reroll_shop_cards(gs: dict[str, Any]) -> None:
 
     _sync_played_hand_types(gs)
 
+    for old in gs.get("shop_cards", []):
+        _release_used_key(gs, old)
+
     ante = gs.get("round_resets", {}).get("ante", 1)
     shop_joker_max: int = gs.get("shop", {}).get("joker_max", 2)
 
+    from jackdaw.engine.shop import apply_store_joker_create_tag
+
     new_cards = []
     for _ in range(shop_joker_max):
+        tag_card = apply_store_joker_create_tag(gs, rng, ante)
+        if tag_card is not None:
+            new_cards.append(tag_card)
+            continue
         card_type = select_shop_card_type(
             rng,
             ante,
@@ -2427,7 +2466,9 @@ def _close_pack(gs: dict[str, Any]) -> None:
     - Fire ``new_blind_choice`` tags (deferred from skip)
     - Restore phase from ``shop_return_phase``
     """
-    # Clear pack state
+    # Clear pack state (unpicked cards dissolve -> keys released)
+    for c in gs.get("pack_cards", []):
+        _release_used_key(gs, c)
     gs["pack_cards"] = []
     gs["pack_choices_remaining"] = 0
 
