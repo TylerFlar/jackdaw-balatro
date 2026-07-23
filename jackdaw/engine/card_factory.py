@@ -377,6 +377,12 @@ def create_card(
     if game_state is not None:
         game_state.setdefault("used_jokers", {})[key] = True
 
+    # To Do List rolls its target hand inside set_ability at creation
+    # (card.lua:311-322, stream 'to_do'), BEFORE the edition poll.
+    # Nothing ever wrote this field before — the joker never paid.
+    if key == "j_todo_list":
+        roll_to_do_hand(card, rng, gs.get("hand_levels"))
+
     # ------------------------------------------------------------------
     # 3. Joker modifiers (shop / pack context only)
     # ------------------------------------------------------------------
@@ -604,3 +610,44 @@ def resolve_destroy_descriptor(
 
     # disable_blind and any other unknown descriptors: no card to destroy
     return None
+
+
+def roll_to_do_hand(card, rng, hand_levels, exclude_current: bool = False) -> None:
+    """(Re)roll To Do List's target hand — card.lua:311-322 / 2975-2984.
+
+    Creation (set_ability): pool = all VISIBLE hands; rolls repeat on the
+    'to_do' stream until the result differs from the previous hand (each
+    repeat consumes another pull).  End of round: the current hand is
+    pre-filtered OUT of the pool and a single pull is made — pass
+    ``exclude_current=True`` for that variant.
+
+    Pool order matches G.GAME.hands iteration as validated for the
+    Orbital Tag (_ORBITAL_HANDS).
+    """
+    from jackdaw.engine.tags import _ORBITAL_HANDS
+
+    if rng is None:
+        return
+    old = card.ability.get("to_do_poker_hand")
+
+    def _visible(ht) -> bool:
+        if hand_levels is None:
+            return True
+        try:
+            return hand_levels.get_state(ht).visible
+        except Exception:
+            return True
+
+    if exclude_current:
+        pool = [ht.value for ht in _ORBITAL_HANDS if _visible(ht) and ht.value != old]
+        new_hand, _ = rng.element(pool, rng.seed("to_do"))
+        card.ability["to_do_poker_hand"] = new_hand
+        return
+
+    pool = [ht.value for ht in _ORBITAL_HANDS if _visible(ht)]
+    chosen = None
+    while chosen is None:
+        v, _ = rng.element(pool, rng.seed("to_do"))
+        if v != old:
+            chosen = v
+    card.ability["to_do_poker_hand"] = chosen

@@ -1643,7 +1643,7 @@ def _round_won(gs: dict[str, Any]) -> None:
         nine_tally=sum(1 for c in _all_owned if c.get_id() == 9),
         joker_count=len(jokers),
     )
-    eor = on_end_of_round(jokers, game_snap, rng)
+    eor = on_end_of_round(jokers, game_snap, rng, hand_levels=gs.get("hand_levels"))
     # Joker end-of-round dollars are NOT banked here: vanilla pays the
     # whole round total (blind + hands + joker $ + interest) in one
     # ease_dollars at the cash-out press, and interest is computed on the

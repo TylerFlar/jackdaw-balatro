@@ -351,6 +351,7 @@ def on_end_of_round(
     jokers: list[Card],
     game: GameSnapshot,
     rng: PseudoRandom | None = None,
+    hand_levels: Any = None,
 ) -> dict[str, Any]:
     """Process all joker end-of-round effects.
 
@@ -373,6 +374,7 @@ def on_end_of_round(
         jokers=jokers,
         rng=rng,
         game=game,
+        hand_levels=hand_levels,
     )
     for joker in jokers:
         if joker.debuff:
@@ -1339,12 +1341,22 @@ def _trading(card: Card, ctx: JokerContext) -> JokerResult | None:
 
 @register("j_todo_list")
 def _to_do_list(card: Card, ctx: JokerContext) -> JokerResult | None:
-    """To Do List: +$4 if hand matches to_do_poker_hand. Source: card.lua:3491."""
+    """To Do List: +$4 if hand matches to_do_poker_hand. Source: card.lua:3491.
+
+    The target rolls at creation (card.lua:311, wired in create_card) and
+    re-rolls at end of round from a pool excluding the current hand
+    (card.lua:2975).  Found dead by lockstep: nothing ever wrote the field.
+    """
     if ctx.joker_main and ctx.scoring_name:
         target = card.ability.get("to_do_poker_hand")
         if target and ctx.scoring_name == target:
             extra = card.ability.get("extra", {})
             return JokerResult(dollars=extra.get("dollars", 4))
+    if ctx.end_of_round and not ctx.blueprint and ctx.rng is not None:
+        from jackdaw.engine.card_factory import roll_to_do_hand
+
+        roll_to_do_hand(card, ctx.rng, ctx.hand_levels, exclude_current=True)
+        return JokerResult(message="Reset")
     return None
 
 

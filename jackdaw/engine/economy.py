@@ -227,7 +227,7 @@ def calculate_round_earnings(
             nine_tally=sum(1 for c in _all_owned if c.get_id() == 9),
             joker_count=len(jokers),
         )
-        end_result = on_end_of_round(jokers, game_snap, rng)
+        end_result = on_end_of_round(jokers, game_snap, rng, hand_levels=game_state.get("hand_levels"))
         joker_dollars = end_result["dollars_earned"]
 
     # ------------------------------------------------------------------
