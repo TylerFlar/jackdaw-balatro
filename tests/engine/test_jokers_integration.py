@@ -372,8 +372,9 @@ class TestSpaceJoker:
 class TestOnEndOfRound:
     def test_multiple_dollar_jokers(self):
         golden = _joker("j_golden", extra=4)
-        cloud = _joker("j_cloud_9", extra=1, nine_tally=5)
-        game = GameSnapshot()
+        cloud = _joker("j_cloud_9", extra=1)
+        # nine count comes from the snapshot (full-deck tally), not the card
+        game = GameSnapshot(nine_tally=5)
         result = on_end_of_round([golden, cloud], game)
         assert result["dollars_earned"] == 9  # 4 + 5
 

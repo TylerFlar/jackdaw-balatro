@@ -45,6 +45,7 @@ class GameSnapshot:
     playing_cards_count: int = 52
     stone_tally: int = 0
     steel_tally: int = 0
+    nine_tally: int = 0
     enhanced_card_count: int = 0
     hands_left: int = 0
     hands_played: int = 0
@@ -2256,8 +2257,13 @@ def _golden_dollars(card: Card, game: GameSnapshot) -> int:
 
 @register_dollars("j_cloud_9")
 def _cloud_9_dollars(card: Card, game: GameSnapshot) -> int:
-    """Cloud 9: +$1 per 9-rank card in full deck. Source: card.lua:1661."""
-    tally = card.ability.get("nine_tally", 0)
+    """Cloud 9: +$1 per 9-rank card in full deck. Source: card.lua:1661.
+
+    Vanilla keeps ability.nine_tally fresh from Card:update (card.lua:4192);
+    the sim computes the count into the end-of-round GameSnapshot instead
+    (found dead by lockstep: live paid $4 for four 9s, sim paid $0).
+    """
+    tally = game.nine_tally
     if tally > 0:
         return card.ability.get("extra", 1) * tally
     return 0
@@ -2514,10 +2520,15 @@ def _turtle_bean(card: Card, ctx: JokerContext) -> JokerResult | None:
         h_size = extra.get("h_size", 5)
         h_mod = extra.get("h_mod", 1)
         if h_size - h_mod <= 0:
+            # removal path calls remove_from_deck, which gives back the
+            # remaining h_size (card.lua:663)
             return JokerResult(remove=True)
         extra["h_size"] = h_size - h_mod
         card.ability["extra"] = extra
-        return JokerResult()
+        # G.hand:change_size(-h_mod) fires with the decay (card.lua:2927)
+        # — found by lockstep: live hand size shrank each round, sim's
+        # only decayed the ability field.
+        return JokerResult(extra={"hand_size_delta": -h_mod})
     return None
 
 

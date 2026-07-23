@@ -1616,6 +1616,12 @@ def _round_won(gs: dict[str, Any]) -> None:
     # ------------------------------------------------------------------
     from jackdaw.engine.jokers import GameSnapshot, on_end_of_round
 
+    # Cards have not yet returned to the deck here, so the full owned set
+    # spans all four piles (matches vanilla's G.playing_cards).
+    _all_owned = (
+        gs.get("deck", []) + gs.get("hand", [])
+        + gs.get("discard_pile", []) + gs.get("played_cards_area", [])
+    )
     game_snap = GameSnapshot(
         money=gs.get("dollars", 0),
         hands_left=cr.get("hands_left", 0),
@@ -1624,6 +1630,9 @@ def _round_won(gs: dict[str, Any]) -> None:
         # round (card.lua:1675) — omitting this defaulted it to 0 and paid
         # out every round with discards remaining.
         discards_used=cr.get("discards_used", 0),
+        # Cloud 9 pays per 9 in the full deck; get_id() == 9 excludes
+        # Stone cards, matching Card:update's tally (card.lua:4192).
+        nine_tally=sum(1 for c in _all_owned if c.get_id() == 9),
         joker_count=len(jokers),
     )
     eor = on_end_of_round(jokers, game_snap, rng)
@@ -1635,6 +1644,10 @@ def _round_won(gs: dict[str, Any]) -> None:
             jokers.remove(removed_joker)
             removed_joker.remove_from_deck(gs)
             _release_used_key(gs, removed_joker)
+    # End-of-round joker mutations (Turtle Bean's per-round hand-size decay)
+    for mut in eor.get("mutations", []):
+        if mut.get("hand_size_delta"):
+            gs["hand_size"] = gs.get("hand_size", 8) + mut["hand_size_delta"]
 
     # ------------------------------------------------------------------
     # 2. Process perishable/rental

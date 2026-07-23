@@ -690,15 +690,24 @@ class TestFullRoundEarnings:
         return [golden, cloud9, rental]
 
     def test_full_breakdown(self):
+        from jackdaw.engine.card_factory import create_playing_card
+        from jackdaw.engine.data.enums import Rank, Suit
+
         jokers = self._make_jokers()
         blind = _bb()
+        # Cloud 9's tally now comes from the deck contents (three 9s here),
+        # not a cached ability field.
+        nines = [
+            create_playing_card(suit=s, rank=Rank.NINE)
+            for s in (Suit.HEARTS, Suit.SPADES, Suit.CLUBS)
+        ]
         result = calculate_round_earnings(
             blind=blind,
             hands_left=2,
             discards_left=0,
             money=23,
             jokers=jokers,
-            game_state={},
+            game_state={"deck": nines},
         )
         assert result.blind_reward == 4
         assert result.unused_hands_bonus == 2

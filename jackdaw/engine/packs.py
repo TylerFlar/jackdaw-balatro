@@ -195,11 +195,16 @@ def _gen_standard(rng: PseudoRandom, ante: int, gs: dict) -> Card:
     suit = Suit(pc_proto.suit)
     rank = Rank(pc_proto.rank)
 
-    # Enhancement selection (only when Enhanced type)
+    # Enhancement selection (only when Enhanced type).
+    # Pool keys carry the ante suffix (common_events.lua:2052 returns
+    # _pool_key .. ante for every non-legendary pool) — 'Enhancedsta'+ante.
+    # NOTE: the modded live game can NOT validate this field — smods takes
+    # ownership of standard packs and rolls enhancements on its own
+    # 'std_enhance' stream; Immolate (vanilla-derived) is the oracle here.
     if is_enhanced:
         enhancement_key, _ = rng.element(
             CENTER_POOLS["Enhanced"],
-            rng.seed("Enhancedsta"),
+            rng.seed("Enhancedsta" + str(ante)),
         )
     else:
         enhancement_key = "c_base"

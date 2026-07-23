@@ -214,6 +214,10 @@ def score_hand_base(
             breakdown=["No hand"],
         )
 
+    # Play counts increment BEFORE the boss debuff check
+    # (state_events.lua:574-575) — a "nope!"-debuffed hand still counts.
+    hand_levels.record_play(hand_type)
+
     # === Phase 3: Boss blind debuff check ===
     # Lua passes G.play.cards (all played cards, not just scoring subset)
     # to debuff_hand (state_events.lua:614).  Matters for The Psychic
@@ -248,8 +252,8 @@ def score_hand_base(
         f" -> {int(hand_chips)} chips, {int(mult)} mult"
     )
 
-    # Record play
-    hand_levels.record_play(hand_type)
+    # (play counts recorded before the debuff check, matching
+    # state_events.lua:574)
 
     # === Phase 6: Blind modify_hand (The Flint) ===
     new_mult, new_chips, modified = blind.modify_hand(mult, int(hand_chips))
@@ -468,6 +472,12 @@ def score_hand(
             breakdown=["No hand"],
         )
 
+    # Play counts increment BEFORE the boss debuff check
+    # (state_events.lua:574-575) — a "nope!"-debuffed hand still counts
+    # (found by lockstep: The Psychic blocked a short play, live still
+    # recorded High Card, sim recorded nothing).
+    hand_levels.record_play(hand_type)
+
     # === Phase 3: Boss blind debuff check ===
     # Lua passes G.play.cards (all played cards, not just scoring subset)
     # to debuff_hand (state_events.lua:614).  Matters for The Psychic
@@ -527,8 +537,8 @@ def score_hand(
         f" -> {int(hand_chips)} chips, {int(mult)} mult"
     )
 
-    # Record play
-    hand_levels.record_play(hand_type)
+    # (play counts recorded before the debuff check, matching
+    # state_events.lua:574)
 
     # Shared context fields (lightweight — references snapshot, not copies)
     _shared = dict(
