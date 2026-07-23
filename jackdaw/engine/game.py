@@ -319,7 +319,7 @@ def _fire_new_blind_choice_tags(gs: dict[str, Any]) -> None:
             _open_tag_pack(gs, result.create_pack)
 
 
-def _open_tag_pack(gs: dict[str, Any], pack_key: str) -> None:
+def _open_tag_pack(gs: dict[str, Any], pack_key: str, force: bool = False) -> None:
     """Open a pack from a tag reward, populating pack_cards.
 
     The caller (or agent) must then pick from the pack or skip it.
@@ -328,6 +328,14 @@ def _open_tag_pack(gs: dict[str, Any], pack_key: str) -> None:
     """
     from jackdaw.engine.data.prototypes import BOOSTERS
     from jackdaw.engine.packs import generate_pack_cards
+
+    # A pack is already open (e.g. Double Tag duplicated a pack tag):
+    # queue this one.  Vanilla stacks pack opens — the next pack opens
+    # when the current one closes, and its contents roll AT THAT TIME
+    # (deferred generation keeps the streams in vanilla order).
+    if not force and (gs.get("phase") == GamePhase.PACK_OPENING or gs.get("pack_cards")):
+        gs.setdefault("pending_tag_packs", []).append(pack_key)
+        return
 
     rng = gs.get("rng")
     ante = gs.get("round_resets", {}).get("ante", 1)
@@ -2598,6 +2606,18 @@ def _close_pack(gs: dict[str, Any]) -> None:
         gs["hand"] = [c for c in hand if id(c) not in pack_ids]
         gs["pack_hand"] = []
 
+    # Queued tag packs (Double Tag duplicates) open back-to-back before
+    # the phase is restored, mirroring vanilla's stacked pack opens.
+    pending: list = gs.get("pending_tag_packs") or []
+    if pending:
+        next_key = pending.pop(0)
+        saved_return = gs.get("shop_return_phase", GamePhase.BLIND_SELECT)
+        _open_tag_pack(gs, next_key, force=True)
+        # keep the ORIGINAL return phase (not PACK_OPENING itself)
+        gs["shop_return_phase"] = saved_return
+        gs["phase"] = GamePhase.PACK_OPENING
+        return
+
     # Restore phase
     gs["phase"] = gs.get("shop_return_phase", GamePhase.SHOP)
 
@@ -2655,33 +2675,33 @@ def _press_play(
 
 
 def _check_double_tag(gs: dict[str, Any], awarded_tag_key: str) -> None:
-    """If player has a Double Tag active, duplicate the just-awarded tag."""
-    tags: list = gs.get("tags", [])
-    if not tags:
+    """Each held Double Tag converts into a copy of the next tag acquired.
+
+    tag.lua 'tag_added' context: the Double is consumed and a duplicate of
+    the new tag is added; a Double never duplicates another Double.
+
+    BUG HISTORY: this used to read ``gs["tags"]`` — a key nothing writes
+    (tags live in ``awarded_tags``) — so Double Tag NEVER duplicated
+    anything.  Found by lockstep seed LSVZ27Z7: skipping into a Buffoon
+    Tag while holding a Double opened two Mega Buffoon packs live, one in
+    the sim.
+    """
+    if awarded_tag_key == "tag_double":
         return
 
-    # Check if any active tag is tag_double
     from jackdaw.engine.tags import Tag
 
-    for i, tag_entry in enumerate(tags):
-        tag_key = tag_entry if isinstance(tag_entry, str) else getattr(tag_entry, "key", "")
-        if tag_key == "tag_double" and awarded_tag_key != "tag_double":
-            # Fire the duplicate
-            dup_tag = Tag(awarded_tag_key)
-            dup_result = dup_tag.apply("immediate", gs, rng=gs.get("rng"))
-
-            awarded_tags: list = gs.setdefault("awarded_tags", [])
-            awarded_tags.append(
-                {
-                    "key": awarded_tag_key,
-                    "result": dup_result,
-                    "blind": "double",
-                }
-            )
-
-            if dup_result and dup_result.dollars:
-                gs["dollars"] = gs.get("dollars", 0) + dup_result.dollars
-
-            # Remove the Double Tag (consumed)
-            tags.pop(i)
-            break
+    awarded: list = gs.setdefault("awarded_tags", [])
+    doubles = [e for e in awarded if e.get("key") == "tag_double"]
+    for dbl in doubles:
+        dup_result = Tag(awarded_tag_key).apply("immediate", gs, rng=gs.get("rng"))
+        awarded.append(
+            {
+                "key": awarded_tag_key,
+                "result": dup_result,
+                "blind": "double",
+            }
+        )
+        if dup_result is not None:
+            _apply_tag_result(gs, dup_result)
+        awarded.remove(dbl)  # consumed

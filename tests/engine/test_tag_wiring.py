@@ -92,3 +92,57 @@ class TestSkipTagWiring:
         gs["shop_cards"] = [create_joker("j_sly")]
         _fire_shop_tags(gs, rerolled=False)
         assert not (getattr(gs["shop_cards"][0], "edition", None) or {})
+
+
+class TestDoubleTag:
+    """Double Tag converts into a copy of the next tag acquired
+    (tag.lua 'tag_added'); duplicated pack tags queue their packs."""
+
+    def _skip_into(self, seed: str, n_skips: int):
+        from jackdaw.engine.actions import GamePhase, SkipBlind
+        from jackdaw.engine.game import step
+        from jackdaw.engine.run_init import initialize_run
+
+        gs = initialize_run("b_red", 1, seed)
+        gs["phase"] = GamePhase.BLIND_SELECT
+        gs["blind_on_deck"] = "Small"
+        for _ in range(n_skips):
+            step(gs, SkipBlind())
+        return gs
+
+    def test_double_tag_duplicates_next_tag(self):
+        from jackdaw.engine.game import _check_double_tag
+
+        gs = {"awarded_tags": [{"key": "tag_double", "result": None}], "rng": None}
+        _check_double_tag(gs, "tag_economy")
+        keys = [e["key"] for e in gs["awarded_tags"]]
+        assert keys.count("tag_double") == 0  # consumed
+        assert keys.count("tag_economy") == 1  # the duplicate entry
+
+    def test_double_never_duplicates_double(self):
+        from jackdaw.engine.game import _check_double_tag
+
+        gs = {"awarded_tags": [{"key": "tag_double", "result": None}], "rng": None}
+        _check_double_tag(gs, "tag_double")
+        keys = [e["key"] for e in gs["awarded_tags"]]
+        assert keys == ["tag_double"]
+
+    def test_second_tag_pack_queues_and_opens_after_close(self):
+        from jackdaw.engine.actions import GamePhase
+        from jackdaw.engine.game import _close_pack, _open_tag_pack
+        from jackdaw.engine.run_init import initialize_run
+
+        gs = initialize_run("b_red", 1, "DBLPACK1")
+        gs["phase"] = GamePhase.BLIND_SELECT
+        _open_tag_pack(gs, "p_buffoon_mega_1")
+        assert gs["phase"] == GamePhase.PACK_OPENING
+        first_pack = [c.center_key for c in gs["pack_cards"]]
+        _open_tag_pack(gs, "p_buffoon_mega_1")  # queued, not overwritten
+        assert [c.center_key for c in gs["pack_cards"]] == first_pack
+        assert gs.get("pending_tag_packs") == ["p_buffoon_mega_1"]
+        _close_pack(gs)
+        assert gs["phase"] == GamePhase.PACK_OPENING  # second pack now open
+        assert gs["pack_cards"], "second pack should have cards"
+        assert not gs.get("pending_tag_packs")
+        _close_pack(gs)
+        assert gs["phase"] == GamePhase.BLIND_SELECT
