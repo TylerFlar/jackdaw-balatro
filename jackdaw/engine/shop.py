@@ -378,25 +378,24 @@ def apply_store_joker_create_tag(gs, rng, ante):
     return None
 
 
-def fill_shop_slots(gs: dict[str, Any]) -> list:
-    """Top up shop card slots to ``shop['joker_max']``.
+def fill_shop_slots(gs: dict[str, Any], count: int) -> list:
+    """Roll ``count`` new cards into the open shop.
 
-    Vanilla refills open shop slots when the shop is (re)built — notably
-    when Overstock is redeemed mid-shop, a card rolls into the new slot
-    immediately (found by lockstep: live's shop grew by a rolled card on
-    voucher redemption, sim's stayed short until the next shop).  Uses the
-    identical creation path/streams as reroll's repopulate.
+    Used when Overstock/Overstock Plus is redeemed mid-shop: live rolls a
+    card into each NEW slot immediately.  Purchase-emptied slots stay
+    empty (lockstep-confirmed: a non-slot voucher refills nothing), so
+    callers pass exactly the slot-count DELTA, never a top-up-to-max.
+    Uses the identical creation path/streams as reroll's repopulate.
     """
     from jackdaw.engine.card_factory import create_card
 
     rng = gs.get("rng")
-    if rng is None:
+    if rng is None or count <= 0:
         return []
     ante = gs.get("round_resets", {}).get("ante", 1)
     shop_cards: list = gs.setdefault("shop_cards", [])
-    slots_needed = gs.get("shop", {}).get("joker_max", 2) - len(shop_cards)
     new_cards = []
-    for _ in range(slots_needed):
+    for _ in range(count):
         card_type = select_shop_card_type(
             rng,
             ante,
