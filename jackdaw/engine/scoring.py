@@ -575,6 +575,7 @@ def score_hand(
         hand_chips = float(new_chips)
         breakdown.append(f"Blind modify: {int(hand_chips)} chips, {int(mult)} mult")
 
+    joker_creates: list[dict] = []
     # === Phase 7: Per scored card (with retriggers) ===
     for card in scoring_cards:
         if card.debuff:
@@ -633,6 +634,12 @@ def score_hand(
                         eff["x_mult"] = ind_result.x_mult
                     if ind_result.dollars:
                         eff["dollars"] = ind_result.dollars
+                    # Per-card creations (8 Ball's tarot on a scored 8):
+                    # these were silently DROPPED — only joker_main creates
+                    # were collected (found by lockstep: 8 Ball rolled a
+                    # proc, live created a tarot, sim created nothing).
+                    if ind_result.extra and "create" in ind_result.extra:
+                        joker_creates.append(ind_result.extra["create"])
                     if eff:
                         eff["card"] = joker
                         effects.append(eff)
@@ -719,7 +726,6 @@ def score_hand(
                 mult *= ihe_result.Xmult_mod
 
     # === Phase 9: Joker main effects (left to right) ===
-    joker_creates: list[dict] = []
     for joker in jokers:
         if joker.debuff:
             continue

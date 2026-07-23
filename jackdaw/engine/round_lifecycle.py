@@ -224,12 +224,16 @@ def reset_round_targets(
     # reset_idol_card — common_events.lua:2271-2286
     # One pseudorandom_element call → card's rank AND suit
     # ------------------------------------------------------------------
-    cr["idol_card"] = {"suit": "Spades", "rank": "Ace"}
+    # 'id' is what the j_idol handler compares against get_id() — omitting
+    # it left The Idol's x2 permanently dead (found by lockstep: 124-chip
+    # scoring gap fully attributed to the missing multiplier).
+    cr["idol_card"] = {"suit": "Spades", "rank": "Ace", "id": 14}
     if valid_cards:
         seed_val = rng.seed("idol" + str(ante))
         idol, _ = rng.element(valid_cards, seed_val)
         cr["idol_card"]["rank"] = _card_rank_str(idol)
         cr["idol_card"]["suit"] = _card_suit_str(idol)
+        cr["idol_card"]["id"] = idol.base.id
 
     # ------------------------------------------------------------------
     # reset_mail_rank — common_events.lua:2288-2301

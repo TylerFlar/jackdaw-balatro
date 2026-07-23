@@ -135,7 +135,7 @@ def init_game_object() -> dict[str, Any]:
             },
             "used_packs": [],
             "cards_flipped": 0,
-            "idol_card": {"suit": "Spades", "rank": "Ace"},
+            "idol_card": {"suit": "Spades", "rank": "Ace", "id": 14},
             "mail_card": {"rank": "Ace"},
             "ancient_card": {"suit": "Spades"},
             "castle_card": {"suit": "Spades"},

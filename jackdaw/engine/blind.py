@@ -424,10 +424,10 @@ class Blind:
             if card.is_face(from_boss=True, pareidolia=pareidolia):
                 return True
 
-        if self.name == "The Fish":
-            # Fish flips cards after each play (prepped flag)
-            # Handled via prepped state set in press_play
-            pass
+        if self.name == "The Fish" and getattr(self, "prepped", False):
+            # Fish flips cards drawn after a played hand (blind.lua:611);
+            # press_play sets the prepped flag.
+            return True
 
         return False
 

@@ -378,6 +378,48 @@ def apply_store_joker_create_tag(gs, rng, ante):
     return None
 
 
+def fill_shop_slots(gs: dict[str, Any]) -> list:
+    """Top up shop card slots to ``shop['joker_max']``.
+
+    Vanilla refills open shop slots when the shop is (re)built — notably
+    when Overstock is redeemed mid-shop, a card rolls into the new slot
+    immediately (found by lockstep: live's shop grew by a rolled card on
+    voucher redemption, sim's stayed short until the next shop).  Uses the
+    identical creation path/streams as reroll's repopulate.
+    """
+    from jackdaw.engine.card_factory import create_card
+
+    rng = gs.get("rng")
+    if rng is None:
+        return []
+    ante = gs.get("round_resets", {}).get("ante", 1)
+    shop_cards: list = gs.setdefault("shop_cards", [])
+    slots_needed = gs.get("shop", {}).get("joker_max", 2) - len(shop_cards)
+    new_cards = []
+    for _ in range(slots_needed):
+        card_type = select_shop_card_type(
+            rng,
+            ante,
+            joker_rate=gs.get("joker_rate", 20.0),
+            tarot_rate=gs.get("tarot_rate", 4.0),
+            planet_rate=gs.get("planet_rate", 4.0),
+            spectral_rate=gs.get("spectral_rate", 0.0),
+            playing_card_rate=gs.get("playing_card_rate", 0.0),
+        )
+        new_card = create_card(
+            card_type,
+            rng,
+            ante,
+            area="shop",
+            soulable=False,
+            append=_SHOP_APPEND,
+            game_state=gs,
+        )
+        shop_cards.append(new_card)
+        new_cards.append(new_card)
+    return new_cards
+
+
 def reprice_shop(gs: dict[str, Any]) -> None:
     """Recompute costs for everything currently offered in the shop.
 

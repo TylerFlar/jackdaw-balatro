@@ -745,10 +745,10 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
             for card in gs.get("hand", []):
                 blind.debuff_card(card, pareidolia=pareidolia)
 
-        # The Fish: flip newly drawn cards face-down
-        if getattr(blind, "name", "") == "The Fish" and getattr(blind, "prepped", False):
-            for card in gs.get("hand", []):
-                card.facing = "back"
+        # The Fish flips ONLY the newly drawn replacements, handled
+        # per-drawn-card by Blind.stay_flipped inside _draw_hand
+        # (blind.lua:611) — the old whole-hand flip here hid cards the
+        # live game left face up (found by lockstep).
 
         # Boss drawn_to_hand effects on redraw (Cerulean Bell, Crimson Heart)
         if blind.boss and not blind.disabled:
@@ -1239,6 +1239,13 @@ def _handle_redeem_voucher(gs: dict[str, Any], idx: int) -> dict[str, Any]:
 
     gs["used_vouchers"][card.center_key] = True
     apply_voucher(card.center_key, gs)
+
+    # Slot-increasing vouchers (Overstock / Overstock Plus) fill the new
+    # slot immediately while the shop is open — the live game rolls a
+    # card into it at redemption time (found by lockstep).
+    from jackdaw.engine.shop import fill_shop_slots
+
+    fill_shop_slots(gs)
 
     # Clear the voucher slot so the next shop doesn't re-offer it.
     # Matches card.lua:1850: G.GAME.current_round.voucher = nil

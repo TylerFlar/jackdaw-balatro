@@ -548,11 +548,18 @@ class TestCardFlipping:
         step(gs, SelectBlind())
         # Play a hand
         gs["blind"].chips = 999999
+        held_before = list(gs["hand"])
+        played_ids = {id(gs["hand"][i]) for i in (0, 1, 2, 3, 4)}
+        held_ids = {id(c) for c in held_before} - played_ids
         step(gs, PlayHand(card_indices=(0, 1, 2, 3, 4)))
-        # After play, remaining hand cards should be flipped
+        # Vanilla flips ONLY the replacement draws (blind.lua:611), not
+        # the cards already held (the old whole-hand flip was a bug).
         if gs["phase"] == GamePhase.SELECTING_HAND:
             for card in gs["hand"]:
-                assert card.facing == "back", f"{card.card_key} not flipped"
+                if id(card) in held_ids:
+                    assert card.facing == "front", f"{card.card_key} wrongly flipped"
+                else:
+                    assert card.facing == "back", f"{card.card_key} not flipped"
 
 
 class TestBossPressPlay:
