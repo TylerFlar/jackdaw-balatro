@@ -708,6 +708,12 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
         _round_won(gs)
     elif cr["hands_left"] <= 0:
         if not result.saved:
+            # Vanilla end_round fires joker end_of_round effects for
+            # LOSSES too (state_events.lua:96-110, game_over flag in the
+            # context): Turtle Bean decays, rentals charge, perishables
+            # tick as you die.  Found by lockstep: hand size differed at
+            # GAME_OVER.
+            _joker_end_of_round_effects(gs)
             gs["phase"] = GamePhase.GAME_OVER
             gs["won"] = False
         else:
@@ -1594,6 +1600,58 @@ def _draw_hand(gs: dict[str, Any]) -> None:
     _sort_hand_desc(hand)
 
 
+def _joker_end_of_round_effects(gs: dict[str, Any]) -> dict[str, Any]:
+    """Fire joker end_of_round context + perishable/rental processing.
+
+    Vanilla's end_round (state_events.lua:96-110) runs this for EVERY
+    round outcome — wins AND losses (game_over is a flag inside the
+    context; Turtle Bean decays, Egg gains, rentals charge as you die).
+    Dollars returned here are only ever banked via the cash-out screen,
+    which a lost run never reaches.
+    """
+    from jackdaw.engine.jokers import GameSnapshot, on_end_of_round
+    from jackdaw.engine.round_lifecycle import process_round_end_cards
+
+    cr = gs.get("current_round", {})
+    jokers = gs.get("jokers", [])
+    rng = gs.get("rng")
+
+    # Cards have not yet returned to the deck here, so the full owned set
+    # spans all four piles (matches vanilla's G.playing_cards).
+    _all_owned = (
+        gs.get("deck", []) + gs.get("hand", [])
+        + gs.get("discard_pile", []) + gs.get("played_cards_area", [])
+    )
+    game_snap = GameSnapshot(
+        money=gs.get("dollars", 0),
+        hands_left=cr.get("hands_left", 0),
+        discards_left=cr.get("discards_left", 0),
+        # Delayed Gratification pays ONLY when no discard was used this
+        # round (card.lua:1675).
+        discards_used=cr.get("discards_used", 0),
+        # Cloud 9 pays per 9 in the full deck; get_id() == 9 excludes
+        # Stone cards, matching Card:update's tally (card.lua:4192).
+        nine_tally=sum(1 for c in _all_owned if c.get_id() == 9),
+        joker_count=len(jokers),
+    )
+    eor = on_end_of_round(jokers, game_snap, rng, hand_levels=gs.get("hand_levels"))
+    # Dollars are NOT banked here: vanilla pays the whole round total in
+    # one ease_dollars at the cash-out press, with interest computed on
+    # pre-payout money.  The value flows to calculate_round_earnings.
+    for removed_joker in eor.get("jokers_removed", []):
+        if removed_joker in jokers:
+            jokers.remove(removed_joker)
+            removed_joker.remove_from_deck(gs)
+            _release_used_key(gs, removed_joker)
+    # End-of-round joker mutations (Turtle Bean's per-round hand-size decay)
+    for mut in eor.get("mutations", []):
+        if mut.get("hand_size_delta"):
+            gs["hand_size"] = gs.get("hand_size", 8) + mut["hand_size_delta"]
+
+    process_round_end_cards(jokers, gs)
+    return eor
+
+
 def _round_won(gs: dict[str, Any]) -> None:
     """Handle winning a round — transition to ROUND_EVAL.
 
@@ -1620,53 +1678,11 @@ def _round_won(gs: dict[str, Any]) -> None:
     rng = gs.get("rng")
 
     # ------------------------------------------------------------------
-    # 1. Fire joker end_of_round context
+    # 1-2. Joker end_of_round effects + perishable/rental — shared with
+    # the LOSS path (vanilla's end_round fires these for every outcome,
+    # state_events.lua:96-110).
     # ------------------------------------------------------------------
-    from jackdaw.engine.jokers import GameSnapshot, on_end_of_round
-
-    # Cards have not yet returned to the deck here, so the full owned set
-    # spans all four piles (matches vanilla's G.playing_cards).
-    _all_owned = (
-        gs.get("deck", []) + gs.get("hand", [])
-        + gs.get("discard_pile", []) + gs.get("played_cards_area", [])
-    )
-    game_snap = GameSnapshot(
-        money=gs.get("dollars", 0),
-        hands_left=cr.get("hands_left", 0),
-        discards_left=cr.get("discards_left", 0),
-        # Delayed Gratification pays ONLY when no discard was used this
-        # round (card.lua:1675) — omitting this defaulted it to 0 and paid
-        # out every round with discards remaining.
-        discards_used=cr.get("discards_used", 0),
-        # Cloud 9 pays per 9 in the full deck; get_id() == 9 excludes
-        # Stone cards, matching Card:update's tally (card.lua:4192).
-        nine_tally=sum(1 for c in _all_owned if c.get_id() == 9),
-        joker_count=len(jokers),
-    )
-    eor = on_end_of_round(jokers, game_snap, rng, hand_levels=gs.get("hand_levels"))
-    # Joker end-of-round dollars are NOT banked here: vanilla pays the
-    # whole round total (blind + hands + joker $ + interest) in one
-    # ease_dollars at the cash-out press, and interest is computed on the
-    # money held BEFORE any payout.  Banking here (a) double-paid once
-    # earnings.total (which includes joker_dollars) landed at cash_out,
-    # and (b) inflated the interest base.  The value flows into
-    # calculate_round_earnings via joker_dollars below.  Found by
-    # lockstep: sim +$4 at ROUND_EVAL with Cloud 9 (live pays at cash-out).
-    # Remove self-destructed jokers (Popcorn, Turtle Bean, etc.)
-    for removed_joker in eor.get("jokers_removed", []):
-        if removed_joker in jokers:
-            jokers.remove(removed_joker)
-            removed_joker.remove_from_deck(gs)
-            _release_used_key(gs, removed_joker)
-    # End-of-round joker mutations (Turtle Bean's per-round hand-size decay)
-    for mut in eor.get("mutations", []):
-        if mut.get("hand_size_delta"):
-            gs["hand_size"] = gs.get("hand_size", 8) + mut["hand_size_delta"]
-
-    # ------------------------------------------------------------------
-    # 2. Process perishable/rental
-    # ------------------------------------------------------------------
-    process_round_end_cards(jokers, gs)
+    eor = _joker_end_of_round_effects(gs)
 
     # ------------------------------------------------------------------
     # 3. Gold Seal: +$3 per held card with Gold Seal in hand
