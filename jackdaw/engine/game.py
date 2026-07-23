@@ -1349,6 +1349,31 @@ def _handle_pick_pack_card(
     if idx < 0 or idx >= len(pack_cards):
         raise IllegalActionError(f"Invalid pack card index {idx}")
 
+    # Targeting consumables demand their highlight count — the live game
+    # rejects e.g. a Chariot pick with no target ("requires exactly 1
+    # target card(s)"); the sim used to accept it as a silent no-op and
+    # burn the pick (found by lockstep).  Same bounds as
+    # can_use_consumable (min_highlighted..mod_num).
+    _pick = pack_cards[idx]
+    _ability = getattr(_pick, "ability", None) or {}
+    if _ability.get("set") in ("Tarot", "Spectral"):
+        from jackdaw.engine.card import _resolve_center
+
+        try:
+            _cfg = _resolve_center(_pick.center_key).get("config") or {}
+        except Exception:
+            _cfg = {}
+        if isinstance(_cfg, dict) and _cfg.get("max_highlighted"):
+            _max_h = _cfg["max_highlighted"]
+            _min_h = _cfg.get("min_highlighted", 1)
+            _mod_num = _cfg.get("mod_num", _max_h)
+            _n = len(targets or ())
+            if not (_min_h <= _n <= _mod_num):
+                raise IllegalActionError(
+                    f"{_pick.center_key} requires between {_min_h} and "
+                    f"{_mod_num} target card(s); provided {_n}"
+                )
+
     card = pack_cards[idx]
     card_set = _get_card_set(card)
 

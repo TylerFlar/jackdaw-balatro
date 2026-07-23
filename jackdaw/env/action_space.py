@@ -496,6 +496,35 @@ def get_consumable_target_info(
 # ---------------------------------------------------------------------------
 
 
+def _default_pick_targets(
+    game_state: dict[str, Any], pack_index: int
+) -> tuple[int, ...] | None:
+    """Default hand targets for a targeting pack pick (first min_h cards).
+
+    Returns None for non-targeting picks (planets, jokers, playing cards).
+    """
+    pack_cards = game_state.get("pack_cards", [])
+    if pack_index >= len(pack_cards):
+        return None
+    card = pack_cards[pack_index]
+    ability = getattr(card, "ability", None) or {}
+    if ability.get("set") not in ("Tarot", "Spectral"):
+        return None
+    from jackdaw.engine.card import _resolve_center
+
+    try:
+        cfg = _resolve_center(card.center_key).get("config") or {}
+    except Exception:
+        return None
+    if not isinstance(cfg, dict) or not cfg.get("max_highlighted"):
+        return None
+    min_h = cfg.get("min_highlighted", 1)
+    hand = game_state.get("hand", [])
+    if len(hand) < min_h:
+        return None
+    return tuple(range(min_h))
+
+
 def factored_to_engine_action(
     fa: FactoredAction,
     game_state: dict[str, Any],
@@ -586,8 +615,17 @@ def factored_to_engine_action(
     if at == ActionType.PickPackCard:
         if fa.entity_target is None:
             raise ValueError("PickPackCard requires entity_target")
+        targets = fa.card_target
+        if targets is None:
+            # Targeting tarot/spectral picks REQUIRE their highlight count
+            # (the engine now rejects bare picks, matching the live game).
+            # Agents that don't emit card targets get a default selection
+            # — the first min_highlighted dealt cards.
+            targets = _default_pick_targets(
+                game_state, fa.entity_target
+            )
         return EnginePickPackCard(
-            card_index=fa.entity_target, target_indices=fa.card_target
+            card_index=fa.entity_target, target_indices=targets
         )
 
     if at == ActionType.SwapJokersLeft:
