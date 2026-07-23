@@ -1636,8 +1636,14 @@ def _round_won(gs: dict[str, Any]) -> None:
         joker_count=len(jokers),
     )
     eor = on_end_of_round(jokers, game_snap, rng)
-    # Apply joker end-of-round dollars
-    gs["dollars"] = gs.get("dollars", 0) + eor.get("dollars_earned", 0)
+    # Joker end-of-round dollars are NOT banked here: vanilla pays the
+    # whole round total (blind + hands + joker $ + interest) in one
+    # ease_dollars at the cash-out press, and interest is computed on the
+    # money held BEFORE any payout.  Banking here (a) double-paid once
+    # earnings.total (which includes joker_dollars) landed at cash_out,
+    # and (b) inflated the interest base.  The value flows into
+    # calculate_round_earnings via joker_dollars below.  Found by
+    # lockstep: sim +$4 at ROUND_EVAL with Cloud 9 (live pays at cash-out).
     # Remove self-destructed jokers (Popcorn, Turtle Bean, etc.)
     for removed_joker in eor.get("jokers_removed", []):
         if removed_joker in jokers:
