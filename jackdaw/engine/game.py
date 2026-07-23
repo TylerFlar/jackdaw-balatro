@@ -1241,15 +1241,15 @@ def _handle_redeem_voucher(gs: dict[str, Any], idx: int) -> dict[str, Any]:
     _slots_before = gs.get("shop", {}).get("joker_max", 2)
     apply_voucher(card.center_key, gs)
 
-    # Slot-increasing vouchers (Overstock / Overstock Plus) fill their NEW
-    # slots immediately while the shop is open — live rolls a card into
-    # each at redemption time.  Only the DELTA: purchase-emptied slots
-    # stay empty (both behaviors lockstep-confirmed).
-    _slots_delta = gs.get("shop", {}).get("joker_max", 2) - _slots_before
-    if _slots_delta > 0:
+    # Overstock / Overstock Plus trigger a FULL shop refill to the new
+    # limit (purchase-emptied slots refill too — live rolled two cards
+    # when one slot was empty); non-slot vouchers refill nothing.
+    # All three behaviors lockstep-confirmed on live.
+    _new_max = gs.get("shop", {}).get("joker_max", 2)
+    if _new_max > _slots_before:
         from jackdaw.engine.shop import fill_shop_slots
 
-        fill_shop_slots(gs, _slots_delta)
+        fill_shop_slots(gs, _new_max - len(gs.get("shop_cards", [])))
 
     # Clear the voucher slot so the next shop doesn't re-offer it.
     # Matches card.lua:1850: G.GAME.current_round.voucher = nil
