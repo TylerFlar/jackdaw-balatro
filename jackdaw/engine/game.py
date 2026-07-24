@@ -2414,6 +2414,21 @@ def _resolve_create_descriptors(gs: dict[str, Any], descriptors: list[dict[str, 
         count = desc.get("count", 1)
 
         for _ in range(count):
+            # Room check BEFORE resolving: vanilla gates create_card on
+            # area room in the caller's condition chain, so at full
+            # slots NO pool/edition streams are consumed.  Resolving
+            # then dropping desynced the 'Tarotvag' stream
+            # (live-verified: LSEEC4W8 — sim burned a roll at full
+            # slots and created c_lovers where live created the
+            # c_wheel_of_fortune the sim had wasted).
+            desc_type = desc.get("type", "")
+            if desc_type in ("Tarot", "Planet", "Spectral"):
+                if len(consumables) >= gs.get("consumable_slots", 2):
+                    continue
+            elif desc_type == "Joker":
+                if len(jokers) >= gs.get("joker_slots", 5):
+                    continue
+
             card = resolve_create_descriptor(desc, rng, ante, gs)
             if card is None:
                 continue
