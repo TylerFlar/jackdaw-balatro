@@ -810,3 +810,22 @@ class TestStoreJokerCreateTag:
         free_unc = [c for c in gs["shop_cards"]
                     if c.center_key in uncommons and c.cost == 0]
         assert free_unc, [(c.center_key, c.cost) for c in gs["shop_cards"]]
+
+
+class TestChaosMidShop:
+    """Chaos the Clown bought mid-shop grants its free reroll immediately
+    (card.lua:601-603) — regression for the wrong-slot write AND the
+    calculate_reroll_cost signature crash the first fix introduced."""
+
+    def test_add_grants_free_reroll_and_zeroes_cost(self):
+        from jackdaw.engine.card_factory import create_joker
+
+        gs = _init_gs("CHAOS_MS")
+        gs["phase"] = GamePhase.SHOP
+        gs["current_round"]["free_rerolls"] = 0
+        c = create_joker("j_chaos")
+        c.add_to_deck(gs)
+        assert gs["current_round"]["free_rerolls"] == 1
+        assert gs["current_round"]["reroll_cost"] == 0
+        c.remove_from_deck(gs)
+        assert gs["current_round"]["free_rerolls"] == 0

@@ -773,7 +773,7 @@ class Card:
             cr["free_rerolls"] = cr.get("free_rerolls", 0) + 1
             from jackdaw.engine.shop import calculate_reroll_cost
 
-            calculate_reroll_cost(game_state, skip_increment=True)
+            calculate_reroll_cost(game_state)
         if name == "Turtle Bean" and isinstance(extra, dict):
             game_state["hand_size"] = game_state.get("hand_size", 0) + extra.get("h_size", 0)
         if name == "Oops! All 6s":
@@ -822,7 +822,7 @@ class Card:
             cr["free_rerolls"] = max(0, cr.get("free_rerolls", 0) - 1)
             from jackdaw.engine.shop import calculate_reroll_cost
 
-            calculate_reroll_cost(game_state, skip_increment=True)
+            calculate_reroll_cost(game_state)
         if name == "Turtle Bean" and isinstance(extra, dict):
             game_state["hand_size"] = game_state.get("hand_size", 0) - extra.get("h_size", 0)
         if name == "Oops! All 6s":
