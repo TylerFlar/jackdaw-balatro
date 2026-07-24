@@ -1250,6 +1250,15 @@ def _handle_redeem_voucher(gs: dict[str, Any], idx: int) -> dict[str, Any]:
     _slots_before = gs.get("shop", {}).get("joker_max", 2)
     apply_voucher(card.center_key, gs)
 
+    # Voucher redeem runs vanilla's ALL-cards set_cost pass (G.I.CARD
+    # loop in Card:apply_to_run) — unlike ordinary shop actions it also
+    # restores couponed OWNED cards to their real costs (live-verified:
+    # LS6G1CWJ, Clearance Sale flipped two $0 tag jokers to $2/$3 with
+    # post-discount sell values).
+    for _owned in gs.get("jokers", []) + gs.get("consumables", []):
+        if hasattr(_owned, "ability"):
+            _owned.ability.pop("couponed", None)
+
     # Overstock / Overstock Plus trigger a FULL shop refill to the new
     # limit (purchase-emptied slots refill too — live rolled two cards
     # when one slot was empty); non-slot vouchers refill nothing.
