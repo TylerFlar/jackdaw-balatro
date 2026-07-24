@@ -253,19 +253,12 @@ class Blind:
                 if not check:
                     self.only_hand = handname
 
-        # The Arm: doesn't block, but sets triggered if hand level > 1
-        # (actual level-down happens in the scoring pipeline)
-        if self.name == "The Arm" and not self.disabled:
-            self.triggered = False
-            # We can't check hand level here without a HandLevels reference,
-            # so we just set a flag that the scoring pipeline will check
-            self.triggered = True  # conservatively flag; pipeline checks level
-
-        # The Ox: doesn't block, but sets triggered if most-played hand
-        # (actual money drain happens in the scoring pipeline)
-        if self.name == "The Ox" and not self.disabled:
-            self.triggered = False
-            # most_played check happens at the pipeline level
+        # The Arm / The Ox don't block; `triggered` is set by the
+        # scoring pipeline / play handler only when the effect actually
+        # fires (Arm: level > 1 demote — Matador reads it during
+        # joker_main, live-verified LS7N21KX; Ox: money drain).  The
+        # old conservative always-True Arm flag here would over-pay
+        # Matador on level-1 hands.
 
         return False
 

@@ -1373,8 +1373,16 @@ def _to_do_list(card: Card, ctx: JokerContext) -> JokerResult | None:
 
 @register("j_matador")
 def _matador(card: Card, ctx: JokerContext) -> JokerResult | None:
-    """Matador: +$8 when boss blind's debuff effect triggers. Source: card.lua:2736."""
-    if ctx.debuffed_hand and ctx.blind is not None and ctx.blind.triggered:
+    """Matador: +$8 when the boss blind's ability triggers this play.
+
+    Vanilla pays at TWO sites, both gated on blind.triggered (per-play
+    flag): the nope'd-hand path (card.lua:2736) and joker_main
+    (card.lua:3719) — the latter covers The Arm's level-down, Hook/Tooth
+    press_play effects, and debuffed scoring cards.  Live-verified:
+    LS7N21KX ($8 on The Arm).
+    """
+    triggered = ctx.blind is not None and getattr(ctx.blind, "triggered", False)
+    if (ctx.debuffed_hand or ctx.joker_main) and triggered:
         return JokerResult(dollars=card.ability.get("extra", 8))
     return None
 

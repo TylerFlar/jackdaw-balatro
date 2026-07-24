@@ -596,6 +596,9 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
     # ------------------------------------------------------------------
     blind = gs["blind"]
     rng = gs.get("rng")
+    # triggered is PER-PLAY state: vanilla clears it at every play
+    # (state_events.lua:455) and Matador reads it during joker_main.
+    blind.triggered = False
     _press_play(gs, blind, played, rng)
 
     # ------------------------------------------------------------------
@@ -2962,10 +2965,12 @@ def _press_play(
                 hooked.append(target)
         if hooked:
             _fire_discard_effects(gs, hooked, hook=True)
+        blind.triggered = True
 
     elif name == "The Tooth":
         # Lose $1 per card played
         gs["dollars"] = gs.get("dollars", 0) - len(played)
+        blind.triggered = True
 
     elif name == "The Fish":
         # Flip all hand cards face-down after play (blind.lua:494-496)

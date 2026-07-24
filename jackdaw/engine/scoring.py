@@ -525,6 +525,10 @@ def score_hand(
         and hand_levels[hand_type].level > 1
     ):
         hand_levels.level_up(hand_type, amount=-1)
+        # Boss ability fired this play — Matador reads this in
+        # joker_main (blind.lua sets self.triggered on the demote;
+        # live-verified: LS7N21KX paid $8 on The Arm).
+        blind.triggered = True
 
     # === Phase 3c: Splash — all played cards score ===
     splash_active = any(
@@ -585,6 +589,10 @@ def score_hand(
     # === Phase 7: Per scored card (with retriggers) ===
     for card in scoring_cards:
         if card.debuff:
+            # A debuffed scoring card counts as the boss ability firing
+            # (state_events.lua:656 sets blind.triggered) — Matador pays.
+            if blind is not None:
+                blind.triggered = True
             continue
 
         # 7a: Collect retriggers (seal + joker)
