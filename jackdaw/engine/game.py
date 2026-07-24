@@ -1250,14 +1250,15 @@ def _handle_redeem_voucher(gs: dict[str, Any], idx: int) -> dict[str, Any]:
     _slots_before = gs.get("shop", {}).get("joker_max", 2)
     apply_voucher(card.center_key, gs)
 
-    # Voucher redeem runs vanilla's ALL-cards set_cost pass (G.I.CARD
-    # loop in Card:apply_to_run) — unlike ordinary shop actions it also
-    # restores couponed OWNED cards to their real costs (live-verified:
-    # LS6G1CWJ, Clearance Sale flipped two $0 tag jokers to $2/$3 with
-    # post-discount sell values).
-    for _owned in gs.get("jokers", []) + gs.get("consumables", []):
-        if hasattr(_owned, "ability"):
-            _owned.ability.pop("couponed", None)
+    # ONLY Clearance Sale / Liquidation run vanilla's ALL-cards set_cost
+    # pass (card.lua:1917-1923) — that pass also restores couponed OWNED
+    # cards to their real costs (live-verified both ways: LS6G1CWJ's
+    # Clearance Sale flipped two $0 tag jokers to $2/$3, while
+    # LS1Z615Y's non-price voucher left a foil-tag $0 joker untouched).
+    if card.center_key in ("v_clearance_sale", "v_liquidation"):
+        for _owned in gs.get("jokers", []) + gs.get("consumables", []):
+            if hasattr(_owned, "ability"):
+                _owned.ability.pop("couponed", None)
 
     # Overstock / Overstock Plus trigger a FULL shop refill to the new
     # limit (purchase-emptied slots refill too — live rolled two cards
@@ -1967,7 +1968,11 @@ def _fire_setting_blind(
         )
         result = calculate_joker(joker, ctx)
         if result and result.extra:
-            mutations.append(result.extra)
+            entry = dict(result.extra)
+            # Madness must exclude ITSELF from its destroy pool
+            # (card.lua: v ~= self) — record who fired the mutation.
+            entry["_source_joker"] = joker
+            mutations.append(entry)
 
     return mutations
 
@@ -1990,12 +1995,21 @@ def _apply_setting_blind_mutations(
                 for card in gs.get("deck", []):
                     card.debuff = False
 
-        # Madness: destroy random joker (not self)
+        # Madness: destroy a random OTHER joker.  Vanilla's pool excludes
+        # SELF, eternals, and getting_sliced cards, in board order
+        # (card.lua Madness branch).  The old jokers[0] exclusion picked
+        # from the wrong pool whenever Madness wasn't first
+        # (live-verified: LS5EUNSF destroyed j_square vs sim's
+        # j_red_card from the same 'madness' roll).
         if mut.get("destroy_random_joker") and len(jokers) > 1:
             if rng:
-                # Pick a random non-self joker to destroy
-
-                candidates = [j for j in jokers if j is not jokers[0]]
+                source = mut.get("_source_joker")
+                candidates = [
+                    j for j in jokers
+                    if j is not source
+                    and not getattr(j, "eternal", False)
+                    and not getattr(j, "getting_sliced", False)
+                ]
                 if candidates:
                     seed_val = rng.seed("madness")
                     target, _ = rng.element(candidates, seed_val)
