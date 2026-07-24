@@ -58,6 +58,7 @@ class GameSnapshot:
     ancient_suit: str | None = None
     castle_card_suit: str | None = None
     skips: int = 0
+    ante: int = 1
 
 
 _DEFAULT_GAME = GameSnapshot()
@@ -2120,10 +2121,14 @@ def _hallucination(card: Card, ctx: JokerContext) -> JokerResult | None:
     if ctx.open_booster:
         odds = card.ability.get("extra", 2)
         if ctx.rng is not None:
-            if ctx.rng.random("hallucination") < ctx.game.probabilities_normal / odds:
+            # Vanilla key is 'halu'+ante (card.lua:2335); the roll is
+            # consumed even when consumable slots are full (left-to-right
+            # `and` chain — the room check comes after the roll).
+            roll = ctx.rng.random("halu" + str(ctx.game.ante))
+            if roll < ctx.game.probabilities_normal / odds:
                 return JokerResult(
                     extra={
-                        "create": {"type": "Tarot", "key": "hal"},
+                        "create": {"type": "Tarot", "count": 1, "seed": "hal"},
                     }
                 )
     return None

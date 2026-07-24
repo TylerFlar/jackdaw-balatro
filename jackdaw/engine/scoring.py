@@ -192,12 +192,11 @@ def score_hand_base(
     """
     from jackdaw.engine.hand_eval import evaluate_hand
 
-    _ = joker_flags  # reserved for future joker flag passing
     dollars = 0
     breakdown: list[str] = []
 
     # === Phase 1-2: Hand detection ===
-    eval_result = evaluate_hand(played_cards, jokers=None)
+    eval_result = evaluate_hand(played_cards, jokers=None, flag_overrides=joker_flags)
     hand_type = eval_result.detected_hand
     scoring_cards = eval_result.scoring_cards
     poker_hands = eval_result.poker_hands
@@ -455,7 +454,10 @@ def score_hand(
     )
 
     # === Phase 1-2: Hand detection ===
-    eval_result = evaluate_hand(played_cards, jokers=None)
+    # Detection MUST see the live joker list: Four Fingers / Shortcut /
+    # Smeared change which hand is detected (vanilla evaluate_poker_hand
+    # reads find_joker() globals, misc_functions.lua:376-380).
+    eval_result = evaluate_hand(played_cards, jokers=jokers)
     hand_type = eval_result.detected_hand
     scoring_cards = eval_result.scoring_cards
     poker_hands = eval_result.poker_hands

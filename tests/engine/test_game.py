@@ -829,3 +829,164 @@ class TestChaosMidShop:
         assert gs["current_round"]["reroll_cost"] == 0
         c.remove_from_deck(gs)
         assert gs["current_round"]["free_rerolls"] == 0
+
+
+class TestHandDetectionJokerFlags:
+    """Bug #27: score_hand called evaluate_hand(jokers=None), so Four
+    Fingers / Shortcut / Smeared never affected hand DETECTION on the
+    organic play path (live-verified: LS9X3EVM smeared flush, LSIMZGYW
+    shortcut straight)."""
+
+    def _score(self, cards, jokers):
+        from jackdaw.engine.blind import Blind
+        from jackdaw.engine.hand_levels import HandLevels
+        from jackdaw.engine.rng import PseudoRandom
+        from jackdaw.engine.scoring import score_hand
+
+        return score_hand(
+            played_cards=cards,
+            held_cards=[],
+            jokers=jokers,
+            hand_levels=HandLevels(),
+            blind=Blind.create("bl_small", 1),
+            rng=PseudoRandom("FLAGTEST"),
+        )
+
+    @staticmethod
+    def _pc(suit, rank):
+        from jackdaw.engine.card_factory import create_playing_card
+        from jackdaw.engine.data.enums import Rank, Suit
+
+        return create_playing_card(Suit(suit), Rank(rank))
+
+    def test_smeared_enables_mixed_red_flush(self):
+        from jackdaw.engine.card_factory import create_joker
+
+        cards = [self._pc("Hearts", "2"), self._pc("Diamonds", "5"),
+                 self._pc("Hearts", "7"), self._pc("Diamonds", "9"),
+                 self._pc("Hearts", "King")]
+        assert self._score(cards, []).hand_type == "High Card"
+        smeared = create_joker("j_smeared")
+        assert self._score(cards, [smeared]).hand_type == "Flush"
+
+    def test_shortcut_enables_gapped_straight(self):
+        from jackdaw.engine.card_factory import create_joker
+
+        cards = [self._pc("Hearts", "3"), self._pc("Spades", "4"),
+                 self._pc("Clubs", "6"), self._pc("Hearts", "7"),
+                 self._pc("Diamonds", "9")]
+        assert self._score(cards, []).hand_type == "High Card"
+        shortcut = create_joker("j_shortcut")
+        assert self._score(cards, [shortcut]).hand_type == "Straight"
+
+
+class TestBurglarOnBlindSelect:
+    """Bug #28: setting_blind fired BEFORE start_round, whose counter
+    reset wiped Burglar's +3 hands / 0 discards (vanilla order:
+    state_events.lua:296-297 reset, then line 336 joker loop).
+    Live-verified: LS4GK4C4."""
+
+    def test_burglar_hands_and_discards_survive_select(self):
+        from jackdaw.engine.card_factory import create_joker
+
+        gs = _init_gs("BURGLAR1")
+        j = create_joker("j_burglar")
+        gs["jokers"] = [j]
+        j.add_to_deck(gs)
+        step(gs, SelectBlind())
+        assert gs["current_round"]["hands_left"] == 7
+        assert gs["current_round"]["discards_left"] == 0
+
+
+class TestVoucherTagAddsShopVoucher:
+    """Bug #29: voucher_add was unwired — Voucher Tag never added its
+    extra shop voucher ('Voucher_fromtag' stream, tag.lua:302-318).
+    Live-verified: LS1UBIP7."""
+
+    def test_voucher_tag_second_voucher_in_shop(self):
+        gs = _init_gs("VTAG1")
+        gs.setdefault("awarded_tags", []).append({"key": "tag_voucher"})
+        step(gs, SelectBlind())
+        gs["chips"] = 10**9
+        step(gs, PlayHand(card_indices=(0,)))
+        step(gs, CashOut())
+        assert len(gs["shop_vouchers"]) == 2
+        # not free — vanilla tag vouchers are purchasable at full price
+        assert all(v.cost > 0 for v in gs["shop_vouchers"])
+        assert gs["awarded_tags"][0].get("shop_fired") is True
+
+
+class TestHallucinationOnPackOpen:
+    """Bug #30: Hallucination rolled a nonexistent 'hallucination'
+    stream (vanilla: 'halu'+ante, card.lua:2335) and the open_booster
+    mutations were discarded. Live-verified: LS6TA2OU (c_hanged_man)."""
+
+    def test_hallucination_roll_and_create(self):
+        from jackdaw.engine.card_factory import create_joker
+        from jackdaw.engine.rng import PseudoRandom
+
+        # find a seed whose first 'halu1' roll passes (< 0.5)
+        seed = next(s for s in ("HAL1", "HAL2", "HAL3", "HAL4", "HAL5")
+                    if PseudoRandom(s).random("halu1") < 0.5)
+        gs = _setup_shop(seed)
+        j = create_joker("j_hallucination")
+        gs["jokers"] = [j]
+        j.add_to_deck(gs)
+        gs["shop_boosters"] = gs.get("shop_boosters") or []
+        if not gs["shop_boosters"]:
+            pytest.skip("no booster in shop for this seed")
+        gs["dollars"] = 50
+        step(gs, OpenBooster(card_index=0))
+        assert len(gs.get("consumables", [])) == 1
+        assert gs["consumables"][0].ability.get("set") == "Tarot"
+
+
+class TestConsumableUsageTotals:
+    """Bug #31: consumable_usage_total['tarot'] had no writer — Fortune
+    Teller always read 0 (vanilla set_consumeable_usage,
+    misc_functions.lua:1184). Live-verified: LSVBDNCC (off-by-one mult)."""
+
+    def test_tarot_use_increments_totals(self):
+        from jackdaw.engine.card_factory import create_consumable
+
+        gs = _init_gs("USAGE1")
+        step(gs, SelectBlind())
+        tarot = create_consumable("c_temperance")  # no targets, pays $
+        gs["consumables"] = [tarot]
+        step(gs, UseConsumable(card_index=0))
+        totals = gs["consumable_usage_total"]
+        assert totals["tarot"] == 1
+        assert totals["tarot_planet"] == 1
+        assert totals["all"] == 1
+        assert gs["consumable_usage"]["c_temperance"]["count"] == 1
+
+
+class TestPillarPlayedThisAnte:
+    """Bug #32: played_this_ante was never cleared at boss defeat
+    (vanilla state_events.lua:266) — The Pillar debuffed cards played
+    in PREVIOUS antes. Live-verified: LSOL9RKQ."""
+
+    def test_flags_cleared_at_boss_defeat_only(self):
+        gs = _init_gs("PILLAR1")
+        gs["chips_target_override"] = None
+        # Small blind: play one hand, win, check flags survive
+        step(gs, SelectBlind())
+        gs["chips"] = 10**9
+        played_cards = [gs["hand"][i] for i in range(3)]
+        step(gs, PlayHand(card_indices=(0, 1, 2)))
+        assert all(c.ability.get("played_this_ante") for c in played_cards)
+        step(gs, CashOut())
+        step(gs, NextRound())
+        # Big blind: flags still set (cleared at BOSS defeat only)
+        step(gs, SelectBlind())
+        assert all(c.ability.get("played_this_ante") for c in played_cards)
+        gs["chips"] = 10**9
+        step(gs, PlayHand(card_indices=(0, 1, 2)))
+        step(gs, CashOut())
+        step(gs, NextRound())
+        # Boss: win it -> every flag cleared
+        step(gs, SelectBlind())
+        gs["chips"] = 10**9
+        step(gs, PlayHand(card_indices=(0, 1, 2)))
+        deck_all = (gs["deck"] + gs.get("hand", []) + gs.get("discard_pile", []))
+        assert not any(c.ability.get("played_this_ante") for c in deck_all)

@@ -332,7 +332,40 @@ def use_consumable(
     handler = _CONSUMABLE_REGISTRY.get(card.center_key)
     if handler is None:
         return None
-    return handler(card, context)
+    result = handler(card, context)
+    if result is not None:
+        _track_consumable_usage(card, context)
+    return result
+
+
+def _track_consumable_usage(card: Card, ctx: ConsumableContext) -> None:
+    """Run-total usage tracking — ``set_consumeable_usage``
+    (misc_functions.lua:1184, called from card.lua:1093 on every
+    non-copied use, INCLUDING pack picks).
+
+    ``consumeable_usage_total.tarot`` feeds Fortune Teller; per-key
+    counts mirror ``G.GAME.consumeable_usage``.
+    """
+    gs = ctx.game_state
+    if gs is None or not card.center_key:
+        return
+    card_set = card.ability.get("set", "")
+    usage = gs.setdefault("consumable_usage", {})
+    entry = usage.setdefault(card.center_key, {"count": 0, "set": card_set})
+    entry["count"] += 1
+    totals = gs.setdefault(
+        "consumable_usage_total",
+        {"tarot": 0, "planet": 0, "spectral": 0, "tarot_planet": 0, "all": 0},
+    )
+    if card_set == "Tarot":
+        totals["tarot"] += 1
+        totals["tarot_planet"] += 1
+    elif card_set == "Planet":
+        totals["planet"] += 1
+        totals["tarot_planet"] += 1
+    elif card_set == "Spectral":
+        totals["spectral"] += 1
+    totals["all"] += 1
 
 
 # ---------------------------------------------------------------------------
@@ -619,26 +652,15 @@ _ALL_HAND_TYPES: list[str] = list(_PLANET_HAND.values())
 
 
 def _track_planet_usage(card: Card, ctx: ConsumableContext) -> None:
-    """Mutate ctx.game_state to track planet usage (mirrors set_consumeable_usage).
+    """Set last_tarot_planet for The Fool.
 
-    Updates consumable_usage_total.planet, .all and last_tarot_planet.
+    Set-based usage totals are tracked centrally in
+    :func:`_track_consumable_usage` (use_consumable) — counting here
+    too would double-count planets.
     """
     gs = ctx.game_state
     if gs is None:
         return
-    totals = gs.setdefault(
-        "consumable_usage_total",
-        {
-            "tarot": 0,
-            "planet": 0,
-            "spectral": 0,
-            "tarot_planet": 0,
-            "all": 0,
-        },
-    )
-    totals["planet"] = totals.get("planet", 0) + 1
-    totals["tarot_planet"] = totals.get("tarot_planet", 0) + 1
-    totals["all"] = totals.get("all", 0) + 1
     gs["last_tarot_planet"] = card.center_key
 
 
@@ -664,22 +686,10 @@ def _black_hole(card: Card, ctx: ConsumableContext) -> ConsumableResult:
     """Black Hole: level up ALL 12 hand types by 1.
 
     Source: card.lua:1175 — iterates G.GAME.hands and calls level_up_hand.
+    Usage totals are tracked centrally in use_consumable.
     """
     gs = ctx.game_state
     if gs is not None:
-        totals = gs.setdefault(
-            "consumable_usage_total",
-            {
-                "tarot": 0,
-                "planet": 0,
-                "spectral": 0,
-                "tarot_planet": 0,
-                "all": 0,
-            },
-        )
-        totals["planet"] = totals.get("planet", 0) + 1
-        totals["tarot_planet"] = totals.get("tarot_planet", 0) + 1
-        totals["all"] = totals.get("all", 0) + 1
         gs["last_tarot_planet"] = card.center_key
     return ConsumableResult(
         level_up=[(ht, 1) for ht in _ALL_HAND_TYPES],

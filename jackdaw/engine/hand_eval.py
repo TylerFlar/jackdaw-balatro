@@ -459,6 +459,7 @@ class HandEvalResult:
 def evaluate_hand(
     played_cards: list[Card],
     jokers: list[Card] | None = None,
+    flag_overrides: dict[str, bool] | None = None,
 ) -> HandEvalResult:
     """Complete hand evaluation pipeline.
 
@@ -480,11 +481,15 @@ def evaluate_hand(
         played_cards: Cards the player chose to play (1-5 cards).
         jokers: Active joker cards (for modifier flag extraction).
             Pass ``None`` or ``[]`` if no jokers.
+        flag_overrides: Explicit flag values merged over the extracted
+            ones (for callers that pre-compute flags without Card objects).
     """
     from jackdaw.engine.data.hands import HAND_ORDER
 
     joker_list = jokers or []
     flags = get_hand_eval_flags(joker_list)
+    if flag_overrides:
+        flags.update(flag_overrides)
 
     # Detection flags for evaluate_poker_hand (only 3 of 5 flags apply)
     results = evaluate_poker_hand(

@@ -183,22 +183,24 @@ def _handle_select_blind(gs: dict[str, Any]) -> dict[str, Any]:
     gs["round"] = gs.get("round", 0) + 1
 
     # ------------------------------------------------------------------
-    # 2. Fire joker setting_blind context
+    # 2. Start round (reset counters, targeting cards)
+    #    Vanilla new_round() resets hands/discards (state_events.lua:296-297)
+    #    BEFORE the joker setting_blind loop (line 336) — Burglar et al.
+    #    mutate the freshly-reset counters.  Boss effects (The Water /
+    #    Needle) then decrement from the post-joker values.
+    # ------------------------------------------------------------------
+    start_round(gs)
+
+    # ------------------------------------------------------------------
+    # 3. Fire joker setting_blind context
     # ------------------------------------------------------------------
     jokers: list = gs.get("jokers", [])
     setting_mutations = _fire_setting_blind(gs, jokers, blind)
 
     # ------------------------------------------------------------------
-    # 3. Process setting_blind side-effects
+    # 4. Process setting_blind side-effects
     # ------------------------------------------------------------------
     _apply_setting_blind_mutations(gs, setting_mutations, jokers)
-
-    # ------------------------------------------------------------------
-    # 4. Start round (reset counters, targeting cards)
-    #    Must run BEFORE boss effects so that The Water/Needle/etc.
-    #    can decrement from the freshly-set values.
-    # ------------------------------------------------------------------
-    start_round(gs)
 
     # ------------------------------------------------------------------
     # 5. Boss blind set-time effects (blind.lua:157-209)
@@ -839,7 +841,7 @@ def _handle_discard(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str, A
             if hand_levels is not None:
                 from jackdaw.engine.hand_eval import evaluate_hand
 
-                det = evaluate_hand(discarded)
+                det = evaluate_hand(discarded, jokers=jokers)
                 if det.detected_hand and det.detected_hand != "NULL":
                     hand_levels.level_up(det.detected_hand)
 
@@ -1322,8 +1324,18 @@ def _handle_open_booster(gs: dict[str, Any], idx: int) -> dict[str, Any]:
         _sort_hand_desc(combined_hand)
         gs["hand"] = combined_hand
 
-    # Fire open_booster joker context (Hallucination creates Tarot)
-    _fire_shop_joker_context(gs, open_booster=True)
+    # Fire open_booster joker context (Hallucination creates Tarot).
+    # Vanilla gates the creation on consumable room INSIDE the same
+    # condition chain (card.lua:2335) — the 'halu' roll is consumed
+    # either way (handler side), but at full slots no create fires and
+    # the Tarot pool streams stay untouched.
+    for mut in _fire_shop_joker_context(gs, open_booster=True):
+        desc = mut.get("create")
+        if desc and (
+            desc.get("type") not in ("Tarot", "Planet", "Spectral")
+            or len(gs.get("consumables", [])) < gs.get("consumable_slots", 2)
+        ):
+            _resolve_create_descriptors(gs, [desc])
 
     gs["phase"] = GamePhase.PACK_OPENING
     return gs
@@ -1632,7 +1644,7 @@ def _draw_hand(gs: dict[str, Any]) -> None:
             if check_flip and blind.stay_flipped(
                 card,
                 rng=gs.get("rng"),
-                probabilities_normal=gs.get("probabilities_normal", 1.0),
+                probabilities_normal=gs.get("probabilities", {}).get("normal", 1.0),
                 hands_played=gs.get("current_round", {}).get("hands_played", 0),
                 discards_used=gs.get("current_round", {}).get("discards_used", 0),
                 pareidolia=pareidolia,
@@ -1836,6 +1848,13 @@ def _round_won(gs: dict[str, Any]) -> None:
         # Boss beaten — check win, advance ante
         if rr["ante"] >= gs.get("win_ante", 8):
             gs["won"] = True
+        # Clear per-ante play tracking (The Pillar): vanilla nils
+        # played_this_ante on every playing card at boss defeat only
+        # (state_events.lua:266).
+        for card in deck:
+            ability = getattr(card, "ability", None)
+            if isinstance(ability, dict):
+                ability.pop("played_this_ante", None)
         _advance_ante(gs)
         gs["blind_on_deck"] = "Small"
 
@@ -2439,11 +2458,12 @@ def _fire_shop_tags(gs: dict[str, Any], rerolled: bool) -> None:
       become free (shop entry only).
     * ``shop_start`` — D6 Tag: rerolls start free (shop entry only).
 
-    ``store_joker_create`` (Rare/Uncommon Tag) and ``voucher_add``
-    (Voucher Tag) remain unwired: both replace RNG-consuming rolls at
-    creation time, so a faithful implementation needs live validation to
-    pin stream behavior first. Those tags stay pending and inert rather
-    than risking a new stream divergence.
+    * ``voucher_add`` — Voucher Tag: an extra purchasable voucher rolled
+      on the dedicated ``'Voucher_fromtag'`` stream (shop entry only;
+      live-validated via lockstep seed LS1UBIP7).
+
+    ``store_joker_create`` (Rare/Uncommon Tag) is wired separately via
+    :func:`~jackdaw.engine.shop.apply_store_joker_create_tag`.
     """
     from jackdaw.engine.tags import Tag
 
@@ -2480,6 +2500,36 @@ def _fire_shop_tags(gs: dict[str, Any], rerolled: bool) -> None:
 
         if rerolled:
             continue  # remaining hooks fire on shop entry only
+
+        # voucher_add — Voucher Tag adds an extra purchasable voucher
+        # (tag.lua:302-318).  Vanilla fires this after boosters on shop
+        # entry (game.lua:3161-3163); the roll uses the dedicated
+        # 'Voucher_fromtag' stream (common_events.lua:1903, no ante
+        # suffix), pool excludes used + currently-in-shop vouchers.
+        result = tag.apply("voucher_add", gs, rng=rng)
+        if result is not None and result.create_voucher and rng is not None:
+            from jackdaw.engine.card_factory import create_voucher
+            from jackdaw.engine.vouchers import get_next_voucher_key
+
+            in_shop = [
+                getattr(v, "center_key", None) or getattr(v, "key", "")
+                for v in gs.get("shop_vouchers", [])
+            ]
+            used_v = {k: True for k in gs.get("used_vouchers", [])}
+            ante = gs.get("round_resets", {}).get("ante", 1)
+            v_key = get_next_voucher_key(
+                rng, used_v, in_shop, from_tag=True, ante=ante
+            )
+            if v_key:
+                voucher = create_voucher(v_key)
+                voucher.set_cost(
+                    inflation=gs.get("inflation", 0),
+                    discount_percent=gs.get("discount_percent", 0),
+                    ante=ante,
+                )
+                gs.setdefault("shop_vouchers", []).append(voucher)
+            entry["shop_fired"] = True
+            continue
 
         result = tag.apply("shop_final_pass", gs, rng=rng)
         if result is not None and result.coupon:
@@ -2574,6 +2624,8 @@ def _fire_shop_joker_context(gs: dict[str, Any], **context_flags: Any) -> list[d
         joker_count=len(jokers),
         joker_slots=gs.get("joker_slots", 5),
         money=gs.get("dollars", 0),
+        probabilities_normal=gs.get("probabilities", {}).get("normal", 1.0),
+        ante=gs.get("round_resets", {}).get("ante", 1),
     )
 
     # Extract 'cards' from flags if present (for playing_card_added)
