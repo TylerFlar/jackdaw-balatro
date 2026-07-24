@@ -65,6 +65,7 @@ def select_shop_card_type(
     planet_rate: float = 4.0,
     spectral_rate: float = 0.0,
     playing_card_rate: float = 0.0,
+    has_illusion: bool = False,
 ) -> str:
     """Select what type of card fills a shop joker slot.
 
@@ -118,6 +119,15 @@ def select_shop_card_type(
 
     poll = rng.random("cdt" + str(ante)) * total
 
+    # With Illusion owned, vanilla's rate table evaluates the playing-card
+    # slot type EAGERLY for every slot (UI_definitions.lua:772): one
+    # 'illusion' pull per slot regardless of what the slot lands on.
+    pc_type = "Base"
+    if has_illusion:
+        pc_type = "Enhanced" if rng.random("illusion") > 0.6 else "Base"
+
+    # Vanilla order: Joker, Tarot, Planet, playing card, Spectral
+    # (UI_definitions.lua:768-774).
     if poll < joker_rate:
         return TYPE_JOKER
     poll -= joker_rate
@@ -130,96 +140,35 @@ def select_shop_card_type(
         return TYPE_PLANET
     poll -= planet_rate
 
-    if poll < spectral_rate:
-        return TYPE_SPECTRAL
+    if poll < playing_card_rate:
+        return pc_type
 
-    return TYPE_PLAYING_CARD
+    return TYPE_SPECTRAL
 
 
 # ---------------------------------------------------------------------------
-# Illusion voucher modifiers — UI_definitions.lua:~780
+# Illusion voucher shop edition — UI_definitions.lua:786-794
 # ---------------------------------------------------------------------------
 
-# Probability thresholds
-_ILLUSION_ENH_THRESHOLD = 0.4  # roll > 0.4 → enhanced (60% chance)
-_ILLUSION_EDI_CHANCE_THRESHOLD = 0.8  # roll > 0.8 → get edition (20% chance)
 
-# Edition distribution for Illusion: Foil 50%, Holo 35%, Poly 15%
-# Evaluated top-down: Poly > 0.85, Holo > 0.5, else Foil
-_ILLUSION_POLY_THRESHOLD = 0.85
-_ILLUSION_HOLO_THRESHOLD = 0.5
+def apply_illusion_shop_edition(rng: PseudoRandom, card: Any) -> None:
+    """Post-creation Illusion edition rolls for a shop playing card.
 
-
-def roll_illusion_modifiers(
-    rng: PseudoRandom,
-    ante: int,
-    *,
-    append: str = "",
-) -> dict[str, Any]:
-    """Roll Illusion voucher modifiers for a playing card drawn from the shop.
-
-    Mirrors the Illusion-specific path in ``create_card_for_shop``
-    (``UI_definitions.lua``).
-
-    Probabilities
-    ~~~~~~~~~~~~~
-    * **60%** the card receives a random enhancement (one of the 8 standard
-      playing-card enhancements); otherwise base card.
-    * **20%** the card receives a random edition:
-      Foil 50 %, Holo 35 %, Polychrome 15 %.
-    * Seal is not determined here — deferred to the post-creation hook pass.
-
-    RNG streams consumed (always, for determinism):
-
-    1. ``'illusion_enh' + append + str(ante)`` — enhancement chance roll
-    2. ``'illusion_enh_pick' + append + str(ante)`` — enhancement selection
-       (seeded via :meth:`~jackdaw.engine.rng.PseudoRandom.seed` passed to
-       :meth:`~jackdaw.engine.rng.PseudoRandom.element`) — consumed only
-       when enhancement is granted
-    3. ``'illusion_edi_chance' + append + str(ante)`` — edition chance roll
-    4. ``'illusion_edi' + append + str(ante)`` — edition type roll (consumed
-       only when edition is granted)
-
-    Parameters
-    ----------
-    rng:
-        Live :class:`~jackdaw.engine.rng.PseudoRandom` instance.
-    ante:
-        Current ante number.
-    append:
-        Optional seed-key suffix for context disambiguation.
-
-    Returns
-    -------
-    dict
-        Dict with zero or more of the following keys:
-
-        * ``'enhancement'`` : str — e.g. ``'m_glass'``
-        * ``'edition'`` : dict — e.g. ``{'foil': True}``
+    Vanilla (UI_definitions.lua:786-794): with Illusion owned, after a
+    Base/Enhanced shop card is created, one ``'illusion'`` pull decides
+    whether it gets an edition (> 0.8), and if so a second ``'illusion'``
+    pull picks it: polychrome > 0.85, holo > 0.5, else foil.  Both pulls
+    come from the SAME plain ``'illusion'`` stream as the slot-type roll
+    (no ante suffix).
     """
-    result: dict[str, Any] = {}
-
-    suffix = append + str(ante)
-
-    # -- Enhancement (60%) --
-    enh_roll = rng.random("illusion_enh" + suffix)
-    if enh_roll > _ILLUSION_ENH_THRESHOLD:
-        enh_seed = rng.seed("illusion_enh_pick" + suffix)
-        enhancement, _ = rng.element(_ENHANCEMENTS, enh_seed)
-        result["enhancement"] = enhancement
-
-    # -- Edition (20%) --
-    edi_chance = rng.random("illusion_edi_chance" + suffix)
-    if edi_chance > _ILLUSION_EDI_CHANCE_THRESHOLD:
-        edi_roll = rng.random("illusion_edi" + suffix)
-        if edi_roll > _ILLUSION_POLY_THRESHOLD:
-            result["edition"] = {"polychrome": True}
-        elif edi_roll > _ILLUSION_HOLO_THRESHOLD:
-            result["edition"] = {"holo": True}
+    if rng.random("illusion") > 0.8:
+        edition_poll = rng.random("illusion")
+        if edition_poll > 1 - 0.15:
+            card.set_edition({"polychrome": True})
+        elif edition_poll > 0.5:
+            card.set_edition({"holo": True})
         else:
-            result["edition"] = {"foil": True}
-
-    return result
+            card.set_edition({"foil": True})
 
 
 # ---------------------------------------------------------------------------
@@ -522,6 +471,7 @@ def populate_shop(
     banned_keys: set[str] = set(gs.get("banned_keys") or {})
 
     # -- 1. Joker slots --
+    has_illusion = bool((gs.get("used_vouchers") or {}).get("v_illusion"))
     jokers: list[_Card] = []
     for _ in range(shop_joker_max):
         tag_card = apply_store_joker_create_tag(gs, rng, ante)
@@ -536,6 +486,7 @@ def populate_shop(
             planet_rate=planet_rate,
             spectral_rate=spectral_rate,
             playing_card_rate=playing_card_rate,
+            has_illusion=has_illusion,
         )
         card = create_card(
             card_type,
@@ -549,6 +500,8 @@ def populate_shop(
             append=_SHOP_APPEND,
             game_state=gs,
         )
+        if card_type in ("Base", "Enhanced") and has_illusion:
+            apply_illusion_shop_edition(rng, card)
         jokers.append(card)
 
     # -- 2. Voucher --

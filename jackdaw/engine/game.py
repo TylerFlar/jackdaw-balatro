@@ -2569,7 +2569,11 @@ def _reroll_shop_cards(gs: dict[str, Any]) -> None:
     (``button_callbacks.lua:2855``).
     """
     from jackdaw.engine.card_factory import create_card
-    from jackdaw.engine.shop import select_shop_card_type
+    from jackdaw.engine.shop import (
+        apply_illusion_shop_edition,
+        apply_store_joker_create_tag,
+        select_shop_card_type,
+    )
 
     rng = gs.get("rng")
     if rng is None:
@@ -2582,8 +2586,7 @@ def _reroll_shop_cards(gs: dict[str, Any]) -> None:
 
     ante = gs.get("round_resets", {}).get("ante", 1)
     shop_joker_max: int = gs.get("shop", {}).get("joker_max", 2)
-
-    from jackdaw.engine.shop import apply_store_joker_create_tag
+    has_illusion = bool((gs.get("used_vouchers") or {}).get("v_illusion"))
 
     new_cards = []
     for _ in range(shop_joker_max):
@@ -2599,6 +2602,7 @@ def _reroll_shop_cards(gs: dict[str, Any]) -> None:
             planet_rate=gs.get("planet_rate", 4.0),
             spectral_rate=gs.get("spectral_rate", 0.0),
             playing_card_rate=gs.get("playing_card_rate", 0.0),
+            has_illusion=has_illusion,
         )
         card = create_card(
             card_type,
@@ -2608,6 +2612,8 @@ def _reroll_shop_cards(gs: dict[str, Any]) -> None:
             append="sho",
             game_state=gs,
         )
+        if card_type in ("Base", "Enhanced") and has_illusion:
+            apply_illusion_shop_edition(rng, card)
         new_cards.append(card)
 
     gs["shop_cards"] = new_cards

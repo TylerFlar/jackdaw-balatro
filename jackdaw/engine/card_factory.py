@@ -367,6 +367,32 @@ def create_card(
     # ------------------------------------------------------------------
     # 2. Construct the card
     # ------------------------------------------------------------------
+    if card_type in ("Base", "Enhanced"):
+        # Shop playing card (Magic Trick / Illusion).  The FRONT is
+        # rolled after the center resolves (common_events.lua:2124),
+        # stream 'front'+append+ante over G.P_CARDS in alphabetical key
+        # order (live-verified: LSLER9XG rolled S_5 / D_Q).
+        p_cards = {
+            f"{sl}_{rl}": (p_suit, p_rank)
+            for sl, p_suit in SUIT_LETTER.items()
+            for rl, p_rank in RANK_LETTER.items()
+        }
+        (f_suit, f_rank), _ = rng.element(p_cards, rng.seed("front" + append + str(ante)))
+        card = create_playing_card(
+            f_suit,
+            f_rank,
+            key,
+            hands_played=gs.get("hands_played", 0),
+        )
+        if game_state is not None:
+            game_state.setdefault("used_jokers", {})[key] = True
+        card.set_cost(
+            inflation=gs.get("inflation", 0),
+            discount_percent=gs.get("discount_percent", 0),
+            ante=ante,
+        )
+        return card
+
     card = Card()
     card.set_ability(key)
 

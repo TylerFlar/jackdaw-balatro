@@ -27,7 +27,7 @@ from jackdaw.engine.shop import (
     get_pack,
     populate_shop,
     reroll_shop,
-    roll_illusion_modifiers,
+    apply_illusion_shop_edition,
     select_shop_card_type,
     sell_card,
 )
@@ -129,22 +129,38 @@ class TestSelectShopCardTypeKnownSeeds:
 
 class TestModifiedRates:
     def test_magic_trick_enables_playing_card(self):
-        assert (
-            select_shop_card_type(PseudoRandom("SHOP_B"), 1, playing_card_rate=4)
-            == TYPE_PLAYING_CARD
-        )
+        # Without Illusion, playing-card slots are plain 'Base'
+        # (UI_definitions.lua:772).
+        assert select_shop_card_type(PseudoRandom("SHOP_B"), 1, playing_card_rate=4) == "Base"
 
 
-class TestRollIllusionModifiers:
-    def test_known_seed_with_enhancement(self):
-        result = roll_illusion_modifiers(PseudoRandom("ILLUS_A"), 1)
-        assert "enhancement" in result
-        assert result["enhancement"] == "m_stone"
+class TestIllusionShopRolls:
+    def test_illusion_pull_consumed_every_slot(self):
+        # With Illusion owned, EVERY slot roll pulls once from the plain
+        # 'illusion' stream — even when the slot lands on a Joker
+        # (vanilla's rate table evaluates the type eagerly,
+        # UI_definitions.lua:772).
+        r1 = PseudoRandom("ILL_EAGER")
+        select_shop_card_type(r1, 1, has_illusion=True)
+        after_with = r1.random("illusion")
 
-    def test_deterministic_same_seed(self):
-        r1 = roll_illusion_modifiers(PseudoRandom("DET_ILLUS"), 1)
-        r2 = roll_illusion_modifiers(PseudoRandom("DET_ILLUS"), 1)
-        assert r1 == r2
+        r2 = PseudoRandom("ILL_EAGER")
+        select_shop_card_type(r2, 1, has_illusion=False)
+        r2.random("illusion")  # the pull select() made in r1
+        after_without = r2.random("illusion")
+        assert after_with == after_without
+
+    def test_apply_illusion_edition_deterministic(self):
+        from jackdaw.engine.card_factory import create_playing_card
+        from jackdaw.engine.data.enums import Rank, Suit
+
+        editions = []
+        for _ in range(2):
+            rng = PseudoRandom("ILL_EDI")
+            card = create_playing_card(Suit.HEARTS, Rank.ACE)
+            apply_illusion_shop_edition(rng, card)
+            editions.append(card.edition)
+        assert editions[0] == editions[1]
 
 
 class TestGetPack:
