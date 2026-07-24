@@ -1138,6 +1138,11 @@ def _handle_buy_card(gs: dict[str, Any], idx: int) -> dict[str, Any]:
         gs.setdefault("deck", []).append(card)
         added_playing_card = True
 
+    # Astronomer joining the board runs the all-cards set_cost pass
+    # (dump card.lua:786-793) — restores couponed owned costs too.
+    if getattr(card, "center_key", "") == "j_astronomer":
+        _all_cards_set_cost_pass(gs)
+
     # Fire buying_card joker context
     _fire_shop_joker_context(gs, buying_card=True)
 
@@ -1169,6 +1174,12 @@ def _handle_sell_card(gs: dict[str, Any], area: str, idx: int) -> dict[str, Any]
     cards.pop(idx)
     card.remove_from_deck(gs)
     _release_used_key(gs, card)
+
+    # Astronomer leaving the board runs the all-cards set_cost pass
+    # (dump card.lua:850) — shop planet prices un-zero, couponed owned
+    # costs restore.
+    if getattr(card, "center_key", "") == "j_astronomer":
+        _all_cards_set_cost_pass(gs)
 
     # Fire selling_card joker context (Campfire +xMult per card sold)
     _fire_shop_joker_context(gs, selling_card=True)
@@ -1444,6 +1455,8 @@ def _handle_pick_pack_card(
         gs.setdefault("jokers", []).append(card)
         gs.setdefault("used_jokers", {})[card.center_key] = True
         card.add_to_deck(gs)
+        if getattr(card, "center_key", "") == "j_astronomer":
+            _all_cards_set_cost_pass(gs)
 
     else:
         # Standard pack: playing card → add to deck
@@ -2689,6 +2702,21 @@ def _reroll_shop_cards(gs: dict[str, Any]) -> None:
     gs["shop_cards"] = new_cards
     # Pending edition tags also claim rerolled jokers (vanilla behavior).
     _fire_shop_tags(gs, rerolled=True)
+
+
+def _all_cards_set_cost_pass(gs: dict[str, Any]) -> None:
+    """Vanilla's G.I.CARD set_cost pass: clears owned coupon flags so the
+    subsequent reprice restores real costs.  Triggers: Clearance Sale /
+    Liquidation redeem (card.lua:1917-23), Gift Card round-end
+    (handled inline), and Astronomer joining/leaving the board
+    (dump card.lua:786-793 / :850; live-verified: LSVFB5K8's couponed
+    foil Astronomer flipped $0 -> $10 the moment it was bought)."""
+    for owned in gs.get("jokers", []) + gs.get("consumables", []):
+        if hasattr(owned, "ability"):
+            owned.ability.pop("couponed", None)
+    from jackdaw.engine.shop import reprice_shop
+
+    reprice_shop(gs)
 
 
 def _get_card_set(card: Any) -> str:
