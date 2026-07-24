@@ -410,26 +410,33 @@ def create_card(
         roll_to_do_hand(card, rng, gs.get("hand_levels"))
 
     # ------------------------------------------------------------------
-    # 3. Joker modifiers (shop / pack context only)
+    # 3. Joker modifiers
     # ------------------------------------------------------------------
-    if card.ability.get("set") == "Joker" and area in ("shop", "pack"):
-        enable_eternals = gs.get("enable_eternals_in_shop", False)
-        enable_perishables = gs.get("enable_perishables_in_shop", False)
-        enable_rentals = gs.get("enable_rentals_in_shop", False)
+    if card.ability.get("set") == "Joker":
+        # Eternal / Perishable / Rental rolls are SHOP/PACK-area-gated
+        # (common_events.lua:2137-2146)...
+        if area in ("shop", "pack"):
+            enable_eternals = gs.get("enable_eternals_in_shop", False)
+            enable_perishables = gs.get("enable_perishables_in_shop", False)
+            enable_rentals = gs.get("enable_rentals_in_shop", False)
 
-        # -- Eternal / Perishable (shared roll) --
-        ep_roll = rng.random(_EP_KEY[area] + str(ante))
-        if ep_roll > _EP_ETERNAL_THRESHOLD and enable_eternals:
-            card.set_eternal(True)
-        elif ep_roll > _EP_PERISHABLE_THRESHOLD and enable_perishables:
-            card.set_perishable(True)
+            # -- Eternal / Perishable (shared roll) --
+            ep_roll = rng.random(_EP_KEY[area] + str(ante))
+            if ep_roll > _EP_ETERNAL_THRESHOLD and enable_eternals:
+                card.set_eternal(True)
+            elif ep_roll > _EP_PERISHABLE_THRESHOLD and enable_perishables:
+                card.set_perishable(True)
 
-        # -- Rental (independent roll) --
-        r_roll = rng.random(_RENTAL_KEY[area] + str(ante))
-        if r_roll > _RENTAL_THRESHOLD and enable_rentals:
-            card.set_rental(True)
+            # -- Rental (independent roll) --
+            r_roll = rng.random(_RENTAL_KEY[area] + str(ante))
+            if r_roll > _RENTAL_THRESHOLD and enable_rentals:
+                card.set_rental(True)
 
-        # -- Edition --
+        # ...but the EDITION poll runs for EVERY created Joker —
+        # tag-created (Top-up, 'top'), Riff-Raff ('rif'), Judgement
+        # ('jud') etc. included (common_events.lua:2149; live-verified:
+        # LS3KW2WN's tag-created joker rolled FOIL on live while the
+        # sim never polled).
         edition = poll_edition(
             "edi" + append + str(ante),
             rng,
