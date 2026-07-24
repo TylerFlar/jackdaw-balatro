@@ -990,3 +990,35 @@ class TestPillarPlayedThisAnte:
         step(gs, PlayHand(card_indices=(0, 1, 2)))
         deck_all = (gs["deck"] + gs.get("hand", []) + gs.get("discard_pile", []))
         assert not any(c.ability.get("played_this_ante") for c in deck_all)
+
+
+class TestMarbleStoneShuffleTiming:
+    """Bug #33: Marble Joker's stone joined the deck BEFORE the per-round
+    'nr' shuffle, changing the whole permutation. Vanilla emplaces it via
+    a queued event AFTER the shuffle; it lands at the pile bottom
+    (live-verified: LS86UJ9R — dealt hand matches a stone-less 52-card
+    shuffle, stone at serialized deck index 0)."""
+
+    def test_stone_added_after_shuffle_at_bottom(self):
+        from jackdaw.engine.card_factory import create_joker
+        from jackdaw.engine.rng import PseudoRandom
+
+        gs = _init_gs("MARBLE1")
+        j = create_joker("j_marble")
+        gs["jokers"] = [j]
+        j.add_to_deck(gs)
+
+        # Expected deal: shuffle a stone-less copy with the same stream.
+        ref = list(gs["deck"])
+        ref_rng = PseudoRandom("MARBLE1")
+        ref_rng.shuffle(ref, ref_rng.seed("nr1"))
+        expected_hand = sorted(c.card_key for c in ref[-8:])
+
+        step(gs, SelectBlind())
+        dealt = sorted(c.card_key for c in gs["hand"])
+        assert dealt == expected_hand
+
+        deck = gs["deck"]
+        stones = [i for i, c in enumerate(deck)
+                  if c.ability.get("effect") == "Stone Card"]
+        assert stones == [0]  # pile bottom, drawn last

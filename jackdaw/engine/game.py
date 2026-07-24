@@ -230,6 +230,13 @@ def _handle_select_blind(gs: dict[str, Any]) -> dict[str, Any]:
         nr_seed = rng.seed("nr" + str(ante))
         rng.shuffle(deck_list, nr_seed)
 
+    # Marble Joker stones join the pile only after the shuffle, at the
+    # bottom (drawn last) — see the pending_deck_bottom note in
+    # _apply_setting_blind_mutations.
+    pending_bottom = gs.pop("pending_deck_bottom", None)
+    if pending_bottom:
+        gs.setdefault("deck", [])[:0] = pending_bottom
+
     # ------------------------------------------------------------------
     # 6b. round_start_bonus tags (Juggle: +3 hand size for this round).
     #     Vanilla fires these at DRAW_TO_HAND, before the initial draw
@@ -2028,6 +2035,14 @@ def _apply_setting_blind_mutations(
                     if ckey == "cert" and gs.get("phase") == GamePhase.SELECTING_HAND:
                         gs.setdefault("hand", []).append(c)
                         _sort_hand_desc(gs.get("hand", []))
+                    elif ckey == "marble":
+                        # Marble's stone is emplaced by a queued event that
+                        # runs AFTER new_round's 'nr' shuffle — it must not
+                        # participate in this round's shuffle, and lands at
+                        # the pile bottom (live-verified: LS86UJ9R, stone at
+                        # serialized index 0 while the dealt hand matches a
+                        # stone-less 52-card shuffle).
+                        gs.setdefault("pending_deck_bottom", []).append(c)
                     else:
                         gs.setdefault("deck", []).append(c)
             elif ctype in ("Joker", "Tarot", "Planet", "Spectral"):
