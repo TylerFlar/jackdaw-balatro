@@ -239,7 +239,7 @@ def select_from_pool(
     pool: list[str],
     rng: PseudoRandom,
     pool_key: str,
-    ante: int,
+    ante: int | None,
     *,
     pool_type: str = "",
 ) -> str:
@@ -278,7 +278,11 @@ def select_from_pool(
     # common_events.lua:2052).  E.g. 'Tag1', 'Joker1sho1', 'Voucher1'.
     # NOTE: pool_key already contains append (from get_current_pool),
     # so we only add ante here — NOT append again.
-    full_key = pool_key + str(ante)
+    # LEGENDARY EXCEPTION: 'Joker4' takes NO ante suffix in Lua
+    # (common_events.lua:2052: `.. (not _legendary and ante or '')`) —
+    # callers pass ante=None for legendary rolls.  Found by lockstep:
+    # The Soul created Yorick in sim vs Caino live.
+    full_key = pool_key + ("" if ante is None else str(ante))
 
     # Initial draw: pseudoseed(full_key)
     seed_val = rng.seed(full_key)
@@ -330,7 +334,10 @@ def pick_card_from_pool(
         The selected center key.
     """
     pool, pool_key = get_current_pool(pool_type, rng, ante, **kwargs)
-    return select_from_pool(pool, rng, pool_key, ante, pool_type=pool_type)
+    _legendary = bool(kwargs.get("legendary"))
+    return select_from_pool(
+        pool, rng, pool_key, None if _legendary else ante, pool_type=pool_type
+    )
 
 
 # ---------------------------------------------------------------------------
