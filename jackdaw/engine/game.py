@@ -282,6 +282,35 @@ def _handle_select_blind(gs: dict[str, Any]) -> dict[str, Any]:
     # 8. Phase → SELECTING_HAND
     # ------------------------------------------------------------------
     gs["phase"] = GamePhase.SELECTING_HAND
+
+    # ------------------------------------------------------------------
+    # 9. first_hand_drawn joker context (game.lua:3226-3231): fires once
+    #    per round after the initial deal.  Certificate creates a sealed
+    #    playing card INTO THE HAND ('cert_fr' front + 'certsl' seal,
+    #    card.lua:2462-2476; live-verified: LSI5EB7T dealt 8 + red-seal
+    #    H_K appeared as the 9th hand card).  Handlers were registered
+    #    but nothing ever fired this context before.
+    # ------------------------------------------------------------------
+    from jackdaw.engine.jokers import GameSnapshot as _GS2
+
+    fhd_snap = _GS2(joker_count=len(jokers), money=gs.get("dollars", 0))
+    fhd_muts: list[dict[str, Any]] = []
+    for joker in jokers:
+        if getattr(joker, "debuff", False):
+            continue
+        from jackdaw.engine.jokers import JokerContext as _JC2, calculate_joker as _cj2
+
+        res = _cj2(joker, _JC2(first_hand_drawn=True, jokers=jokers, game=fhd_snap))
+        if res and res.extra:
+            fhd_muts.append(dict(res.extra))
+    if fhd_muts:
+        _hand_before = list(gs.get("hand", []))
+        _apply_setting_blind_mutations(gs, fhd_muts, jokers)
+        # Blind-debuff any card the mutations added to the hand
+        # (vanilla debuff_cards the created cert card, card.lua:2475).
+        for c in gs.get("hand", []):
+            if c not in _hand_before:
+                blind.debuff_card(c, pareidolia=pareidolia)
     return gs
 
 
