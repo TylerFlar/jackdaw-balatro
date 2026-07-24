@@ -1097,3 +1097,35 @@ class TestHookDiscardJokerContexts:
         step(gs, PlayHand(card_indices=(0,)))
         if levels_before is not None:
             assert {ht: hl.get_level(ht) for ht in hl.hands} == levels_before
+
+
+class TestD6TagRerollCost:
+    """Bug #41: D6 Tag was modeled as one Chaos-style free reroll —
+    vanilla sets round_resets.temp_reroll_cost = 0 so rerolls START at
+    $0 and climb +1 each (tag.lua:383-391), once per shop (shop_d6ed,
+    cleared at cash_out).  A Python `or` also dropped temp == 0 (0 is
+    truthy in Lua).  Live-verified: LSKWQS7C entered the shop at $0."""
+
+    def test_d6_shop_starts_at_zero_and_climbs(self):
+        from jackdaw.engine.shop import calculate_reroll_cost
+
+        gs = _init_gs("D6TAG1")
+        gs.setdefault("awarded_tags", []).append({"key": "tag_d_six"})
+        step(gs, SelectBlind())
+        gs["chips"] = 10**9
+        step(gs, PlayHand(card_indices=(0,)))
+        step(gs, CashOut())
+        assert gs["current_round"]["reroll_cost"] == 0
+        gs["dollars"] = 20
+        step(gs, Reroll())
+        assert gs["current_round"]["reroll_cost"] == 1
+        step(gs, Reroll())
+        assert gs["current_round"]["reroll_cost"] == 2
+
+    def test_temp_zero_not_dropped_by_or(self):
+        from jackdaw.engine.shop import calculate_reroll_cost
+
+        gs = _init_gs("D6TAG2")
+        gs["round_resets"]["temp_reroll_cost"] = 0
+        gs["current_round"]["reroll_cost_increase"] = 0
+        assert calculate_reroll_cost(gs) == 0

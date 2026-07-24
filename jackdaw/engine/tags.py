@@ -100,7 +100,12 @@ class TagResult:
     """Apply this edition to the shop joker (foil/holo/polychrome/negative)."""
 
     free_rerolls: int = 0
-    """Number of free rerolls this shop session (d_six)."""
+    """Number of free rerolls (Chaos-style; unused by tags currently)."""
+
+    temp_reroll_zero: bool = False
+    """D6 Tag: this shop's rerolls START at $0 and climb (+1 per reroll).
+    Vanilla sets round_resets.temp_reroll_cost = 0 and recalcs with
+    skip_increment (tag.lua:383-391), once per shop (shop_d6ed guard)."""
 
     double: bool = False
     """Double Tag: duplicate the tag that was just added."""
@@ -330,7 +335,7 @@ class Tag:
                 return None
 
             if self.key == "tag_d_six":
-                return TagResult(free_rerolls=1)
+                return TagResult(temp_reroll_zero=True)
 
             return None  # pragma: no cover
 

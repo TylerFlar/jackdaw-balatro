@@ -1022,6 +1022,10 @@ def _handle_cash_out(gs: dict[str, Any]) -> dict[str, Any]:
     """
     _require_phase(gs, GamePhase.ROUND_EVAL)
 
+    # The D6 Tag's once-per-shop guard resets at cash-out
+    # (button_callbacks.lua:2933: G.GAME.shop_d6ed = nil).
+    gs.pop("shop_d6ed", None)
+
     # End-of-round targeting-card re-roll (state_events.lua:273-276):
     # idol / mail / ancient / castle streams advance once per round END
     # (they are NOT re-rolled at round start; see start_round).
@@ -2609,6 +2613,19 @@ def _fire_shop_tags(gs: dict[str, Any], rerolled: bool) -> None:
             continue
 
         result = tag.apply("shop_start", gs, rng=rng)
+        if result is not None and result.temp_reroll_zero:
+            # D6 Tag (tag.lua:383-391): rerolls START at $0 this shop
+            # (then climb +1 per reroll); once per shop via shop_d6ed,
+            # cleared at the next cash_out.  Live-verified: LSKWQS7C
+            # entered the shop with reroll_cost 0.
+            if not gs.get("shop_d6ed"):
+                gs["shop_d6ed"] = True
+                gs.setdefault("round_resets", {})["temp_reroll_cost"] = 0
+                from jackdaw.engine.shop import calculate_reroll_cost
+
+                calculate_reroll_cost(gs)
+                entry["shop_fired"] = True
+            continue
         if result is not None and result.free_rerolls:
             cr = gs.setdefault("current_round", {})
             cr["free_rerolls"] = cr.get("free_rerolls", 0) + result.free_rerolls

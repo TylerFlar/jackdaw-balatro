@@ -590,7 +590,11 @@ def calculate_reroll_cost(game_state: dict) -> int:
         return 0
 
     increase = cr.get("reroll_cost_increase", 0)
-    base = rr.get("temp_reroll_cost") or rr.get("reroll_cost", _DEFAULT_BASE_REROLL_COST)
+    # Lua's `temp or base` keeps temp == 0 (0 is truthy in Lua) — the D6
+    # Tag sets temp_reroll_cost to exactly 0, so a Python `or` here would
+    # silently fall back to the $5 base (live-verified: LSKWQS7C).
+    temp = rr.get("temp_reroll_cost")
+    base = temp if temp is not None else rr.get("reroll_cost", _DEFAULT_BASE_REROLL_COST)
     cost = base + increase
     cr["reroll_cost"] = cost
     return cost
