@@ -2353,12 +2353,12 @@ def _gift_card(card: Card, ctx: JokerContext) -> JokerResult | None:
 
     Source: card.lua:2920. Iterates all jokers (and consumables).
     """
-    if ctx.end_of_round and not ctx.blueprint and ctx.jokers:
-        increment = card.ability.get("extra", 1)
-        for j in ctx.jokers:
-            j.ability["extra_value"] = j.ability.get("extra_value", 0) + increment
-            j.sell_cost = j.sell_cost + increment
-        return JokerResult()
+    if ctx.end_of_round and not ctx.blueprint:
+        # Applied by the round-end caller: vanilla bumps extra_value on
+        # every JOKER and CONSUMABLE and re-runs set_cost on each
+        # (card.lua:3325-3341) — that set_cost pass is also what
+        # restores a couponed card's real buy cost (LSM98F1Z).
+        return JokerResult(extra={"gift_card_bump": card.ability.get("extra", 1)})
     return None
 
 

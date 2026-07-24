@@ -319,33 +319,50 @@ class TestEgg:
 
 
 class TestGiftCard:
-    def test_all_jokers_increase(self):
+    """Gift Card returns a bump descriptor; the round-end caller applies
+    it to every joker AND consumable with a set_cost pass
+    (card.lua:3325-3341) — which also restores couponed buy costs
+    (live-verified: LSM98F1Z)."""
+
+    def test_returns_bump_descriptor(self):
         gift = _joker("j_gift", extra=1)
-        j1 = _joker("j_joker", mult=4)
-        j2 = _joker("j_stuntman", extra={"chip_mod": 250})
-        jokers = [gift, j1, j2]
-        for j in jokers:
-            j.sell_cost = 2
+        result = calculate_joker(gift, JokerContext(end_of_round=True, jokers=[gift]))
+        assert result is not None
+        assert result.extra == {"gift_card_bump": 1}
 
-        ctx = JokerContext(end_of_round=True, jokers=jokers)
-        calculate_joker(gift, ctx)
+    def test_engine_applies_to_jokers_and_consumables(self):
+        from jackdaw.engine.card_factory import create_consumable, create_joker
+        from jackdaw.engine.game import _joker_end_of_round_effects
+        from jackdaw.engine.run_init import initialize_run
 
-        for j in jokers:
-            assert j.ability.get("extra_value", 0) == 1
-            assert j.sell_cost == 3
-
-    def test_accumulates_across_rounds(self):
-        gift = _joker("j_gift", extra=1)
-        j1 = _joker("j_joker", mult=4)
-        jokers = [gift, j1]
-        for j in jokers:
-            j.sell_cost = 1
+        gs = initialize_run("b_red", 1, "GIFT_ENG")
+        gift = create_joker("j_gift")
+        other = create_joker("j_joker")
+        tarot = create_consumable("c_temperance")
+        gs["jokers"] = [gift, other]
+        gs["consumables"] = [tarot]
 
         for _ in range(3):
-            calculate_joker(gift, JokerContext(end_of_round=True, jokers=jokers))
+            _joker_end_of_round_effects(gs)
 
-        assert j1.ability["extra_value"] == 3
-        assert j1.sell_cost == 4
+        assert other.ability["extra_value"] == 3
+        assert other.sell_cost == max(1, other.cost // 2) + 3
+        assert tarot.ability["extra_value"] == 3
+
+    def test_round_end_set_cost_restores_couponed_buy_cost(self):
+        from jackdaw.engine.card_factory import create_joker
+        from jackdaw.engine.game import _joker_end_of_round_effects
+        from jackdaw.engine.run_init import initialize_run
+
+        gs = initialize_run("b_red", 1, "GIFT_CPN")
+        gift = create_joker("j_gift")
+        free = create_joker("j_joker")
+        free.ability["couponed"] = True
+        free.cost = 0
+        gs["jokers"] = [gift, free]
+
+        _joker_end_of_round_effects(gs)
+        assert free.cost > 0  # real buy cost restored (LSM98F1Z: 0 -> 6)
 
 
 class TestInvisible:

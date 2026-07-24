@@ -391,15 +391,20 @@ def reprice_shop(gs: dict[str, Any]) -> None:
                     is_couponed=bool(card.ability.get("couponed")),
                     **kwargs,
                 )
-    # Vanilla's per-frame set_cost covers OWNED cards too: buying
-    # Clearance Sale / Liquidation immediately reprices your jokers and
-    # consumables, including their SELL values (live-verified:
-    # LSPNZ98T — live dropped every owned cost 25% the moment the
-    # voucher was bought).  The coupon zeroing does NOT apply outside
-    # shop areas (card.lua:383 checks the card's area).
+    # Discount vouchers reprice OWNED cards too: the redeem runs
+    # set_cost over every card instance (card.lua apply_to_run's
+    # G.I.CARD pass; live-verified: LSPNZ98T dropped every owned cost
+    # 25% the moment Clearance Sale was bought).  set_cost is NOT
+    # per-frame though — a couponed card bought for $0 keeps cost 0
+    # until the next explicit pass (Gift Card round-end / voucher /
+    # inflation; live-verified: LSM98F1Z's free Uncommon-Tag Gift Card
+    # stayed buy=0 through the whole shop AND round, flipping to 6 only
+    # at its own round-end set_cost).  So: skip couponed owned cards
+    # here; the explicit passes recompute them (area check neuters the
+    # coupon outside shop areas, dump card.lua:511).
     for area in ("jokers", "consumables"):
         for card in gs.get(area, []):
-            if hasattr(card, "set_cost"):
+            if hasattr(card, "set_cost") and not card.ability.get("couponed"):
                 card.set_cost(is_couponed=False, **kwargs)
 
 
