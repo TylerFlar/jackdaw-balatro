@@ -1442,6 +1442,20 @@ def _handle_pick_pack_card(
         if not negative and len(gs.get("jokers", [])) >= gs.get("joker_slots", 5):
             raise IllegalActionError("No room for joker")
 
+    # Creator consumables are room-gated at USE time in vanilla
+    # (can_use_consumeable, card.lua:1550-1563): Judgement/Wraith/Soul
+    # need a joker slot, Emperor/High Priestess a consumable slot.
+    # NOTE: the smods booster UI skips this gate — live created a 6th
+    # joker on a 5-slot board (LSBVJSQL) — but the sim stays
+    # vanilla-faithful and the lockstep policy vetoes the pick instead.
+    _key = getattr(card, "center_key", "")
+    if _key in ("c_judgement", "c_wraith", "c_soul"):
+        if len(gs.get("jokers", [])) >= gs.get("joker_slots", 5):
+            raise IllegalActionError(f"{_key}: no room for created joker")
+    elif _key in ("c_emperor", "c_high_priestess"):
+        if len(gs.get("consumables", [])) >= gs.get("consumable_slots", 2):
+            raise IllegalActionError(f"{_key}: no room for created consumable")
+
     pack_cards.pop(idx)
     gs["pack_choices_remaining"] = remaining - 1
 
