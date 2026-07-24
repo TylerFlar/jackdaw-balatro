@@ -1460,9 +1460,16 @@ def _handle_reroll(gs: dict[str, Any]) -> dict[str, Any]:
     else:
         raise IllegalActionError("Cannot afford reroll")
 
-    # Increment reroll cost for next reroll
-    cr["reroll_cost_increase"] = cr.get("reroll_cost_increase", 0) + 1
-    cr["reroll_cost"] = gs.get("base_reroll_cost", 5) + cr["reroll_cost_increase"]
+    # Only PAID rerolls climb the cost ladder — vanilla's free-reroll
+    # branch calls calculate_reroll_cost(true) with skip_increment
+    # (button_callbacks.lua:2855; live-confirmed: cost stayed 6 after a
+    # Chaos free reroll).  Recalc via the shared helper so temp costs
+    # (D6 Tag) and remaining free rerolls are honored.
+    if free <= 0:
+        cr["reroll_cost_increase"] = cr.get("reroll_cost_increase", 0) + 1
+    from jackdaw.engine.shop import calculate_reroll_cost
+
+    calculate_reroll_cost(gs)
 
     # Track stat
     gs.setdefault("round_scores", {})
