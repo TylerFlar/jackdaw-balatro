@@ -95,6 +95,9 @@ class JokerContext:
     end_of_round: bool = False
     discard: bool = False
     pre_discard: bool = False
+    hook: bool = False
+    """True when the discard was forced by The Hook (state_events.lua:395
+    passes the flag; Burnt Joker is hook-gated, Green Joker is not)."""
     destroying_card: Card | None = None
     cards_destroyed: list[Card] | None = None
     buying_card: bool = False
@@ -2521,7 +2524,7 @@ def _burnt(card: Card, ctx: JokerContext) -> JokerResult | None:
 
     Source: card.lua:2749. Fires in discard context when discards_used <= 0.
     """
-    if ctx.discard and not ctx.blueprint:
+    if ctx.discard and not ctx.blueprint and not ctx.hook:
         if ctx.game.discards_used <= 0 and ctx.other_card is not None:
             if ctx.full_hand and ctx.other_card is ctx.full_hand[-1]:
                 return JokerResult(level_up=True)

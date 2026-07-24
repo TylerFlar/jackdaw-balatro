@@ -1045,3 +1045,55 @@ class TestDiscountRepricesOwnedCards:
         reprice_shop(gs)
         assert j.cost == 6  # floor(8.5 * 0.75) = 6
         assert j.sell_cost == 3
+
+
+class TestHookDiscardJokerContexts:
+    """Bug #35: The Hook's forced discards silently moved cards to the
+    pile — vanilla routes them through discard_cards_from_highlighted
+    (hook flag), firing per-card seal + joker discard contexts: Green
+    Joker LOSES mult on hook discards (live-verified: LSN6STIA, mult
+    13 vs 12 on the first Hook hand), while Burnt Joker is hook-gated
+    and the discard counters stay untouched."""
+
+    def _hook_gs(self, seed="HOOK1"):
+        gs = _init_gs(seed)
+        step(gs, SelectBlind())
+        gs["blind"].name = "The Hook"
+        gs["blind"].boss = True
+        gs["blind"].chips = 10**9  # keep the round going
+        return gs
+
+    def test_green_joker_loses_mult_on_hook_discard(self):
+        from jackdaw.engine.card_factory import create_joker
+
+        # Baseline: same play WITHOUT the hook gains +1 (hand played).
+        gs0 = self._hook_gs("HOOKG")
+        gs0["blind"].name = "The Wall"
+        g0 = create_joker("j_green_joker")
+        g0.ability["mult"] = 5
+        gs0["jokers"] = [g0]
+        step(gs0, PlayHand(card_indices=(0,)))
+        assert g0.ability["mult"] == 6
+
+        # With The Hook: the forced discard costs 1 → net unchanged.
+        gs = self._hook_gs("HOOKG")
+        green = create_joker("j_green_joker")
+        green.ability["mult"] = 5
+        gs["jokers"] = [green]
+        discards_before = gs["current_round"]["discards_left"]
+        step(gs, PlayHand(card_indices=(0,)))
+        assert green.ability["mult"] == 5  # +1 play, -1 hook discard
+        # hook discards must NOT consume a discard
+        assert gs["current_round"]["discards_left"] == discards_before
+
+    def test_burnt_joker_hook_gated(self):
+        from jackdaw.engine.card_factory import create_joker
+
+        gs = self._hook_gs("HOOK2")
+        burnt = create_joker("j_burnt")
+        gs["jokers"] = [burnt]
+        hl = gs["hand_levels"]
+        levels_before = {ht: hl.get_level(ht) for ht in hl.hands} if hasattr(hl, "hands") else None
+        step(gs, PlayHand(card_indices=(0,)))
+        if levels_before is not None:
+            assert {ht: hl.get_level(ht) for ht in hl.hands} == levels_before

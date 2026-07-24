@@ -2759,6 +2759,73 @@ def _close_pack(gs: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _fire_discard_effects(gs: dict[str, Any], discarded: list, *, hook: bool) -> None:
+    """Seal effects + per-card joker ``discard`` contexts + pile move for
+    a forced (Hook) discard.
+
+    Mirrors the per-card loop of ``discard_cards_from_highlighted``
+    (state_events.lua:399-430) which runs for hook discards too; the
+    counter block (discards_left/discards_used/redraw) is ``not hook``
+    guarded there and is NOT applied here.
+    """
+    from jackdaw.engine.jokers import JokerContext, calculate_joker
+
+    jokers: list = gs.get("jokers", [])
+    rng = gs.get("rng")
+    game_snap = _build_discard_snapshot(gs, jokers)
+
+    dollars_earned = 0
+    destroyed: list = []
+    jokers_to_remove: list = []
+
+    for card in discarded:
+        # Purple Seal → random Tarot ('8ba' append), slot-gated pre-roll
+        if getattr(card, "seal", None) == "Purple":
+            consumables: list = gs.setdefault("consumables", [])
+            if len(consumables) < gs.get("consumable_slots", 2):
+                _resolve_create_descriptors(gs, [{"type": "Tarot", "count": 1, "seed": "8ba"}])
+
+        card_destroyed = False
+        for joker in jokers:
+            if getattr(joker, "debuff", False):
+                continue
+            ctx = JokerContext(
+                discard=True,
+                hook=hook,
+                other_card=card,
+                full_hand=discarded,
+                jokers=jokers,
+                rng=rng,
+                game=game_snap,
+            )
+            result = calculate_joker(joker, ctx)
+            if result:
+                dollars_earned += result.dollars
+                if result.remove:
+                    if result.extra and result.extra.get("destroy"):
+                        card_destroyed = True
+                    elif joker not in jokers_to_remove:
+                        jokers_to_remove.append(joker)
+        if card_destroyed:
+            destroyed.append(card)
+
+    if dollars_earned:
+        gs["dollars"] = gs.get("dollars", 0) + dollars_earned
+    for joker in jokers_to_remove:
+        if joker in jokers:
+            jokers.remove(joker)
+            joker.remove_from_deck(gs)
+            _release_used_key(gs, joker)
+
+    surviving = [c for c in discarded if c not in destroyed]
+    discard_pile: list = gs.setdefault("discard_pile", [])
+    discard_pile.extend(surviving)
+    gs["round_scores"] = gs.get("round_scores", {})
+    gs["round_scores"]["cards_discarded"] = (
+        gs["round_scores"].get("cards_discarded", 0) + len(discarded)
+    )
+
+
 def _press_play(
     gs: dict[str, Any],
     blind: Any,
@@ -2775,15 +2842,22 @@ def _press_play(
     name = getattr(blind, "name", "")
 
     if name == "The Hook":
-        # Discard 2 random cards from hand
+        # Discard 2 random cards from hand.  Vanilla routes them through
+        # discard_cards_from_highlighted(nil, HOOK) (blind.lua:482 →
+        # state_events.lua:379): per-card SEAL effects and joker
+        # `discard` contexts DO fire (Green Joker loses mult — the
+        # LSN6STIA off-by-one), only the discard counters and Burnt
+        # Joker (hook-gated) are skipped.
         hand: list = gs.get("hand", [])
-        discard_pile: list = gs.setdefault("discard_pile", [])
+        hooked: list = []
         for _ in range(min(2, len(hand))):
             if hand and rng:
                 seed_val = rng.seed("hook")
                 target, _ = rng.element(hand, seed_val)
                 hand.remove(target)
-                discard_pile.append(target)
+                hooked.append(target)
+        if hooked:
+            _fire_discard_effects(gs, hooked, hook=True)
 
     elif name == "The Tooth":
         # Lose $1 per card played
