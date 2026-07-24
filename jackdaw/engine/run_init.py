@@ -137,7 +137,12 @@ def init_game_object() -> dict[str, Any]:
             "cards_flipped": 0,
             "idol_card": {"suit": "Spades", "rank": "Ace", "id": 14},
             "mail_card": {"rank": "Ace"},
-            "ancient_card": {"suit": "Spades"},
+            # suit starts None: game.lua:2387 nils it before the run-init
+            # reset_ancient_card, so the FIRST 'anc' roll draws from the
+            # full 4-suit pool; a 'Spades' default here shrank it to 3 and
+            # shifted every subsequent pick (live-verified: LSJXD66D —
+            # live's round-2 suit Hearts = 4-pool pull #1 chain).
+            "ancient_card": {"suit": None},
             "castle_card": {"suit": "Spades"},
             "hands_left": 0,
             "hands_played": 0,
