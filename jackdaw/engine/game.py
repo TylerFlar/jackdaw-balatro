@@ -2655,9 +2655,15 @@ def _close_pack(gs: dict[str, Any]) -> None:
     if pack_hand:
         deck: list = gs.setdefault("deck", [])
         hand: list = gs.get("hand", [])
-        hand_set = set(id(c) for c in hand)
-        # Only return cards that are still in the hand (not destroyed)
-        surviving = [c for c in pack_hand if id(c) in hand_set]
+        # Only return cards that are still in the hand (not destroyed),
+        # in the HAND's current (sorted display) order — vanilla's
+        # draw_from_hand_to_deck pops hand[1] repeatedly
+        # (state_events.lua:1121), i.e. sorted order, NOT deal order.
+        # Deal-order returns diverge the deck whenever no seeded shuffle
+        # intervenes before the next deal (found by lockstep at the first
+        # back-to-back pack open; reproduced at normal speed).
+        pack_id_set = set(id(c) for c in pack_hand)
+        surviving = [c for c in hand if id(c) in pack_id_set]
         deck[:0] = list(reversed(surviving))
         # Remove only the pack_hand cards from hand, preserving any
         # cards that were there before the pack opened.
