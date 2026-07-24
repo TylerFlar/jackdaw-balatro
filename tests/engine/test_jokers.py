@@ -725,10 +725,11 @@ class TestBlackboard:
         ctx = JokerContext(joker_main=True, held_cards=held)
         assert calculate_joker(joker, ctx) is None
 
-    def test_empty_held_no_effect(self):
+    def test_empty_held_fires_vacuously(self):
         joker = _joker_card("j_blackboard", extra=3)
         ctx = JokerContext(joker_main=True, held_cards=[])
-        assert calculate_joker(joker, ctx) is None
+        result = calculate_joker(joker, ctx)
+        assert result is not None and result.Xmult_mod == 3  # card.lua:3951: no cards disqualify
 
     def test_wild_card_counts(self):
         """Wild Card is_suit returns True for any suit including Clubs/Spades."""

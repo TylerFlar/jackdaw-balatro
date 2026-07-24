@@ -1067,8 +1067,10 @@ def _blackboard(card: Card, ctx: JokerContext) -> JokerResult | None:
     Uses ``flush_calc=True`` in is_suit calls (matching source).
     """
     if ctx.joker_main and ctx.held_cards is not None:
-        if not ctx.held_cards:
-            return None
+        # Vanilla loops G.hand.cards with no empty-check (card.lua:3951):
+        # ZERO held cards disqualify nothing, so the x3 fires vacuously —
+        # the classic all-in Blackboard play.  Found by lockstep: The Hook
+        # emptied the held hand, live scored x3, sim skipped it.
         for c in ctx.held_cards:
             if not (c.is_suit("Clubs", flush_calc=True) or c.is_suit("Spades", flush_calc=True)):
                 return None
