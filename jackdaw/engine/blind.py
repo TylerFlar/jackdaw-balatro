@@ -364,7 +364,12 @@ class Blind:
         """
         result: dict[str, Any] = {}
 
+        # The Fish's prepped flag is ONE-SHOT: vanilla clears it at the end
+        # of EVERY drawn_to_hand, outside the disabled gate (blind.lua:602)
+        # — only the redraw after a PLAY flips face-down; discard redraws
+        # don't (found by lockstep: sim flipped discard replacements).
         if self.disabled:
+            self.prepped = False
             return result
 
         if self.name == "Cerulean Bell" and rng and hand_cards:
@@ -392,6 +397,7 @@ class Blind:
                 joker_cards[idx].set_debuff(True)
                 result["debuffed_joker_index"] = idx
 
+        self.prepped = False
         return result
 
     def stay_flipped(
