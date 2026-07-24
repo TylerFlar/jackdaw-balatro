@@ -442,6 +442,16 @@ def reprice_shop(gs: dict[str, Any]) -> None:
                     is_couponed=bool(card.ability.get("couponed")),
                     **kwargs,
                 )
+    # Vanilla's per-frame set_cost covers OWNED cards too: buying
+    # Clearance Sale / Liquidation immediately reprices your jokers and
+    # consumables, including their SELL values (live-verified:
+    # LSPNZ98T — live dropped every owned cost 25% the moment the
+    # voucher was bought).  The coupon zeroing does NOT apply outside
+    # shop areas (card.lua:383 checks the card's area).
+    for area in ("jokers", "consumables"):
+        for card in gs.get(area, []):
+            if hasattr(card, "set_cost"):
+                card.set_cost(is_couponed=False, **kwargs)
 
 
 def populate_shop(

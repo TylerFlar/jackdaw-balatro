@@ -1022,3 +1022,26 @@ class TestMarbleStoneShuffleTiming:
         stones = [i for i, c in enumerate(deck)
                   if c.ability.get("effect") == "Stone Card"]
         assert stones == [0]  # pile bottom, drawn last
+
+
+class TestDiscountRepricesOwnedCards:
+    """Bug #34: buying Clearance Sale repriced only shop areas — vanilla's
+    per-frame set_cost also drops OWNED jokers'/consumables' buy AND sell
+    values immediately (live-verified: LSPNZ98T, -25% across the board)."""
+
+    def test_clearance_sale_lowers_owned_sell_values(self):
+        from jackdaw.engine.card_factory import create_joker
+        from jackdaw.engine.shop import reprice_shop
+
+        gs = _init_gs("DISC1")
+        gs["phase"] = GamePhase.SHOP
+        j = create_joker("j_joker")  # base_cost 2? use set_cost baseline
+        j.base_cost = 8
+        j.set_cost()
+        gs["jokers"] = [j]
+        assert (j.cost, j.sell_cost) == (8, 4)
+
+        gs["discount_percent"] = 25
+        reprice_shop(gs)
+        assert j.cost == 6  # floor(8.5 * 0.75) = 6
+        assert j.sell_cost == 3
