@@ -1350,3 +1350,31 @@ class TestHandsPlayedPreIncrementDuringScoring:
             + len(gs.get("played_cards_area", []))
         )
         assert owned_after == owned_before
+
+
+# ---------------------------------------------------------------------------
+# Oops! All 6s doubles the NESTED probabilities table (bug #60, LSPV15ZH)
+# ---------------------------------------------------------------------------
+
+
+class TestOopsAllSixesProbabilities:
+    """Vanilla doubles/halves every key of G.GAME.probabilities
+    (card.lua:608-11/665-68).  The old top-level probabilities_normal
+    write was a dead slot — scoring reads gs['probabilities']['normal']."""
+
+    def test_buy_doubles_nested_normal(self):
+        gs = _setup_shop("OOPS1")
+        oops = _joker_card("j_oops", cost=0)
+        oops.ability["name"] = "Oops! All 6s"
+        gs["shop_cards"] = [oops]
+        step(gs, BuyCard(shop_index=0))
+        assert gs["probabilities"]["normal"] == 2.0
+
+    def test_sell_halves_back(self):
+        gs = _setup_shop("OOPS2")
+        oops = _joker_card("j_oops", cost=0, sell_cost=1)
+        oops.ability["name"] = "Oops! All 6s"
+        gs["shop_cards"] = [oops]
+        step(gs, BuyCard(shop_index=0))
+        step(gs, SellCard(area="jokers", card_index=len(gs["jokers"]) - 1))
+        assert gs["probabilities"]["normal"] == 1.0

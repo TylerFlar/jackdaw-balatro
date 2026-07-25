@@ -784,7 +784,15 @@ class Card:
         if name == "Turtle Bean" and isinstance(extra, dict):
             game_state["hand_size"] = game_state.get("hand_size", 0) + extra.get("h_size", 0)
         if name == "Oops! All 6s":
-            game_state["probabilities_normal"] = game_state.get("probabilities_normal", 1) * 2
+            # Vanilla doubles EVERY key of the NESTED G.GAME.probabilities
+            # table (card.lua:608-11).  The old top-level
+            # 'probabilities_normal' write was a dead slot — scoring
+            # reads gs['probabilities']['normal'] (live-verified:
+            # LSPV15ZH — Oops+Business Card paid every face card on
+            # live, sim still rolled 1-in-2).
+            probs = game_state.setdefault("probabilities", {"normal": 1.0})
+            for k in probs:
+                probs[k] = probs[k] * 2
         if name == "To the Moon":
             amount = extra if isinstance(extra, int) else 0
             game_state["interest_amount"] = game_state.get("interest_amount", 0) + amount
@@ -839,9 +847,11 @@ class Card:
         if name == "Turtle Bean" and isinstance(extra, dict):
             game_state["hand_size"] = game_state.get("hand_size", 0) - extra.get("h_size", 0)
         if name == "Oops! All 6s":
-            game_state["probabilities_normal"] = max(
-                1, game_state.get("probabilities_normal", 1) // 2
-            )
+            # Vanilla halves every nested probabilities key, float
+            # division, no clamp (card.lua:665-68).
+            probs = game_state.setdefault("probabilities", {"normal": 1.0})
+            for k in probs:
+                probs[k] = probs[k] / 2
         if name == "To the Moon":
             amount = extra if isinstance(extra, int) else 0
             game_state["interest_amount"] = game_state.get("interest_amount", 0) - amount
