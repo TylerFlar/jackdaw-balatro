@@ -2746,6 +2746,14 @@ def _reroll_shop_cards(gs: dict[str, Any]) -> None:
             rng,
             ante,
             area="shop",
+            # Shop cards are never soulable (UI_definitions.lua:776
+            # passes nil): The Soul / Black Hole cannot appear in a
+            # shop and no 'soul_*' roll is consumed.  This reroll loop
+            # missed the populate_shop fix and left the True default —
+            # every reroll slot burned a phantom soul roll, and
+            # LSMORS4J's hit 0.99963 > 0.997, forcing a c_black_hole
+            # into the rerolled shop (live: c_venus).
+            soulable=False,
             append="sho",
             game_state=gs,
         )

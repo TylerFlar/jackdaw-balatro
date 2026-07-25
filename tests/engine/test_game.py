@@ -1240,3 +1240,32 @@ class TestDrunkardCurrentRoundDiscards:
         step(gs, SellCard(area="jokers", card_index=len(gs["jokers"]) - 1))
         assert gs["round_resets"]["discards"] == rr_before - 1
         assert gs["current_round"]["discards_left"] == 0  # ease_discard clamp
+
+
+# ---------------------------------------------------------------------------
+# Reroll shop slots are not soulable (bug #56, LSMORS4J)
+# ---------------------------------------------------------------------------
+
+
+class TestRerollNotSoulable:
+    """Shop cards are never soulable (UI_definitions.lua:776 passes nil)
+    — the reroll refill left create_card's True default, burning a
+    phantom soul_* roll per slot; LSMORS4J's hit 0.997+ and forced a
+    c_black_hole into the rerolled shop."""
+
+    def test_reroll_consumes_no_soul_rolls(self):
+        from jackdaw.engine.rng import PseudoRandom
+
+        seed = "SOULR1"
+        gs = _setup_shop(seed)
+        gs["dollars"] = 50
+        step(gs, Reroll())
+        rng = gs["rng"]
+        for pool in ("Tarot", "Planet", "Spectral"):
+            fresh = PseudoRandom(seed)
+            key = f"soul_{pool}1"
+            assert rng.random(key) == fresh.random(key), key
+        assert all(
+            getattr(c, "center_key", "") not in ("c_soul", "c_black_hole")
+            for c in gs.get("shop_cards", [])
+        )
