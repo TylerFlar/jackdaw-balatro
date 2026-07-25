@@ -2799,6 +2799,10 @@ def _fire_shop_joker_context(gs: dict[str, Any], **context_flags: Any) -> list[d
         money=gs.get("dollars", 0),
         probabilities_normal=gs.get("probabilities", {}).get("normal", 1.0),
         ante=gs.get("round_resets", {}).get("ante", 1),
+        # Hallucination's room gate (card.lua:2336) — checked BEFORE its
+        # halu roll, so full slots must suppress the pull entirely.
+        consumable_count=len(gs.get("consumables", [])),
+        consumable_slots=gs.get("consumable_slots", 2),
     )
 
     # Extract 'cards' from flags if present (for playing_card_added)

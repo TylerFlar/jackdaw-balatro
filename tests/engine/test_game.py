@@ -940,6 +940,27 @@ class TestHallucinationOnPackOpen:
         assert len(gs.get("consumables", [])) == 1
         assert gs["consumables"][0].ability.get("set") == "Tarot"
 
+    def test_full_slots_consume_no_halu_roll(self):
+        """Bug #55 (LSVRQFEU): vanilla room-gates BEFORE the halu roll
+        (outer if card.lua:2336, roll card.lua:2337) — a pack opened at
+        full consumable slots must not advance the halu stream."""
+        from jackdaw.engine.card_factory import create_joker
+        from jackdaw.engine.jokers import (
+            GameSnapshot,
+            JokerContext,
+            calculate_joker,
+        )
+        from jackdaw.engine.rng import PseudoRandom
+
+        j = create_joker("j_hallucination")
+        rng = PseudoRandom("HALGATE")
+        snap = GameSnapshot(consumable_count=2, consumable_slots=2, ante=1)
+        ctx = JokerContext(open_booster=True, rng=rng, game=snap, jokers=[j])
+        assert calculate_joker(j, ctx) is None
+        # stream untouched: next halu1 pull matches a fresh rng's first
+        fresh = PseudoRandom("HALGATE")
+        assert rng.random("halu1") == fresh.random("halu1")
+
 
 class TestConsumableUsageTotals:
     """Bug #31: consumable_usage_total['tarot'] had no writer — Fortune

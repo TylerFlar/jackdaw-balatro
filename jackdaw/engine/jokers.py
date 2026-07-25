@@ -59,6 +59,8 @@ class GameSnapshot:
     castle_card_suit: str | None = None
     skips: int = 0
     ante: int = 1
+    consumable_count: int = 0
+    consumable_slots: int = 2
 
 
 _DEFAULT_GAME = GameSnapshot()
@@ -2131,10 +2133,16 @@ def _hallucination(card: Card, ctx: JokerContext) -> JokerResult | None:
     """
     if ctx.open_booster:
         odds = card.ability.get("extra", 2)
+        # Vanilla room-gates BEFORE the roll: the slot check sits in the
+        # OUTER if (card.lua:2336) and pseudorandom('halu'+ante) in the
+        # INNER if (card.lua:2337) — at full consumable slots NO halu
+        # roll is consumed.  The old always-roll here desynced the halu
+        # stream after any full-slot pack open (live-verified:
+        # LSVRQFEU — sim fired The Moon at step 52, live's un-shifted
+        # roll stayed quiet).
+        if ctx.game.consumable_count >= ctx.game.consumable_slots:
+            return None
         if ctx.rng is not None:
-            # Vanilla key is 'halu'+ante (card.lua:2335); the roll is
-            # consumed even when consumable slots are full (left-to-right
-            # `and` chain — the room check comes after the roll).
             roll = ctx.rng.random("halu" + str(ctx.game.ante))
             if roll < ctx.game.probabilities_normal / odds:
                 return JokerResult(
