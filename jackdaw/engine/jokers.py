@@ -2363,12 +2363,18 @@ def _rocket(card: Card, ctx: JokerContext) -> JokerResult | None:
 
 @register("j_egg")
 def _egg(card: Card, ctx: JokerContext) -> JokerResult | None:
-    """Egg: +$3 to sell value per round. Source: card.lua:2940."""
+    """Egg: +$3 to sell value per round. Source: card.lua:2940.
+
+    Vanilla bumps extra_value then runs self:set_cost() — a set_cost
+    TRIGGER (the bug-#37 inventory), which also restores a couponed
+    pack-picked Egg's real buy cost (live-verified: LS5BUVXO — live
+    buy=4/sell=5, sim's direct sell bump left buy=$0).  The caller
+    runs the coupon-pop + set_cost.
+    """
     if ctx.end_of_round and not ctx.blueprint:
         inc = card.ability.get("extra", 3)
         card.ability["extra_value"] = card.ability.get("extra_value", 0) + inc
-        card.sell_cost = card.sell_cost + inc
-        return JokerResult()
+        return JokerResult(extra={"set_cost_cards": [card]})
     return None
 
 

@@ -1807,6 +1807,16 @@ def _joker_end_of_round_effects(gs: dict[str, Any]) -> dict[str, Any]:
     for mut in eor.get("mutations", []):
         if mut.get("hand_size_delta"):
             gs["hand_size"] = gs.get("hand_size", 8) + mut["hand_size_delta"]
+        # Egg's round-end bump runs self:set_cost() (card.lua:2940) —
+        # a set_cost trigger that restores a couponed buy cost too.
+        for c in mut.get("set_cost_cards", []):
+            if hasattr(c, "set_cost"):
+                c.ability.pop("couponed", None)
+                c.set_cost(
+                    inflation=gs.get("inflation", 0),
+                    discount_percent=gs.get("discount_percent", 0),
+                    ante=gs.get("round_resets", {}).get("ante", 1),
+                )
         if mut.get("gift_card_bump"):
             # Gift Card (card.lua:3325-3341): +extra_value to every joker
             # AND consumable, each followed by set_cost — which also

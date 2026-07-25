@@ -301,21 +301,45 @@ class TestDelayedGratification:
 
 
 class TestEgg:
-    def test_sell_value_increases(self):
+    """Egg bumps extra_value and runs self:set_cost() (card.lua:2940) —
+    the set_cost trigger also restores a couponed pack-picked Egg's
+    real buy cost (bug #59, LS5BUVXO)."""
+
+    def test_handler_bumps_and_signals_set_cost(self):
         j = _joker("j_egg", extra=3)
-        j.sell_cost = 2
-        ctx = JokerContext(end_of_round=True)
-        calculate_joker(j, ctx)
+        result = calculate_joker(j, JokerContext(end_of_round=True))
         assert j.ability["extra_value"] == 3
-        assert j.sell_cost == 5  # 2 + 3
+        assert result is not None
+        assert result.extra == {"set_cost_cards": [j]}
+
+    def test_round_end_restores_couponed_buy_cost(self):
+        from jackdaw.engine.card_factory import create_joker
+        from jackdaw.engine.game import _joker_end_of_round_effects
+        from jackdaw.engine.run_init import initialize_run
+
+        gs = initialize_run("b_red", 1, "EGG_ENG")
+        egg = create_joker("j_egg")
+        egg.ability["couponed"] = True
+        egg.cost = 0
+        egg.sell_cost = 2
+        gs["jokers"] = [egg]
+        _joker_end_of_round_effects(gs)
+        assert egg.ability["extra_value"] == 3
+        assert egg.cost == 4  # coupon cleared, base cost restored
+        assert egg.sell_cost == 5  # floor(4/2) + 3
 
     def test_accumulates(self):
-        j = _joker("j_egg", extra=3)
-        j.sell_cost = 2
+        from jackdaw.engine.card_factory import create_joker
+        from jackdaw.engine.game import _joker_end_of_round_effects
+        from jackdaw.engine.run_init import initialize_run
+
+        gs = initialize_run("b_red", 1, "EGG_ACC")
+        egg = create_joker("j_egg")
+        gs["jokers"] = [egg]
         for _ in range(3):
-            calculate_joker(j, JokerContext(end_of_round=True))
-        assert j.ability["extra_value"] == 9
-        assert j.sell_cost == 11  # 2 + 3*3
+            _joker_end_of_round_effects(gs)
+        assert egg.ability["extra_value"] == 9
+        assert egg.sell_cost == 11  # floor(4/2) + 9
 
 
 class TestGiftCard:
