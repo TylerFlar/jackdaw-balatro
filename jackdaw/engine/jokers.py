@@ -1415,13 +1415,18 @@ def _find_right_neighbor(card: Card, ctx: JokerContext) -> Card | None:
 
 
 def _find_leftmost(card: Card, ctx: JokerContext) -> Card | None:
-    """Find the leftmost joker that isn't *card*."""
-    if ctx.jokers is None:
+    """Brainstorm's copy target: the LITERAL leftmost joker
+    (G.jokers.cards[1], card.lua:2322) — vanilla no-ops when that is
+    Brainstorm itself (`other_joker ~= self`, card.lua:2323).  The old
+    skip-self scan wrongly copied the SECOND joker when Brainstorm sat
+    leftmost (live-verified: LSOBR3XS — sim double-counted Gluttonous,
+    +3 mult on the scoring club)."""
+    if not ctx.jokers:
         return None
-    for j in ctx.jokers:
-        if j is not card:
-            return j
-    return None
+    leftmost = ctx.jokers[0]
+    if leftmost is card:
+        return None
+    return leftmost
 
 
 @register("j_blueprint")

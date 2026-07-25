@@ -1458,15 +1458,15 @@ class TestBrainstorm:
         assert result is not None
         assert result.mult_mod == 4
 
-    def test_brainstorm_is_leftmost_skips_self(self):
-        """Brainstorm is leftmost → copies the second joker."""
+    def test_brainstorm_is_leftmost_no_effect(self):
+        """Brainstorm copies the LITERAL leftmost joker (card.lua:2322)
+        and no-ops when that is itself (bug #61, LSOBR3XS — the old
+        skip-self scan wrongly copied the second joker)."""
         brain = _joker_card("j_brainstorm")
         joker = _joker_card("j_joker", mult=4)
         jokers = [brain, joker]
         ctx = JokerContext(joker_main=True, jokers=jokers)
-        result = calculate_joker(brain, ctx)
-        assert result is not None
-        assert result.mult_mod == 4
+        assert calculate_joker(brain, ctx) is None
 
     def test_brainstorm_alone_no_effect(self):
         brain = _joker_card("j_brainstorm")
