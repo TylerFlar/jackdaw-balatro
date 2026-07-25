@@ -216,8 +216,12 @@ def _handle_select_blind(gs: dict[str, Any]) -> dict[str, Any]:
         getattr(j, "center_key", None) == "j_pareidolia" and not getattr(j, "debuff", False)
         for j in jokers
     )
+    smeared = any(
+        getattr(j, "center_key", None) == "j_smeared" and not getattr(j, "debuff", False)
+        for j in jokers
+    )
     for card in deck:
-        blind.debuff_card(card, pareidolia=pareidolia)
+        blind.debuff_card(card, pareidolia=pareidolia, smeared=smeared)
 
     # ------------------------------------------------------------------
     # 6. Per-round deck shuffle (state_events.lua:344)
@@ -261,7 +265,7 @@ def _handle_select_blind(gs: dict[str, Any]) -> dict[str, Any]:
     _draw_hand(gs)
     # Debuff hand cards too (they were drawn from the deck)
     for card in gs.get("hand", []):
-        blind.debuff_card(card, pareidolia=pareidolia)
+        blind.debuff_card(card, pareidolia=pareidolia, smeared=smeared)
 
     # ------------------------------------------------------------------
     # 7b. Boss drawn_to_hand effects (Cerulean Bell, Crimson Heart)
@@ -310,7 +314,7 @@ def _handle_select_blind(gs: dict[str, Any]) -> dict[str, Any]:
         # (vanilla debuff_cards the created cert card, card.lua:2475).
         for c in gs.get("hand", []):
             if c not in _hand_before:
-                blind.debuff_card(c, pareidolia=pareidolia)
+                blind.debuff_card(c, pareidolia=pareidolia, smeared=smeared)
     return gs
 
 
@@ -783,8 +787,12 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
                 getattr(j, "center_key", None) == "j_pareidolia" and not getattr(j, "debuff", False)
                 for j in jokers
             )
+            smeared = any(
+                getattr(j, "center_key", None) == "j_smeared" and not getattr(j, "debuff", False)
+                for j in jokers
+            )
             for card in gs.get("hand", []):
-                blind.debuff_card(card, pareidolia=pareidolia)
+                blind.debuff_card(card, pareidolia=pareidolia, smeared=smeared)
 
         # The Fish flips ONLY the newly drawn replacements, handled
         # per-drawn-card by Blind.stay_flipped inside _draw_hand
@@ -1006,8 +1014,12 @@ def _handle_discard(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str, A
             getattr(j, "center_key", None) == "j_pareidolia" and not getattr(j, "debuff", False)
             for j in jokers
         )
+        smeared = any(
+            getattr(j, "center_key", None) == "j_smeared" and not getattr(j, "debuff", False)
+            for j in jokers
+        )
         for card in gs.get("hand", []):
-            blind.debuff_card(card, pareidolia=pareidolia)
+            blind.debuff_card(card, pareidolia=pareidolia, smeared=smeared)
 
         # Boss drawn_to_hand effects on discard redraw
         rng = gs.get("rng")

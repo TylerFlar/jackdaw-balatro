@@ -121,6 +121,7 @@ class Blind:
         *,
         is_joker_area: bool = False,
         pareidolia: bool = False,
+        smeared: bool = False,
     ) -> None:
         """Set card.debuff based on boss blind effect.
 
@@ -143,9 +144,12 @@ class Blind:
             cfg = self.debuff_config
 
             # Suit debuff: The Club (Clubs), The Goad (Spades),
-            # The Head (Hearts), The Window (Diamonds)
+            # The Head (Hearts), The Window (Diamonds).
+            # Vanilla's check is card:is_suit (blind.lua:626), which
+            # honors Smeared Joker — under Goad+Smeared, CLUBS are
+            # debuffed too (live-verified: LSDYY84R, all 12 clubs).
             if "suit" in cfg:
-                if card.is_suit(cfg["suit"], bypass_debuff=True):
+                if card.is_suit(cfg["suit"], bypass_debuff=True, smeared=smeared):
                     card.set_debuff(True)
                     return
 

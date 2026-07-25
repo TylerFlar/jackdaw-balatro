@@ -511,3 +511,45 @@ class TestGetBlindTarget:
         normal = get_blind_target(1, "Boss", scaling=1, ante_scaling=1.0)
         plasma = get_blind_target(1, "Boss", scaling=1, ante_scaling=2.0)
         assert plasma == normal * 2
+
+
+# ============================================================================
+# Suit debuffs honor Smeared Joker (bug #54, LSDYY84R)
+# ============================================================================
+
+
+class TestSuitDebuffSmeared:
+    """Blind:debuff_card uses card:is_suit (blind.lua:626), which honors
+    Smeared Joker — under The Goad (Spades) with Smeared on the board,
+    Clubs are debuffed too (live-verified: LSDYY84R, all 12 clubs)."""
+
+    @staticmethod
+    def _card(key, suit, rank):
+        c = Card()
+        c.set_base(key, suit, rank)
+        c.set_ability("c_base")
+        return c
+
+    def test_goad_with_smeared_debuffs_clubs(self):
+        blind = Blind.create("bl_goad", ante=1)
+        club = self._card("C_8", "Clubs", "8")
+        blind.debuff_card(club, smeared=True)
+        assert club.debuff is True
+
+    def test_goad_without_smeared_leaves_clubs(self):
+        blind = Blind.create("bl_goad", ante=1)
+        club = self._card("C_8", "Clubs", "8")
+        blind.debuff_card(club, smeared=False)
+        assert club.debuff is False
+
+    def test_goad_with_smeared_leaves_hearts(self):
+        blind = Blind.create("bl_goad", ante=1)
+        heart = self._card("H_8", "Hearts", "8")
+        blind.debuff_card(heart, smeared=True)
+        assert heart.debuff is False
+
+    def test_goad_debuffs_spades_regardless(self):
+        blind = Blind.create("bl_goad", ante=1)
+        spade = self._card("S_8", "Spades", "8")
+        blind.debuff_card(spade, smeared=False)
+        assert spade.debuff is True
