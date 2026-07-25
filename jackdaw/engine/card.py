@@ -760,6 +760,13 @@ class Card:
             rr = game_state.get("round_resets")
             if rr is not None:
                 rr["discards"] = rr.get("discards", 0) + self.ability["d_size"]
+            # ease_discard(d_size): the CURRENT round gains the discards
+            # immediately too (card.lua:591) — a Riff-Raff-created
+            # Drunkard at setting_blind affects the round being dealt
+            # (live-verified: LSH8NR94).
+            cr = game_state.get("current_round")
+            if cr is not None:
+                cr["discards_left"] = cr.get("discards_left", 0) + self.ability["d_size"]
 
         if name == "Credit Card":
             amount = extra if isinstance(extra, int) else 0
@@ -813,6 +820,12 @@ class Card:
             rr = game_state.get("round_resets")
             if rr is not None:
                 rr["discards"] = rr.get("discards", 0) - self.ability["d_size"]
+            # ease_discard(-d_size) clamps at zero remaining
+            # (common_events.lua:116).
+            cr = game_state.get("current_round")
+            if cr is not None:
+                left = cr.get("discards_left", 0)
+                cr["discards_left"] = left + max(-left, -self.ability["d_size"])
 
         if name == "Credit Card":
             amount = extra if isinstance(extra, int) else 0

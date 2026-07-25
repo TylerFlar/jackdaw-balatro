@@ -1185,3 +1185,37 @@ class TestRoundEndSealEffects:
         gs["consumables"] = filler
         step(gs, PlayHand(card_indices=(0,)))
         assert len(gs["consumables"]) == gs.get("consumable_slots", 2)
+
+
+# ---------------------------------------------------------------------------
+# d_size passives adjust the CURRENT round (bug #53, LSH8NR94)
+# ---------------------------------------------------------------------------
+
+
+class TestDrunkardCurrentRoundDiscards:
+    """d_size passives ease_discard the CURRENT round immediately on
+    add/remove (card.lua:591/653), not just round_resets — a Riff-Raff-
+    created Drunkard at setting_blind affects the round being dealt."""
+
+    def test_buy_drunkard_bumps_current_round_discards(self):
+        gs = _setup_shop()
+        rr_before = gs["round_resets"]["discards"]
+        cr_before = gs["current_round"]["discards_left"]
+        drunkard = _joker_card("j_drunkard", cost=0)
+        drunkard.ability["d_size"] = 1
+        gs["shop_cards"] = [drunkard]
+        step(gs, BuyCard(shop_index=0))
+        assert gs["round_resets"]["discards"] == rr_before + 1
+        assert gs["current_round"]["discards_left"] == cr_before + 1
+
+    def test_sell_drunkard_clamps_current_round_at_zero(self):
+        gs = _setup_shop()
+        drunkard = _joker_card("j_drunkard", cost=0, sell_cost=1)
+        drunkard.ability["d_size"] = 1
+        gs["shop_cards"] = [drunkard]
+        step(gs, BuyCard(shop_index=0))
+        gs["current_round"]["discards_left"] = 0  # all spent this round
+        rr_before = gs["round_resets"]["discards"]
+        step(gs, SellCard(area="jokers", card_index=len(gs["jokers"]) - 1))
+        assert gs["round_resets"]["discards"] == rr_before - 1
+        assert gs["current_round"]["discards_left"] == 0  # ease_discard clamp
