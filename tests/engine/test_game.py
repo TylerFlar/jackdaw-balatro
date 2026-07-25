@@ -1269,3 +1269,40 @@ class TestRerollNotSoulable:
             getattr(c, "center_key", "") not in ("c_soul", "c_black_hole")
             for c in gs.get("shop_cards", [])
         )
+
+
+# ---------------------------------------------------------------------------
+# Ceremonial Dagger destroys its right neighbor (bug #57, LSL9ZZUW)
+# ---------------------------------------------------------------------------
+
+
+class TestCeremonialDaggerOnBlindSelect:
+    """The destroy_joker mutation from Ceremonial Dagger was never
+    processed by _apply_setting_blind_mutations — the dagger gained
+    mult while its victim survived (card.lua:2561)."""
+
+    def test_dagger_eats_right_neighbor(self):
+        gs = _init_gs("DAGGER1")
+        dagger = _joker_card("j_ceremonial")
+        dagger.ability["name"] = "j_ceremonial"
+        victim = _joker_card("j_flower_pot", sell_cost=3)
+        gs["jokers"] = [dagger, victim]
+        step(gs, SelectBlind())
+        assert [j.center_key for j in gs["jokers"]] == ["j_ceremonial"]
+        assert dagger.ability.get("mult", 0) == 6  # 2x sell_cost
+
+    def test_dagger_spares_eternal_neighbor(self):
+        gs = _init_gs("DAGGER2")
+        dagger = _joker_card("j_ceremonial")
+        victim = _joker_card("j_flower_pot", sell_cost=3, eternal=True)
+        gs["jokers"] = [dagger, victim]
+        step(gs, SelectBlind())
+        assert len(gs["jokers"]) == 2
+        assert dagger.ability.get("mult", 0) == 0
+
+    def test_dagger_alone_no_effect(self):
+        gs = _init_gs("DAGGER3")
+        dagger = _joker_card("j_ceremonial")
+        gs["jokers"] = [dagger]
+        step(gs, SelectBlind())
+        assert len(gs["jokers"]) == 1

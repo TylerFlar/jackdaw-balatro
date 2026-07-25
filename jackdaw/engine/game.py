@@ -2088,6 +2088,17 @@ def _apply_setting_blind_mutations(
                     target.remove_from_deck(gs)
                     _release_used_key(gs, target)
 
+        # Ceremonial Dagger: destroy the joker to its right (the +2x
+        # sell-value mult bump happens in the handler, card.lua:2561).
+        # This mutation was never processed — the dagger gained mult
+        # but its victim survived on the sim (live-verified: LSL9ZZUW,
+        # live destroyed the fresh-bought Flower Pot at blind select).
+        _dagger_target = mut.get("destroy_joker")
+        if _dagger_target is not None and _dagger_target in jokers:
+            jokers.remove(_dagger_target)
+            _dagger_target.remove_from_deck(gs)
+            _release_used_key(gs, _dagger_target)
+
         # Burglar: set hands / remove discards
         if "set_hands" in mut:
             cr = gs.get("current_round", {})
