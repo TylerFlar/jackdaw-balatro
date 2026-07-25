@@ -445,3 +445,65 @@ class TestAfterPhase:
         assert r.total == 64
         assert r.saved is True
         assert bones in r.jokers_removed
+
+
+# ============================================================================
+# Debuffed hands still run the "after" joker pass (bug #50)
+# ============================================================================
+
+
+class TestDebuffedHandAfterPass:
+    """Vanilla's context.after loop sits AFTER the scored/debuffed
+    if-else (state_events.lua:1068), so a boss-debuffed play still
+    decays Ice Cream — live-verified on LS96X6P4 (sim +25 = one missed
+    5-chip decay x5 mult vs The Psychic)."""
+
+    def test_ice_cream_decays_on_debuffed_play(self):
+        played = [_card("Hearts", "King"), _card("Spades", "Jack")]
+        ice = _joker("j_ice_cream", extra={"chips": 85, "chip_mod": 5})
+        blind = Blind.create("bl_psychic", ante=1)  # must play 5 cards
+        r = score_hand(played, [], [ice], HandLevels(), blind, PseudoRandom("T"))
+        assert r.debuffed is True
+        assert r.total == 0
+        assert ice.ability["extra"]["chips"] == 80
+        assert r.jokers_removed == []
+
+    def test_ice_cream_melts_on_debuffed_play(self):
+        played = [_card("Hearts", "King"), _card("Spades", "Jack")]
+        ice = _joker("j_ice_cream", extra={"chips": 5, "chip_mod": 5})
+        blind = Blind.create("bl_psychic", ante=1)
+        r = score_hand(played, [], [ice], HandLevels(), blind, PseudoRandom("T"))
+        assert r.debuffed is True
+        assert r.jokers_removed == [ice]
+
+    def test_scored_play_decay_unchanged(self):
+        played = [
+            _card("Hearts", "King"),
+            _card("Spades", "King"),
+            _card("Clubs", "King"),
+            _card("Hearts", "Jack"),
+            _card("Spades", "Jack"),
+        ]
+        ice = _joker("j_ice_cream", extra={"chips": 85, "chip_mod": 5})
+        blind = Blind.create("bl_psychic", ante=1)
+        r = score_hand(played, [], [ice], HandLevels(), blind, PseudoRandom("T"))
+        assert r.debuffed is False
+        assert ice.ability["extra"]["chips"] == 80
+
+    def test_mr_bones_saves_on_debuffed_final_hand(self):
+        played = [_card("Hearts", "King"), _card("Spades", "Jack")]
+        bones = _joker("j_mr_bones")
+        blind = Blind.create("bl_psychic", ante=1)
+        r = score_hand(
+            played,
+            [],
+            [bones],
+            HandLevels(),
+            blind,
+            PseudoRandom("T"),
+            blind_chips=300,
+            game_state={"hands_left": 0},
+        )
+        assert r.debuffed is True
+        assert r.saved is True
+        assert bones in r.jokers_removed

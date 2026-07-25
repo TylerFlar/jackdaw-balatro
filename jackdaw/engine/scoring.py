@@ -490,22 +490,58 @@ def score_hand(
     # which checks #cards >= h_size_ge against the full played hand.
     debuffed = blind.debuff_hand(played_cards, poker_hands, hand_type)
     if debuffed:
+        _debuffed_shared = dict(
+            full_hand=played_cards,
+            scoring_hand=scoring_cards,
+            scoring_name=hand_type,
+            poker_hands=poker_hands,
+            jokers=jokers,
+            rng=rng,
+            smeared=smeared,
+            pareidolia=pareidolia,
+            hand_levels=hand_levels,
+            blind=blind,
+            held_cards=held_cards,
+            game=snapshot,
+        )
         # Phase 3a: Matador check on debuffed hands
         for joker in jokers:
             if joker.debuff:
                 continue
-            ctx = JokerContext(
-                debuffed_hand=True,
-                blind=blind,
-                jokers=jokers,
-                full_hand=played_cards,
-                scoring_hand=scoring_cards,
-                scoring_name=hand_type,
-                poker_hands=poker_hands,
-            )
+            ctx = JokerContext(debuffed_hand=True, **_debuffed_shared)
             result = calculate_joker(joker, ctx)
             if result and result.dollars:
                 dollars += result.dollars
+
+        # Vanilla's "after" joker pass sits AFTER the scored/debuffed
+        # if-else (state_events.lua:1068) — it fires on debuffed hands
+        # too, so Ice Cream decays (and can melt) on a "Nope!" play
+        # (live-verified: LS96X6P4 sim scored +25 over live = one missed
+        # 5-chip decay x5 mult).  Same for the Mr. Bones save on a
+        # debuffed final hand.
+        jokers_removed_debuffed: list[Card] = []
+        for joker in jokers:
+            if joker.debuff:
+                continue
+            after_result = calculate_joker(
+                joker, JokerContext(after=True, **_debuffed_shared)
+            )
+            if after_result and after_result.remove:
+                jokers_removed_debuffed.append(joker)
+
+        saved = False
+        if blind_chips > 0 and gs.get("hands_left", 0) == 0:
+            for joker in jokers:
+                if joker.debuff:
+                    continue
+                bones_ctx = JokerContext(**_debuffed_shared)
+                bones_ctx.game_over = True  # type: ignore[attr-defined]
+                bones_result = calculate_joker(joker, bones_ctx)
+                if bones_result and bones_result.saved:
+                    saved = True
+                    if bones_result.remove:
+                        jokers_removed_debuffed.append(joker)
+                    break
 
         return ScoreResult(
             hand_type=hand_type,
@@ -516,6 +552,8 @@ def score_hand(
             dollars_earned=dollars,
             debuffed=True,
             breakdown=[f"Hand blocked by {blind.name}"],
+            jokers_removed=jokers_removed_debuffed,
+            saved=saved,
         )
 
     # === Phase 3b: The Arm — demote played hand type by 1 (min L1) ===
