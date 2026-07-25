@@ -48,7 +48,13 @@ class GameSnapshot:
     nine_tally: int = 0
     enhanced_card_count: int = 0
     hands_left: int = 0
+    # current-round hands played (G.GAME.current_round.hands_played) —
+    # PRE-increment during scoring (vanilla increments after
+    # evaluate_play, state_events.lua:523-24); DNA / Sixth Sense == 0.
     hands_played: int = 0
+    # run-wide hands played (G.GAME.hands_played) — Loyalty Card's
+    # window (card.lua:3633); also pre-increment during scoring.
+    hands_played_run: int = 0
     discards_left: int = 0
     discards_used: int = 0
     probabilities_normal: float = 1.0
@@ -1189,7 +1195,10 @@ def _loyalty_card(card: Card, ctx: JokerContext) -> JokerResult | None:
         extra = card.ability.get("extra", {})
         every = extra.get("every", 5)
         hands_at_create = card.ability.get("hands_played_at_create", 0)
-        remaining = (every - 1 - (ctx.game.hands_played - hands_at_create)) % (every + 1)
+        # RUN-WIDE counter (G.GAME.hands_played, card.lua:3633) — NOT
+        # the current-round one (live-verified: LSHACSAC, live's x4
+        # fired exactly 738*4=2952 where sim scored flat).
+        remaining = (every - 1 - (ctx.game.hands_played_run - hands_at_create)) % (every + 1)
         if remaining == every:
             return JokerResult(Xmult_mod=extra.get("Xmult", 4))
     return None

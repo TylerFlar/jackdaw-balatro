@@ -444,6 +444,7 @@ def score_hand(
         enhanced_card_count=gs.get("enhanced_card_count", 0),
         hands_left=gs.get("hands_left", 0),
         hands_played=gs.get("current_round_hands_played", 0),
+        hands_played_run=gs.get("hands_played", 0),
         discards_left=gs.get("discards_left", 0),
         discards_used=gs.get("discards_used", 0),
         probabilities_normal=probabilities_normal,
@@ -607,6 +608,8 @@ def score_hand(
         game=snapshot,
     )
 
+    joker_creates: list[dict] = []
+
     # === Phase 5: "before" joker pass ===
     for joker in jokers:
         if joker.debuff:
@@ -618,6 +621,10 @@ def score_hand(
             base_chips, base_mult = hand_levels.get(hand_type)
             hand_chips = float(base_chips)
             mult = float(base_mult)
+        # DNA's playing-card copy is a before-context create
+        # (card.lua:3501-13) — this pass used to drop extra entirely.
+        if result and result.extra and "create" in result.extra:
+            joker_creates.append(result.extra["create"])
 
     # === Phase 6: Blind modify_hand (The Flint) ===
     new_mult, new_chips, modified = blind.modify_hand(mult, int(hand_chips))
@@ -625,8 +632,6 @@ def score_hand(
         mult = float(new_mult)
         hand_chips = float(new_chips)
         breakdown.append(f"Blind modify: {int(hand_chips)} chips, {int(mult)} mult")
-
-    joker_creates: list[dict] = []
     # === Phase 7: Per scored card (with retriggers) ===
     for card in scoring_cards:
         if card.debuff:
@@ -856,6 +861,10 @@ def score_hand(
             )
             dest_result = calculate_joker(joker, dest_ctx)
             if dest_result and dest_result.remove:
+                # Sixth Sense destroys the six AND creates a Spectral
+                # (card.lua:2604-10) — the create was dropped here.
+                if dest_result.extra and "create" in dest_result.extra:
+                    joker_creates.append(dest_result.extra["create"])
                 destroyed = True
                 break
         # Glass Card self-shatter: 1 in (1/probabilities_normal * 4) chance

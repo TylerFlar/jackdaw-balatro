@@ -394,7 +394,12 @@ def create_card(
         return card
 
     card = Card()
-    card.set_ability(key)
+    # hands_played_at_create is stamped at CARD CREATION for every
+    # center (card.lua:337, inside set_ability) — this call passed
+    # nothing, so every created joker anchored Loyalty Card's x4
+    # window to hand 0 instead of its creation point (live-verified:
+    # LSHACSAC — live H0=13 fired at play 19, sim H0=0 fired at 18).
+    card.set_ability(key, hands_played=gs.get("hands_played", 0))
 
     # Card:set_ability registers EVERY created center key in
     # G.GAME.used_jokers (card.lua:349-354) — shop displays, pack contents,
@@ -570,6 +575,25 @@ def resolve_create_descriptor(
     copy_source: Card | None = descriptor.get("copy_of")
     if copy_source is not None:
         return copy.deepcopy(copy_source)
+
+    # ------------------------------------------------------------------
+    # DNA: copy of a played playing card (card.lua:3505 copy_card).
+    # A FRESH Card object — vanilla's Card:init assigns the next global
+    # sort_id, so the copy must NOT share the source's (shuffles sort
+    # by sort_id first; a duplicate id would desync deck order).
+    # ------------------------------------------------------------------
+    if card_type == "playing_card_copy":
+        source: Card | None = descriptor.get("source_card")
+        if source is None or getattr(source, "base", None) is None:
+            return None
+        return create_playing_card(
+            Suit(source.base.suit.value if hasattr(source.base.suit, "value") else source.base.suit),
+            Rank(source.base.rank.value if hasattr(source.base.rank, "value") else source.base.rank),
+            enhancement=getattr(source, "center_key", None) or "c_base",
+            edition=dict(source.edition) if getattr(source, "edition", None) else None,
+            seal=getattr(source, "seal", None),
+            hands_played=game_state.get("hands_played", 0) if game_state else 0,
+        )
 
     # ------------------------------------------------------------------
     # Pool-drawn consumables and jokers

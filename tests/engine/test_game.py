@@ -1306,3 +1306,47 @@ class TestCeremonialDaggerOnBlindSelect:
         gs["jokers"] = [dagger]
         step(gs, SelectBlind())
         assert len(gs["jokers"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# hands_played counters are pre-increment during scoring (bug #58)
+# ---------------------------------------------------------------------------
+
+
+class TestHandsPlayedPreIncrementDuringScoring:
+    """Vanilla increments BOTH hands_played counters in the event AFTER
+    evaluate_play (state_events.lua:523-24) — scoring contexts see
+    pre-increment values.  The sim incremented before score_hand, which
+    killed DNA / Sixth Sense (== 0 never true) and shifted Loyalty
+    Card's window (LSHACSAC)."""
+
+    def test_dna_copies_first_single_card_play(self):
+        gs = _init_gs("DNAPRE1")
+        dna = _joker_card("j_dna")
+        gs["jokers"] = [dna]
+        step(gs, SelectBlind())
+        owned_before = (
+            len(gs["deck"]) + len(gs["hand"]) + len(gs.get("discard_pile", []))
+        )
+        step(gs, PlayHand(card_indices=(0,)))
+        owned_after = (
+            len(gs["deck"]) + len(gs["hand"]) + len(gs.get("discard_pile", []))
+            + len(gs.get("played_cards_area", []))
+        )
+        assert owned_after == owned_before + 1  # DNA copy created
+
+    def test_second_play_no_dna(self):
+        gs = _init_gs("DNAPRE2")
+        dna = _joker_card("j_dna")
+        gs["jokers"] = [dna]
+        step(gs, SelectBlind())
+        step(gs, PlayHand(card_indices=(0, 1)))  # 2 cards: DNA needs 1
+        owned_before = (
+            len(gs["deck"]) + len(gs["hand"]) + len(gs.get("discard_pile", []))
+        )
+        step(gs, PlayHand(card_indices=(0,)))  # 2nd hand of round: no DNA
+        owned_after = (
+            len(gs["deck"]) + len(gs["hand"]) + len(gs.get("discard_pile", []))
+            + len(gs.get("played_cards_area", []))
+        )
+        assert owned_after == owned_before

@@ -607,11 +607,18 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
         c.facing = "front"
 
     # ------------------------------------------------------------------
-    # 3. Decrement hands_left, increment hands_played
+    # 3. Decrement hands_left
+    #
+    # hands_left drops at the play press (vanilla ease_hands_played
+    # early in play_cards_from_highlighted), but BOTH hands_played
+    # counters increment in the event queued AFTER evaluate_play
+    # (state_events.lua:517-27) — every scoring context sees
+    # PRE-increment values: Loyalty Card's run-wide window
+    # (card.lua:3633), DNA / Sixth Sense's current_round == 0 checks
+    # (card.lua:3501/2604).  The increments moved below score_hand
+    # (bug #58, LSHACSAC: sim's Loyalty x4 fired a play late).
     # ------------------------------------------------------------------
     cr["hands_left"] -= 1
-    cr["hands_played"] += 1
-    gs["hands_played"] = gs.get("hands_played", 0) + 1
 
     # ------------------------------------------------------------------
     # 4. Per-card stats
@@ -682,6 +689,12 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
         back_key=gs.get("selected_back_key"),
         blind_chips=blind.chips,
     )
+
+    # hands_played counters increment AFTER evaluate_play completes
+    # (state_events.lua:523-24) — see the step-3 comment above.
+    cr["hands_played"] += 1
+    gs["hands_played"] = gs.get("hands_played", 0) + 1
+    gs["current_round_hands_played"] = cr["hands_played"]
 
     # ------------------------------------------------------------------
     # 7. Process scoring side-effects

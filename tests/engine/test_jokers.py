@@ -13,6 +13,7 @@ from jackdaw.engine.card import Card, reset_sort_id_counter
 from jackdaw.engine.hand_levels import HandLevels
 from jackdaw.engine.jokers import (
     _REGISTRY,
+    GameSnapshot,
     JokerContext,
     JokerResult,
     calculate_joker,
@@ -550,16 +551,20 @@ class TestIdolHandler:
 
 
 class TestLoyaltyCard:
-    """Loyalty Card: x4 every 6th hand (every=5, triggers when remainder==every)."""
+    """Loyalty Card: x4 every 6th hand (every=5, triggers when
+    remainder==every).  Uses the RUN-WIDE hands_played (card.lua:3633,
+    GameSnapshot.hands_played_run), pre-increment at scoring — bug #58
+    (LSHACSAC) fed it the current-round counter with at_create never
+    stamped."""
 
     def test_sixth_hand_triggers(self):
-        """hands_played=5 (delta=5 from create at 0): triggers."""
+        """hands_played_run=5 (delta=5 from create at 0): triggers."""
         joker = _joker_card(
             "j_loyalty_card",
             extra={"Xmult": 4, "every": 5},
             hands_played_at_create=0,
         )
-        ctx = JokerContext(joker_main=True, hands_played=5)
+        ctx = JokerContext(joker_main=True, game=GameSnapshot(hands_played_run=5))
         result = calculate_joker(joker, ctx)
         assert result is not None
         assert result.Xmult_mod == 4
@@ -570,7 +575,7 @@ class TestLoyaltyCard:
             extra={"Xmult": 4, "every": 5},
             hands_played_at_create=0,
         )
-        ctx = JokerContext(joker_main=True, hands_played=0)
+        ctx = JokerContext(joker_main=True, game=GameSnapshot(hands_played_run=0))
         assert calculate_joker(joker, ctx) is None
 
     def test_twelfth_hand_triggers(self):
@@ -580,7 +585,7 @@ class TestLoyaltyCard:
             extra={"Xmult": 4, "every": 5},
             hands_played_at_create=0,
         )
-        ctx = JokerContext(joker_main=True, hands_played=11)
+        ctx = JokerContext(joker_main=True, game=GameSnapshot(hands_played_run=11))
         result = calculate_joker(joker, ctx)
         assert result is not None
         assert result.Xmult_mod == 4
@@ -592,17 +597,17 @@ class TestLoyaltyCard:
             extra={"Xmult": 4, "every": 5},
             hands_played_at_create=0,
         )
-        ctx = JokerContext(joker_main=True, hands_played=6)
+        ctx = JokerContext(joker_main=True, game=GameSnapshot(hands_played_run=6))
         assert calculate_joker(joker, ctx) is None
 
     def test_created_mid_run(self):
-        """Created at hands_played=10, triggers at hands_played=15."""
+        """Created at hands_played=10, triggers at hands_played_run=15."""
         joker = _joker_card(
             "j_loyalty_card",
             extra={"Xmult": 4, "every": 5},
             hands_played_at_create=10,
         )
-        ctx = JokerContext(joker_main=True, hands_played=15)
+        ctx = JokerContext(joker_main=True, game=GameSnapshot(hands_played_run=15))
         result = calculate_joker(joker, ctx)
         assert result is not None
         assert result.Xmult_mod == 4
