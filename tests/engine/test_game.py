@@ -1129,3 +1129,59 @@ class TestD6TagRerollCost:
         gs["round_resets"]["temp_reroll_cost"] = 0
         gs["current_round"]["reroll_cost_increase"] = 0
         assert calculate_reroll_cost(gs) == 0
+
+
+# ---------------------------------------------------------------------------
+# Round-end seal effects (bugs #51/#52, LSGLNPN9)
+# ---------------------------------------------------------------------------
+
+
+class TestRoundEndSealEffects:
+    """Gold Seal has NO held effect at round end — vanilla pays it on
+    play+score only (get_p_dollars, card.lua:1071-73); the held-card
+    round-end effects are h_dollars + Blue Seal only (card.lua:1033-65).
+    Blue Seal's planet matches the LAST hand played
+    (G.GAME.last_hand_played, card.lua:1047-53), not the most-played."""
+
+    def _setup_win(self, seed="SEAL_TEST"):
+        gs = _init_gs(seed)
+        step(gs, SelectBlind())
+        gs["blind"].chips = 1
+        return gs
+
+    def test_gold_seal_held_pays_nothing_at_round_end(self):
+        gs = self._setup_win()
+        gs["hand"][7].seal = "Gold"  # stays in hand through the play
+        dollars_before = gs["dollars"]
+        step(gs, PlayHand(card_indices=(0, 1, 2, 3, 4)))
+        assert gs["phase"] == GamePhase.ROUND_EVAL
+        assert gs["dollars"] == dollars_before
+
+    def test_gold_seal_pays_on_played_scoring_card(self):
+        gs = self._setup_win()
+        gs["hand"][0].seal = "Gold"
+        dollars_before = gs["dollars"]
+        step(gs, PlayHand(card_indices=(0,)))  # High Card always scores
+        assert gs["dollars"] == dollars_before + 3
+
+    def test_blue_seal_creates_planet_for_last_hand_played(self):
+        gs = self._setup_win()
+        gs["hand"][7].seal = "Blue"
+        step(gs, PlayHand(card_indices=(0,)))  # last hand = High Card
+        assert gs["phase"] == GamePhase.ROUND_EVAL
+        cons = gs["consumables"]
+        assert [c.center_key for c in cons] == ["c_pluto"]
+
+    def test_blue_seal_no_planet_at_full_consumable_slots(self):
+        gs = self._setup_win()
+        gs["hand"][7].seal = "Blue"
+        from jackdaw.engine.card import Card as _C
+
+        filler = []
+        for _ in range(gs.get("consumable_slots", 2)):
+            f = _C(center_key="c_pluto")
+            f.ability = {"set": "Planet", "effect": ""}
+            filler.append(f)
+        gs["consumables"] = filler
+        step(gs, PlayHand(card_indices=(0,)))
+        assert len(gs["consumables"]) == gs.get("consumable_slots", 2)

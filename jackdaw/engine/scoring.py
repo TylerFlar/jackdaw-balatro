@@ -483,6 +483,9 @@ def score_hand(
     # (found by lockstep: The Psychic blocked a short play, live still
     # recorded High Card, sim recorded nothing).
     hand_levels.record_play(hand_type)
+    # last_hand_played is set alongside the counters (state_events.lua:576),
+    # also before the debuff check — Blue Seal reads it at round end.
+    gs["last_hand_played"] = hand_type
 
     # === Phase 3: Boss blind debuff check ===
     # Lua passes G.play.cards (all played cards, not just scoring subset)

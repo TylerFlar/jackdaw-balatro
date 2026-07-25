@@ -1809,7 +1809,8 @@ def _round_won(gs: dict[str, Any]) -> None:
 
     1. Fire joker ``end_of_round`` context (economy + scaling)
     2. Process perishable/rental (round_lifecycle)
-    3. Gold Seal: +$3 per held card with Gold Seal
+    3. Held-card effects: Blue Seal planet for the last hand played
+       (Gold Seal has NO held effect — it pays on play+score only)
     4. Return all cards to deck (hand + played + discard)
     5. Un-debuff all playing cards (blind debuffs don't persist)
     6. Track unused discards (for Garbage Tag)
@@ -1835,39 +1836,34 @@ def _round_won(gs: dict[str, Any]) -> None:
     eor = _joker_end_of_round_effects(gs)
 
     # ------------------------------------------------------------------
-    # 3. Gold Seal: +$3 per held card with Gold Seal in hand
+    # 3. Held-card end-of-round effects (card.lua:1033-65): only
+    #    h_dollars (Gold CARD enhancement) and Blue Seal planets.  Gold
+    #    SEAL has NO held effect — it pays $3 when played+scoring only
+    #    (get_p_dollars, card.lua:1071-73); the old +$3-per-held-gold-
+    #    seal block here was invented (live-verified LSGLNPN9: sim +$3
+    #    for a Certificate gold-seal Ace held at round end).
+    #    Blue Seal creates the planet for the LAST hand played
+    #    (G.GAME.last_hand_played, card.lua:1047-53) — NOT most-played —
+    #    via the descriptor path so the forced-key create registers in
+    #    used_jokers and room-gates like vanilla's 'blusl' create_card.
     # ------------------------------------------------------------------
     hand: list = gs.get("hand", [])
-    gold_seal_dollars = sum(
-        3 for c in hand if getattr(c, "seal", None) == "Gold" and not getattr(c, "debuff", False)
-    )
-    if gold_seal_dollars:
-        gs["dollars"] = gs.get("dollars", 0) + gold_seal_dollars
+    last_hand = gs.get("last_hand_played")
+    if last_hand:
+        from jackdaw.engine.consumables import _PLANET_HAND
 
-    # ------------------------------------------------------------------
-    # 3b. Blue Seal: create Planet for most-played hand type
-    # ------------------------------------------------------------------
-    hand_levels = gs.get("hand_levels")
-    consumables: list = gs.get("consumables", [])
-    consumable_limit = gs.get("consumable_slots", 2)
-    for c in hand:
-        if getattr(c, "seal", None) == "Blue" and not getattr(c, "debuff", False):
-            if len(consumables) < consumable_limit and hand_levels is not None:
-                most_played = hand_levels.most_played()
-                # Find the planet key for this hand type
-                from jackdaw.engine.consumables import _PLANET_HAND
-
-                planet_key = None
-                for pk, ht in _PLANET_HAND.items():
-                    if ht == most_played.value:
-                        planet_key = pk
-                        break
-                if planet_key:
-                    from jackdaw.engine.card import Card as _BSCard
-
-                    planet = _BSCard(center_key=planet_key)
-                    planet.ability = {"set": "Planet", "effect": ""}
-                    consumables.append(planet)
+        planet_key = None
+        for pk, ht in _PLANET_HAND.items():
+            if ht == last_hand:
+                planet_key = pk
+                break
+        if planet_key:
+            for c in hand:
+                if getattr(c, "seal", None) == "Blue" and not getattr(c, "debuff", False):
+                    _resolve_create_descriptors(
+                        gs,
+                        [{"type": "Planet", "forced_key": planet_key, "seed": "blusl"}],
+                    )
 
     # ------------------------------------------------------------------
     # 4. Return all cards to deck
