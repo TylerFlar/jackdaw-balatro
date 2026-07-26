@@ -1378,3 +1378,42 @@ class TestOopsAllSixesProbabilities:
         step(gs, BuyCard(shop_index=0))
         step(gs, SellCard(area="jokers", card_index=len(gs["jokers"]) - 1))
         assert gs["probabilities"]["normal"] == 1.0
+
+
+# ---------------------------------------------------------------------------
+# Rocket bumps before the payout is read (bug #62, LSZ6YOW6)
+# ---------------------------------------------------------------------------
+
+
+class TestRocketBossBump:
+    """Rocket's +$2-per-boss bump fires in the end_of_round pass
+    (card.lua:2896, needs the blind) BEFORE calc_dollar_bonus builds
+    the payout rows — a boss-round cash-out pays the bumped value."""
+
+    def test_boss_round_pays_bumped_value(self):
+        from jackdaw.engine.card_factory import create_joker
+        from jackdaw.engine.game import _joker_end_of_round_effects
+        from jackdaw.engine.blind import Blind
+        from jackdaw.engine.run_init import initialize_run
+
+        gs = initialize_run("b_red", 1, "ROCKET1")
+        rocket = create_joker("j_rocket")
+        gs["jokers"] = [rocket]
+        gs["blind"] = Blind.create("bl_hook", ante=1)  # boss
+        eor = _joker_end_of_round_effects(gs)
+        assert rocket.ability["extra"]["dollars"] == 3  # 1 + 2
+        assert eor["dollars_earned"] == 3  # post-bump value paid
+
+    def test_non_boss_round_no_bump(self):
+        from jackdaw.engine.card_factory import create_joker
+        from jackdaw.engine.game import _joker_end_of_round_effects
+        from jackdaw.engine.blind import Blind
+        from jackdaw.engine.run_init import initialize_run
+
+        gs = initialize_run("b_red", 1, "ROCKET2")
+        rocket = create_joker("j_rocket")
+        gs["jokers"] = [rocket]
+        gs["blind"] = Blind.create("bl_small", ante=1)
+        eor = _joker_end_of_round_effects(gs)
+        assert rocket.ability["extra"]["dollars"] == 1
+        assert eor["dollars_earned"] == 1

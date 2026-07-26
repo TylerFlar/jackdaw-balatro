@@ -1794,7 +1794,15 @@ def _joker_end_of_round_effects(gs: dict[str, Any]) -> dict[str, Any]:
         nine_tally=sum(1 for c in _all_owned if c.get_id() == 9),
         joker_count=len(jokers),
     )
-    eor = on_end_of_round(jokers, game_snap, rng, hand_levels=gs.get("hand_levels"))
+    eor = on_end_of_round(
+        jokers,
+        game_snap,
+        rng,
+        hand_levels=gs.get("hand_levels"),
+        # Rocket's boss bump reads the just-finished blind
+        # (card.lua:2896); fires on losses too (bug #15 semantics).
+        blind=gs.get("blind"),
+    )
     # Dollars are NOT banked here: vanilla pays the whole round total in
     # one ease_dollars at the cash-out press, with interest computed on
     # pre-payout money.  The value flows to calculate_round_earnings.

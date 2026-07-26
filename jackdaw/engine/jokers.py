@@ -364,8 +364,16 @@ def on_end_of_round(
     game: GameSnapshot,
     rng: PseudoRandom | None = None,
     hand_levels: Any = None,
+    blind: Any = None,
 ) -> dict[str, Any]:
     """Process all joker end-of-round effects.
+
+    Order matches vanilla: the calculate_joker end_of_round pass fires
+    at end_round (state_events.lua:96-110) BEFORE the cash-out screen
+    builds its calc_dollar_bonus rows — so Rocket's boss bump
+    (card.lua:2896, needs *blind*) lands before its payout is read
+    (live-verified: LSZ6YOW6 — live paid the post-bump $3 at the boss
+    cash-out, sim paid the pre-bump $1).
 
     Returns a dict with:
         dollars_earned: total dollars from calc_dollar_bonus
@@ -376,17 +384,14 @@ def on_end_of_round(
     removed: list[Card] = []
     mutations: list[dict[str, Any]] = []
 
-    # 1. Dollar bonuses (calc_dollar_bonus)
-    for joker in jokers:
-        dollars += calc_dollar_bonus(joker, game)
-
-    # 2. End-of-round calculate_joker effects
+    # 1. End-of-round calculate_joker effects (bumps/decays/destroys)
     ctx = JokerContext(
         end_of_round=True,
         jokers=jokers,
         rng=rng,
         game=game,
         hand_levels=hand_levels,
+        blind=blind,
     )
     for joker in jokers:
         if joker.debuff:
@@ -397,6 +402,14 @@ def on_end_of_round(
                 removed.append(joker)
             if result.extra:
                 mutations.append(result.extra)
+
+    # 2. Dollar bonuses (calc_dollar_bonus) — after the mutations, and
+    #    a joker that self-destructed above pays nothing (vanilla's
+    #    eval rows are built after the destruction event).
+    for joker in jokers:
+        if joker in removed:
+            continue
+        dollars += calc_dollar_bonus(joker, game)
 
     return {
         "dollars_earned": dollars,
