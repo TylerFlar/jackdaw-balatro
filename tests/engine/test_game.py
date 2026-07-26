@@ -1478,3 +1478,35 @@ class TestGoldCardHeldPayout:
 
     def test_no_gold_no_payout(self):
         assert self._win_with_held("GOLDH4", (None, None)) == 0
+
+
+# ---------------------------------------------------------------------------
+# Cerulean Bell forced card must be in every selection (bug #67, ES7L222Z)
+# ---------------------------------------------------------------------------
+
+
+class TestCeruleanBellForcedCard:
+    """The forced card is auto-highlighted every deal and cannot be
+    deselected (blind.lua:572-87) — a play or discard without it is
+    UI-impossible in vanilla, so the engine rejects it."""
+
+    def _setup(self, seed="BELL1"):
+        gs = _init_gs(seed)
+        step(gs, SelectBlind())
+        gs["hand"][6].ability["forced_selection"] = True
+        return gs
+
+    def test_play_without_forced_card_rejected(self):
+        gs = self._setup()
+        with pytest.raises(IllegalActionError, match="Forced card"):
+            step(gs, PlayHand(card_indices=(0, 1, 2, 3, 4)))
+
+    def test_play_including_forced_card_ok(self):
+        gs = self._setup()
+        step(gs, PlayHand(card_indices=(0, 1, 2, 3, 6)))
+        assert gs["current_round"]["hands_played"] == 1
+
+    def test_discard_without_forced_card_rejected(self):
+        gs = self._setup()
+        with pytest.raises(IllegalActionError, match="Forced card"):
+            step(gs, Discard(card_indices=(0, 1)))

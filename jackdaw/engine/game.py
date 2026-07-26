@@ -590,6 +590,7 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
         raise IllegalActionError("Cannot play more than 5 cards")
     if any(i < 0 or i >= len(hand) for i in indices):
         raise IllegalActionError("Card index out of range")
+    _require_forced_card(hand, indices)
 
     # ------------------------------------------------------------------
     # 2. Move cards from hand to play area
@@ -828,6 +829,23 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
     return gs
 
 
+def _require_forced_card(hand: list, indices: tuple[int, ...]) -> None:
+    """Cerulean Bell's forced card cannot be deselected in vanilla — a
+    play/discard without it is UI-impossible (blind.lua:572-87: the
+    forced card is auto-highlighted every deal).  Bug #67 (ES7L222Z):
+    the sim rolled the SAME forced card as live but let the policy
+    play around it; live's endpoint force-included it and cap-dropped
+    the 5th requested card (full house became trips)."""
+    for i, c in enumerate(hand):
+        ability = getattr(c, "ability", None)
+        if isinstance(ability, dict) and ability.get("forced_selection"):
+            if i not in indices:
+                raise IllegalActionError(
+                    "Forced card (Cerulean Bell) must be in the selection"
+                )
+            return
+
+
 def _handle_discard(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str, Any]:
     """Discard highlighted cards, fire joker contexts, draw replacements.
 
@@ -859,6 +877,7 @@ def _handle_discard(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str, A
         raise IllegalActionError("Cannot discard more than 5 cards")
     if any(i < 0 or i >= len(hand) for i in indices):
         raise IllegalActionError("Card index out of range")
+    _require_forced_card(hand, indices)
 
     # ------------------------------------------------------------------
     # 2. Extract discarded cards in sorted order
