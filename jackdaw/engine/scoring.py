@@ -534,12 +534,14 @@ def score_hand(
                 jokers_removed_debuffed.append(joker)
 
         saved = False
-        if blind_chips > 0 and gs.get("hands_left", 0) == 0:
+        _round_chips_now = gs.get("chips", 0)  # debuffed play adds 0
+        if blind_chips > 0 and _round_chips_now < blind_chips and gs.get("hands_left", 0) == 0:
             for joker in jokers:
                 if joker.debuff:
                     continue
                 bones_ctx = JokerContext(**_debuffed_shared)
                 bones_ctx.game_over = True  # type: ignore[attr-defined]
+                bones_ctx.chips_ratio = _round_chips_now / blind_chips  # type: ignore[attr-defined]
                 bones_result = calculate_joker(joker, bones_ctx)
                 if bones_result and bones_result.saved:
                     saved = True
@@ -899,14 +901,20 @@ def score_hand(
         if after_result and after_result.remove:
             jokers_removed.append(joker)
 
-    # Mr. Bones save check: if score < blind target and last hand
+    # Mr. Bones save check: death = CUMULATIVE round chips below the
+    # blind target on the last hand; the handler enforces vanilla's
+    # >= 25% ratio (card.lua:3047-48: G.GAME.chips/G.GAME.blind.chips,
+    # both cumulative — live-verified: LSWPWW38 died at <25% with
+    # Bones on board while the old unconditional save advanced).
     saved = False
-    if blind_chips > 0 and total < blind_chips and gs.get("hands_left", 0) == 0:
+    _round_chips_after = gs.get("chips", 0) + total
+    if blind_chips > 0 and _round_chips_after < blind_chips and gs.get("hands_left", 0) == 0:
         for joker in jokers:
             if joker.debuff:
                 continue
             bones_ctx = JokerContext(**_shared)
             bones_ctx.game_over = True  # type: ignore[attr-defined]
+            bones_ctx.chips_ratio = _round_chips_after / blind_chips  # type: ignore[attr-defined]
             bones_result = calculate_joker(joker, bones_ctx)
             if bones_result and bones_result.saved:
                 saved = True

@@ -429,7 +429,8 @@ class TestAfterPhase:
         assert ice in r.jokers_removed
 
     def test_mr_bones_saves_losing_hand(self):
-        """Mr. Bones saves when score < blind_chips and hands_left == 0."""
+        """Mr. Bones saves when cumulative round chips >= 25% of the
+        blind (card.lua:3047-48, bug #65): 64/200 = 0.32 saves."""
         played = [_card("Hearts", "Ace"), _card("Spades", "Ace")]
         bones = _joker("j_mr_bones")
         r = score_hand(
@@ -439,12 +440,30 @@ class TestAfterPhase:
             HandLevels(),
             _small_blind(),
             PseudoRandom("T"),
-            blind_chips=300,
+            blind_chips=200,
             game_state={"hands_left": 0},
         )
         assert r.total == 64
         assert r.saved is True
         assert bones in r.jokers_removed
+
+    def test_mr_bones_below_quarter_no_save(self):
+        """Below 25% of the blind target Mr. Bones does NOT save
+        (LSWPWW38: live died at <25% with Bones on board)."""
+        played = [_card("Hearts", "Ace"), _card("Spades", "Ace")]
+        bones = _joker("j_mr_bones")
+        r = score_hand(
+            played,
+            [],
+            [bones],
+            HandLevels(),
+            _small_blind(),
+            PseudoRandom("T"),
+            blind_chips=300,  # 64/300 = 0.213 < 0.25
+            game_state={"hands_left": 0},
+        )
+        assert r.saved is False
+        assert bones not in r.jokers_removed
 
 
 # ============================================================================
@@ -491,6 +510,8 @@ class TestDebuffedHandAfterPass:
         assert ice.ability["extra"]["chips"] == 80
 
     def test_mr_bones_saves_on_debuffed_final_hand(self):
+        """A debuffed final hand adds 0 — prior round chips must carry
+        the 25% ratio (80/300 = 0.267 saves)."""
         played = [_card("Hearts", "King"), _card("Spades", "Jack")]
         bones = _joker("j_mr_bones")
         blind = Blind.create("bl_psychic", ante=1)
@@ -502,7 +523,7 @@ class TestDebuffedHandAfterPass:
             blind,
             PseudoRandom("T"),
             blind_chips=300,
-            game_state={"hands_left": 0},
+            game_state={"hands_left": 0, "chips": 80},
         )
         assert r.debuffed is True
         assert r.saved is True

@@ -2564,12 +2564,18 @@ def _ramen(card: Card, ctx: JokerContext) -> JokerResult | None:
 
 @register("j_mr_bones")
 def _mr_bones(card: Card, ctx: JokerContext) -> JokerResult | None:
-    """Mr. Bones: prevents death if score ≥ 25% of blind. Source: card.lua:3047.
+    """Mr. Bones: prevents death if round chips ≥ 25% of the blind.
 
-    Returns saved=True and remove=True (self-destructs after saving).
+    Vanilla checks G.GAME.chips / G.GAME.blind.chips >= 0.25
+    (card.lua:3047-48) — the old handler had NO ratio check and saved
+    unconditionally (live-verified: LSWPWW38 died at <25% with Bones
+    on board).  The caller passes the cumulative ratio via
+    ctx.chips_ratio.  Returns saved=True and remove=True
+    (self-destructs after saving).
     """
     if getattr(ctx, "game_over", False):
-        return JokerResult(saved=True, remove=True)
+        if getattr(ctx, "chips_ratio", 0.0) >= 0.25:
+            return JokerResult(saved=True, remove=True)
     return None
 
 
