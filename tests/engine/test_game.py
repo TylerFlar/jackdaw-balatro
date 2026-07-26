@@ -1441,3 +1441,40 @@ class TestUsedConsumableKeyRelease:
             step(gs, UseConsumable(card_index=0))
             created = [c.center_key for c in gs.get("consumables", [])]
             assert "c_emperor" not in created, f"seed {seed}: {created}"
+
+
+# ---------------------------------------------------------------------------
+# Gold Card h_dollars paid for held cards at round end (bug #66, LSSFHWWS)
+# ---------------------------------------------------------------------------
+
+
+class TestGoldCardHeldPayout:
+    """m_gold pays $3 per copy held at round end (card.lua:1036-38),
+    eased immediately in the end_round loop — was never paid anywhere.
+    Red seal retriggers the held effect."""
+
+    def _win_with_held(self, seed, *mods):
+        gs = _init_gs(seed)
+        step(gs, SelectBlind())
+        gs["blind"].chips = 1
+        for i, (enh, seal) in enumerate(mods):
+            card = gs["hand"][7 - i]  # stays in hand through the play
+            if enh:
+                card.set_ability(enh)
+            if seal:
+                card.set_seal(seal)
+        before = gs["dollars"]
+        step(gs, PlayHand(card_indices=(0, 1, 2, 3, 4)))
+        return gs["dollars"] - before
+
+    def test_held_gold_card_pays_three(self):
+        assert self._win_with_held("GOLDH1", ("m_gold", None)) == 3
+
+    def test_two_held_gold_cards_pay_six(self):
+        assert self._win_with_held("GOLDH2", ("m_gold", None), ("m_gold", None)) == 6
+
+    def test_red_seal_retriggers_gold(self):
+        assert self._win_with_held("GOLDH3", ("m_gold", "Red")) == 6
+
+    def test_no_gold_no_payout(self):
+        assert self._win_with_held("GOLDH4", (None, None)) == 0

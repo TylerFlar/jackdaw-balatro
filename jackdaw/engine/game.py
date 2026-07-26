@@ -1896,6 +1896,24 @@ def _round_won(gs: dict[str, Any]) -> None:
     #    used_jokers and room-gates like vanilla's 'blusl' create_card.
     # ------------------------------------------------------------------
     hand: list = gs.get("hand", [])
+
+    # h_dollars: Gold CARD enhancement pays $3 per copy HELD at round
+    # end (get_end_of_round_effect, card.lua:1036-38), eased IMMEDIATELY
+    # in the end_round loop (state_events.lua:221-24) — not part of the
+    # cash-out earnings.  Was never paid anywhere in the sim
+    # (live-verified: LSSFHWWS — live +$3 for a held Midas-golded
+    # Queen at the round-win compare).  Red seal retriggers the held
+    # effect (the reps loop above the payout).  Mime retriggers are
+    # not modelled here yet — no such collision observed live.
+    for c in hand:
+        if getattr(c, "debuff", False):
+            continue
+        _ab = getattr(c, "ability", None)
+        _hd = _ab.get("h_dollars", 0) if isinstance(_ab, dict) else 0
+        if _hd:
+            _reps = 2 if getattr(c, "seal", None) == "Red" else 1
+            gs["dollars"] = gs.get("dollars", 0) + _hd * _reps
+
     last_hand = gs.get("last_hand_played")
     if last_hand:
         from jackdaw.engine.consumables import _PLANET_HAND
