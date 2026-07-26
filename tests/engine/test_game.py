@@ -1417,3 +1417,27 @@ class TestRocketBossBump:
         eor = _joker_end_of_round_effects(gs)
         assert rocket.ability["extra"]["dollars"] == 1
         assert eor["dollars_earned"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Used consumable keeps its no-repeat key through the use chain (bug #64)
+# ---------------------------------------------------------------------------
+
+
+class TestUsedConsumableKeyRelease:
+    """The used card is still in play while its creates roll — vanilla
+    releases the used_jokers key at post-use removal, so Emperor
+    cannot self-recreate from its own Tarot draw (LSUNHM8G)."""
+
+    def test_emperor_cannot_self_recreate(self):
+        from jackdaw.engine.card_factory import create_consumable
+
+        for seed in ("EMP1", "EMP2", "EMP3", "EMP4", "EMP5", "EMP6"):
+            gs = _init_gs(seed)
+            gs["phase"] = GamePhase.SHOP
+            emperor = create_consumable("c_emperor")
+            gs["consumables"] = [emperor]
+            gs.setdefault("used_jokers", {})["c_emperor"] = True
+            step(gs, UseConsumable(card_index=0))
+            created = [c.center_key for c in gs.get("consumables", [])]
+            assert "c_emperor" not in created, f"seed {seed}: {created}"

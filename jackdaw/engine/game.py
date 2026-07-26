@@ -1294,8 +1294,13 @@ def _handle_use_consumable(
 
     consumables.pop(idx)
     card.remove_from_deck(gs)
-    _release_used_key(gs, card)
     _use_consumable_card(gs, card, targets)
+    # The used card's no-repeat key releases only AFTER the use chain:
+    # vanilla's card is still in play (dissolving) while its creates
+    # roll, so e.g. a used Emperor stays excluded from its own Tarot
+    # pool draw (live-verified: LSUNHM8G — sim released early and
+    # self-recreated c_emperor where live drew c_justice).
+    _release_used_key(gs, card)
 
     # Phase does NOT change — returns to whatever it was
     return gs
