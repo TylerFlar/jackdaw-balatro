@@ -1510,3 +1510,35 @@ class TestCeruleanBellForcedCard:
         gs = self._setup()
         with pytest.raises(IllegalActionError, match="Forced card"):
             step(gs, Discard(card_indices=(0, 1)))
+
+
+# ---------------------------------------------------------------------------
+# Perkeo negative copy: cost, slot bonus, deep copy (bug #68, ESWXXNUU)
+# ---------------------------------------------------------------------------
+
+
+class TestPerkeoNegativeCopy:
+    """Perkeo copies a random held consumable with Negative edition:
+    the copy is repriced (+5 negative, card.lua:372-73), grants +1
+    consumable slot (card.lua:568 routing), and must not share state
+    with the original."""
+
+    def test_copy_priced_slotted_and_independent(self):
+        from jackdaw.engine.card_factory import create_consumable, create_joker
+
+        gs = _setup_shop("PERKEO1")
+        perkeo = create_joker("j_perkeo")
+        gs["jokers"] = [perkeo]
+        sun = create_consumable("c_sun")
+        sun.set_cost(ante=1)
+        gs["consumables"] = [sun]
+        limit_before = gs.get("consumable_slots", 2)
+        step(gs, NextRound())
+        cons = gs["consumables"]
+        assert len(cons) == 2
+        copy_card = cons[1]
+        assert copy_card.edition == {"negative": True}
+        assert copy_card.cost == sun.cost + 5
+        assert gs["consumable_slots"] == limit_before + 1
+        copy_card.ability["marker"] = True
+        assert "marker" not in sun.ability  # deep copy, no shared dict

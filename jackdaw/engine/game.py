@@ -2933,7 +2933,14 @@ def _apply_shop_mutations(
             ctype = create.get("type", "")
 
             if ctype == "consumable_copy":
-                # Perkeo: copy a random consumable with Negative edition
+                # Perkeo: copy a random consumable with Negative edition.
+                # Vanilla copy_card + set_edition({negative}) + set_cost
+                # + add_to_deck: the negative edition adds +5 to cost
+                # (card.lua:372-73) and the negative CONSUMABLE bumps
+                # consumable_slots by 1 (card.lua:568 routing).  The old
+                # shallow copy shared the ability dict and skipped both
+                # (live-verified: ESWXXNUU — live's copy buy=8/sell=4
+                # with limit 3; sim kept 3/1 and limit 2).
                 consumables: list = gs.get("consumables", [])
                 if consumables:
                     rng = gs.get("rng")
@@ -2942,9 +2949,15 @@ def _apply_shop_mutations(
 
                         seed_val = rng.seed("perkeo")
                         original, _ = rng.element(consumables, seed_val)
-                        duplicate = copy.copy(original)
-                        duplicate.edition = {"negative": True}
+                        duplicate = copy.deepcopy(original)
+                        duplicate.set_edition({"negative": True})
+                        duplicate.set_cost(
+                            inflation=gs.get("inflation", 0),
+                            discount_percent=gs.get("discount_percent", 0),
+                            ante=gs.get("round_resets", {}).get("ante", 1),
+                        )
                         consumables.append(duplicate)
+                        duplicate.add_to_deck(gs)
 
 
 # ---------------------------------------------------------------------------
