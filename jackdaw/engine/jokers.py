@@ -1234,7 +1234,13 @@ def _raised_fist(card: Card, ctx: JokerContext) -> JokerResult | None:
             lowest_id = 15
             lowest_card = None
             for c in ctx.held_cards:
-                if c.ability.get("effect") != "Stone Card" and c.get_id() < lowest_id:
+                # Vanilla's scan uses temp_ID >= id (card.lua:3324): on
+                # TIES the LAST card in hand order wins — with twin
+                # lowest cards the fist targets the later one, which
+                # matters when only one twin is debuffed (LSF5YVZ9:
+                # Pillar-debuffed D7 was vanilla's target → no mult;
+                # sim's strict < picked the clean H7 → +14).
+                if c.ability.get("effect") != "Stone Card" and c.get_id() <= lowest_id:
                     lowest_id = c.get_id()
                     lowest_card = c
             if ctx.other_card is lowest_card:

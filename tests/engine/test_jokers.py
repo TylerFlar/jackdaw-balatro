@@ -1509,3 +1509,45 @@ class TestBlueprintBrainstormChain:
         result = calculate_joker(bp, ctx)
         # Eventually returns None when cap exceeded
         assert result is None
+
+
+class TestRaisedFistTieBreak:
+    """Vanilla scans with temp_ID >= id (card.lua:3324): tied lowest
+    cards resolve to the LAST in hand order — which matters when only
+    one twin is debuffed (bug #63, LSF5YVZ9)."""
+
+    @staticmethod
+    def _pc(suit, rank):
+        from jackdaw.engine.card import Card
+
+        c = Card()
+        c.set_base(f"{suit[0]}_{rank}", suit, rank)
+        c.set_ability("c_base")
+        return c
+
+    def test_tied_lowest_targets_last_twin(self):
+        fist = _joker_card("j_raised_fist")
+        h7 = self._pc("Hearts", "7")
+        d7 = self._pc("Diamonds", "7")
+        held = [self._pc("Hearts", "Ace"), h7, d7]
+        # earlier twin: no fire
+        ctx1 = JokerContext(individual=True, cardarea="hand", other_card=h7, held_cards=held)
+        r1 = calculate_joker(fist, ctx1)
+        assert r1 is None or not getattr(r1, "h_mult", 0)
+        # later twin: fires
+        ctx2 = JokerContext(individual=True, cardarea="hand", other_card=d7, held_cards=held)
+        r2 = calculate_joker(fist, ctx2)
+        assert r2 is not None and r2.h_mult == 14
+
+    def test_debuffed_last_twin_pays_nothing(self):
+        fist = _joker_card("j_raised_fist")
+        h7 = self._pc("Hearts", "7")
+        d7 = self._pc("Diamonds", "7")
+        d7.set_debuff(True)
+        held = [self._pc("Hearts", "Ace"), h7, d7]
+        ctx = JokerContext(individual=True, cardarea="hand", other_card=d7, held_cards=held)
+        r = calculate_joker(fist, ctx)
+        assert r is not None and not getattr(r, "h_mult", 0)  # Debuffed message, no mult
+        ctx_h7 = JokerContext(individual=True, cardarea="hand", other_card=h7, held_cards=held)
+        r_h7 = calculate_joker(fist, ctx_h7)
+        assert r_h7 is None or not getattr(r_h7, "h_mult", 0)
