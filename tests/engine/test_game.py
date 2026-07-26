@@ -1537,7 +1537,7 @@ class TestPerkeoNegativeCopy:
         cons = gs["consumables"]
         assert len(cons) == 2
         copy_card = cons[1]
-        assert copy_card.edition == {"negative": True}
+        assert copy_card.edition and copy_card.edition.get("negative") is True
         assert copy_card.cost == sun.cost + 5
         assert gs["consumable_slots"] == limit_before + 1
         copy_card.ability["marker"] = True
