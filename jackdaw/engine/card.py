@@ -504,7 +504,13 @@ class Card:
             return False
         if pareidolia:
             return True
-        return self.base.id in (11, 12, 13)
+        # Vanilla checks get_id() (card.lua:964-66) — a STONE card's id
+        # is randomized/negative, so stone faces are NOT faces (no Sock
+        # and Buskin retrigger, no Business Card, no Photograph...).
+        # Reading base.id kept the underlying rank visible through the
+        # stone (live-verified: ESG772CF — sim retriggered a stone King
+        # via Sock and Buskin, +50 chips over live).
+        return self.get_id() in (11, 12, 13)
 
     def is_suit(
         self,

@@ -625,3 +625,34 @@ class TestSort:
         assert ranks[0] is Rank.ACE
         assert ranks[1] is Rank.KING
         assert ranks[-1] is Rank.TWO
+
+
+class TestStoneCardNotFace:
+    """is_face goes through get_id (card.lua:964-66): a stone card's id
+    is not a rank, so stone faces are NOT faces — except under
+    Pareidolia, whose check precedes the id test (bug #70, ESG772CF:
+    Sock and Buskin retriggered a stone King on the sim only)."""
+
+    def test_stone_king_is_not_face(self):
+        from jackdaw.engine.card import Card
+
+        c = Card()
+        c.set_base("D_K", "Diamonds", "King")
+        c.set_ability("m_stone")
+        assert c.is_face() is False
+
+    def test_stone_king_is_face_under_pareidolia(self):
+        from jackdaw.engine.card import Card
+
+        c = Card()
+        c.set_base("D_K", "Diamonds", "King")
+        c.set_ability("m_stone")
+        assert c.is_face(pareidolia=True) is True
+
+    def test_plain_king_still_face(self):
+        from jackdaw.engine.card import Card
+
+        c = Card()
+        c.set_base("D_K", "Diamonds", "King")
+        c.set_ability("c_base")
+        assert c.is_face() is True
