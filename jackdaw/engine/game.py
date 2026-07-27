@@ -1006,6 +1006,9 @@ def _handle_discard(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str, A
     # ------------------------------------------------------------------
     # 8. Move surviving cards to discard pile
     # ------------------------------------------------------------------
+    # remove_playing_cards joker notify (state_events.lua:426)
+    _notify_cards_destroyed(gs, destroyed)
+
     surviving = [c for c in discarded if c not in destroyed]
     discard_pile: list = gs.setdefault("discard_pile", [])
     discard_pile.extend(surviving)
@@ -2440,11 +2443,16 @@ def _apply_consumable_result(
     if getattr(result, "destroy", None):
         deck: list = gs.get("deck", [])
         hand: list = gs.get("hand", [])
+        _removed: list = []
         for destroyed in result.destroy:
             if destroyed in hand:
                 hand.remove(destroyed)
-            if destroyed in deck:
+                _removed.append(destroyed)
+            elif destroyed in deck:
                 deck.remove(destroyed)
+                _removed.append(destroyed)
+        # remove_playing_cards joker notify (card.lua:1370)
+        _notify_cards_destroyed(gs, _removed)
 
     # f. Add seal
     if getattr(result, "add_seal", None):
@@ -3026,6 +3034,26 @@ def _close_pack(gs: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _notify_cards_destroyed(gs: dict[str, Any], destroyed: list) -> None:
+    """Vanilla fires ``remove_playing_cards`` to every joker wherever
+    playing cards are destroyed: consumable destroys (card.lua:1370),
+    discard-flow destroys (state_events.lua:426), and scoring destroys
+    (state_events.lua:975 — that one lives in score_hand's Phase 11
+    notify).  Caino / Glass Joker growth listens (bug #69, ES9IGE4S:
+    a tarot ate two face cards — live Caino x3, sim stuck at x1)."""
+    if not destroyed:
+        return
+    from jackdaw.engine.jokers import JokerContext, calculate_joker
+
+    jokers = gs.get("jokers", [])
+    for joker in jokers:
+        if getattr(joker, "debuff", False):
+            continue
+        calculate_joker(
+            joker, JokerContext(cards_destroyed=destroyed, jokers=jokers)
+        )
+
+
 def _fire_discard_effects(gs: dict[str, Any], discarded: list, *, hook: bool) -> None:
     """Seal effects + per-card joker ``discard`` contexts + pile move for
     a forced (Hook) discard.
@@ -3083,6 +3111,9 @@ def _fire_discard_effects(gs: dict[str, Any], discarded: list, *, hook: bool) ->
             jokers.remove(joker)
             joker.remove_from_deck(gs)
             _release_used_key(gs, joker)
+
+    # remove_playing_cards joker notify (state_events.lua:426)
+    _notify_cards_destroyed(gs, destroyed)
 
     surviving = [c for c in discarded if c not in destroyed]
     discard_pile: list = gs.setdefault("discard_pile", [])

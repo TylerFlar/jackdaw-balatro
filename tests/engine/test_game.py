@@ -1542,3 +1542,31 @@ class TestPerkeoNegativeCopy:
         assert gs["consumable_slots"] == limit_before + 1
         copy_card.ability["marker"] = True
         assert "marker" not in sun.ability  # deep copy, no shared dict
+
+
+# ---------------------------------------------------------------------------
+# Destroyed-card joker notify outside scoring (bug #69, ES9IGE4S)
+# ---------------------------------------------------------------------------
+
+
+class TestCainoConsumableDestroyNotify:
+    """Vanilla fires remove_playing_cards wherever playing cards are
+    destroyed (card.lua:1370 consumable use, state_events.lua:426
+    discard flow) — Caino/Glass Joker growth must see tarot-destroyed
+    faces, not just scoring destructions."""
+
+    def test_hanged_man_face_destroy_grows_caino(self):
+        from jackdaw.engine.card_factory import create_consumable, create_joker
+
+        gs = _init_gs("CAINO1")
+        step(gs, SelectBlind())
+        caino = create_joker("j_caino")
+        gs["jokers"] = [caino]
+        hangman = create_consumable("c_hanged_man")
+        gs["consumables"] = [hangman]
+        # find two face cards in hand; force ranks if needed
+        hand = gs["hand"]
+        hand[0].set_base("H_K", "Hearts", "King")
+        hand[1].set_base("S_J", "Spades", "Jack")
+        step(gs, UseConsumable(card_index=0, target_indices=(0, 1)))
+        assert caino.ability["caino_xmult"] == 3  # 1 + 1 per face
