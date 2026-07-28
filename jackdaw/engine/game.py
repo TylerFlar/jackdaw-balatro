@@ -1479,7 +1479,7 @@ def _handle_pick_pack_card(
     closes: remaining cards are removed, dealt hand cards (if any)
     return to deck, and phase restores to SHOP.
     """
-    from jackdaw.engine.consumables import pack_pick_room_error
+    from jackdaw.engine.consumables import pack_pick_block_reason
 
     _require_phase(gs, GamePhase.PACK_OPENING)
 
@@ -1519,17 +1519,15 @@ def _handle_pick_pack_card(
     card_set = _get_card_set(card)
 
     # Space check — jokers need a slot (Negative exempt); creator
-    # consumables need somewhere to put what they make, room-gated at USE
-    # time in vanilla (can_use_consumeable, card.lua:1550-1563).  The same
-    # helper drives the action mask, so a masked-legal pick never raises.
+    # consumables need somewhere to put what they make, gated at USE time
+    # in vanilla (can_use_consumeable, card.lua:1550-1563), The Fool also
+    # needing a tarot/planet to copy.  The same helper drives the action
+    # mask, so a masked-legal pick never raises.
     # NOTE: the smods booster UI skips this gate — live created a 6th
     # joker on a 5-slot board (LSBVJSQL) — but the sim stays
     # vanilla-faithful and the lockstep policy vetoes the pick instead.
-    # NOT enforced: The Fool's own room clause (card.lua:1554).  Vanilla
-    # blocks a full-slots Fool too; adding it here would change outcomes,
-    # so it is tracked separately rather than folded into this fix.
-    if (_room_error := pack_pick_room_error(card, gs)) is not None:
-        raise IllegalActionError(_room_error)
+    if (_blocked := pack_pick_block_reason(card, gs)) is not None:
+        raise IllegalActionError(_blocked)
 
     pack_cards.pop(idx)
     gs["pack_choices_remaining"] = remaining - 1

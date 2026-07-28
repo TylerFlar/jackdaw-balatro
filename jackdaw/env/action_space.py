@@ -106,7 +106,7 @@ from jackdaw.engine.actions import (
 from jackdaw.engine.consumables import (
     _resolve_consumable_config,
     can_use_consumable,
-    pack_pick_room_error,
+    pack_pick_block_reason,
 )
 from jackdaw.env.game_spec import FactoredAction  # noqa: F401 — re-export
 
@@ -278,7 +278,7 @@ def get_action_mask(game_state: dict[str, Any]) -> ActionMask:
             # helper the PickPackCard executor raises on, so the mask can
             # never offer a pick that step() then rejects.
             pick_mask = np.array(
-                [pack_pick_room_error(card, game_state) is None for card in pack_cards],
+                [pack_pick_block_reason(card, game_state) is None for card in pack_cards],
                 dtype=bool,
             )
             if pick_mask.any():

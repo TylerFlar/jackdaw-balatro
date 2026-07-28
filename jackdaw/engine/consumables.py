@@ -190,23 +190,27 @@ _NEED_JOKER_SLOT = frozenset(
     }
 )
 
-def pack_pick_room_error(card: Any, gs: dict[str, Any]) -> str | None:
+def pack_pick_block_reason(card: Any, gs: dict[str, Any]) -> str | None:
     """Why *card* cannot be taken out of an open booster pack, else ``None``.
 
-    Vanilla greys out the pack's select/use button through two checks, and
-    a pack card is placed or used immediately, so the ``or self.area ==
-    G.consumeables`` escape in ``Card:can_use_consumeable`` never applies:
+    Vanilla greys out a pack card with nowhere to go.  A pack card is
+    placed or used immediately, so the ``or self.area == G.consumeables``
+    escape in ``Card:can_use_consumeable`` never applies:
 
     * a Joker needs a free slot unless it is Negative
       (``button_callbacks.lua:2112``);
-    * Judgement/Wraith/The Soul need a joker slot and Emperor/High
-      Priestess a consumable slot for what they create
-      (``card.lua:1550-1563``).
+    * a creator consumable needs somewhere to put what it makes —
+      Judgement/Wraith/The Soul a joker slot, Emperor/High Priestess a
+      consumable slot, and The Fool a consumable slot *plus* a prior
+      tarot/planet that is not itself a Fool (``card.lua:1550-1563``).
+
+    The decision for consumables is delegated to
+    :func:`can_use_consumable`, which is the same predicate vanilla's use
+    button consults — so the pack gate can never drift from the tray gate.
+    The message is diagnostic only.
 
     Shared by the ``PickPackCard`` executor and the action mask: an action
     the mask offers must never raise, and both sides move together.
-    (The Fool's own room clause at ``card.lua:1554`` is deliberately not
-    enforced here — see the note in the executor.)
     """
     ability = getattr(card, "ability", None)
     card_set = ability.get("set", "") if isinstance(ability, dict) else ""
@@ -219,13 +223,29 @@ def pack_pick_room_error(card: Any, gs: dict[str, Any]) -> str | None:
         return None
 
     key = getattr(card, "center_key", "") or ""
+    if key not in _NEED_JOKER_SLOT and key not in _NEED_CONSUMABLE_SLOT:
+        return None
+
+    jokers = gs.get("jokers", [])
+    consumables = gs.get("consumables", [])
+    joker_limit = gs.get("joker_slots", 5)
+    consumable_limit = gs.get("consumable_slots", 2)
+    if can_use_consumable(
+        card,
+        jokers=jokers,
+        consumables=consumables,
+        consumable_limit=consumable_limit,
+        joker_limit=joker_limit,
+        game_state=gs,
+    ):
+        return None
+
     if key in _NEED_JOKER_SLOT:
-        if len(gs.get("jokers", [])) >= gs.get("joker_slots", 5):
-            return f"{key}: no room for created joker"
-    elif key in ("c_emperor", "c_high_priestess"):
-        if len(gs.get("consumables", [])) >= gs.get("consumable_slots", 2):
-            return f"{key}: no room for created consumable"
-    return None
+        return f"{key}: no room for created joker"
+    if len(consumables) >= consumable_limit:
+        return f"{key}: no room for created consumable"
+    # Fool with room but nothing to copy (last_tarot_planet unset or itself)
+    return f"{key}: no tarot or planet to copy"
 
 
 # Consumables that need an eligible joker (editionless)

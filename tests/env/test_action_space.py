@@ -1071,6 +1071,7 @@ class TestMaskConsistencyWithEngine:
                 joker_slots=5,
                 consumables=[MockCard(center_key="c_fool") for _ in range(n_cons)],
                 consumable_slots=2,
+                last_tarot_planet="c_strength",
             )
             mask = get_action_mask(gs)
             offered = bool(
@@ -1084,6 +1085,41 @@ class TestMaskConsistencyWithEngine:
             # and the executor agrees it is illegal
             with pytest.raises(IllegalActionError):
                 engine_step(copy.deepcopy(gs), EnginePickPackCard(card_index=0))
+
+    def test_pack_pick_fool_needs_room_and_something_to_copy(self):
+        """The Fool's own clause (card.lua:1554), both halves.
+
+        Vanilla lets a Fool be used only with a free consumable slot AND a
+        last tarot/planet that is not itself a Fool; a pack card is used
+        from the pack, so the ``self.area == G.consumeables`` escape that
+        covers a Fool sitting in your own tray does not apply here.
+        """
+        from jackdaw.engine.game import IllegalActionError
+        from jackdaw.engine.game import step as engine_step
+
+        cases = [
+            # (consumables held, last_tarot_planet, pickable?)
+            (0, "c_strength", True),    # room + something to copy
+            (2, "c_strength", False),   # no room for the copy
+            (0, None, False),           # nothing used yet
+            (0, "c_fool", False),       # a Fool cannot copy a Fool
+        ]
+        for n_cons, ltp, pickable in cases:
+            gs = _pack_opening_state(
+                pack_cards=[MockCard(center_key="c_fool", ability={"set": "Tarot"})],
+                consumables=[MockCard(center_key="c_moon") for _ in range(n_cons)],
+                consumable_slots=2,
+                last_tarot_planet=ltp,
+            )
+            mask = get_action_mask(gs)
+            offered = bool(
+                mask.type_mask[ActionType.PickPackCard]
+                and mask.entity_masks[ActionType.PickPackCard][0]
+            )
+            assert offered == pickable, f"fool with {n_cons} consumables, ltp={ltp}"
+            if not offered:
+                with pytest.raises(IllegalActionError):
+                    engine_step(copy.deepcopy(gs), EnginePickPackCard(card_index=0))
 
     def test_buy_mask_allows_negative_consumable_at_full_slots(self):
         """The mask must not hide a buy the executor allows.
