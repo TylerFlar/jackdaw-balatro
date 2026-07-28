@@ -1043,6 +1043,90 @@ class TestMaskConsistencyWithEngine:
         assert mask.type_mask[ActionType.PickPackCard] == has_pick
         assert mask.type_mask[ActionType.SkipPack] == has_skip
 
+    def test_pack_pick_mask_never_offers_a_pick_step_rejects(self):
+        """Bug #71: the mask offered creator consumables step() then refused.
+
+        Vanilla greys out a pack card with nowhere to go (can_use_consumeable,
+        card.lua:1550-1563).  Whatever the mask marks pickable must survive
+        the executor.
+        """
+        from jackdaw.engine.game import IllegalActionError
+        from jackdaw.engine.game import step as engine_step
+
+        cases = [
+            # (center_key, set, jokers held, consumables held, pickable?)
+            ("c_judgement", "Tarot", 5, 0, False),   # needs a joker slot
+            ("c_judgement", "Tarot", 4, 0, True),
+            ("c_soul", "Spectral", 5, 0, False),
+            ("c_wraith", "Spectral", 5, 0, False),
+            ("c_emperor", "Tarot", 0, 2, False),     # needs a consumable slot
+            ("c_emperor", "Tarot", 0, 1, True),
+            ("c_high_priestess", "Tarot", 0, 2, False),
+            ("c_strength", "Tarot", 5, 2, True),     # creates nothing: fine
+        ]
+        for key, cset, n_jokers, n_cons, pickable in cases:
+            gs = _pack_opening_state(
+                pack_cards=[MockCard(center_key=key, ability={"set": cset})],
+                jokers=_make_jokers(n_jokers),
+                joker_slots=5,
+                consumables=[MockCard(center_key="c_fool") for _ in range(n_cons)],
+                consumable_slots=2,
+            )
+            mask = get_action_mask(gs)
+            offered = bool(
+                mask.type_mask[ActionType.PickPackCard]
+                and mask.entity_masks[ActionType.PickPackCard][0]
+            )
+            assert offered == pickable, f"{key} with {n_jokers}j/{n_cons}c"
+
+            if offered:
+                continue
+            # and the executor agrees it is illegal
+            with pytest.raises(IllegalActionError):
+                engine_step(copy.deepcopy(gs), EnginePickPackCard(card_index=0))
+
+    def test_buy_mask_allows_negative_consumable_at_full_slots(self):
+        """The mask must not hide a buy the executor allows.
+
+        check_for_buy_space (button_callbacks.lua:2392) adds +1 to the limit
+        for a Negative card on the consumable branch as well as the joker
+        one, so a Negative tarot is buyable with consumable slots full.
+        """
+        from jackdaw.engine.game import step as engine_step
+
+        for card_set, negative, buyable in [
+            ("Tarot", True, True),
+            ("Tarot", False, False),
+            ("Joker", True, True),
+        ]:
+            card = MockCard(
+                center_key="c_test" if card_set != "Joker" else "j_test",
+                ability={"set": card_set},
+                edition={"negative": True} if negative else None,
+                cost=3,
+            )
+            gs = _shop_state(
+                shop_cards=[card],
+                jokers=_make_jokers(5),
+                joker_slots=5,
+                consumables=[MockCard(center_key="c_fool") for _ in range(2)],
+                consumable_slots=2,
+            )
+            mask = get_action_mask(gs)
+            offered = bool(
+                mask.type_mask[ActionType.BuyCard]
+                and mask.entity_masks[ActionType.BuyCard][0]
+            )
+            assert offered == buyable, f"{card_set} negative={negative}"
+            if not offered:
+                continue
+            # ...and the executor agrees it is legal.  MockCard has no
+            # add_to_deck, so the buy runs past the space check and then
+            # trips on the mock — an AttributeError proves the gate passed,
+            # while IllegalActionError would mean the two still disagree.
+            with pytest.raises(AttributeError):
+                engine_step(copy.deepcopy(gs), EngineBuyCard(shop_index=0))
+
     def test_shop_consistency(self):
         gs = _shop_state(
             shop_cards=[_make_shop_card(cost=3)],

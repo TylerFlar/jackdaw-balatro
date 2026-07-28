@@ -103,7 +103,11 @@ from jackdaw.engine.actions import (
 from jackdaw.engine.actions import (
     UseConsumable as EngineUseConsumable,
 )
-from jackdaw.engine.consumables import _resolve_consumable_config, can_use_consumable
+from jackdaw.engine.consumables import (
+    _resolve_consumable_config,
+    can_use_consumable,
+    pack_pick_room_error,
+)
 from jackdaw.env.game_spec import FactoredAction  # noqa: F401 — re-export
 
 # ---------------------------------------------------------------------------
@@ -267,19 +271,16 @@ def get_action_mask(game_state: dict[str, Any]) -> ActionMask:
         # Spectral packs: balatrobot cannot handle Spectral card
         # highlighting via RPC, so only SkipPack is valid.
         if remaining > 0 and pack_cards and pack_type != "Spectral":
-            # Vanilla gate (button_callbacks.lua:2112): a Joker in a pack is
-            # selectable only if joker slots have room or it is negative.
-            pick_mask = np.ones(len(pack_cards), dtype=bool)
-            if len(game_state.get("jokers", [])) >= game_state.get("joker_slots", 5):
-                for i, card in enumerate(pack_cards):
-                    ability = getattr(card, "ability", None) or {}
-                    edition = getattr(card, "edition", None) or {}
-                    negative = (
-                        bool(edition.get("negative"))
-                        if isinstance(edition, dict) else False
-                    )
-                    if ability.get("set", "") == "Joker" and not negative:
-                        pick_mask[i] = False
+            # Vanilla greys out a pack card with nowhere to go: a Joker
+            # without a free slot (button_callbacks.lua:2112), and a creator
+            # consumable without room for what it makes
+            # (can_use_consumeable, card.lua:1550-1563).  This is the same
+            # helper the PickPackCard executor raises on, so the mask can
+            # never offer a pick that step() then rejects.
+            pick_mask = np.array(
+                [pack_pick_room_error(card, game_state) is None for card in pack_cards],
+                dtype=bool,
+            )
             if pick_mask.any():
                 type_mask[ActionType.PickPackCard] = True
                 entity_masks[ActionType.PickPackCard] = pick_mask
@@ -313,12 +314,18 @@ def _mask_shop_buy(
         if card.cost > dollars:
             continue
         card_set = card.ability.get("set", "") if isinstance(card.ability, dict) else ""
+        # check_for_buy_space (button_callbacks.lua:2392) raises the limit by
+        # one for a Negative card on BOTH branches — a Negative consumable is
+        # buyable at full slots exactly like a Negative joker.
+        is_negative = bool(
+            isinstance(card.edition, dict) and card.edition.get("negative")
+        )
+        bonus = 1 if is_negative else 0
         if card_set == "Joker":
-            is_negative = isinstance(card.edition, dict) and card.edition.get("negative")
-            if len(jokers) >= joker_slots and not is_negative:
+            if len(jokers) >= joker_slots + bonus:
                 continue
         elif card_set in ("Tarot", "Planet", "Spectral"):
-            if len(consumables) >= consumable_slots:
+            if len(consumables) >= consumable_slots + bonus:
                 continue
         mask[i] = True
 

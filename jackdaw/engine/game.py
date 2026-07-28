@@ -1479,6 +1479,8 @@ def _handle_pick_pack_card(
     closes: remaining cards are removed, dealt hand cards (if any)
     return to deck, and phase restores to SHOP.
     """
+    from jackdaw.engine.consumables import pack_pick_room_error
+
     _require_phase(gs, GamePhase.PACK_OPENING)
 
     pack_cards: list = gs.get("pack_cards", [])
@@ -1516,26 +1518,18 @@ def _handle_pick_pack_card(
     card = pack_cards[idx]
     card_set = _get_card_set(card)
 
-    # Space check — jokers need a slot (Negative exempt); pack consumables
-    # are used immediately, never stored, so they need no room.
-    if card_set == "Joker":
-        negative = bool(card.edition and card.edition.get("negative"))
-        if not negative and len(gs.get("jokers", [])) >= gs.get("joker_slots", 5):
-            raise IllegalActionError("No room for joker")
-
-    # Creator consumables are room-gated at USE time in vanilla
-    # (can_use_consumeable, card.lua:1550-1563): Judgement/Wraith/Soul
-    # need a joker slot, Emperor/High Priestess a consumable slot.
+    # Space check — jokers need a slot (Negative exempt); creator
+    # consumables need somewhere to put what they make, room-gated at USE
+    # time in vanilla (can_use_consumeable, card.lua:1550-1563).  The same
+    # helper drives the action mask, so a masked-legal pick never raises.
     # NOTE: the smods booster UI skips this gate — live created a 6th
     # joker on a 5-slot board (LSBVJSQL) — but the sim stays
     # vanilla-faithful and the lockstep policy vetoes the pick instead.
-    _key = getattr(card, "center_key", "")
-    if _key in ("c_judgement", "c_wraith", "c_soul"):
-        if len(gs.get("jokers", [])) >= gs.get("joker_slots", 5):
-            raise IllegalActionError(f"{_key}: no room for created joker")
-    elif _key in ("c_emperor", "c_high_priestess"):
-        if len(gs.get("consumables", [])) >= gs.get("consumable_slots", 2):
-            raise IllegalActionError(f"{_key}: no room for created consumable")
+    # NOT enforced: The Fool's own room clause (card.lua:1554).  Vanilla
+    # blocks a full-slots Fool too; adding it here would change outcomes,
+    # so it is tracked separately rather than folded into this fix.
+    if (_room_error := pack_pick_room_error(card, gs)) is not None:
+        raise IllegalActionError(_room_error)
 
     pack_cards.pop(idx)
     gs["pack_choices_remaining"] = remaining - 1

@@ -190,6 +190,44 @@ _NEED_JOKER_SLOT = frozenset(
     }
 )
 
+def pack_pick_room_error(card: Any, gs: dict[str, Any]) -> str | None:
+    """Why *card* cannot be taken out of an open booster pack, else ``None``.
+
+    Vanilla greys out the pack's select/use button through two checks, and
+    a pack card is placed or used immediately, so the ``or self.area ==
+    G.consumeables`` escape in ``Card:can_use_consumeable`` never applies:
+
+    * a Joker needs a free slot unless it is Negative
+      (``button_callbacks.lua:2112``);
+    * Judgement/Wraith/The Soul need a joker slot and Emperor/High
+      Priestess a consumable slot for what they create
+      (``card.lua:1550-1563``).
+
+    Shared by the ``PickPackCard`` executor and the action mask: an action
+    the mask offers must never raise, and both sides move together.
+    (The Fool's own room clause at ``card.lua:1554`` is deliberately not
+    enforced here — see the note in the executor.)
+    """
+    ability = getattr(card, "ability", None)
+    card_set = ability.get("set", "") if isinstance(ability, dict) else ""
+
+    if card_set == "Joker":
+        edition = getattr(card, "edition", None)
+        negative = bool(edition.get("negative")) if isinstance(edition, dict) else False
+        if not negative and len(gs.get("jokers", [])) >= gs.get("joker_slots", 5):
+            return "No room for joker"
+        return None
+
+    key = getattr(card, "center_key", "") or ""
+    if key in _NEED_JOKER_SLOT:
+        if len(gs.get("jokers", [])) >= gs.get("joker_slots", 5):
+            return f"{key}: no room for created joker"
+    elif key in ("c_emperor", "c_high_priestess"):
+        if len(gs.get("consumables", [])) >= gs.get("consumable_slots", 2):
+            return f"{key}: no room for created consumable"
+    return None
+
+
 # Consumables that need an eligible joker (editionless)
 _NEED_ELIGIBLE_JOKER = frozenset(
     {
