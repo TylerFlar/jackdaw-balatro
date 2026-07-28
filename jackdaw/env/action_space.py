@@ -267,10 +267,17 @@ def get_action_mask(game_state: dict[str, Any]) -> ActionMask:
     elif phase == GamePhase.PACK_OPENING:
         pack_cards = game_state.get("pack_cards", [])
         remaining = game_state.get("pack_choices_remaining", 0)
-        pack_type = game_state.get("pack_type", "")
-        # Spectral packs: balatrobot cannot handle Spectral card
-        # highlighting via RPC, so only SkipPack is valid.
-        if remaining > 0 and pack_cards and pack_type != "Spectral":
+        # NOTE: Spectral packs were once excluded here wholesale, on the
+        # grounds that balatrobot cannot express Spectral card
+        # highlighting over RPC.  That is a LIVE-ORACLE limitation, not a
+        # rule of the game: ``_pick_pack_card`` deals a targeting hand for
+        # Spectral packs (game.py:1427) and accepts their picks.  Masking
+        # them here made every Spectral pack skip-only for every agent —
+        # the same mask-vs-step() disagreement class as bugs #71/#72, and
+        # the most valuable pack in the game.  The lockstep policy now
+        # carries the veto (``pick:spectral(balatrobot-no-highlight)``),
+        # which is where oracle constraints belong.
+        if remaining > 0 and pack_cards:
             # Vanilla greys out a pack card with nowhere to go: a Joker
             # without a free slot (button_callbacks.lua:2112), and a creator
             # consumable without room for what it makes
@@ -506,9 +513,13 @@ def get_consumable_target_info(
 def _default_pick_targets(
     game_state: dict[str, Any], pack_index: int
 ) -> tuple[int, ...] | None:
-    """Default hand targets for a targeting pack pick (first min_h cards).
+    """Default hand targets for a targeting pack pick.
 
     Returns None for non-targeting picks (planets, jokers, playing cards).
+
+    Delegates to the engine so the selection an agent gets by default is
+    the same one ``pack_pick_block_reason`` judged legal when it let the
+    mask offer the pick.
     """
     pack_cards = game_state.get("pack_cards", [])
     if pack_index >= len(pack_cards):
@@ -517,19 +528,9 @@ def _default_pick_targets(
     ability = getattr(card, "ability", None) or {}
     if ability.get("set") not in ("Tarot", "Spectral"):
         return None
-    from jackdaw.engine.card import _resolve_center
+    from jackdaw.engine.consumables import pack_pick_default_targets
 
-    try:
-        cfg = _resolve_center(card.center_key).get("config") or {}
-    except Exception:
-        return None
-    if not isinstance(cfg, dict) or not cfg.get("max_highlighted"):
-        return None
-    min_h = cfg.get("min_highlighted", 1)
-    hand = game_state.get("hand", [])
-    if len(hand) < min_h:
-        return None
-    return tuple(range(min_h))
+    return pack_pick_default_targets(card, game_state)
 
 
 def factored_to_engine_action(

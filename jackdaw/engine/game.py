@@ -1526,7 +1526,7 @@ def _handle_pick_pack_card(
     # NOTE: the smods booster UI skips this gate — live created a 6th
     # joker on a 5-slot board (LSBVJSQL) — but the sim stays
     # vanilla-faithful and the lockstep policy vetoes the pick instead.
-    if (_blocked := pack_pick_block_reason(card, gs)) is not None:
+    if (_blocked := pack_pick_block_reason(card, gs, targets)) is not None:
         raise IllegalActionError(_blocked)
 
     pack_cards.pop(idx)

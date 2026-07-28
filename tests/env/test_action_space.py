@@ -134,6 +134,23 @@ def _make_jokers(n: int = 3, eternal_indices: set[int] | None = None) -> list[Mo
     ]
 
 
+def _pack_consumable(key: str, card_set: str) -> MockCard:
+    """A pack consumable carrying its REAL center config.
+
+    Engine-built cards get ``ability['consumeable']`` from the center
+    registry, and ``can_use_consumable`` reads it to find
+    ``max_highlighted``.  A mock without it silently looks like a card
+    that needs no selection, which is not what the executor sees.
+    """
+    from jackdaw.engine.card import _resolve_center
+
+    ability: dict[str, Any] = {"set": card_set}
+    cfg = _resolve_center(key).get("config")
+    if isinstance(cfg, dict):
+        ability["consumeable"] = cfg
+    return MockCard(center_key=key, ability=ability)
+
+
 def _make_consumable(key: str, cfg: dict | None = None) -> MockCard:
     """Create a consumable with optional config."""
     ability: dict[str, Any] = {"set": "Tarot"}
@@ -1054,37 +1071,109 @@ class TestMaskConsistencyWithEngine:
         from jackdaw.engine.game import step as engine_step
 
         cases = [
-            # (center_key, set, jokers held, consumables held, pickable?)
-            ("c_judgement", "Tarot", 5, 0, False),   # needs a joker slot
-            ("c_judgement", "Tarot", 4, 0, True),
-            ("c_soul", "Spectral", 5, 0, False),
-            ("c_wraith", "Spectral", 5, 0, False),
-            ("c_emperor", "Tarot", 0, 2, False),     # needs a consumable slot
-            ("c_emperor", "Tarot", 0, 1, True),
-            ("c_high_priestess", "Tarot", 0, 2, False),
-            ("c_strength", "Tarot", 5, 2, True),     # creates nothing: fine
+            # (center_key, set, jokers held, consumables held, hand, pickable?)
+            ("c_judgement", "Tarot", 5, 0, 5, False),   # needs a joker slot
+            ("c_judgement", "Tarot", 4, 0, 5, True),
+            ("c_soul", "Spectral", 5, 0, 5, False),
+            ("c_wraith", "Spectral", 5, 0, 5, False),
+            ("c_emperor", "Tarot", 0, 2, 5, False),     # needs a consumable slot
+            ("c_emperor", "Tarot", 0, 1, 5, True),
+            ("c_high_priestess", "Tarot", 0, 2, 5, False),
+            ("c_strength", "Tarot", 5, 2, 5, True),     # creates nothing: fine
+            # A targeting pick needs a dealt hand that can satisfy
+            # min_highlighted.  With no hand the executor raises
+            # ("requires between 1 and 2 target card(s); provided 0"), so
+            # the mask must not offer it — this case used to be offered.
+            ("c_strength", "Tarot", 5, 2, 0, False),
+            # Hand-size spectrals (can_use_consumable: len(hand) > 1).
+            ("c_familiar", "Spectral", 0, 0, 5, True),
+            ("c_familiar", "Spectral", 0, 0, 1, False),
+            ("c_immolate", "Spectral", 0, 0, 0, False),
         ]
-        for key, cset, n_jokers, n_cons, pickable in cases:
+        for key, cset, n_jokers, n_cons, n_hand, pickable in cases:
             gs = _pack_opening_state(
-                pack_cards=[MockCard(center_key=key, ability={"set": cset})],
+                pack_cards=[_pack_consumable(key, cset)],
                 jokers=_make_jokers(n_jokers),
                 joker_slots=5,
                 consumables=[MockCard(center_key="c_fool") for _ in range(n_cons)],
                 consumable_slots=2,
                 last_tarot_planet="c_strength",
+                hand=_make_hand(n_hand),
             )
             mask = get_action_mask(gs)
             offered = bool(
                 mask.type_mask[ActionType.PickPackCard]
                 and mask.entity_masks[ActionType.PickPackCard][0]
             )
-            assert offered == pickable, f"{key} with {n_jokers}j/{n_cons}c"
+            assert offered == pickable, (
+                f"{key} with {n_jokers}j/{n_cons}c/{n_hand} in hand"
+            )
 
             if offered:
                 continue
             # and the executor agrees it is illegal
             with pytest.raises(IllegalActionError):
                 engine_step(copy.deepcopy(gs), EnginePickPackCard(card_index=0))
+
+    def test_spectral_pack_picks_are_offered(self):
+        """Bug #73: Spectral packs were masked skip-only for every agent.
+
+        The exclusion was justified by balatrobot being unable to express
+        Spectral card highlighting over RPC — a live-oracle limitation,
+        not a rule of the game.  ``_pick_pack_card`` deals a targeting
+        hand for Spectral packs and accepts their picks, so the mask must
+        offer them; the lockstep policy carries the oracle veto instead.
+        """
+        from jackdaw.engine.game import step as engine_step
+        from jackdaw.env.action_space import factored_to_engine_action
+        from jackdaw.env.game_spec import FactoredAction
+
+        for key in ("c_ankh", "c_trance", "c_familiar", "c_immolate"):
+            gs = _pack_opening_state(
+                pack_cards=[_pack_consumable(key, "Spectral")],
+                pack_type="Spectral",
+                jokers=_make_jokers(1),
+                joker_slots=5,
+                consumables=[],
+                consumable_slots=2,
+                hand=_make_hand(5),
+            )
+            mask = get_action_mask(gs)
+            assert mask.type_mask[ActionType.PickPackCard], f"{key} not offered"
+            assert mask.entity_masks[ActionType.PickPackCard][0], f"{key} masked off"
+            # and the executor accepts what the mask offered, over the
+            # path an agent actually takes (targets defaulted in for
+            # picks that need a selection)
+            engine_step(
+                copy.deepcopy(gs),
+                factored_to_engine_action(
+                    FactoredAction(
+                        action_type=int(ActionType.PickPackCard), entity_target=0
+                    ),
+                    gs,
+                ),
+            )
+
+    def test_pack_pick_default_targets_are_legal(self):
+        """The default selection must be one the mask judged legal.
+
+        ``c_aura`` needs exactly one *editionless* card.  When the first
+        dealt card already has an edition the historical "first min_h
+        cards" default was illegal, so a mask-legal pick raised.
+        """
+        from jackdaw.engine.consumables import pack_pick_default_targets
+
+        hand = _make_hand(4)
+        hand[0].edition = {"type": "foil", "foil": True}
+        gs = _pack_opening_state(
+            pack_cards=[_pack_consumable("c_aura", "Spectral")],
+            pack_type="Spectral",
+            hand=hand,
+        )
+        mask = get_action_mask(gs)
+        assert mask.entity_masks[ActionType.PickPackCard][0]
+        # not card 0 — it already has an edition
+        assert pack_pick_default_targets(gs["pack_cards"][0], gs) == (1,)
 
     def test_pack_pick_fool_needs_room_and_something_to_copy(self):
         """The Fool's own clause (card.lua:1554), both halves.

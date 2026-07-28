@@ -190,8 +190,14 @@ _NEED_JOKER_SLOT = frozenset(
     }
 )
 
-def pack_pick_block_reason(card: Any, gs: dict[str, Any]) -> str | None:
+def pack_pick_block_reason(
+    card: Any, gs: dict[str, Any], targets: tuple[int, ...] | None = None
+) -> str | None:
     """Why *card* cannot be taken out of an open booster pack, else ``None``.
+
+    *targets* is the caller's explicit hand selection: the executor
+    passes what the agent asked for, the mask passes nothing and the
+    default selection is judged instead.
 
     Vanilla greys out a pack card with nowhere to go.  A pack card is
     placed or used immediately, so the ``or self.area == G.consumeables``
@@ -222,30 +228,116 @@ def pack_pick_block_reason(card: Any, gs: dict[str, Any]) -> str | None:
             return "No room for joker"
         return None
 
-    key = getattr(card, "center_key", "") or ""
-    if key not in _NEED_JOKER_SLOT and key not in _NEED_CONSUMABLE_SLOT:
-        return None
+    if card_set not in ("Tarot", "Planet", "Spectral"):
+        return None  # playing cards out of a standard pack: nowhere to be full
 
-    jokers = gs.get("jokers", [])
+    key = getattr(card, "center_key", "") or ""
     consumables = gs.get("consumables", [])
-    joker_limit = gs.get("joker_slots", 5)
     consumable_limit = gs.get("consumable_slots", 2)
+
+    # One predicate governs every consumable, evaluated against the
+    # selection the pick would actually be used with: the caller's
+    # explicit targets, or the same default the executor would choose.
+    # Anything narrower drifts — a key-list gate here once let the
+    # hand-size spectrals (c_familiar/c_grim/c_immolate...) be offered
+    # on an empty hand, and let targeting picks be offered when the
+    # dealt hand could not satisfy min_highlighted.
+    selection = targets if targets is not None else pack_pick_default_targets(card, gs)
+    if selection is None and targets is None and _pick_needs_targets(card):
+        return f"{key}: no legal target in the dealt hand"
+
+    hand = gs.get("hand", [])
+    highlighted = [hand[i] for i in (selection or ()) if 0 <= i < len(hand)]
     if can_use_consumable(
         card,
-        jokers=jokers,
+        highlighted=highlighted,
+        hand_cards=hand,
+        jokers=gs.get("jokers", []),
         consumables=consumables,
         consumable_limit=consumable_limit,
-        joker_limit=joker_limit,
+        joker_limit=gs.get("joker_slots", 5),
         game_state=gs,
     ):
         return None
 
     if key in _NEED_JOKER_SLOT:
         return f"{key}: no room for created joker"
-    if len(consumables) >= consumable_limit:
+    if key in _NEED_CONSUMABLE_SLOT and len(consumables) >= consumable_limit:
         return f"{key}: no room for created consumable"
-    # Fool with room but nothing to copy (last_tarot_planet unset or itself)
-    return f"{key}: no tarot or planet to copy"
+    if key in _NEED_CONSUMABLE_SLOT:
+        # Fool with room but nothing to copy (last_tarot_planet unset/itself)
+        return f"{key}: no tarot or planet to copy"
+    if key in _NEED_HAND_CARDS:
+        return f"{key}: needs more than one card in hand"
+    return f"{key}: not usable on the dealt hand"
+
+
+# Cards whose selection requirement is special-cased inside
+# can_use_consumable instead of being declared as max_highlighted.
+# ``c_aura`` needs exactly one card and that card must be editionless.
+_SPECIAL_SELECTION_MIN = {"c_aura": 1}
+
+
+def _pick_selection_size(card: Any) -> int | None:
+    """How many hand cards this pack pick is used against, else ``None``."""
+    key = getattr(card, "center_key", "") or ""
+    if key in _SPECIAL_SELECTION_MIN:
+        return _SPECIAL_SELECTION_MIN[key]
+    try:
+        cfg = _resolve_consumable_config(card)
+    except Exception:  # noqa: BLE001
+        return None
+    if isinstance(cfg, dict) and cfg.get("max_highlighted"):
+        return cfg.get("min_highlighted", 1)
+    return None
+
+
+def _pick_needs_targets(card: Any) -> bool:
+    """True if this pack card is used against a highlighted selection."""
+    return _pick_selection_size(card) is not None
+
+
+def pack_pick_default_targets(card: Any, gs: dict[str, Any]) -> tuple[int, ...] | None:
+    """The hand selection a bare (targetless) pack pick will be used with.
+
+    ``None`` for picks that take no selection, and for targeting picks
+    with no legal selection at all.  The action mask and the executor
+    both route through this, so the selection the mask judged legal is
+    the selection the pick is made with — they cannot disagree.
+
+    Prefers the lowest indices (the historical "first ``min_h`` cards"
+    default) and only searches further when that selection is invalid —
+    ``c_aura`` on an already-editioned first card being the case that
+    forced the search.
+    """
+    min_h = _pick_selection_size(card)
+    if min_h is None:
+        return None
+    hand = gs.get("hand", [])
+    if len(hand) < min_h:
+        return None
+
+    def _ok(sel: tuple[int, ...]) -> bool:
+        return can_use_consumable(
+            card,
+            highlighted=[hand[i] for i in sel],
+            hand_cards=hand,
+            jokers=gs.get("jokers", []),
+            consumables=gs.get("consumables", []),
+            consumable_limit=gs.get("consumable_slots", 2),
+            joker_limit=gs.get("joker_slots", 5),
+            game_state=gs,
+        )
+
+    default = tuple(range(min_h))
+    if _ok(default):
+        return default
+    from itertools import combinations
+
+    for sel in combinations(range(len(hand)), min_h):
+        if sel != default and _ok(sel):
+            return sel
+    return None
 
 
 # Consumables that need an eligible joker (editionless)
