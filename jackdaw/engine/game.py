@@ -349,12 +349,16 @@ def _apply_tag_result(gs: dict[str, Any], result: Any) -> None:
         for _ in range(result.create_jokers):
             if len(jokers) >= joker_slots:
                 break
+            # Top-up Tag: create_card('Joker', G.jokers, nil, 0, nil, nil,
+            # nil, 'top') — forced Common, append 'top' (tag.lua:138)
             card = create_card(
                 "Joker",
                 rng,
                 ante,
                 area="",
+                soulable=False,
                 forced_rarity=1,
+                append="top",
                 game_state=gs,
             )
             jokers.append(card)
@@ -788,16 +792,14 @@ def _handle_discard(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str, A
     jokers_to_remove: list = []
 
     for card in discarded:
-        # Seal: Purple Seal → create Tarot
+        # Seal: Purple Seal → create random Tarot with append '8ba'
+        # (card.lua:2254-2260; slot check gates the roll so no RNG is
+        # consumed when consumable slots are full)
         if getattr(card, "seal", None) == "Purple":
             consumables: list = gs.setdefault("consumables", [])
             consumable_limit = gs.get("consumable_slots", 2)
             if len(consumables) < consumable_limit:
-                from jackdaw.engine.card import Card as _Card
-
-                tarot = _Card(center_key="c_fool")
-                tarot.ability = {"set": "Tarot", "effect": ""}
-                consumables.append(tarot)
+                _resolve_create_descriptors(gs, [{"type": "Tarot", "count": 1, "seed": "8ba"}])
 
         # Fire joker discard context per card
         card_destroyed = False
@@ -934,6 +936,7 @@ def _build_discard_snapshot(gs: dict[str, Any], jokers: list) -> Any:
         discards_left=cr.get("discards_left", 0),
         discards_used=cr.get("discards_used", 0),
         mail_card_id=cr.get("mail_card", {}).get("id"),
+        castle_card_suit=cr.get("castle_card", {}).get("suit"),
         skips=gs.get("skips", 0),
     )
 
@@ -949,9 +952,18 @@ def _handle_cash_out(gs: dict[str, Any]) -> dict[str, Any]:
     """
     _require_phase(gs, GamePhase.ROUND_EVAL)
 
+    # End-of-round targeting-card re-roll (state_events.lua:273-276):
+    # idol / mail / ancient / castle streams advance once per round END
+    # (they are NOT re-rolled at round start; see start_round).
+    rng = gs.get("rng")
+    if rng:
+        from jackdaw.engine.round_lifecycle import reset_round_targets
+
+        ante = gs.get("round_resets", {}).get("ante", 1)
+        reset_round_targets(rng, ante, gs)
+
     # Shuffle deck at cash-out (button_callbacks.lua:2918)
     # G.deck:shuffle('cashout'..G.GAME.round_resets.ante)
-    rng = gs.get("rng")
     if rng:
         deck: list = gs.get("deck", [])
         ante = gs.get("round_resets", {}).get("ante", 1)
@@ -1087,6 +1099,7 @@ def _handle_use_consumable(
         consumables=consumables,
         joker_limit=gs.get("joker_slots", 5),
         consumable_limit=gs.get("consumable_slots", 2),
+        game_state=gs,
     ):
         consumable_name = card.ability.get("name", card.center_key)
         raise IllegalActionError(f"Consumable {consumable_name!r} cannot be used at this time")
@@ -1725,23 +1738,11 @@ def _apply_setting_blind_mutations(
                 if create.get("seal"):
                     c.seal = "Gold"  # Certificate default
                 deck.append(c)
-            elif ctype == "Joker":
-                # Riff-raff: create Common jokers
-                count = create.get("count", 1)
-                for _ in range(count):
-                    from jackdaw.engine.card import Card as _Card
-
-                    j = _Card(center_key="j_joker")
-                    j.ability = {"set": "Joker", "effect": "", "name": "Joker"}
-                    jokers.append(j)
-            elif ctype == "Tarot":
-                # Cartomancer: create Tarot
-                consumables: list = gs.setdefault("consumables", [])
-                from jackdaw.engine.card import Card as _Card2
-
-                t = _Card2(center_key="c_fool")
-                t.ability = {"set": "Tarot", "effect": ""}
-                consumables.append(t)
+            elif ctype in ("Joker", "Tarot", "Planet", "Spectral"):
+                # Riff-raff ('rif', Common), Cartomancer ('car'), 8 Ball
+                # ('8ba'), etc. — roll the real pool with the descriptor's
+                # append key instead of hardcoding a center.
+                _resolve_create_descriptors(gs, [create])
 
 
 # ---------------------------------------------------------------------------
@@ -1979,24 +1980,32 @@ def _apply_consumable_result(
     if getattr(result, "add_to_deck", None):
         import copy as _copy
 
-        from jackdaw.engine.card import Card as _Card
+        from jackdaw.engine.card import Card as _Card, _next_sort_id
 
         deck_list: list = gs.setdefault("deck", [])
         for card_spec in result.add_to_deck:
-            # Cryptid: copy an existing card
+            # Cryptid: copy an existing card — copies are emplaced into the
+            # HAND, not the draw pile (card.lua:1206-1213: copy_card +
+            # G.hand:emplace), with a fresh sort_id like any new Card.
             copy_source = card_spec.get("copy_of")
             if copy_source is not None:
                 new_card = _copy.deepcopy(copy_source)
-            else:
-                new_card = _Card()
-                if "suit" in card_spec and "rank" in card_spec:
-                    new_card.set_base(
-                        card_spec.get("key", ""),
-                        card_spec["suit"],
-                        card_spec["rank"],
-                    )
-                if "enhancement" in card_spec:
-                    new_card.set_ability(card_spec["enhancement"])
+                new_card.sort_id = _next_sort_id()
+                if gs.get("phase") == GamePhase.SELECTING_HAND:
+                    gs.setdefault("hand", []).append(new_card)
+                    _sort_hand_desc(gs.get("hand", []))
+                else:
+                    deck_list.append(new_card)
+                continue
+            new_card = _Card()
+            if "suit" in card_spec and "rank" in card_spec:
+                new_card.set_base(
+                    card_spec.get("key", ""),
+                    card_spec["suit"],
+                    card_spec["rank"],
+                )
+            if "enhancement" in card_spec:
+                new_card.set_ability(card_spec["enhancement"])
             deck_list.append(new_card)
 
     # ---- Joker effects ----
@@ -2037,6 +2046,9 @@ def _resolve_create_descriptors(gs: dict[str, Any], descriptors: list[dict[str, 
 
     rng = gs.get("rng")
     ante = gs.get("round_resets", {}).get("ante", 1)
+    # Planet pool softlock filtering needs current played-hand counts
+    # (High Priestess / Blue Seal create Planets mid-round).
+    _sync_played_hand_types(gs)
     consumables: list = gs.setdefault("consumables", [])
     consumable_limit = gs.get("consumable_slots", 2)
     jokers: list = gs.setdefault("jokers", [])
@@ -2079,23 +2091,23 @@ def _resolve_create_descriptors(gs: dict[str, Any], descriptors: list[dict[str, 
 
 
 def _sync_played_hand_types(gs: dict[str, Any]) -> None:
-    """Populate ``gs["played_hand_types"]`` from hand level visibility.
+    """Populate ``gs["played_hand_types"]`` from per-run play counts.
 
-    In Lua, ``G.GAME.hands[ht].visible`` gates whether a planet can
-    appear in pools (softlock).  Secret hand types (Five of a Kind,
-    Flush House, Flush Five) start invisible and become visible once
-    played or leveled.  This syncs that state so pool filtering works.
+    The Planet pool softlock gate is ``G.GAME.hands[hand_type].played > 0``
+    (common_events.lua:2009) — a hand type counts only once it has been
+    PLAYED this run.  Leveling a secret hand (e.g. via a Ceres from a pack)
+    makes it *visible* but does not unlock its planet in pools.
     """
     from jackdaw.engine.hand_levels import HandLevels
 
     hand_levels: HandLevels | None = gs.get("hand_levels")
     if hand_levels is None:
         return
-    visible: set[str] = set()
+    played: set[str] = set()
     for ht, state in hand_levels._hands.items():
-        if state.visible:
-            visible.add(ht.value)
-    gs["played_hand_types"] = visible
+        if state.played > 0:
+            played.add(ht.value)
+    gs["played_hand_types"] = played
 
 
 def _populate_shop(gs: dict[str, Any]) -> None:
@@ -2110,8 +2122,8 @@ def _populate_shop(gs: dict[str, Any]) -> None:
     if rng is None:
         return
 
-    # Sync visible hand types for Planet pool softlock filtering.
-    # In Lua, G.GAME.hands[ht].visible gates planet availability.
+    # Sync played hand types for Planet pool softlock filtering
+    # (G.GAME.hands[ht].played > 0, common_events.lua:2009).
     _sync_played_hand_types(gs)
 
     ante = gs.get("round_resets", {}).get("ante", 1)

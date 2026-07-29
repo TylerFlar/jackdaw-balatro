@@ -361,6 +361,13 @@ def create_card(
     card = Card()
     card.set_ability(key)
 
+    # Card:set_ability registers EVERY created center key in
+    # G.GAME.used_jokers (card.lua:349-354) — shop displays, pack contents,
+    # and consumable-created cards alike.  This drives run-wide duplicate
+    # exclusion in all pools (a key never repeats without Showman).
+    if game_state is not None:
+        game_state.setdefault("used_jokers", {})[key] = True
+
     # ------------------------------------------------------------------
     # 3. Joker modifiers (shop / pack context only)
     # ------------------------------------------------------------------
@@ -533,7 +540,10 @@ def resolve_create_descriptor(
         rng,
         ante,
         area="",  # no shop/pack stickers for consumable-triggered creation
-        soulable=True,
+        # Vanilla passes soulable=nil for every consumable/joker-triggered
+        # create_card call (only pack opening passes soulable=true), so
+        # descriptor-created cards never roll the Soul/Black Hole chance.
+        soulable=False,
         forced_key=forced_key,
         forced_rarity=forced_rarity,
         append=append,
