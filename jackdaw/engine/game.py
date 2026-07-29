@@ -974,6 +974,20 @@ def _handle_cash_out(gs: dict[str, Any]) -> dict[str, Any]:
     if earnings:
         gs["dollars"] = gs.get("dollars", 0) + earnings.total
 
+    # eval-context tags (Investment: $25 once per tag, after a boss kill).
+    if gs.get("last_blind_was_boss"):
+        from jackdaw.engine.tags import Tag
+
+        for entry in gs.get("awarded_tags", []):
+            if entry.get("eval_fired"):
+                continue
+            result = Tag(entry.get("key", "")).apply(
+                "eval", gs, rng=rng, last_blind_is_boss=True
+            )
+            if result is not None and result.dollars:
+                gs["dollars"] = gs.get("dollars", 0) + result.dollars
+                entry["eval_fired"] = True
+
     gs["previous_round"] = {"dollars": gs.get("dollars", 0)}
 
     # Populate shop
@@ -1587,6 +1601,8 @@ def _round_won(gs: dict[str, Any]) -> None:
     blind_on_deck = gs.get("blind_on_deck", "Small")
     rr["blind_states"][blind_on_deck] = "Defeated"
     gs["round"] = gs.get("round", 0) + 1
+    # Remembered for cash-out tag hooks (Investment Tag pays after a boss).
+    gs["last_blind_was_boss"] = blind_on_deck == "Boss"
 
     # ------------------------------------------------------------------
     # 8-9. Advance blind progression
@@ -1727,17 +1743,51 @@ def _apply_setting_blind_mutations(
             create = mut["create"]
             ctype = create.get("type", "")
             if ctype == "playing_card":
-                # Marble Joker: add Stone Card; Certificate: add card with seal
-                deck: list = gs.setdefault("deck", [])
-                from jackdaw.engine.card import Card
+                # Marble Joker (card.lua:2580): front via 'marb_fr', Stone
+                # center, joins the playing cards. Certificate (card.lua:2462):
+                # front via 'cert_fr' emplaced into the HAND, seal via
+                # 'certsl' (>0.75 Red, >0.5 Blue, >0.25 Gold, else Purple).
+                # The old code appended a Card with NO front (base=None),
+                # which corrupted the playing-card pool and crashed the
+                # round-end targeting rolls (mail.base.id).
+                from jackdaw.engine.card_factory import (
+                    RANK_LETTER,
+                    SUIT_LETTER,
+                    create_playing_card,
+                )
 
-                c = Card()
-                enhancement = create.get("enhancement")
-                if enhancement:
-                    c.ability = {"effect": enhancement, "set": "Enhanced"}
-                if create.get("seal"):
-                    c.seal = "Gold"  # Certificate default
-                deck.append(c)
+                ckey = create.get("key", "")
+                stream = {"cert": "cert_fr", "marble": "marb_fr"}.get(ckey)
+                if rng is not None and stream is not None:
+                    p_cards = {
+                        f"{sl}_{rl}": (suit, rank)
+                        for sl, suit in SUIT_LETTER.items()
+                        for rl, rank in RANK_LETTER.items()
+                    }
+                    (c_suit, c_rank), _ = rng.element(p_cards, rng.seed(stream))
+                    seal = None
+                    if create.get("seal"):
+                        roll = rng.random(rng.seed("certsl"))
+                        if roll > 0.75:
+                            seal = "Red"
+                        elif roll > 0.5:
+                            seal = "Blue"
+                        elif roll > 0.25:
+                            seal = "Gold"
+                        else:
+                            seal = "Purple"
+                    c = create_playing_card(
+                        c_suit,
+                        c_rank,
+                        create.get("enhancement", "c_base"),
+                        seal=seal,
+                        hands_played=gs.get("hands_played", 0),
+                    )
+                    if ckey == "cert" and gs.get("phase") == GamePhase.SELECTING_HAND:
+                        gs.setdefault("hand", []).append(c)
+                        _sort_hand_desc(gs.get("hand", []))
+                    else:
+                        gs.setdefault("deck", []).append(c)
             elif ctype in ("Joker", "Tarot", "Planet", "Spectral"):
                 # Riff-raff ('rif', Common), Cartomancer ('car'), 8 Ball
                 # ('8ba'), etc. — roll the real pool with the descriptor's
@@ -2134,6 +2184,73 @@ def _populate_shop(gs: dict[str, Any]) -> None:
     gs["shop_vouchers"] = [voucher] if voucher else []
     gs["shop_boosters"] = result.get("boosters", [])
 
+    _fire_shop_tags(gs, rerolled=False)
+
+
+def _fire_shop_tags(gs: dict[str, Any], rerolled: bool) -> None:
+    """Fire pending shop-context tag hooks on freshly stocked shop cards.
+
+    Wires the hooks :func:`~jackdaw.engine.shop.populate_shop` defers (its
+    "M11 tag system" note), consuming awarded tags FIFO:
+
+    * ``store_joker_modify`` — Foil/Holo/Polychrome/Negative Tag: the next
+      base-edition shop Joker gains the edition and becomes free
+      (tags.lua ``Tag:apply_to_run``). Applies to rerolled jokers too.
+    * ``shop_final_pass`` — Coupon Tag: initial shop cards and boosters
+      become free (shop entry only).
+    * ``shop_start`` — D6 Tag: rerolls start free (shop entry only).
+
+    ``store_joker_create`` (Rare/Uncommon Tag) and ``voucher_add``
+    (Voucher Tag) remain unwired: both replace RNG-consuming rolls at
+    creation time, so a faithful implementation needs live validation to
+    pin stream behavior first. Those tags stay pending and inert rather
+    than risking a new stream divergence.
+    """
+    from jackdaw.engine.tags import Tag
+
+    awarded: list[dict[str, Any]] = gs.get("awarded_tags", [])
+    rng = gs.get("rng")
+
+    for entry in awarded:
+        if entry.get("shop_fired"):
+            continue
+        tag = Tag(entry.get("key", ""))
+
+        result = tag.apply("store_joker_modify", gs, rng=rng)
+        if result is not None and result.force_edition:
+            target = None
+            for c in gs.get("shop_cards", []):
+                ability = getattr(c, "ability", None) or {}
+                if ability.get("set") == "Joker" and not getattr(c, "edition", None):
+                    target = c
+                    break
+            if target is None:
+                continue  # no eligible joker; tag stays pending for later
+            edition = {str(result.force_edition): True}
+            if hasattr(target, "set_edition"):
+                target.set_edition(edition)
+            else:
+                target.edition = edition
+            target.cost = 0  # vanilla: tag-edition shop jokers are free
+            entry["shop_fired"] = True
+            continue
+
+        if rerolled:
+            continue  # remaining hooks fire on shop entry only
+
+        result = tag.apply("shop_final_pass", gs, rng=rng)
+        if result is not None and result.coupon:
+            for c in gs.get("shop_cards", []) + gs.get("shop_boosters", []):
+                c.cost = 0
+            entry["shop_fired"] = True
+            continue
+
+        result = tag.apply("shop_start", gs, rng=rng)
+        if result is not None and result.free_rerolls:
+            cr = gs.setdefault("current_round", {})
+            cr["free_rerolls"] = cr.get("free_rerolls", 0) + result.free_rerolls
+            entry["shop_fired"] = True
+
 
 def _reroll_shop_cards(gs: dict[str, Any]) -> None:
     """Regenerate the shop joker/consumable cards (not voucher or boosters).
@@ -2175,6 +2292,8 @@ def _reroll_shop_cards(gs: dict[str, Any]) -> None:
         new_cards.append(card)
 
     gs["shop_cards"] = new_cards
+    # Pending edition tags also claim rerolled jokers (vanilla behavior).
+    _fire_shop_tags(gs, rerolled=True)
 
 
 def _get_card_set(card: Any) -> str:

@@ -487,7 +487,19 @@ def _legal_pack_opening(gs: dict[str, Any]) -> list[Action]:
     # via RPC, so only SkipPack is offered.  RNG stays in sync because
     # the pack is generated normally — we just force the agent to skip.
     if remaining > 0 and pack_type != "Spectral":
-        for i in range(len(pack_cards)):
+        # Vanilla gate (button_callbacks.lua:2112-2113): a Joker in a pack
+        # is selectable only if joker slots have room or it is negative.
+        jokers: list[Card] = gs.get("jokers", [])
+        joker_limit: int = gs.get("joker_slots", 5)
+        board_full = len(jokers) >= joker_limit
+        for i, card in enumerate(pack_cards):
+            if board_full:
+                ability = getattr(card, "ability", None) or {}
+                edition = getattr(card, "edition", None) or {}
+                is_joker = ability.get("set", "") == "Joker"
+                negative = bool(edition.get("negative")) if isinstance(edition, dict) else False
+                if is_joker and not negative:
+                    continue
             actions.append(PickPackCard(card_index=i))
 
     actions.append(SkipPack())
