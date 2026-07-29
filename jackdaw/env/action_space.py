@@ -220,11 +220,18 @@ def get_action_mask(game_state: dict[str, Any]) -> ActionMask:
         return ActionMask(type_mask, card_mask, entity_masks, max_card_select, min_card_select)
 
     # --- BLIND_SELECT ---
+    # Selling is available wherever vanilla's sell button is live, which
+    # is everywhere except mid-scoring: Card:can_sell_card (card.lua:1640)
+    # has no state gate and the blind-select restriction is commented out
+    # in the source. Keep these call sites in step with
+    # _SELLABLE_PHASES in game.py or the mask and executor will drift.
     if phase == GamePhase.BLIND_SELECT:
         type_mask[ActionType.SelectBlind] = True
         blind_on_deck = game_state.get("blind_on_deck", "Small")
         if blind_on_deck in ("Small", "Big"):
             type_mask[ActionType.SkipBlind] = True
+        _mask_sell_jokers(type_mask, entity_masks, jokers)
+        _mask_sell_consumables(type_mask, entity_masks, consumables)
         _mask_consumables(type_mask, entity_masks, game_state)
 
     # --- SELECTING_HAND ---
@@ -238,6 +245,8 @@ def get_action_mask(game_state: dict[str, Any]) -> ActionMask:
             type_mask[ActionType.SortHandSuit] = True
             _mask_hand_swaps(type_mask, entity_masks, hand)
         _mask_joker_swaps(type_mask, entity_masks, jokers)
+        _mask_sell_jokers(type_mask, entity_masks, jokers)
+        _mask_sell_consumables(type_mask, entity_masks, consumables)
         _mask_consumables(type_mask, entity_masks, game_state)
 
     # --- ROUND_EVAL ---
@@ -292,6 +301,8 @@ def get_action_mask(game_state: dict[str, Any]) -> ActionMask:
                 type_mask[ActionType.PickPackCard] = True
                 entity_masks[ActionType.PickPackCard] = pick_mask
         type_mask[ActionType.SkipPack] = True
+        _mask_sell_jokers(type_mask, entity_masks, jokers)
+        _mask_sell_consumables(type_mask, entity_masks, consumables)
 
     return ActionMask(type_mask, card_mask, entity_masks, max_card_select, min_card_select)
 

@@ -1115,6 +1115,69 @@ class TestMaskConsistencyWithEngine:
             with pytest.raises(IllegalActionError):
                 engine_step(copy.deepcopy(gs), EnginePickPackCard(card_index=0))
 
+    def test_selling_is_not_shop_only(self):
+        """Bug #74: selling was gated to SHOP in mask AND executor.
+
+        Card:can_sell_card (card.lua:1640) has no state gate -- its
+        blockers are cards mid-scoring, a locked controller and STOP_USE
+        -- and vanilla explicitly COMMENTED OUT the blind-select
+        restriction. Consumables qualify too: can_sell_card wants
+        area.config.type == 'joker' and game.lua:2239 gives the
+        consumables area that type.
+
+        Restricting it removed a real tactic from every agent: selling a
+        joker mid-blind to fire selling_self, to dump a perishable before
+        it expires, or to free a slot during a pack.
+        """
+        from jackdaw.engine.actions import SellCard
+        from jackdaw.engine.game import IllegalActionError
+        from jackdaw.engine.game import step as engine_step
+
+        from jackdaw.engine.card import Card
+
+        def real_jokers(n):
+            out = []
+            for k in ("j_joker", "j_greedy_joker")[:n]:
+                c = Card()
+                c.set_ability(k)
+                c.center_key = k
+                c.sell_cost = 2
+                out.append(c)
+            return out
+
+        for phase, sellable in ((GamePhase.SELECTING_HAND, True),
+                                (GamePhase.BLIND_SELECT, True),
+                                (GamePhase.SHOP, True),
+                                (GamePhase.ROUND_EVAL, False)):
+            gs = _blind_select_state(phase=phase, jokers=real_jokers(2),
+                                     hand=_make_hand(5))
+            mask = get_action_mask(gs)
+            assert bool(mask.type_mask[ActionType.SellJoker]) == sellable, phase
+            act = SellCard(area="jokers", card_index=0)
+            if sellable:
+                after = engine_step(copy.deepcopy(gs), act)
+                assert len(after["jokers"]) == 1, phase
+            else:
+                with pytest.raises(IllegalActionError):
+                    engine_step(copy.deepcopy(gs), act)
+
+    def test_sell_blocked_by_stop_use(self):
+        """can_sell_card's STOP_USE blocker (card.lua:1642)."""
+        from jackdaw.engine.actions import SellCard
+        from jackdaw.engine.game import IllegalActionError
+        from jackdaw.engine.game import step as engine_step
+
+        from jackdaw.engine.card import Card
+
+        j = Card()
+        j.set_ability("j_joker")
+        j.center_key = "j_joker"
+        j.sell_cost = 2
+        gs = _blind_select_state(phase=GamePhase.SELECTING_HAND,
+                                 jokers=[j], STOP_USE=1)
+        with pytest.raises(IllegalActionError):
+            engine_step(gs, SellCard(area="jokers", card_index=0))
+
     def test_spectral_pack_picks_are_offered(self):
         """Bug #73: Spectral packs were masked skip-only for every agent.
 

@@ -1232,6 +1232,19 @@ def _handle_buy_card(gs: dict[str, Any], idx: int) -> dict[str, Any]:
     return gs
 
 
+# States in which vanilla's sell button is live. ROUND_EVAL is excluded
+# deliberately: our engine models the cash-out as one atomic step, so
+# there is no window there for the player to act.
+_SELLABLE_PHASES = frozenset(
+    {
+        GamePhase.BLIND_SELECT,
+        GamePhase.SELECTING_HAND,
+        GamePhase.SHOP,
+        GamePhase.PACK_OPENING,
+    }
+)
+
+
 def _handle_sell_card(gs: dict[str, Any], area: str, idx: int) -> dict[str, Any]:
     """Sell a card for its sell value.
 
@@ -1239,7 +1252,23 @@ def _handle_sell_card(gs: dict[str, Any], area: str, idx: int) -> dict[str, Any]
     - Fire ``selling_card`` on all jokers (Campfire +xMult)
     - If joker sold itself: fire ``selling_self``
     """
-    _require_phase(gs, GamePhase.SHOP)
+    # Selling is NOT shop-only. Card:can_sell_card (card.lua:1640) has no
+    # state gate at all -- its blockers are cards mid-scoring, a locked
+    # controller and STOP_USE -- and vanilla explicitly COMMENTED OUT the
+    # blind-select restriction that used to be there. Both the joker and
+    # the consumable areas qualify: can_sell_card requires
+    # area.config.type == 'joker', and game.lua:2239 gives the
+    # consumables area exactly that type.
+    #
+    # Restricting this to SHOP removed a real tactic from every agent --
+    # selling a joker mid-blind to fire selling_self, to dump a
+    # perishable before it expires, or to free a slot during a pack.
+    if gs.get("phase") not in _SELLABLE_PHASES:
+        raise IllegalActionError(
+            f"Cannot sell in phase {gs.get('phase')}"
+        )
+    if gs.get("STOP_USE", 0) > 0:
+        raise IllegalActionError("Cannot sell while STOP_USE is set")
 
     cards: list = gs.get(area, [])
     if idx < 0 or idx >= len(cards):
