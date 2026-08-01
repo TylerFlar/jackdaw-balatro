@@ -21,13 +21,12 @@ from jackdaw.engine.pools import (
 from jackdaw.engine.rng import PseudoRandom
 from jackdaw.engine.shop import (
     TYPE_JOKER,
-    TYPE_PLAYING_CARD,
+    apply_illusion_shop_edition,
     buy_card,
     calculate_reroll_cost,
     get_pack,
     populate_shop,
     reroll_shop,
-    apply_illusion_shop_edition,
     select_shop_card_type,
     sell_card,
 )

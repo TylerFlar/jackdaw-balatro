@@ -586,9 +586,11 @@ def resolve_create_descriptor(
         source: Card | None = descriptor.get("source_card")
         if source is None or getattr(source, "base", None) is None:
             return None
+        suit = source.base.suit
+        rank = source.base.rank
         return create_playing_card(
-            Suit(source.base.suit.value if hasattr(source.base.suit, "value") else source.base.suit),
-            Rank(source.base.rank.value if hasattr(source.base.rank, "value") else source.base.rank),
+            Suit(suit.value if hasattr(suit, "value") else suit),
+            Rank(rank.value if hasattr(rank, "value") else rank),
             enhancement=getattr(source, "center_key", None) or "c_base",
             edition=dict(source.edition) if getattr(source, "edition", None) else None,
             seal=getattr(source, "seal", None),

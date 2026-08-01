@@ -9,12 +9,10 @@ Both bugs were found by LLM agents playing full runs (2026-07-20):
 """
 from __future__ import annotations
 
-import numpy as np
-
-from jackdaw.env.action_space import ActionType, get_action_mask
 from jackdaw.engine.actions import GamePhase
 from jackdaw.engine.game import _fire_shop_tags, step
 from jackdaw.engine.run_init import initialize_run
+from jackdaw.env.action_space import ActionType, get_action_mask
 
 
 def _cheat_through_blind(gs) -> None:

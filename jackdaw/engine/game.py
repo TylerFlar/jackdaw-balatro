@@ -302,7 +302,8 @@ def _handle_select_blind(gs: dict[str, Any]) -> dict[str, Any]:
     for joker in jokers:
         if getattr(joker, "debuff", False):
             continue
-        from jackdaw.engine.jokers import JokerContext as _JC2, calculate_joker as _cj2
+        from jackdaw.engine.jokers import JokerContext as _JC2
+        from jackdaw.engine.jokers import calculate_joker as _cj2
 
         res = _cj2(joker, _JC2(first_hand_drawn=True, jokers=jokers, game=fhd_snap))
         if res and res.extra:
@@ -1785,7 +1786,6 @@ def _draw_hand(gs: dict[str, Any]) -> None:
         blind, "disabled", False
     )
     if check_flip:
-        cr = gs.get("current_round", {})
         pareidolia = any(
             getattr(j, "center_key", None) == "j_pareidolia" and not getattr(j, "debuff", False)
             for j in gs.get("jokers", [])
@@ -1912,7 +1912,6 @@ def _round_won(gs: dict[str, Any]) -> None:
     11. Phase → ROUND_EVAL
     """
     from jackdaw.engine.economy import calculate_round_earnings
-    from jackdaw.engine.round_lifecycle import process_round_end_cards
 
     cr = gs["current_round"]
     blind = gs["blind"]
@@ -2509,7 +2508,8 @@ def _apply_consumable_result(
     if getattr(result, "add_to_deck", None):
         import copy as _copy
 
-        from jackdaw.engine.card import Card as _Card, _next_sort_id
+        from jackdaw.engine.card import Card as _Card
+        from jackdaw.engine.card import _next_sort_id
 
         deck_list: list = gs.setdefault("deck", [])
         for card_spec in result.add_to_deck:

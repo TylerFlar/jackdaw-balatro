@@ -1128,7 +1128,6 @@ class TestD6TagRerollCost:
     truthy in Lua).  Live-verified: LSKWQS7C entered the shop at $0."""
 
     def test_d6_shop_starts_at_zero_and_climbs(self):
-        from jackdaw.engine.shop import calculate_reroll_cost
 
         gs = _init_gs("D6TAG1")
         gs.setdefault("awarded_tags", []).append({"key": "tag_d_six"})
@@ -1391,9 +1390,9 @@ class TestRocketBossBump:
     the payout rows — a boss-round cash-out pays the bumped value."""
 
     def test_boss_round_pays_bumped_value(self):
+        from jackdaw.engine.blind import Blind
         from jackdaw.engine.card_factory import create_joker
         from jackdaw.engine.game import _joker_end_of_round_effects
-        from jackdaw.engine.blind import Blind
         from jackdaw.engine.run_init import initialize_run
 
         gs = initialize_run("b_red", 1, "ROCKET1")
@@ -1405,9 +1404,9 @@ class TestRocketBossBump:
         assert eor["dollars_earned"] == 3  # post-bump value paid
 
     def test_non_boss_round_no_bump(self):
+        from jackdaw.engine.blind import Blind
         from jackdaw.engine.card_factory import create_joker
         from jackdaw.engine.game import _joker_end_of_round_effects
-        from jackdaw.engine.blind import Blind
         from jackdaw.engine.run_init import initialize_run
 
         gs = initialize_run("b_red", 1, "ROCKET2")

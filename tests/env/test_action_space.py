@@ -1130,10 +1130,9 @@ class TestMaskConsistencyWithEngine:
         it expires, or to free a slot during a pack.
         """
         from jackdaw.engine.actions import SellCard
+        from jackdaw.engine.card import Card
         from jackdaw.engine.game import IllegalActionError
         from jackdaw.engine.game import step as engine_step
-
-        from jackdaw.engine.card import Card
 
         def real_jokers(n):
             out = []
@@ -1164,10 +1163,9 @@ class TestMaskConsistencyWithEngine:
     def test_sell_blocked_by_stop_use(self):
         """can_sell_card's STOP_USE blocker (card.lua:1642)."""
         from jackdaw.engine.actions import SellCard
+        from jackdaw.engine.card import Card
         from jackdaw.engine.game import IllegalActionError
         from jackdaw.engine.game import step as engine_step
-
-        from jackdaw.engine.card import Card
 
         j = Card()
         j.set_ability("j_joker")
