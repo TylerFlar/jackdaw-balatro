@@ -215,7 +215,8 @@ def calculate_round_earnings(
     # ------------------------------------------------------------------
     if joker_dollars is None:
         _all_owned = (
-            game_state.get("deck", []) + game_state.get("hand", [])
+            game_state.get("deck", [])
+            + game_state.get("hand", [])
             + game_state.get("discard_pile", [])
             + game_state.get("played_cards_area", [])
         )

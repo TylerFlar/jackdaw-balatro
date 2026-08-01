@@ -216,9 +216,7 @@ def reset_round_targets(
     # Filter out Stone cards — only non-Stone playing cards are eligible.
     # Also skip any card without a base (cannot occur in vanilla; defends
     # the mail.base.id read below against sim-side creation bugs).
-    valid_cards = [
-        c for c in all_cards if _card_effect(c) != "Stone Card" and c.base is not None
-    ]
+    valid_cards = [c for c in all_cards if _card_effect(c) != "Stone Card" and c.base is not None]
 
     # ------------------------------------------------------------------
     # reset_idol_card — common_events.lua:2271-2286

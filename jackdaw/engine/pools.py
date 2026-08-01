@@ -335,9 +335,7 @@ def pick_card_from_pool(
     """
     pool, pool_key = get_current_pool(pool_type, rng, ante, **kwargs)
     _legendary = bool(kwargs.get("legendary"))
-    return select_from_pool(
-        pool, rng, pool_key, None if _legendary else ante, pool_type=pool_type
-    )
+    return select_from_pool(pool, rng, pool_key, None if _legendary else ante, pool_type=pool_type)
 
 
 # ---------------------------------------------------------------------------

@@ -313,14 +313,14 @@ class TestDeath:
         """Swap actions reorder the hand list; Death must honor that
         order (vanilla: visual position), not creation-order sort_id."""
         c = _consumable("c_death")
-        a = _card("Hearts", "5")     # created first -> lower sort_id
-        b = _card("Spades", "Ace")   # created second -> higher sort_id
+        a = _card("Hearts", "5")  # created first -> lower sort_id
+        b = _card("Spades", "Ace")  # created second -> higher sort_id
         result = use_consumable(
             c,
             ConsumableContext(card=c, highlighted=[a, b], hand_cards=[b, a]),
         )
         source, target = result.copy_card
-        assert source is a           # rightmost by hand position
+        assert source is a  # rightmost by hand position
         assert target is b
 
 

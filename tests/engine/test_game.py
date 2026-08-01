@@ -797,8 +797,7 @@ class TestStoreJokerCreateTag:
 
         gs = self._skip_for_tag("tag_rare")
         rares = set(JOKER_RARITY_POOLS[3])
-        free_rares = [c for c in gs["shop_cards"]
-                      if c.center_key in rares and c.cost == 0]
+        free_rares = [c for c in gs["shop_cards"] if c.center_key in rares and c.cost == 0]
         assert free_rares, [(c.center_key, c.cost) for c in gs["shop_cards"]]
         assert gs["awarded_tags"][0].get("shop_fired") is True
 
@@ -807,8 +806,7 @@ class TestStoreJokerCreateTag:
 
         gs = self._skip_for_tag("tag_uncommon")
         uncommons = set(JOKER_RARITY_POOLS[2])
-        free_unc = [c for c in gs["shop_cards"]
-                    if c.center_key in uncommons and c.cost == 0]
+        free_unc = [c for c in gs["shop_cards"] if c.center_key in uncommons and c.cost == 0]
         assert free_unc, [(c.center_key, c.cost) for c in gs["shop_cards"]]
 
 
@@ -862,9 +860,13 @@ class TestHandDetectionJokerFlags:
     def test_smeared_enables_mixed_red_flush(self):
         from jackdaw.engine.card_factory import create_joker
 
-        cards = [self._pc("Hearts", "2"), self._pc("Diamonds", "5"),
-                 self._pc("Hearts", "7"), self._pc("Diamonds", "9"),
-                 self._pc("Hearts", "King")]
+        cards = [
+            self._pc("Hearts", "2"),
+            self._pc("Diamonds", "5"),
+            self._pc("Hearts", "7"),
+            self._pc("Diamonds", "9"),
+            self._pc("Hearts", "King"),
+        ]
         assert self._score(cards, []).hand_type == "High Card"
         smeared = create_joker("j_smeared")
         assert self._score(cards, [smeared]).hand_type == "Flush"
@@ -872,9 +874,13 @@ class TestHandDetectionJokerFlags:
     def test_shortcut_enables_gapped_straight(self):
         from jackdaw.engine.card_factory import create_joker
 
-        cards = [self._pc("Hearts", "3"), self._pc("Spades", "4"),
-                 self._pc("Clubs", "6"), self._pc("Hearts", "7"),
-                 self._pc("Diamonds", "9")]
+        cards = [
+            self._pc("Hearts", "3"),
+            self._pc("Spades", "4"),
+            self._pc("Clubs", "6"),
+            self._pc("Hearts", "7"),
+            self._pc("Diamonds", "9"),
+        ]
         assert self._score(cards, []).hand_type == "High Card"
         shortcut = create_joker("j_shortcut")
         assert self._score(cards, [shortcut]).hand_type == "Straight"
@@ -926,8 +932,11 @@ class TestHallucinationOnPackOpen:
         from jackdaw.engine.rng import PseudoRandom
 
         # find a seed whose first 'halu1' roll passes (< 0.5)
-        seed = next(s for s in ("HAL1", "HAL2", "HAL3", "HAL4", "HAL5")
-                    if PseudoRandom(s).random("halu1") < 0.5)
+        seed = next(
+            s
+            for s in ("HAL1", "HAL2", "HAL3", "HAL4", "HAL5")
+            if PseudoRandom(s).random("halu1") < 0.5
+        )
         gs = _setup_shop(seed)
         j = create_joker("j_hallucination")
         gs["jokers"] = [j]
@@ -1009,7 +1018,7 @@ class TestPillarPlayedThisAnte:
         step(gs, SelectBlind())
         gs["chips"] = 10**9
         step(gs, PlayHand(card_indices=(0, 1, 2)))
-        deck_all = (gs["deck"] + gs.get("hand", []) + gs.get("discard_pile", []))
+        deck_all = gs["deck"] + gs.get("hand", []) + gs.get("discard_pile", [])
         assert not any(c.ability.get("played_this_ante") for c in deck_all)
 
 
@@ -1040,8 +1049,7 @@ class TestMarbleStoneShuffleTiming:
         assert dealt == expected_hand
 
         deck = gs["deck"]
-        stones = [i for i, c in enumerate(deck)
-                  if c.ability.get("effect") == "Stone Card"]
+        stones = [i for i, c in enumerate(deck) if c.ability.get("effect") == "Stone Card"]
         assert stones == [0]  # pile bottom, drawn last
 
 
@@ -1324,12 +1332,12 @@ class TestHandsPlayedPreIncrementDuringScoring:
         dna = _joker_card("j_dna")
         gs["jokers"] = [dna]
         step(gs, SelectBlind())
-        owned_before = (
-            len(gs["deck"]) + len(gs["hand"]) + len(gs.get("discard_pile", []))
-        )
+        owned_before = len(gs["deck"]) + len(gs["hand"]) + len(gs.get("discard_pile", []))
         step(gs, PlayHand(card_indices=(0,)))
         owned_after = (
-            len(gs["deck"]) + len(gs["hand"]) + len(gs.get("discard_pile", []))
+            len(gs["deck"])
+            + len(gs["hand"])
+            + len(gs.get("discard_pile", []))
             + len(gs.get("played_cards_area", []))
         )
         assert owned_after == owned_before + 1  # DNA copy created
@@ -1340,12 +1348,12 @@ class TestHandsPlayedPreIncrementDuringScoring:
         gs["jokers"] = [dna]
         step(gs, SelectBlind())
         step(gs, PlayHand(card_indices=(0, 1)))  # 2 cards: DNA needs 1
-        owned_before = (
-            len(gs["deck"]) + len(gs["hand"]) + len(gs.get("discard_pile", []))
-        )
+        owned_before = len(gs["deck"]) + len(gs["hand"]) + len(gs.get("discard_pile", []))
         step(gs, PlayHand(card_indices=(0,)))  # 2nd hand of round: no DNA
         owned_after = (
-            len(gs["deck"]) + len(gs["hand"]) + len(gs.get("discard_pile", []))
+            len(gs["deck"])
+            + len(gs["hand"])
+            + len(gs.get("discard_pile", []))
             + len(gs.get("played_cards_area", []))
         )
         assert owned_after == owned_before

@@ -1072,14 +1072,14 @@ class TestMaskConsistencyWithEngine:
 
         cases = [
             # (center_key, set, jokers held, consumables held, hand, pickable?)
-            ("c_judgement", "Tarot", 5, 0, 5, False),   # needs a joker slot
+            ("c_judgement", "Tarot", 5, 0, 5, False),  # needs a joker slot
             ("c_judgement", "Tarot", 4, 0, 5, True),
             ("c_soul", "Spectral", 5, 0, 5, False),
             ("c_wraith", "Spectral", 5, 0, 5, False),
-            ("c_emperor", "Tarot", 0, 2, 5, False),     # needs a consumable slot
+            ("c_emperor", "Tarot", 0, 2, 5, False),  # needs a consumable slot
             ("c_emperor", "Tarot", 0, 1, 5, True),
             ("c_high_priestess", "Tarot", 0, 2, 5, False),
-            ("c_strength", "Tarot", 5, 2, 5, True),     # creates nothing: fine
+            ("c_strength", "Tarot", 5, 2, 5, True),  # creates nothing: fine
             # A targeting pick needs a dealt hand that can satisfy
             # min_highlighted.  With no hand the executor raises
             # ("requires between 1 and 2 target card(s); provided 0"), so
@@ -1105,9 +1105,7 @@ class TestMaskConsistencyWithEngine:
                 mask.type_mask[ActionType.PickPackCard]
                 and mask.entity_masks[ActionType.PickPackCard][0]
             )
-            assert offered == pickable, (
-                f"{key} with {n_jokers}j/{n_cons}c/{n_hand} in hand"
-            )
+            assert offered == pickable, f"{key} with {n_jokers}j/{n_cons}c/{n_hand} in hand"
 
             if offered:
                 continue
@@ -1144,12 +1142,13 @@ class TestMaskConsistencyWithEngine:
                 out.append(c)
             return out
 
-        for phase, sellable in ((GamePhase.SELECTING_HAND, True),
-                                (GamePhase.BLIND_SELECT, True),
-                                (GamePhase.SHOP, True),
-                                (GamePhase.ROUND_EVAL, False)):
-            gs = _blind_select_state(phase=phase, jokers=real_jokers(2),
-                                     hand=_make_hand(5))
+        for phase, sellable in (
+            (GamePhase.SELECTING_HAND, True),
+            (GamePhase.BLIND_SELECT, True),
+            (GamePhase.SHOP, True),
+            (GamePhase.ROUND_EVAL, False),
+        ):
+            gs = _blind_select_state(phase=phase, jokers=real_jokers(2), hand=_make_hand(5))
             mask = get_action_mask(gs)
             assert bool(mask.type_mask[ActionType.SellJoker]) == sellable, phase
             act = SellCard(area="jokers", card_index=0)
@@ -1171,8 +1170,7 @@ class TestMaskConsistencyWithEngine:
         j.set_ability("j_joker")
         j.center_key = "j_joker"
         j.sell_cost = 2
-        gs = _blind_select_state(phase=GamePhase.SELECTING_HAND,
-                                 jokers=[j], STOP_USE=1)
+        gs = _blind_select_state(phase=GamePhase.SELECTING_HAND, jokers=[j], STOP_USE=1)
         with pytest.raises(IllegalActionError):
             engine_step(gs, SellCard(area="jokers", card_index=0))
 
@@ -1208,9 +1206,7 @@ class TestMaskConsistencyWithEngine:
             engine_step(
                 copy.deepcopy(gs),
                 factored_to_engine_action(
-                    FactoredAction(
-                        action_type=int(ActionType.PickPackCard), entity_target=0
-                    ),
+                    FactoredAction(action_type=int(ActionType.PickPackCard), entity_target=0),
                     gs,
                 ),
             )
@@ -1249,10 +1245,10 @@ class TestMaskConsistencyWithEngine:
 
         cases = [
             # (consumables held, last_tarot_planet, pickable?)
-            (0, "c_strength", True),    # room + something to copy
-            (2, "c_strength", False),   # no room for the copy
-            (0, None, False),           # nothing used yet
-            (0, "c_fool", False),       # a Fool cannot copy a Fool
+            (0, "c_strength", True),  # room + something to copy
+            (2, "c_strength", False),  # no room for the copy
+            (0, None, False),  # nothing used yet
+            (0, "c_fool", False),  # a Fool cannot copy a Fool
         ]
         for n_cons, ltp, pickable in cases:
             gs = _pack_opening_state(
@@ -1300,8 +1296,7 @@ class TestMaskConsistencyWithEngine:
             )
             mask = get_action_mask(gs)
             offered = bool(
-                mask.type_mask[ActionType.BuyCard]
-                and mask.entity_masks[ActionType.BuyCard][0]
+                mask.type_mask[ActionType.BuyCard] and mask.entity_masks[ActionType.BuyCard][0]
             )
             assert offered == buyable, f"{card_set} negative={negative}"
             if not offered:

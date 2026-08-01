@@ -7,6 +7,7 @@ Both bugs were found by LLM agents playing full runs (2026-07-20):
 - Pack picks ignored the joker-slot cap (vanilla button_callbacks.lua:2112
   gates non-negative Jokers when the board is full).
 """
+
 from __future__ import annotations
 
 from jackdaw.engine.actions import GamePhase
@@ -34,8 +35,13 @@ class TestPackJokerCapGate:
         gs["blind_on_deck"] = "Small"
         from jackdaw.engine.card_factory import create_joker
 
-        for key in ("j_joker", "j_greedy_joker", "j_lusty_joker",
-                    "j_wrathful_joker", "j_gluttenous_joker"):
+        for key in (
+            "j_joker",
+            "j_greedy_joker",
+            "j_lusty_joker",
+            "j_wrathful_joker",
+            "j_gluttenous_joker",
+        ):
             gs["jokers"].append(create_joker(key))
         assert len(gs["jokers"]) == 5
 
@@ -72,8 +78,9 @@ class TestSkipTagWiring:
         step(gs, SkipBlind())  # Big skipped -> polychrome tag awarded
         _cheat_through_blind(gs)  # beat Boss -> next shop generated
 
-        jokers = [c for c in gs["shop_cards"]
-                  if (getattr(c, "ability", None) or {}).get("set") == "Joker"]
+        jokers = [
+            c for c in gs["shop_cards"] if (getattr(c, "ability", None) or {}).get("set") == "Joker"
+        ]
         assert jokers, "expected a joker in the post-skip shop"
         tagged = [c for c in jokers if (getattr(c, "edition", None) or {}).get("polychrome")]
         assert tagged, "polychrome tag should mark the next base shop joker"

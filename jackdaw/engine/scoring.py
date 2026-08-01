@@ -527,9 +527,7 @@ def score_hand(
         for joker in jokers:
             if joker.debuff:
                 continue
-            after_result = calculate_joker(
-                joker, JokerContext(after=True, **_debuffed_shared)
-            )
+            after_result = calculate_joker(joker, JokerContext(after=True, **_debuffed_shared))
             if after_result and after_result.remove:
                 jokers_removed_debuffed.append(joker)
 

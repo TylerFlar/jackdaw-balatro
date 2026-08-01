@@ -841,9 +841,7 @@ def _require_forced_card(hand: list, indices: tuple[int, ...]) -> None:
         ability = getattr(c, "ability", None)
         if isinstance(ability, dict) and ability.get("forced_selection"):
             if i not in indices:
-                raise IllegalActionError(
-                    "Forced card (Cerulean Bell) must be in the selection"
-                )
+                raise IllegalActionError("Forced card (Cerulean Bell) must be in the selection")
             return
 
 
@@ -1135,9 +1133,7 @@ def _handle_cash_out(gs: dict[str, Any]) -> dict[str, Any]:
         for entry in gs.get("awarded_tags", []):
             if entry.get("eval_fired"):
                 continue
-            result = Tag(entry.get("key", "")).apply(
-                "eval", gs, rng=rng, last_blind_is_boss=True
-            )
+            result = Tag(entry.get("key", "")).apply("eval", gs, rng=rng, last_blind_is_boss=True)
             if result is not None and result.dollars:
                 gs["dollars"] = gs.get("dollars", 0) + result.dollars
                 entry["eval_fired"] = True
@@ -1265,9 +1261,7 @@ def _handle_sell_card(gs: dict[str, Any], area: str, idx: int) -> dict[str, Any]
     # selling a joker mid-blind to fire selling_self, to dump a
     # perishable before it expires, or to free a slot during a pack.
     if gs.get("phase") not in _SELLABLE_PHASES:
-        raise IllegalActionError(
-            f"Cannot sell in phase {gs.get('phase')}"
-        )
+        raise IllegalActionError(f"Cannot sell in phase {gs.get('phase')}")
     if gs.get("STOP_USE", 0) > 0:
         raise IllegalActionError("Cannot sell while STOP_USE is set")
 
@@ -1782,8 +1776,8 @@ def _draw_hand(gs: dict[str, Any]) -> None:
     # draw order BEFORE the hand sort, so The Wheel's stream consumption
     # matches Lua exactly.
     blind = gs.get("blind")
-    check_flip = blind is not None and getattr(blind, "boss", None) and not getattr(
-        blind, "disabled", False
+    check_flip = (
+        blind is not None and getattr(blind, "boss", None) and not getattr(blind, "disabled", False)
     )
     if check_flip:
         pareidolia = any(
@@ -1827,8 +1821,10 @@ def _joker_end_of_round_effects(gs: dict[str, Any]) -> dict[str, Any]:
     # Cards have not yet returned to the deck here, so the full owned set
     # spans all four piles (matches vanilla's G.playing_cards).
     _all_owned = (
-        gs.get("deck", []) + gs.get("hand", [])
-        + gs.get("discard_pile", []) + gs.get("played_cards_area", [])
+        gs.get("deck", [])
+        + gs.get("hand", [])
+        + gs.get("discard_pile", [])
+        + gs.get("played_cards_area", [])
     )
     game_snap = GameSnapshot(
         money=gs.get("dollars", 0),
@@ -2172,7 +2168,8 @@ def _apply_setting_blind_mutations(
             if rng:
                 source = mut.get("_source_joker")
                 candidates = [
-                    j for j in jokers
+                    j
+                    for j in jokers
                     if j is not source
                     and not getattr(j, "eternal", False)
                     and not getattr(j, "getting_sliced", False)
@@ -2769,9 +2766,7 @@ def _fire_shop_tags(gs: dict[str, Any], rerolled: bool) -> None:
             ]
             used_v = {k: True for k in gs.get("used_vouchers", [])}
             ante = gs.get("round_resets", {}).get("ante", 1)
-            v_key = get_next_voucher_key(
-                rng, used_v, in_shop, from_tag=True, ante=ante
-            )
+            v_key = get_next_voucher_key(rng, used_v, in_shop, from_tag=True, ante=ante)
             if v_key:
                 voucher = create_voucher(v_key)
                 voucher.set_cost(
@@ -3070,9 +3065,7 @@ def _notify_cards_destroyed(gs: dict[str, Any], destroyed: list) -> None:
     for joker in jokers:
         if getattr(joker, "debuff", False):
             continue
-        calculate_joker(
-            joker, JokerContext(cards_destroyed=destroyed, jokers=jokers)
-        )
+        calculate_joker(joker, JokerContext(cards_destroyed=destroyed, jokers=jokers))
 
 
 def _fire_discard_effects(gs: dict[str, Any], discarded: list, *, hook: bool) -> None:
@@ -3140,8 +3133,8 @@ def _fire_discard_effects(gs: dict[str, Any], discarded: list, *, hook: bool) ->
     discard_pile: list = gs.setdefault("discard_pile", [])
     discard_pile.extend(surviving)
     gs["round_scores"] = gs.get("round_scores", {})
-    gs["round_scores"]["cards_discarded"] = (
-        gs["round_scores"].get("cards_discarded", 0) + len(discarded)
+    gs["round_scores"]["cards_discarded"] = gs["round_scores"].get("cards_discarded", 0) + len(
+        discarded
     )
 
 

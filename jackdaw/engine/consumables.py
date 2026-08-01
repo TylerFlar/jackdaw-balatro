@@ -190,6 +190,7 @@ _NEED_JOKER_SLOT = frozenset(
     }
 )
 
+
 def pack_pick_block_reason(
     card: Any, gs: dict[str, Any], targets: tuple[int, ...] | None = None
 ) -> str | None:

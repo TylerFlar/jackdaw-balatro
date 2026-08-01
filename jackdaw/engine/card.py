@@ -814,7 +814,9 @@ class Card:
             # card.lua:568 routes the Negative slot bonus by card type:
             # consumables raise the consumable limit, everything else jokers.
             if self.ability.get("consumeable") or self.ability.get("set") in (
-                "Tarot", "Planet", "Spectral",
+                "Tarot",
+                "Planet",
+                "Spectral",
             ):
                 game_state["consumable_slots"] = game_state.get("consumable_slots", 0) + 1
             else:
@@ -871,7 +873,9 @@ class Card:
 
         if self.edition and self.edition.get("negative"):
             if self.ability.get("consumeable") or self.ability.get("set") in (
-                "Tarot", "Planet", "Spectral",
+                "Tarot",
+                "Planet",
+                "Spectral",
             ):
                 game_state["consumable_slots"] = game_state.get("consumable_slots", 0) - 1
             else:

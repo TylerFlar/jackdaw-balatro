@@ -275,7 +275,6 @@ def get_pack(
 _SHOP_APPEND = "sho"
 
 
-
 def apply_store_joker_create_tag(gs, rng, ante):
     """Fire a pending Rare/Uncommon Tag for one shop joker slot.
 
@@ -301,10 +300,7 @@ def apply_store_joker_create_tag(gs, rng, ante):
             from jackdaw.engine.pools import JOKER_RARITY_POOLS
 
             rare_pool = set(JOKER_RARITY_POOLS.get(3, []))
-            owned = {
-                c.center_key for c in gs.get("jokers", [])
-                if c.center_key in rare_pool
-            }
+            owned = {c.center_key for c in gs.get("jokers", []) if c.center_key in rare_pool}
             if len(owned) >= len(rare_pool):
                 continue  # vanilla nope(): consumed, slot rolls normally
         append = "rta" if result.force_rarity == 3 else "uta"

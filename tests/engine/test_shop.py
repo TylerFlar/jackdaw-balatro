@@ -625,7 +625,4 @@ class TestCheckSoulChanceThreshold:
 
     def test_used_soul_skips_roll_entirely(self):
         # gated: no roll consumed, empty stub doesn't raise
-        assert (
-            check_soul_chance("Tarot", _ScriptedRNG(), 1, used_jokers={"c_soul": True})
-            is None
-        )
+        assert check_soul_chance("Tarot", _ScriptedRNG(), 1, used_jokers={"c_soul": True}) is None

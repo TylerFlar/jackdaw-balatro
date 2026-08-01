@@ -335,9 +335,7 @@ def _mask_shop_buy(
         # check_for_buy_space (button_callbacks.lua:2392) raises the limit by
         # one for a Negative card on BOTH branches — a Negative consumable is
         # buyable at full slots exactly like a Negative joker.
-        is_negative = bool(
-            isinstance(card.edition, dict) and card.edition.get("negative")
-        )
+        is_negative = bool(isinstance(card.edition, dict) and card.edition.get("negative"))
         bonus = 1 if is_negative else 0
         if card_set == "Joker":
             if len(jokers) >= joker_slots + bonus:
@@ -521,9 +519,7 @@ def get_consumable_target_info(
 # ---------------------------------------------------------------------------
 
 
-def _default_pick_targets(
-    game_state: dict[str, Any], pack_index: int
-) -> tuple[int, ...] | None:
+def _default_pick_targets(game_state: dict[str, Any], pack_index: int) -> tuple[int, ...] | None:
     """Default hand targets for a targeting pack pick.
 
     Returns None for non-targeting picks (planets, jokers, playing cards).
@@ -640,12 +636,8 @@ def factored_to_engine_action(
             # (the engine now rejects bare picks, matching the live game).
             # Agents that don't emit card targets get a default selection
             # — the first min_highlighted dealt cards.
-            targets = _default_pick_targets(
-                game_state, fa.entity_target
-            )
-        return EnginePickPackCard(
-            card_index=fa.entity_target, target_indices=targets
-        )
+            targets = _default_pick_targets(game_state, fa.entity_target)
+        return EnginePickPackCard(card_index=fa.entity_target, target_indices=targets)
 
     if at == ActionType.SwapJokersLeft:
         if fa.entity_target is None:
