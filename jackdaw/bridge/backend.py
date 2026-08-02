@@ -235,6 +235,13 @@ class SimBackend:
                 rental=rental,
                 hands_played=self._gs.get("hands_played", 0),
             )
+            # To Do List rolls its target at creation, before the edition
+            # poll (card.lua:311) — balatrobot's add goes through the full
+            # create_card pipeline, so mirror it here.
+            if key == "j_todo_list":
+                from jackdaw.engine.card_factory import roll_to_do_hand
+
+                roll_to_do_hand(card, self._gs.get("rng"), self._gs.get("hand_levels"))
             # Poll for edition to match balatrobot's create_card() behaviour.
             # Balatrobot's add command goes through the full Lua create_card()
             # pipeline which calls poll_edition(), so we must do the same to

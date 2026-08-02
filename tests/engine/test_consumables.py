@@ -309,6 +309,20 @@ class TestDeath:
         assert source is right
         assert target is left
 
+    def test_direction_follows_hand_position_not_sort_id(self):
+        """Swap actions reorder the hand list; Death must honor that
+        order (vanilla: visual position), not creation-order sort_id."""
+        c = _consumable("c_death")
+        a = _card("Hearts", "5")  # created first -> lower sort_id
+        b = _card("Spades", "Ace")  # created second -> higher sort_id
+        result = use_consumable(
+            c,
+            ConsumableContext(card=c, highlighted=[a, b], hand_cards=[b, a]),
+        )
+        source, target = result.copy_card
+        assert source is a  # rightmost by hand position
+        assert target is b
+
 
 class TestHex:
     def test_adds_polychrome_to_chosen_joker(self):
@@ -676,15 +690,24 @@ class TestFullRoundEarnings:
         return [golden, cloud9, rental]
 
     def test_full_breakdown(self):
+        from jackdaw.engine.card_factory import create_playing_card
+        from jackdaw.engine.data.enums import Rank, Suit
+
         jokers = self._make_jokers()
         blind = _bb()
+        # Cloud 9's tally now comes from the deck contents (three 9s here),
+        # not a cached ability field.
+        nines = [
+            create_playing_card(suit=s, rank=Rank.NINE)
+            for s in (Suit.HEARTS, Suit.SPADES, Suit.CLUBS)
+        ]
         result = calculate_round_earnings(
             blind=blind,
             hands_left=2,
             discards_left=0,
             money=23,
             jokers=jokers,
-            game_state={},
+            game_state={"deck": nines},
         )
         assert result.blind_reward == 4
         assert result.unused_hands_bonus == 2

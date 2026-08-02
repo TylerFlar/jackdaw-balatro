@@ -192,12 +192,11 @@ def score_hand_base(
     """
     from jackdaw.engine.hand_eval import evaluate_hand
 
-    _ = joker_flags  # reserved for future joker flag passing
     dollars = 0
     breakdown: list[str] = []
 
     # === Phase 1-2: Hand detection ===
-    eval_result = evaluate_hand(played_cards, jokers=None)
+    eval_result = evaluate_hand(played_cards, jokers=None, flag_overrides=joker_flags)
     hand_type = eval_result.detected_hand
     scoring_cards = eval_result.scoring_cards
     poker_hands = eval_result.poker_hands
@@ -213,6 +212,10 @@ def score_hand_base(
             debuffed=False,
             breakdown=["No hand"],
         )
+
+    # Play counts increment BEFORE the boss debuff check
+    # (state_events.lua:574-575) — a "nope!"-debuffed hand still counts.
+    hand_levels.record_play(hand_type)
 
     # === Phase 3: Boss blind debuff check ===
     # Lua passes G.play.cards (all played cards, not just scoring subset)
@@ -248,8 +251,8 @@ def score_hand_base(
         f" -> {int(hand_chips)} chips, {int(mult)} mult"
     )
 
-    # Record play
-    hand_levels.record_play(hand_type)
+    # (play counts recorded before the debuff check, matching
+    # state_events.lua:574)
 
     # === Phase 6: Blind modify_hand (The Flint) ===
     new_mult, new_chips, modified = blind.modify_hand(mult, int(hand_chips))
@@ -441,6 +444,7 @@ def score_hand(
         enhanced_card_count=gs.get("enhanced_card_count", 0),
         hands_left=gs.get("hands_left", 0),
         hands_played=gs.get("current_round_hands_played", 0),
+        hands_played_run=gs.get("hands_played", 0),
         discards_left=gs.get("discards_left", 0),
         discards_used=gs.get("discards_used", 0),
         probabilities_normal=probabilities_normal,
@@ -448,10 +452,17 @@ def score_hand(
         mail_card_id=gs.get("mail_card_id"),
         idol_card=gs.get("idol_card"),
         ancient_suit=gs.get("ancient_suit"),
+        # Throwback: x0.25 mult per skipped blind — omitting this made
+        # the joker score x1.0 always (live-verified: LSOO7FA8, live =
+        # sim x 1.25 exactly after one skip).
+        skips=gs.get("skips", 0),
     )
 
     # === Phase 1-2: Hand detection ===
-    eval_result = evaluate_hand(played_cards, jokers=None)
+    # Detection MUST see the live joker list: Four Fingers / Shortcut /
+    # Smeared change which hand is detected (vanilla evaluate_poker_hand
+    # reads find_joker() globals, misc_functions.lua:376-380).
+    eval_result = evaluate_hand(played_cards, jokers=jokers)
     hand_type = eval_result.detected_hand
     scoring_cards = eval_result.scoring_cards
     poker_hands = eval_result.poker_hands
@@ -468,28 +479,73 @@ def score_hand(
             breakdown=["No hand"],
         )
 
+    # Play counts increment BEFORE the boss debuff check
+    # (state_events.lua:574-575) — a "nope!"-debuffed hand still counts
+    # (found by lockstep: The Psychic blocked a short play, live still
+    # recorded High Card, sim recorded nothing).
+    hand_levels.record_play(hand_type)
+    # last_hand_played is set alongside the counters (state_events.lua:576),
+    # also before the debuff check — Blue Seal reads it at round end.
+    gs["last_hand_played"] = hand_type
+
     # === Phase 3: Boss blind debuff check ===
     # Lua passes G.play.cards (all played cards, not just scoring subset)
     # to debuff_hand (state_events.lua:614).  Matters for The Psychic
     # which checks #cards >= h_size_ge against the full played hand.
     debuffed = blind.debuff_hand(played_cards, poker_hands, hand_type)
     if debuffed:
+        _debuffed_shared = dict(
+            full_hand=played_cards,
+            scoring_hand=scoring_cards,
+            scoring_name=hand_type,
+            poker_hands=poker_hands,
+            jokers=jokers,
+            rng=rng,
+            smeared=smeared,
+            pareidolia=pareidolia,
+            hand_levels=hand_levels,
+            blind=blind,
+            held_cards=held_cards,
+            game=snapshot,
+        )
         # Phase 3a: Matador check on debuffed hands
         for joker in jokers:
             if joker.debuff:
                 continue
-            ctx = JokerContext(
-                debuffed_hand=True,
-                blind=blind,
-                jokers=jokers,
-                full_hand=played_cards,
-                scoring_hand=scoring_cards,
-                scoring_name=hand_type,
-                poker_hands=poker_hands,
-            )
+            ctx = JokerContext(debuffed_hand=True, **_debuffed_shared)
             result = calculate_joker(joker, ctx)
             if result and result.dollars:
                 dollars += result.dollars
+
+        # Vanilla's "after" joker pass sits AFTER the scored/debuffed
+        # if-else (state_events.lua:1068) — it fires on debuffed hands
+        # too, so Ice Cream decays (and can melt) on a "Nope!" play
+        # (live-verified: LS96X6P4 sim scored +25 over live = one missed
+        # 5-chip decay x5 mult).  Same for the Mr. Bones save on a
+        # debuffed final hand.
+        jokers_removed_debuffed: list[Card] = []
+        for joker in jokers:
+            if joker.debuff:
+                continue
+            after_result = calculate_joker(joker, JokerContext(after=True, **_debuffed_shared))
+            if after_result and after_result.remove:
+                jokers_removed_debuffed.append(joker)
+
+        saved = False
+        _round_chips_now = gs.get("chips", 0)  # debuffed play adds 0
+        if blind_chips > 0 and _round_chips_now < blind_chips and gs.get("hands_left", 0) == 0:
+            for joker in jokers:
+                if joker.debuff:
+                    continue
+                bones_ctx = JokerContext(**_debuffed_shared)
+                bones_ctx.game_over = True  # type: ignore[attr-defined]
+                bones_ctx.chips_ratio = _round_chips_now / blind_chips  # type: ignore[attr-defined]
+                bones_result = calculate_joker(joker, bones_ctx)
+                if bones_result and bones_result.saved:
+                    saved = True
+                    if bones_result.remove:
+                        jokers_removed_debuffed.append(joker)
+                    break
 
         return ScoreResult(
             hand_type=hand_type,
@@ -500,6 +556,8 @@ def score_hand(
             dollars_earned=dollars,
             debuffed=True,
             breakdown=[f"Hand blocked by {blind.name}"],
+            jokers_removed=jokers_removed_debuffed,
+            saved=saved,
         )
 
     # === Phase 3b: The Arm — demote played hand type by 1 (min L1) ===
@@ -509,6 +567,10 @@ def score_hand(
         and hand_levels[hand_type].level > 1
     ):
         hand_levels.level_up(hand_type, amount=-1)
+        # Boss ability fired this play — Matador reads this in
+        # joker_main (blind.lua sets self.triggered on the demote;
+        # live-verified: LS7N21KX paid $8 on The Arm).
+        blind.triggered = True
 
     # === Phase 3c: Splash — all played cards score ===
     splash_active = any(
@@ -527,8 +589,8 @@ def score_hand(
         f" -> {int(hand_chips)} chips, {int(mult)} mult"
     )
 
-    # Record play
-    hand_levels.record_play(hand_type)
+    # (play counts recorded before the debuff check, matching
+    # state_events.lua:574)
 
     # Shared context fields (lightweight — references snapshot, not copies)
     _shared = dict(
@@ -546,6 +608,8 @@ def score_hand(
         game=snapshot,
     )
 
+    joker_creates: list[dict] = []
+
     # === Phase 5: "before" joker pass ===
     for joker in jokers:
         if joker.debuff:
@@ -557,6 +621,10 @@ def score_hand(
             base_chips, base_mult = hand_levels.get(hand_type)
             hand_chips = float(base_chips)
             mult = float(base_mult)
+        # DNA's playing-card copy is a before-context create
+        # (card.lua:3501-13) — this pass used to drop extra entirely.
+        if result and result.extra and "create" in result.extra:
+            joker_creates.append(result.extra["create"])
 
     # === Phase 6: Blind modify_hand (The Flint) ===
     new_mult, new_chips, modified = blind.modify_hand(mult, int(hand_chips))
@@ -564,10 +632,13 @@ def score_hand(
         mult = float(new_mult)
         hand_chips = float(new_chips)
         breakdown.append(f"Blind modify: {int(hand_chips)} chips, {int(mult)} mult")
-
     # === Phase 7: Per scored card (with retriggers) ===
     for card in scoring_cards:
         if card.debuff:
+            # A debuffed scoring card counts as the boss ability firing
+            # (state_events.lua:656 sets blind.triggered) — Matador pays.
+            if blind is not None:
+                blind.triggered = True
             continue
 
         # 7a: Collect retriggers (seal + joker)
@@ -623,6 +694,12 @@ def score_hand(
                         eff["x_mult"] = ind_result.x_mult
                     if ind_result.dollars:
                         eff["dollars"] = ind_result.dollars
+                    # Per-card creations (8 Ball's tarot on a scored 8):
+                    # these were silently DROPPED — only joker_main creates
+                    # were collected (found by lockstep: 8 Ball rolled a
+                    # proc, live created a tarot, sim created nothing).
+                    if ind_result.extra and "create" in ind_result.extra:
+                        joker_creates.append(ind_result.extra["create"])
                     if eff:
                         eff["card"] = joker
                         effects.append(eff)
@@ -709,7 +786,6 @@ def score_hand(
                 mult *= ihe_result.Xmult_mod
 
     # === Phase 9: Joker main effects (left to right) ===
-    joker_creates: list[dict] = []
     for joker in jokers:
         if joker.debuff:
             continue
@@ -785,6 +861,10 @@ def score_hand(
             )
             dest_result = calculate_joker(joker, dest_ctx)
             if dest_result and dest_result.remove:
+                # Sixth Sense destroys the six AND creates a Spectral
+                # (card.lua:2604-10) — the create was dropped here.
+                if dest_result.extra and "create" in dest_result.extra:
+                    joker_creates.append(dest_result.extra["create"])
                 destroyed = True
                 break
         # Glass Card self-shatter: 1 in (1/probabilities_normal * 4) chance
@@ -819,14 +899,20 @@ def score_hand(
         if after_result and after_result.remove:
             jokers_removed.append(joker)
 
-    # Mr. Bones save check: if score < blind target and last hand
+    # Mr. Bones save check: death = CUMULATIVE round chips below the
+    # blind target on the last hand; the handler enforces vanilla's
+    # >= 25% ratio (card.lua:3047-48: G.GAME.chips/G.GAME.blind.chips,
+    # both cumulative — live-verified: LSWPWW38 died at <25% with
+    # Bones on board while the old unconditional save advanced).
     saved = False
-    if blind_chips > 0 and total < blind_chips and gs.get("hands_left", 0) == 0:
+    _round_chips_after = gs.get("chips", 0) + total
+    if blind_chips > 0 and _round_chips_after < blind_chips and gs.get("hands_left", 0) == 0:
         for joker in jokers:
             if joker.debuff:
                 continue
             bones_ctx = JokerContext(**_shared)
             bones_ctx.game_over = True  # type: ignore[attr-defined]
+            bones_ctx.chips_ratio = _round_chips_after / blind_chips  # type: ignore[attr-defined]
             bones_result = calculate_joker(joker, bones_ctx)
             if bones_result and bones_result.saved:
                 saved = True

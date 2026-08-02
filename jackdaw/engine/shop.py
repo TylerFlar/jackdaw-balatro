@@ -27,6 +27,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from jackdaw.engine.card_utils import astronomer_active
 from jackdaw.engine.data.prototypes import BOOSTERS, CENTER_POOLS
 
 if TYPE_CHECKING:
@@ -64,6 +65,7 @@ def select_shop_card_type(
     planet_rate: float = 4.0,
     spectral_rate: float = 0.0,
     playing_card_rate: float = 0.0,
+    has_illusion: bool = False,
 ) -> str:
     """Select what type of card fills a shop joker slot.
 
@@ -117,6 +119,15 @@ def select_shop_card_type(
 
     poll = rng.random("cdt" + str(ante)) * total
 
+    # With Illusion owned, vanilla's rate table evaluates the playing-card
+    # slot type EAGERLY for every slot (UI_definitions.lua:772): one
+    # 'illusion' pull per slot regardless of what the slot lands on.
+    pc_type = "Base"
+    if has_illusion:
+        pc_type = "Enhanced" if rng.random("illusion") > 0.6 else "Base"
+
+    # Vanilla order: Joker, Tarot, Planet, playing card, Spectral
+    # (UI_definitions.lua:768-774).
     if poll < joker_rate:
         return TYPE_JOKER
     poll -= joker_rate
@@ -129,96 +140,35 @@ def select_shop_card_type(
         return TYPE_PLANET
     poll -= planet_rate
 
-    if poll < spectral_rate:
-        return TYPE_SPECTRAL
+    if poll < playing_card_rate:
+        return pc_type
 
-    return TYPE_PLAYING_CARD
+    return TYPE_SPECTRAL
 
 
 # ---------------------------------------------------------------------------
-# Illusion voucher modifiers — UI_definitions.lua:~780
+# Illusion voucher shop edition — UI_definitions.lua:786-794
 # ---------------------------------------------------------------------------
 
-# Probability thresholds
-_ILLUSION_ENH_THRESHOLD = 0.4  # roll > 0.4 → enhanced (60% chance)
-_ILLUSION_EDI_CHANCE_THRESHOLD = 0.8  # roll > 0.8 → get edition (20% chance)
 
-# Edition distribution for Illusion: Foil 50%, Holo 35%, Poly 15%
-# Evaluated top-down: Poly > 0.85, Holo > 0.5, else Foil
-_ILLUSION_POLY_THRESHOLD = 0.85
-_ILLUSION_HOLO_THRESHOLD = 0.5
+def apply_illusion_shop_edition(rng: PseudoRandom, card: Any) -> None:
+    """Post-creation Illusion edition rolls for a shop playing card.
 
-
-def roll_illusion_modifiers(
-    rng: PseudoRandom,
-    ante: int,
-    *,
-    append: str = "",
-) -> dict[str, Any]:
-    """Roll Illusion voucher modifiers for a playing card drawn from the shop.
-
-    Mirrors the Illusion-specific path in ``create_card_for_shop``
-    (``UI_definitions.lua``).
-
-    Probabilities
-    ~~~~~~~~~~~~~
-    * **60%** the card receives a random enhancement (one of the 8 standard
-      playing-card enhancements); otherwise base card.
-    * **20%** the card receives a random edition:
-      Foil 50 %, Holo 35 %, Polychrome 15 %.
-    * Seal is not determined here — deferred to the post-creation hook pass.
-
-    RNG streams consumed (always, for determinism):
-
-    1. ``'illusion_enh' + append + str(ante)`` — enhancement chance roll
-    2. ``'illusion_enh_pick' + append + str(ante)`` — enhancement selection
-       (seeded via :meth:`~jackdaw.engine.rng.PseudoRandom.seed` passed to
-       :meth:`~jackdaw.engine.rng.PseudoRandom.element`) — consumed only
-       when enhancement is granted
-    3. ``'illusion_edi_chance' + append + str(ante)`` — edition chance roll
-    4. ``'illusion_edi' + append + str(ante)`` — edition type roll (consumed
-       only when edition is granted)
-
-    Parameters
-    ----------
-    rng:
-        Live :class:`~jackdaw.engine.rng.PseudoRandom` instance.
-    ante:
-        Current ante number.
-    append:
-        Optional seed-key suffix for context disambiguation.
-
-    Returns
-    -------
-    dict
-        Dict with zero or more of the following keys:
-
-        * ``'enhancement'`` : str — e.g. ``'m_glass'``
-        * ``'edition'`` : dict — e.g. ``{'foil': True}``
+    Vanilla (UI_definitions.lua:786-794): with Illusion owned, after a
+    Base/Enhanced shop card is created, one ``'illusion'`` pull decides
+    whether it gets an edition (> 0.8), and if so a second ``'illusion'``
+    pull picks it: polychrome > 0.85, holo > 0.5, else foil.  Both pulls
+    come from the SAME plain ``'illusion'`` stream as the slot-type roll
+    (no ante suffix).
     """
-    result: dict[str, Any] = {}
-
-    suffix = append + str(ante)
-
-    # -- Enhancement (60%) --
-    enh_roll = rng.random("illusion_enh" + suffix)
-    if enh_roll > _ILLUSION_ENH_THRESHOLD:
-        enh_seed = rng.seed("illusion_enh_pick" + suffix)
-        enhancement, _ = rng.element(_ENHANCEMENTS, enh_seed)
-        result["enhancement"] = enhancement
-
-    # -- Edition (20%) --
-    edi_chance = rng.random("illusion_edi_chance" + suffix)
-    if edi_chance > _ILLUSION_EDI_CHANCE_THRESHOLD:
-        edi_roll = rng.random("illusion_edi" + suffix)
-        if edi_roll > _ILLUSION_POLY_THRESHOLD:
-            result["edition"] = {"polychrome": True}
-        elif edi_roll > _ILLUSION_HOLO_THRESHOLD:
-            result["edition"] = {"holo": True}
+    if rng.random("illusion") > 0.8:
+        edition_poll = rng.random("illusion")
+        if edition_poll > 1 - 0.15:
+            card.set_edition({"polychrome": True})
+        elif edition_poll > 0.5:
+            card.set_edition({"holo": True})
         else:
-            result["edition"] = {"foil": True}
-
-    return result
+            card.set_edition({"foil": True})
 
 
 # ---------------------------------------------------------------------------
@@ -325,6 +275,135 @@ def get_pack(
 _SHOP_APPEND = "sho"
 
 
+def apply_store_joker_create_tag(gs, rng, ante):
+    """Fire a pending Rare/Uncommon Tag for one shop joker slot.
+
+    Vanilla ``create_card_for_shop`` (UI_definitions.lua:753-763): a
+    pending ``store_joker_create`` tag replaces the slot's normal type
+    and rarity rolls entirely — the joker is created with forced rarity
+    on its own stream ('rta'/'uta') and is free (couponed). The Rare Tag
+    no-ops, but is still consumed, when every rare is already owned
+    (tag.lua:346-368). Returns the tag card, or None for a normal roll.
+    """
+    from jackdaw.engine.card_factory import create_card
+    from jackdaw.engine.tags import Tag
+
+    for entry in gs.get("awarded_tags", []):
+        if entry.get("shop_fired"):
+            continue
+        tag = Tag(entry.get("key", ""))
+        result = tag.apply("store_joker_create", gs, rng=rng)
+        if result is None or not result.force_rarity:
+            continue
+        entry["shop_fired"] = True
+        if result.force_rarity == 3:
+            from jackdaw.engine.pools import JOKER_RARITY_POOLS
+
+            rare_pool = set(JOKER_RARITY_POOLS.get(3, []))
+            owned = {c.center_key for c in gs.get("jokers", []) if c.center_key in rare_pool}
+            if len(owned) >= len(rare_pool):
+                continue  # vanilla nope(): consumed, slot rolls normally
+        append = "rta" if result.force_rarity == 3 else "uta"
+        card = create_card(
+            "Joker",
+            rng,
+            ante,
+            area="shop",
+            forced_rarity=result.force_rarity,
+            append=append,
+            game_state=gs,
+        )
+        card.ability["couponed"] = True
+        card.set_cost(
+            inflation=gs.get("inflation", 0),
+            discount_percent=gs.get("discount_percent", 0),
+            is_couponed=True,
+        )
+        return card
+    return None
+
+
+def fill_shop_slots(gs: dict[str, Any], count: int) -> list:
+    """Roll ``count`` new cards into the open shop.
+
+    Used when Overstock/Overstock Plus is redeemed mid-shop: live rolls a
+    card into each NEW slot immediately.  Purchase-emptied slots stay
+    empty (lockstep-confirmed: a non-slot voucher refills nothing), so
+    callers pass exactly the slot-count DELTA, never a top-up-to-max.
+    Uses the identical creation path/streams as reroll's repopulate.
+    """
+    from jackdaw.engine.card_factory import create_card
+
+    rng = gs.get("rng")
+    if rng is None or count <= 0:
+        return []
+    ante = gs.get("round_resets", {}).get("ante", 1)
+    shop_cards: list = gs.setdefault("shop_cards", [])
+    new_cards = []
+    for _ in range(count):
+        card_type = select_shop_card_type(
+            rng,
+            ante,
+            joker_rate=gs.get("joker_rate", 20.0),
+            tarot_rate=gs.get("tarot_rate", 4.0),
+            planet_rate=gs.get("planet_rate", 4.0),
+            spectral_rate=gs.get("spectral_rate", 0.0),
+            playing_card_rate=gs.get("playing_card_rate", 0.0),
+        )
+        new_card = create_card(
+            card_type,
+            rng,
+            ante,
+            area="shop",
+            soulable=False,
+            append=_SHOP_APPEND,
+            game_state=gs,
+        )
+        shop_cards.append(new_card)
+        new_cards.append(new_card)
+    return new_cards
+
+
+def reprice_shop(gs: dict[str, Any]) -> None:
+    """Recompute costs for everything currently offered in the shop.
+
+    Vanilla recalls ``Card:set_cost`` continuously while the shop is open
+    (``Card:update``), so price-affecting changes reflect immediately —
+    e.g. buying Astronomer zeroes Planet cards and Celestial Packs already
+    on offer, and selling it restores their prices.  ``step()`` calls this
+    after every action that leaves the game in the SHOP phase.
+    """
+    kwargs: dict[str, Any] = dict(
+        inflation=gs.get("inflation", 0),
+        discount_percent=gs.get("discount_percent", 0),
+        ante=gs.get("round_resets", {}).get("ante", 1),
+        booster_ante_scaling=gs.get("booster_ante_scaling", False),
+        has_astronomer=astronomer_active(gs),
+    )
+    for area in ("shop_cards", "shop_vouchers", "shop_boosters"):
+        for card in gs.get(area, []):
+            if hasattr(card, "set_cost"):
+                card.set_cost(
+                    is_couponed=bool(card.ability.get("couponed")),
+                    **kwargs,
+                )
+    # Discount vouchers reprice OWNED cards too: the redeem runs
+    # set_cost over every card instance (card.lua apply_to_run's
+    # G.I.CARD pass; live-verified: LSPNZ98T dropped every owned cost
+    # 25% the moment Clearance Sale was bought).  set_cost is NOT
+    # per-frame though — a couponed card bought for $0 keeps cost 0
+    # until the next explicit pass (Gift Card round-end / voucher /
+    # inflation; live-verified: LSM98F1Z's free Uncommon-Tag Gift Card
+    # stayed buy=0 through the whole shop AND round, flipping to 6 only
+    # at its own round-end set_cost).  So: skip couponed owned cards
+    # here; the explicit passes recompute them (area check neuters the
+    # coupon outside shop areas, dump card.lua:511).
+    for area in ("jokers", "consumables"):
+        for card in gs.get(area, []):
+            if hasattr(card, "set_cost") and not card.ability.get("couponed"):
+                card.set_cost(is_couponed=False, **kwargs)
+
+
 def populate_shop(
     rng: PseudoRandom,
     ante: int,
@@ -393,8 +472,13 @@ def populate_shop(
     banned_keys: set[str] = set(gs.get("banned_keys") or {})
 
     # -- 1. Joker slots --
+    has_illusion = bool((gs.get("used_vouchers") or {}).get("v_illusion"))
     jokers: list[_Card] = []
     for _ in range(shop_joker_max):
+        tag_card = apply_store_joker_create_tag(gs, rng, ante)
+        if tag_card is not None:
+            jokers.append(tag_card)
+            continue
         card_type = select_shop_card_type(
             rng,
             ante,
@@ -403,15 +487,22 @@ def populate_shop(
             planet_rate=planet_rate,
             spectral_rate=spectral_rate,
             playing_card_rate=playing_card_rate,
+            has_illusion=has_illusion,
         )
         card = create_card(
             card_type,
             rng,
             ante,
             area="shop",
+            # Shop cards are created non-soulable (UI_definitions.lua:776
+            # passes soulable=nil): The Soul / Black Hole can never appear
+            # in a shop, and no 'soul_*' stream roll is consumed for them.
+            soulable=False,
             append=_SHOP_APPEND,
             game_state=gs,
         )
+        if card_type in ("Base", "Enhanced") and has_illusion:
+            apply_illusion_shop_edition(rng, card)
         jokers.append(card)
 
     # -- 2. Voucher --
@@ -440,7 +531,7 @@ def populate_shop(
             discount_percent=gs.get("discount_percent", 0),
             ante=ante,
             booster_ante_scaling=gs.get("booster_ante_scaling", False),
-            has_astronomer=gs.get("has_astronomer", False),
+            has_astronomer=astronomer_active(gs),
         )
         boosters.append(pack_card)
 
@@ -495,7 +586,11 @@ def calculate_reroll_cost(game_state: dict) -> int:
         return 0
 
     increase = cr.get("reroll_cost_increase", 0)
-    base = rr.get("temp_reroll_cost") or rr.get("reroll_cost", _DEFAULT_BASE_REROLL_COST)
+    # Lua's `temp or base` keeps temp == 0 (0 is truthy in Lua) — the D6
+    # Tag sets temp_reroll_cost to exactly 0, so a Python `or` here would
+    # silently fall back to the $5 base (live-verified: LSKWQS7C).
+    temp = rr.get("temp_reroll_cost")
+    base = temp if temp is not None else rr.get("reroll_cost", _DEFAULT_BASE_REROLL_COST)
     cost = base + increase
     cr["reroll_cost"] = cost
     return cost
@@ -619,7 +714,7 @@ def buy_card(
                     discount_percent=discount,
                     ante=ante,
                     booster_ante_scaling=game_state.get("booster_ante_scaling", False),
-                    has_astronomer=game_state.get("has_astronomer", False),
+                    has_astronomer=astronomer_active(game_state),
                 )
 
     # -- 9. Track --
@@ -817,6 +912,8 @@ def reroll_shop(
             rng,
             ante,
             area="shop",
+            # Non-soulable, matching shop creation (see populate_shop).
+            soulable=False,
             append=_SHOP_APPEND,
             game_state=game_state,
         )

@@ -103,7 +103,11 @@ from jackdaw.engine.actions import (
 from jackdaw.engine.actions import (
     UseConsumable as EngineUseConsumable,
 )
-from jackdaw.engine.consumables import _resolve_consumable_config, can_use_consumable
+from jackdaw.engine.consumables import (
+    _resolve_consumable_config,
+    can_use_consumable,
+    pack_pick_block_reason,
+)
 from jackdaw.env.game_spec import FactoredAction  # noqa: F401 — re-export
 
 # ---------------------------------------------------------------------------
@@ -216,11 +220,18 @@ def get_action_mask(game_state: dict[str, Any]) -> ActionMask:
         return ActionMask(type_mask, card_mask, entity_masks, max_card_select, min_card_select)
 
     # --- BLIND_SELECT ---
+    # Selling is available wherever vanilla's sell button is live, which
+    # is everywhere except mid-scoring: Card:can_sell_card (card.lua:1640)
+    # has no state gate and the blind-select restriction is commented out
+    # in the source. Keep these call sites in step with
+    # _SELLABLE_PHASES in game.py or the mask and executor will drift.
     if phase == GamePhase.BLIND_SELECT:
         type_mask[ActionType.SelectBlind] = True
         blind_on_deck = game_state.get("blind_on_deck", "Small")
         if blind_on_deck in ("Small", "Big"):
             type_mask[ActionType.SkipBlind] = True
+        _mask_sell_jokers(type_mask, entity_masks, jokers)
+        _mask_sell_consumables(type_mask, entity_masks, consumables)
         _mask_consumables(type_mask, entity_masks, game_state)
 
     # --- SELECTING_HAND ---
@@ -234,6 +245,8 @@ def get_action_mask(game_state: dict[str, Any]) -> ActionMask:
             type_mask[ActionType.SortHandSuit] = True
             _mask_hand_swaps(type_mask, entity_masks, hand)
         _mask_joker_swaps(type_mask, entity_masks, jokers)
+        _mask_sell_jokers(type_mask, entity_masks, jokers)
+        _mask_sell_consumables(type_mask, entity_masks, consumables)
         _mask_consumables(type_mask, entity_masks, game_state)
 
     # --- ROUND_EVAL ---
@@ -263,27 +276,33 @@ def get_action_mask(game_state: dict[str, Any]) -> ActionMask:
     elif phase == GamePhase.PACK_OPENING:
         pack_cards = game_state.get("pack_cards", [])
         remaining = game_state.get("pack_choices_remaining", 0)
-        pack_type = game_state.get("pack_type", "")
-        # Spectral packs: balatrobot cannot handle Spectral card
-        # highlighting via RPC, so only SkipPack is valid.
-        if remaining > 0 and pack_cards and pack_type != "Spectral":
-            # Vanilla gate (button_callbacks.lua:2112): a Joker in a pack is
-            # selectable only if joker slots have room or it is negative.
-            pick_mask = np.ones(len(pack_cards), dtype=bool)
-            if len(game_state.get("jokers", [])) >= game_state.get("joker_slots", 5):
-                for i, card in enumerate(pack_cards):
-                    ability = getattr(card, "ability", None) or {}
-                    edition = getattr(card, "edition", None) or {}
-                    negative = (
-                        bool(edition.get("negative"))
-                        if isinstance(edition, dict) else False
-                    )
-                    if ability.get("set", "") == "Joker" and not negative:
-                        pick_mask[i] = False
+        # NOTE: Spectral packs were once excluded here wholesale, on the
+        # grounds that balatrobot cannot express Spectral card
+        # highlighting over RPC.  That is a LIVE-ORACLE limitation, not a
+        # rule of the game: ``_pick_pack_card`` deals a targeting hand for
+        # Spectral packs (game.py:1427) and accepts their picks.  Masking
+        # them here made every Spectral pack skip-only for every agent —
+        # the same mask-vs-step() disagreement class as bugs #71/#72, and
+        # the most valuable pack in the game.  The lockstep policy now
+        # carries the veto (``pick:spectral(balatrobot-no-highlight)``),
+        # which is where oracle constraints belong.
+        if remaining > 0 and pack_cards:
+            # Vanilla greys out a pack card with nowhere to go: a Joker
+            # without a free slot (button_callbacks.lua:2112), and a creator
+            # consumable without room for what it makes
+            # (can_use_consumeable, card.lua:1550-1563).  This is the same
+            # helper the PickPackCard executor raises on, so the mask can
+            # never offer a pick that step() then rejects.
+            pick_mask = np.array(
+                [pack_pick_block_reason(card, game_state) is None for card in pack_cards],
+                dtype=bool,
+            )
             if pick_mask.any():
                 type_mask[ActionType.PickPackCard] = True
                 entity_masks[ActionType.PickPackCard] = pick_mask
         type_mask[ActionType.SkipPack] = True
+        _mask_sell_jokers(type_mask, entity_masks, jokers)
+        _mask_sell_consumables(type_mask, entity_masks, consumables)
 
     return ActionMask(type_mask, card_mask, entity_masks, max_card_select, min_card_select)
 
@@ -313,12 +332,16 @@ def _mask_shop_buy(
         if card.cost > dollars:
             continue
         card_set = card.ability.get("set", "") if isinstance(card.ability, dict) else ""
+        # check_for_buy_space (button_callbacks.lua:2392) raises the limit by
+        # one for a Negative card on BOTH branches — a Negative consumable is
+        # buyable at full slots exactly like a Negative joker.
+        is_negative = bool(isinstance(card.edition, dict) and card.edition.get("negative"))
+        bonus = 1 if is_negative else 0
         if card_set == "Joker":
-            is_negative = isinstance(card.edition, dict) and card.edition.get("negative")
-            if len(jokers) >= joker_slots and not is_negative:
+            if len(jokers) >= joker_slots + bonus:
                 continue
         elif card_set in ("Tarot", "Planet", "Spectral"):
-            if len(consumables) >= consumable_slots:
+            if len(consumables) >= consumable_slots + bonus:
                 continue
         mask[i] = True
 
@@ -496,6 +519,27 @@ def get_consumable_target_info(
 # ---------------------------------------------------------------------------
 
 
+def _default_pick_targets(game_state: dict[str, Any], pack_index: int) -> tuple[int, ...] | None:
+    """Default hand targets for a targeting pack pick.
+
+    Returns None for non-targeting picks (planets, jokers, playing cards).
+
+    Delegates to the engine so the selection an agent gets by default is
+    the same one ``pack_pick_block_reason`` judged legal when it let the
+    mask offer the pick.
+    """
+    pack_cards = game_state.get("pack_cards", [])
+    if pack_index >= len(pack_cards):
+        return None
+    card = pack_cards[pack_index]
+    ability = getattr(card, "ability", None) or {}
+    if ability.get("set") not in ("Tarot", "Spectral"):
+        return None
+    from jackdaw.engine.consumables import pack_pick_default_targets
+
+    return pack_pick_default_targets(card, game_state)
+
+
 def factored_to_engine_action(
     fa: FactoredAction,
     game_state: dict[str, Any],
@@ -586,7 +630,14 @@ def factored_to_engine_action(
     if at == ActionType.PickPackCard:
         if fa.entity_target is None:
             raise ValueError("PickPackCard requires entity_target")
-        return EnginePickPackCard(card_index=fa.entity_target)
+        targets = fa.card_target
+        if targets is None:
+            # Targeting tarot/spectral picks REQUIRE their highlight count
+            # (the engine now rejects bare picks, matching the live game).
+            # Agents that don't emit card targets get a default selection
+            # — the first min_highlighted dealt cards.
+            targets = _default_pick_targets(game_state, fa.entity_target)
+        return EnginePickPackCard(card_index=fa.entity_target, target_indices=targets)
 
     if at == ActionType.SwapJokersLeft:
         if fa.entity_target is None:

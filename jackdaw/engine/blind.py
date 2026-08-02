@@ -121,6 +121,7 @@ class Blind:
         *,
         is_joker_area: bool = False,
         pareidolia: bool = False,
+        smeared: bool = False,
     ) -> None:
         """Set card.debuff based on boss blind effect.
 
@@ -143,9 +144,12 @@ class Blind:
             cfg = self.debuff_config
 
             # Suit debuff: The Club (Clubs), The Goad (Spades),
-            # The Head (Hearts), The Window (Diamonds)
+            # The Head (Hearts), The Window (Diamonds).
+            # Vanilla's check is card:is_suit (blind.lua:626), which
+            # honors Smeared Joker — under Goad+Smeared, CLUBS are
+            # debuffed too (live-verified: LSDYY84R, all 12 clubs).
             if "suit" in cfg:
-                if card.is_suit(cfg["suit"], bypass_debuff=True):
+                if card.is_suit(cfg["suit"], bypass_debuff=True, smeared=smeared):
                     card.set_debuff(True)
                     return
 
@@ -253,19 +257,12 @@ class Blind:
                 if not check:
                     self.only_hand = handname
 
-        # The Arm: doesn't block, but sets triggered if hand level > 1
-        # (actual level-down happens in the scoring pipeline)
-        if self.name == "The Arm" and not self.disabled:
-            self.triggered = False
-            # We can't check hand level here without a HandLevels reference,
-            # so we just set a flag that the scoring pipeline will check
-            self.triggered = True  # conservatively flag; pipeline checks level
-
-        # The Ox: doesn't block, but sets triggered if most-played hand
-        # (actual money drain happens in the scoring pipeline)
-        if self.name == "The Ox" and not self.disabled:
-            self.triggered = False
-            # most_played check happens at the pipeline level
+        # The Arm / The Ox don't block; `triggered` is set by the
+        # scoring pipeline / play handler only when the effect actually
+        # fires (Arm: level > 1 demote — Matador reads it during
+        # joker_main, live-verified LS7N21KX; Ox: money drain).  The
+        # old conservative always-True Arm flag here would over-pay
+        # Matador on level-1 hands.
 
         return False
 
@@ -364,7 +361,12 @@ class Blind:
         """
         result: dict[str, Any] = {}
 
+        # The Fish's prepped flag is ONE-SHOT: vanilla clears it at the end
+        # of EVERY drawn_to_hand, outside the disabled gate (blind.lua:602)
+        # — only the redraw after a PLAY flips face-down; discard redraws
+        # don't (found by lockstep: sim flipped discard replacements).
         if self.disabled:
+            self.prepped = False
             return result
 
         if self.name == "Cerulean Bell" and rng and hand_cards:
@@ -392,6 +394,7 @@ class Blind:
                 joker_cards[idx].set_debuff(True)
                 result["debuffed_joker_index"] = idx
 
+        self.prepped = False
         return result
 
     def stay_flipped(
@@ -424,10 +427,10 @@ class Blind:
             if card.is_face(from_boss=True, pareidolia=pareidolia):
                 return True
 
-        if self.name == "The Fish":
-            # Fish flips cards after each play (prepped flag)
-            # Handled via prepped state set in press_play
-            pass
+        if self.name == "The Fish" and getattr(self, "prepped", False):
+            # Fish flips cards drawn after a played hand (blind.lua:611);
+            # press_play sets the prepped flag.
+            return True
 
         return False
 

@@ -134,6 +134,23 @@ def _make_jokers(n: int = 3, eternal_indices: set[int] | None = None) -> list[Mo
     ]
 
 
+def _pack_consumable(key: str, card_set: str) -> MockCard:
+    """A pack consumable carrying its REAL center config.
+
+    Engine-built cards get ``ability['consumeable']`` from the center
+    registry, and ``can_use_consumable`` reads it to find
+    ``max_highlighted``.  A mock without it silently looks like a card
+    that needs no selection, which is not what the executor sees.
+    """
+    from jackdaw.engine.card import _resolve_center
+
+    ability: dict[str, Any] = {"set": card_set}
+    cfg = _resolve_center(key).get("config")
+    if isinstance(cfg, dict):
+        ability["consumeable"] = cfg
+    return MockCard(center_key=key, ability=ability)
+
+
 def _make_consumable(key: str, cfg: dict | None = None) -> MockCard:
     """Create a consumable with optional config."""
     ability: dict[str, Any] = {"set": "Tarot"}
@@ -1042,6 +1059,254 @@ class TestMaskConsistencyWithEngine:
         has_skip = any(isinstance(a, EngineSkipPack) for a in legal)
         assert mask.type_mask[ActionType.PickPackCard] == has_pick
         assert mask.type_mask[ActionType.SkipPack] == has_skip
+
+    def test_pack_pick_mask_never_offers_a_pick_step_rejects(self):
+        """Bug #71: the mask offered creator consumables step() then refused.
+
+        Vanilla greys out a pack card with nowhere to go (can_use_consumeable,
+        card.lua:1550-1563).  Whatever the mask marks pickable must survive
+        the executor.
+        """
+        from jackdaw.engine.game import IllegalActionError
+        from jackdaw.engine.game import step as engine_step
+
+        cases = [
+            # (center_key, set, jokers held, consumables held, hand, pickable?)
+            ("c_judgement", "Tarot", 5, 0, 5, False),  # needs a joker slot
+            ("c_judgement", "Tarot", 4, 0, 5, True),
+            ("c_soul", "Spectral", 5, 0, 5, False),
+            ("c_wraith", "Spectral", 5, 0, 5, False),
+            ("c_emperor", "Tarot", 0, 2, 5, False),  # needs a consumable slot
+            ("c_emperor", "Tarot", 0, 1, 5, True),
+            ("c_high_priestess", "Tarot", 0, 2, 5, False),
+            ("c_strength", "Tarot", 5, 2, 5, True),  # creates nothing: fine
+            # A targeting pick needs a dealt hand that can satisfy
+            # min_highlighted.  With no hand the executor raises
+            # ("requires between 1 and 2 target card(s); provided 0"), so
+            # the mask must not offer it — this case used to be offered.
+            ("c_strength", "Tarot", 5, 2, 0, False),
+            # Hand-size spectrals (can_use_consumable: len(hand) > 1).
+            ("c_familiar", "Spectral", 0, 0, 5, True),
+            ("c_familiar", "Spectral", 0, 0, 1, False),
+            ("c_immolate", "Spectral", 0, 0, 0, False),
+        ]
+        for key, cset, n_jokers, n_cons, n_hand, pickable in cases:
+            gs = _pack_opening_state(
+                pack_cards=[_pack_consumable(key, cset)],
+                jokers=_make_jokers(n_jokers),
+                joker_slots=5,
+                consumables=[MockCard(center_key="c_fool") for _ in range(n_cons)],
+                consumable_slots=2,
+                last_tarot_planet="c_strength",
+                hand=_make_hand(n_hand),
+            )
+            mask = get_action_mask(gs)
+            offered = bool(
+                mask.type_mask[ActionType.PickPackCard]
+                and mask.entity_masks[ActionType.PickPackCard][0]
+            )
+            assert offered == pickable, f"{key} with {n_jokers}j/{n_cons}c/{n_hand} in hand"
+
+            if offered:
+                continue
+            # and the executor agrees it is illegal
+            with pytest.raises(IllegalActionError):
+                engine_step(copy.deepcopy(gs), EnginePickPackCard(card_index=0))
+
+    def test_selling_is_not_shop_only(self):
+        """Bug #74: selling was gated to SHOP in mask AND executor.
+
+        Card:can_sell_card (card.lua:1640) has no state gate -- its
+        blockers are cards mid-scoring, a locked controller and STOP_USE
+        -- and vanilla explicitly COMMENTED OUT the blind-select
+        restriction. Consumables qualify too: can_sell_card wants
+        area.config.type == 'joker' and game.lua:2239 gives the
+        consumables area that type.
+
+        Restricting it removed a real tactic from every agent: selling a
+        joker mid-blind to fire selling_self, to dump a perishable before
+        it expires, or to free a slot during a pack.
+        """
+        from jackdaw.engine.actions import SellCard
+        from jackdaw.engine.card import Card
+        from jackdaw.engine.game import IllegalActionError
+        from jackdaw.engine.game import step as engine_step
+
+        def real_jokers(n):
+            out = []
+            for k in ("j_joker", "j_greedy_joker")[:n]:
+                c = Card()
+                c.set_ability(k)
+                c.center_key = k
+                c.sell_cost = 2
+                out.append(c)
+            return out
+
+        for phase, sellable in (
+            (GamePhase.SELECTING_HAND, True),
+            (GamePhase.BLIND_SELECT, True),
+            (GamePhase.SHOP, True),
+            (GamePhase.ROUND_EVAL, False),
+        ):
+            gs = _blind_select_state(phase=phase, jokers=real_jokers(2), hand=_make_hand(5))
+            mask = get_action_mask(gs)
+            assert bool(mask.type_mask[ActionType.SellJoker]) == sellable, phase
+            act = SellCard(area="jokers", card_index=0)
+            if sellable:
+                after = engine_step(copy.deepcopy(gs), act)
+                assert len(after["jokers"]) == 1, phase
+            else:
+                with pytest.raises(IllegalActionError):
+                    engine_step(copy.deepcopy(gs), act)
+
+    def test_sell_blocked_by_stop_use(self):
+        """can_sell_card's STOP_USE blocker (card.lua:1642)."""
+        from jackdaw.engine.actions import SellCard
+        from jackdaw.engine.card import Card
+        from jackdaw.engine.game import IllegalActionError
+        from jackdaw.engine.game import step as engine_step
+
+        j = Card()
+        j.set_ability("j_joker")
+        j.center_key = "j_joker"
+        j.sell_cost = 2
+        gs = _blind_select_state(phase=GamePhase.SELECTING_HAND, jokers=[j], STOP_USE=1)
+        with pytest.raises(IllegalActionError):
+            engine_step(gs, SellCard(area="jokers", card_index=0))
+
+    def test_spectral_pack_picks_are_offered(self):
+        """Bug #73: Spectral packs were masked skip-only for every agent.
+
+        The exclusion was justified by balatrobot being unable to express
+        Spectral card highlighting over RPC — a live-oracle limitation,
+        not a rule of the game.  ``_pick_pack_card`` deals a targeting
+        hand for Spectral packs and accepts their picks, so the mask must
+        offer them; the lockstep policy carries the oracle veto instead.
+        """
+        from jackdaw.engine.game import step as engine_step
+        from jackdaw.env.action_space import factored_to_engine_action
+        from jackdaw.env.game_spec import FactoredAction
+
+        for key in ("c_ankh", "c_trance", "c_familiar", "c_immolate"):
+            gs = _pack_opening_state(
+                pack_cards=[_pack_consumable(key, "Spectral")],
+                pack_type="Spectral",
+                jokers=_make_jokers(1),
+                joker_slots=5,
+                consumables=[],
+                consumable_slots=2,
+                hand=_make_hand(5),
+            )
+            mask = get_action_mask(gs)
+            assert mask.type_mask[ActionType.PickPackCard], f"{key} not offered"
+            assert mask.entity_masks[ActionType.PickPackCard][0], f"{key} masked off"
+            # and the executor accepts what the mask offered, over the
+            # path an agent actually takes (targets defaulted in for
+            # picks that need a selection)
+            engine_step(
+                copy.deepcopy(gs),
+                factored_to_engine_action(
+                    FactoredAction(action_type=int(ActionType.PickPackCard), entity_target=0),
+                    gs,
+                ),
+            )
+
+    def test_pack_pick_default_targets_are_legal(self):
+        """The default selection must be one the mask judged legal.
+
+        ``c_aura`` needs exactly one *editionless* card.  When the first
+        dealt card already has an edition the historical "first min_h
+        cards" default was illegal, so a mask-legal pick raised.
+        """
+        from jackdaw.engine.consumables import pack_pick_default_targets
+
+        hand = _make_hand(4)
+        hand[0].edition = {"type": "foil", "foil": True}
+        gs = _pack_opening_state(
+            pack_cards=[_pack_consumable("c_aura", "Spectral")],
+            pack_type="Spectral",
+            hand=hand,
+        )
+        mask = get_action_mask(gs)
+        assert mask.entity_masks[ActionType.PickPackCard][0]
+        # not card 0 — it already has an edition
+        assert pack_pick_default_targets(gs["pack_cards"][0], gs) == (1,)
+
+    def test_pack_pick_fool_needs_room_and_something_to_copy(self):
+        """The Fool's own clause (card.lua:1554), both halves.
+
+        Vanilla lets a Fool be used only with a free consumable slot AND a
+        last tarot/planet that is not itself a Fool; a pack card is used
+        from the pack, so the ``self.area == G.consumeables`` escape that
+        covers a Fool sitting in your own tray does not apply here.
+        """
+        from jackdaw.engine.game import IllegalActionError
+        from jackdaw.engine.game import step as engine_step
+
+        cases = [
+            # (consumables held, last_tarot_planet, pickable?)
+            (0, "c_strength", True),  # room + something to copy
+            (2, "c_strength", False),  # no room for the copy
+            (0, None, False),  # nothing used yet
+            (0, "c_fool", False),  # a Fool cannot copy a Fool
+        ]
+        for n_cons, ltp, pickable in cases:
+            gs = _pack_opening_state(
+                pack_cards=[MockCard(center_key="c_fool", ability={"set": "Tarot"})],
+                consumables=[MockCard(center_key="c_moon") for _ in range(n_cons)],
+                consumable_slots=2,
+                last_tarot_planet=ltp,
+            )
+            mask = get_action_mask(gs)
+            offered = bool(
+                mask.type_mask[ActionType.PickPackCard]
+                and mask.entity_masks[ActionType.PickPackCard][0]
+            )
+            assert offered == pickable, f"fool with {n_cons} consumables, ltp={ltp}"
+            if not offered:
+                with pytest.raises(IllegalActionError):
+                    engine_step(copy.deepcopy(gs), EnginePickPackCard(card_index=0))
+
+    def test_buy_mask_allows_negative_consumable_at_full_slots(self):
+        """The mask must not hide a buy the executor allows.
+
+        check_for_buy_space (button_callbacks.lua:2392) adds +1 to the limit
+        for a Negative card on the consumable branch as well as the joker
+        one, so a Negative tarot is buyable with consumable slots full.
+        """
+        from jackdaw.engine.game import step as engine_step
+
+        for card_set, negative, buyable in [
+            ("Tarot", True, True),
+            ("Tarot", False, False),
+            ("Joker", True, True),
+        ]:
+            card = MockCard(
+                center_key="c_test" if card_set != "Joker" else "j_test",
+                ability={"set": card_set},
+                edition={"negative": True} if negative else None,
+                cost=3,
+            )
+            gs = _shop_state(
+                shop_cards=[card],
+                jokers=_make_jokers(5),
+                joker_slots=5,
+                consumables=[MockCard(center_key="c_fool") for _ in range(2)],
+                consumable_slots=2,
+            )
+            mask = get_action_mask(gs)
+            offered = bool(
+                mask.type_mask[ActionType.BuyCard] and mask.entity_masks[ActionType.BuyCard][0]
+            )
+            assert offered == buyable, f"{card_set} negative={negative}"
+            if not offered:
+                continue
+            # ...and the executor agrees it is legal.  MockCard has no
+            # add_to_deck, so the buy runs past the space check and then
+            # trips on the mock — an AttributeError proves the gate passed,
+            # while IllegalActionError would mean the two still disagree.
+            with pytest.raises(AttributeError):
+                engine_step(copy.deepcopy(gs), EngineBuyCard(shop_index=0))
 
     def test_shop_consistency(self):
         gs = _shop_state(

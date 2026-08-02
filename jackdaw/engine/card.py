@@ -504,7 +504,13 @@ class Card:
             return False
         if pareidolia:
             return True
-        return self.base.id in (11, 12, 13)
+        # Vanilla checks get_id() (card.lua:964-66) — a STONE card's id
+        # is randomized/negative, so stone faces are NOT faces (no Sock
+        # and Buskin retrigger, no Business Card, no Photograph...).
+        # Reading base.id kept the underlying rank visible through the
+        # stone (live-verified: ESG772CF — sim retriggered a stone King
+        # via Sock and Buskin, +50 chips over live).
+        return self.get_id() in (11, 12, 13)
 
     def is_suit(
         self,
@@ -760,16 +766,39 @@ class Card:
             rr = game_state.get("round_resets")
             if rr is not None:
                 rr["discards"] = rr.get("discards", 0) + self.ability["d_size"]
+            # ease_discard(d_size): the CURRENT round gains the discards
+            # immediately too (card.lua:591) — a Riff-Raff-created
+            # Drunkard at setting_blind affects the round being dealt
+            # (live-verified: LSH8NR94).
+            cr = game_state.get("current_round")
+            if cr is not None:
+                cr["discards_left"] = cr.get("discards_left", 0) + self.ability["d_size"]
 
         if name == "Credit Card":
             amount = extra if isinstance(extra, int) else 0
             game_state["bankrupt_at"] = game_state.get("bankrupt_at", 0) - amount
         if name == "Chaos the Clown":
-            game_state["free_rerolls"] = game_state.get("free_rerolls", 0) + 1
+            # current_round.free_rerolls + immediate cost recalc
+            # (card.lua:601-603) — the old top-level key was never read,
+            # so Chaos bought mid-shop granted nothing (found by lockstep:
+            # live reroll cost dropped to 0 on purchase, sim stayed).
+            cr = game_state.setdefault("current_round", {})
+            cr["free_rerolls"] = cr.get("free_rerolls", 0) + 1
+            from jackdaw.engine.shop import calculate_reroll_cost
+
+            calculate_reroll_cost(game_state)
         if name == "Turtle Bean" and isinstance(extra, dict):
             game_state["hand_size"] = game_state.get("hand_size", 0) + extra.get("h_size", 0)
         if name == "Oops! All 6s":
-            game_state["probabilities_normal"] = game_state.get("probabilities_normal", 1) * 2
+            # Vanilla doubles EVERY key of the NESTED G.GAME.probabilities
+            # table (card.lua:608-11).  The old top-level
+            # 'probabilities_normal' write was a dead slot — scoring
+            # reads gs['probabilities']['normal'] (live-verified:
+            # LSPV15ZH — Oops+Business Card paid every face card on
+            # live, sim still rolled 1-in-2).
+            probs = game_state.setdefault("probabilities", {"normal": 1.0})
+            for k in probs:
+                probs[k] = probs[k] * 2
         if name == "To the Moon":
             amount = extra if isinstance(extra, int) else 0
             game_state["interest_amount"] = game_state.get("interest_amount", 0) + amount
@@ -782,7 +811,16 @@ class Card:
             game_state["hand_size"] = game_state.get("hand_size", 0) - extra.get("h_size", 0)
 
         if self.edition and self.edition.get("negative"):
-            game_state["joker_slots"] = game_state.get("joker_slots", 0) + 1
+            # card.lua:568 routes the Negative slot bonus by card type:
+            # consumables raise the consumable limit, everything else jokers.
+            if self.ability.get("consumeable") or self.ability.get("set") in (
+                "Tarot",
+                "Planet",
+                "Spectral",
+            ):
+                game_state["consumable_slots"] = game_state.get("consumable_slots", 0) + 1
+            else:
+                game_state["joker_slots"] = game_state.get("joker_slots", 0) + 1
 
     def remove_from_deck(self, game_state: dict) -> None:
         """Reverse joker's passive effects when removed from deck (card.lua:Card:remove_from_deck).
@@ -798,18 +836,30 @@ class Card:
             rr = game_state.get("round_resets")
             if rr is not None:
                 rr["discards"] = rr.get("discards", 0) - self.ability["d_size"]
+            # ease_discard(-d_size) clamps at zero remaining
+            # (common_events.lua:116).
+            cr = game_state.get("current_round")
+            if cr is not None:
+                left = cr.get("discards_left", 0)
+                cr["discards_left"] = left + max(-left, -self.ability["d_size"])
 
         if name == "Credit Card":
             amount = extra if isinstance(extra, int) else 0
             game_state["bankrupt_at"] = game_state.get("bankrupt_at", 0) + amount
         if name == "Chaos the Clown":
-            game_state["free_rerolls"] = max(0, game_state.get("free_rerolls", 0) - 1)
+            cr = game_state.setdefault("current_round", {})
+            cr["free_rerolls"] = max(0, cr.get("free_rerolls", 0) - 1)
+            from jackdaw.engine.shop import calculate_reroll_cost
+
+            calculate_reroll_cost(game_state)
         if name == "Turtle Bean" and isinstance(extra, dict):
             game_state["hand_size"] = game_state.get("hand_size", 0) - extra.get("h_size", 0)
         if name == "Oops! All 6s":
-            game_state["probabilities_normal"] = max(
-                1, game_state.get("probabilities_normal", 1) // 2
-            )
+            # Vanilla halves every nested probabilities key, float
+            # division, no clamp (card.lua:665-68).
+            probs = game_state.setdefault("probabilities", {"normal": 1.0})
+            for k in probs:
+                probs[k] = probs[k] / 2
         if name == "To the Moon":
             amount = extra if isinstance(extra, int) else 0
             game_state["interest_amount"] = game_state.get("interest_amount", 0) - amount
@@ -822,7 +872,14 @@ class Card:
             game_state["hand_size"] = game_state.get("hand_size", 0) + extra.get("h_size", 0)
 
         if self.edition and self.edition.get("negative"):
-            game_state["joker_slots"] = game_state.get("joker_slots", 0) - 1
+            if self.ability.get("consumeable") or self.ability.get("set") in (
+                "Tarot",
+                "Planet",
+                "Spectral",
+            ):
+                game_state["consumable_slots"] = game_state.get("consumable_slots", 0) - 1
+            else:
+                game_state["joker_slots"] = game_state.get("joker_slots", 0) - 1
 
     def __repr__(self) -> str:
         if self.base:

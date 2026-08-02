@@ -214,13 +214,23 @@ def calculate_round_earnings(
     # on_end_of_round to avoid duplicate RNG consumption.
     # ------------------------------------------------------------------
     if joker_dollars is None:
+        _all_owned = (
+            game_state.get("deck", [])
+            + game_state.get("hand", [])
+            + game_state.get("discard_pile", [])
+            + game_state.get("played_cards_area", [])
+        )
         game_snap = GameSnapshot(
             money=money,
             hands_left=hands_left,
             discards_left=discards_left,
+            # Cloud 9: $ per 9 in the full deck (card.lua:4192 tally).
+            nine_tally=sum(1 for c in _all_owned if c.get_id() == 9),
             joker_count=len(jokers),
         )
-        end_result = on_end_of_round(jokers, game_snap, rng)
+        end_result = on_end_of_round(
+            jokers, game_snap, rng, hand_levels=game_state.get("hand_levels")
+        )
         joker_dollars = end_result["dollars_earned"]
 
     # ------------------------------------------------------------------

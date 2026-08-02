@@ -334,7 +334,16 @@ def create_card(
         key = "c_base"
 
     if key is None and soulable:
-        key = check_soul_chance(card_type, rng, ante)
+        key = check_soul_chance(
+            card_type,
+            rng,
+            ante,
+            used_jokers=gs.get("used_jokers"),
+            has_showman=any(
+                getattr(j, "center_key", "") == "j_showman" and not getattr(j, "debuff", False)
+                for j in gs.get("jokers", [])
+            ),
+        )
 
     if key is None:
         key = pick_card_from_pool(
@@ -358,8 +367,39 @@ def create_card(
     # ------------------------------------------------------------------
     # 2. Construct the card
     # ------------------------------------------------------------------
+    if card_type in ("Base", "Enhanced"):
+        # Shop playing card (Magic Trick / Illusion).  The FRONT is
+        # rolled after the center resolves (common_events.lua:2124),
+        # stream 'front'+append+ante over G.P_CARDS in alphabetical key
+        # order (live-verified: LSLER9XG rolled S_5 / D_Q).
+        p_cards = {
+            f"{sl}_{rl}": (p_suit, p_rank)
+            for sl, p_suit in SUIT_LETTER.items()
+            for rl, p_rank in RANK_LETTER.items()
+        }
+        (f_suit, f_rank), _ = rng.element(p_cards, rng.seed("front" + append + str(ante)))
+        card = create_playing_card(
+            f_suit,
+            f_rank,
+            key,
+            hands_played=gs.get("hands_played", 0),
+        )
+        if game_state is not None:
+            game_state.setdefault("used_jokers", {})[key] = True
+        card.set_cost(
+            inflation=gs.get("inflation", 0),
+            discount_percent=gs.get("discount_percent", 0),
+            ante=ante,
+        )
+        return card
+
     card = Card()
-    card.set_ability(key)
+    # hands_played_at_create is stamped at CARD CREATION for every
+    # center (card.lua:337, inside set_ability) — this call passed
+    # nothing, so every created joker anchored Loyalty Card's x4
+    # window to hand 0 instead of its creation point (live-verified:
+    # LSHACSAC — live H0=13 fired at play 19, sim H0=0 fired at 18).
+    card.set_ability(key, hands_played=gs.get("hands_played", 0))
 
     # Card:set_ability registers EVERY created center key in
     # G.GAME.used_jokers (card.lua:349-354) — shop displays, pack contents,
@@ -368,27 +408,40 @@ def create_card(
     if game_state is not None:
         game_state.setdefault("used_jokers", {})[key] = True
 
+    # To Do List rolls its target hand inside set_ability at creation
+    # (card.lua:311-322, stream 'to_do'), BEFORE the edition poll.
+    # Nothing ever wrote this field before — the joker never paid.
+    if key == "j_todo_list":
+        roll_to_do_hand(card, rng, gs.get("hand_levels"))
+
     # ------------------------------------------------------------------
-    # 3. Joker modifiers (shop / pack context only)
+    # 3. Joker modifiers
     # ------------------------------------------------------------------
-    if card.ability.get("set") == "Joker" and area in ("shop", "pack"):
-        enable_eternals = gs.get("enable_eternals_in_shop", False)
-        enable_perishables = gs.get("enable_perishables_in_shop", False)
-        enable_rentals = gs.get("enable_rentals_in_shop", False)
+    if card.ability.get("set") == "Joker":
+        # Eternal / Perishable / Rental rolls are SHOP/PACK-area-gated
+        # (common_events.lua:2137-2146)...
+        if area in ("shop", "pack"):
+            enable_eternals = gs.get("enable_eternals_in_shop", False)
+            enable_perishables = gs.get("enable_perishables_in_shop", False)
+            enable_rentals = gs.get("enable_rentals_in_shop", False)
 
-        # -- Eternal / Perishable (shared roll) --
-        ep_roll = rng.random(_EP_KEY[area] + str(ante))
-        if ep_roll > _EP_ETERNAL_THRESHOLD and enable_eternals:
-            card.set_eternal(True)
-        elif ep_roll > _EP_PERISHABLE_THRESHOLD and enable_perishables:
-            card.set_perishable(True)
+            # -- Eternal / Perishable (shared roll) --
+            ep_roll = rng.random(_EP_KEY[area] + str(ante))
+            if ep_roll > _EP_ETERNAL_THRESHOLD and enable_eternals:
+                card.set_eternal(True)
+            elif ep_roll > _EP_PERISHABLE_THRESHOLD and enable_perishables:
+                card.set_perishable(True)
 
-        # -- Rental (independent roll) --
-        r_roll = rng.random(_RENTAL_KEY[area] + str(ante))
-        if r_roll > _RENTAL_THRESHOLD and enable_rentals:
-            card.set_rental(True)
+            # -- Rental (independent roll) --
+            r_roll = rng.random(_RENTAL_KEY[area] + str(ante))
+            if r_roll > _RENTAL_THRESHOLD and enable_rentals:
+                card.set_rental(True)
 
-        # -- Edition --
+        # ...but the EDITION poll runs for EVERY created Joker —
+        # tag-created (Top-up, 'top'), Riff-Raff ('rif'), Judgement
+        # ('jud') etc. included (common_events.lua:2149; live-verified:
+        # LS3KW2WN's tag-created joker rolled FOIL on live while the
+        # sim never polled).
         edition = poll_edition(
             "edi" + append + str(ante),
             rng,
@@ -399,12 +452,14 @@ def create_card(
     # ------------------------------------------------------------------
     # 4. Cost
     # ------------------------------------------------------------------
+    from jackdaw.engine.card_utils import astronomer_active
+
     card.set_cost(
         inflation=gs.get("inflation", 0),
         discount_percent=gs.get("discount_percent", 0),
         ante=ante,
         booster_ante_scaling=gs.get("booster_ante_scaling", False),
-        has_astronomer=gs.get("has_astronomer", False),
+        has_astronomer=astronomer_active(gs),
     )
 
     return card
@@ -522,6 +577,27 @@ def resolve_create_descriptor(
         return copy.deepcopy(copy_source)
 
     # ------------------------------------------------------------------
+    # DNA: copy of a played playing card (card.lua:3505 copy_card).
+    # A FRESH Card object — vanilla's Card:init assigns the next global
+    # sort_id, so the copy must NOT share the source's (shuffles sort
+    # by sort_id first; a duplicate id would desync deck order).
+    # ------------------------------------------------------------------
+    if card_type == "playing_card_copy":
+        source: Card | None = descriptor.get("source_card")
+        if source is None or getattr(source, "base", None) is None:
+            return None
+        suit = source.base.suit
+        rank = source.base.rank
+        return create_playing_card(
+            Suit(suit.value if hasattr(suit, "value") else suit),
+            Rank(rank.value if hasattr(rank, "value") else rank),
+            enhancement=getattr(source, "center_key", None) or "c_base",
+            edition=dict(source.edition) if getattr(source, "edition", None) else None,
+            seal=getattr(source, "seal", None),
+            hands_played=game_state.get("hands_played", 0) if game_state else 0,
+        )
+
+    # ------------------------------------------------------------------
     # Pool-drawn consumables and jokers
     # ------------------------------------------------------------------
     if card_type not in ("Tarot", "Planet", "Spectral", "Tarot_Planet", "Joker"):
@@ -593,3 +669,44 @@ def resolve_destroy_descriptor(
 
     # disable_blind and any other unknown descriptors: no card to destroy
     return None
+
+
+def roll_to_do_hand(card, rng, hand_levels, exclude_current: bool = False) -> None:
+    """(Re)roll To Do List's target hand — card.lua:311-322 / 2975-2984.
+
+    Creation (set_ability): pool = all VISIBLE hands; rolls repeat on the
+    'to_do' stream until the result differs from the previous hand (each
+    repeat consumes another pull).  End of round: the current hand is
+    pre-filtered OUT of the pool and a single pull is made — pass
+    ``exclude_current=True`` for that variant.
+
+    Pool order matches G.GAME.hands iteration as validated for the
+    Orbital Tag (_ORBITAL_HANDS).
+    """
+    from jackdaw.engine.tags import _ORBITAL_HANDS
+
+    if rng is None:
+        return
+    old = card.ability.get("to_do_poker_hand")
+
+    def _visible(ht) -> bool:
+        if hand_levels is None:
+            return True
+        try:
+            return hand_levels.get_state(ht).visible
+        except Exception:
+            return True
+
+    if exclude_current:
+        pool = [ht.value for ht in _ORBITAL_HANDS if _visible(ht) and ht.value != old]
+        new_hand, _ = rng.element(pool, rng.seed("to_do"))
+        card.ability["to_do_poker_hand"] = new_hand
+        return
+
+    pool = [ht.value for ht in _ORBITAL_HANDS if _visible(ht)]
+    chosen = None
+    while chosen is None:
+        v, _ = rng.element(pool, rng.seed("to_do"))
+        if v != old:
+            chosen = v
+    card.ability["to_do_poker_hand"] = chosen

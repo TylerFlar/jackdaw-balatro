@@ -85,3 +85,15 @@ def poll_edition(
     if roll > 1 - 0.04 * rate * mod:
         return {"foil": True}
     return None
+
+
+def astronomer_active(gs: dict) -> bool:
+    """``find_joker('Astronomer')`` presence check (card.lua:380).
+
+    Vanilla's find_joker excludes debuffed jokers, so a debuffed
+    Astronomer does not zero shop prices.
+    """
+    return any(
+        getattr(j, "center_key", "") == "j_astronomer" and not getattr(j, "debuff", False)
+        for j in gs.get("jokers", [])
+    )

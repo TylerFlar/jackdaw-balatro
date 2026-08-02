@@ -75,6 +75,36 @@ def generate_pack_cards(
     choose: int = proto.config.get("choose", 1)
     gs = game_state or {}
 
+    # Populate the voucher feeder fields HERE so every caller gets them
+    # (they were documented inputs that nothing wrote — Telescope's
+    # forced planet and Omen Globe's arcana-spectral substitution were
+    # both inert; live-verified: LS88XB6E's celestial pack led with the
+    # forced most-played planet).
+    used_v = gs.get("used_vouchers") or {}
+    gs["has_telescope"] = bool(used_v.get("v_telescope")) or bool(gs.get("has_telescope"))
+    gs["has_omen_globe"] = (
+        bool(used_v.get("v_omen_globe"))
+        or bool(gs.get("omen_globe"))
+        or bool(gs.get("has_omen_globe"))
+    )
+    if gs.get("has_telescope") and kind == "Celestial":
+        # Vanilla scans G.handlist in display order with a strict '>'
+        # (card.lua:1739-1744): ties keep the EARLIER (higher) hand.
+        hand_levels = gs.get("hand_levels")
+        if hand_levels is not None:
+            from jackdaw.engine.data.hands import HAND_ORDER
+
+            best, tally = None, 0
+            for ht in HAND_ORDER:
+                try:
+                    entry = hand_levels[ht.value]
+                except (KeyError, TypeError):
+                    continue  # undiscovered secret hands
+                visible = getattr(entry, "visible", True)
+                if visible and entry.played > tally:
+                    best, tally = ht.value, entry.played
+            gs["most_played_hand"] = best
+
     cards: list[Card] = []
     # Track keys added during this pack generation so we can clean up after.
     # In Lua, Card:set_ability (card.lua:349-354) adds every created card's
@@ -195,11 +225,16 @@ def _gen_standard(rng: PseudoRandom, ante: int, gs: dict) -> Card:
     suit = Suit(pc_proto.suit)
     rank = Rank(pc_proto.rank)
 
-    # Enhancement selection (only when Enhanced type)
+    # Enhancement selection (only when Enhanced type).
+    # Pool keys carry the ante suffix (common_events.lua:2052 returns
+    # _pool_key .. ante for every non-legendary pool) — 'Enhancedsta'+ante.
+    # NOTE: the modded live game can NOT validate this field — smods takes
+    # ownership of standard packs and rolls enhancements on its own
+    # 'std_enhance' stream; Immolate (vanilla-derived) is the oracle here.
     if is_enhanced:
         enhancement_key, _ = rng.element(
             CENTER_POOLS["Enhanced"],
-            rng.seed("Enhancedsta"),
+            rng.seed("Enhancedsta" + str(ante)),
         )
     else:
         enhancement_key = "c_base"

@@ -13,6 +13,7 @@ from jackdaw.engine.card import Card, reset_sort_id_counter
 from jackdaw.engine.hand_levels import HandLevels
 from jackdaw.engine.jokers import (
     _REGISTRY,
+    GameSnapshot,
     JokerContext,
     JokerResult,
     calculate_joker,
@@ -550,16 +551,20 @@ class TestIdolHandler:
 
 
 class TestLoyaltyCard:
-    """Loyalty Card: x4 every 6th hand (every=5, triggers when remainder==every)."""
+    """Loyalty Card: x4 every 6th hand (every=5, triggers when
+    remainder==every).  Uses the RUN-WIDE hands_played (card.lua:3633,
+    GameSnapshot.hands_played_run), pre-increment at scoring — bug #58
+    (LSHACSAC) fed it the current-round counter with at_create never
+    stamped."""
 
     def test_sixth_hand_triggers(self):
-        """hands_played=5 (delta=5 from create at 0): triggers."""
+        """hands_played_run=5 (delta=5 from create at 0): triggers."""
         joker = _joker_card(
             "j_loyalty_card",
             extra={"Xmult": 4, "every": 5},
             hands_played_at_create=0,
         )
-        ctx = JokerContext(joker_main=True, hands_played=5)
+        ctx = JokerContext(joker_main=True, game=GameSnapshot(hands_played_run=5))
         result = calculate_joker(joker, ctx)
         assert result is not None
         assert result.Xmult_mod == 4
@@ -570,7 +575,7 @@ class TestLoyaltyCard:
             extra={"Xmult": 4, "every": 5},
             hands_played_at_create=0,
         )
-        ctx = JokerContext(joker_main=True, hands_played=0)
+        ctx = JokerContext(joker_main=True, game=GameSnapshot(hands_played_run=0))
         assert calculate_joker(joker, ctx) is None
 
     def test_twelfth_hand_triggers(self):
@@ -580,7 +585,7 @@ class TestLoyaltyCard:
             extra={"Xmult": 4, "every": 5},
             hands_played_at_create=0,
         )
-        ctx = JokerContext(joker_main=True, hands_played=11)
+        ctx = JokerContext(joker_main=True, game=GameSnapshot(hands_played_run=11))
         result = calculate_joker(joker, ctx)
         assert result is not None
         assert result.Xmult_mod == 4
@@ -592,17 +597,17 @@ class TestLoyaltyCard:
             extra={"Xmult": 4, "every": 5},
             hands_played_at_create=0,
         )
-        ctx = JokerContext(joker_main=True, hands_played=6)
+        ctx = JokerContext(joker_main=True, game=GameSnapshot(hands_played_run=6))
         assert calculate_joker(joker, ctx) is None
 
     def test_created_mid_run(self):
-        """Created at hands_played=10, triggers at hands_played=15."""
+        """Created at hands_played=10, triggers at hands_played_run=15."""
         joker = _joker_card(
             "j_loyalty_card",
             extra={"Xmult": 4, "every": 5},
             hands_played_at_create=10,
         )
-        ctx = JokerContext(joker_main=True, hands_played=15)
+        ctx = JokerContext(joker_main=True, game=GameSnapshot(hands_played_run=15))
         result = calculate_joker(joker, ctx)
         assert result is not None
         assert result.Xmult_mod == 4
@@ -725,10 +730,11 @@ class TestBlackboard:
         ctx = JokerContext(joker_main=True, held_cards=held)
         assert calculate_joker(joker, ctx) is None
 
-    def test_empty_held_no_effect(self):
+    def test_empty_held_fires_vacuously(self):
         joker = _joker_card("j_blackboard", extra=3)
         ctx = JokerContext(joker_main=True, held_cards=[])
-        assert calculate_joker(joker, ctx) is None
+        result = calculate_joker(joker, ctx)
+        assert result is not None and result.Xmult_mod == 3  # card.lua:3951: no cards disqualify
 
     def test_wild_card_counts(self):
         """Wild Card is_suit returns True for any suit including Clubs/Spades."""
@@ -1452,15 +1458,15 @@ class TestBrainstorm:
         assert result is not None
         assert result.mult_mod == 4
 
-    def test_brainstorm_is_leftmost_skips_self(self):
-        """Brainstorm is leftmost → copies the second joker."""
+    def test_brainstorm_is_leftmost_no_effect(self):
+        """Brainstorm copies the LITERAL leftmost joker (card.lua:2322)
+        and no-ops when that is itself (bug #61, LSOBR3XS — the old
+        skip-self scan wrongly copied the second joker)."""
         brain = _joker_card("j_brainstorm")
         joker = _joker_card("j_joker", mult=4)
         jokers = [brain, joker]
         ctx = JokerContext(joker_main=True, jokers=jokers)
-        result = calculate_joker(brain, ctx)
-        assert result is not None
-        assert result.mult_mod == 4
+        assert calculate_joker(brain, ctx) is None
 
     def test_brainstorm_alone_no_effect(self):
         brain = _joker_card("j_brainstorm")
@@ -1503,3 +1509,45 @@ class TestBlueprintBrainstormChain:
         result = calculate_joker(bp, ctx)
         # Eventually returns None when cap exceeded
         assert result is None
+
+
+class TestRaisedFistTieBreak:
+    """Vanilla scans with temp_ID >= id (card.lua:3324): tied lowest
+    cards resolve to the LAST in hand order — which matters when only
+    one twin is debuffed (bug #63, LSF5YVZ9)."""
+
+    @staticmethod
+    def _pc(suit, rank):
+        from jackdaw.engine.card import Card
+
+        c = Card()
+        c.set_base(f"{suit[0]}_{rank}", suit, rank)
+        c.set_ability("c_base")
+        return c
+
+    def test_tied_lowest_targets_last_twin(self):
+        fist = _joker_card("j_raised_fist")
+        h7 = self._pc("Hearts", "7")
+        d7 = self._pc("Diamonds", "7")
+        held = [self._pc("Hearts", "Ace"), h7, d7]
+        # earlier twin: no fire
+        ctx1 = JokerContext(individual=True, cardarea="hand", other_card=h7, held_cards=held)
+        r1 = calculate_joker(fist, ctx1)
+        assert r1 is None or not getattr(r1, "h_mult", 0)
+        # later twin: fires
+        ctx2 = JokerContext(individual=True, cardarea="hand", other_card=d7, held_cards=held)
+        r2 = calculate_joker(fist, ctx2)
+        assert r2 is not None and r2.h_mult == 14
+
+    def test_debuffed_last_twin_pays_nothing(self):
+        fist = _joker_card("j_raised_fist")
+        h7 = self._pc("Hearts", "7")
+        d7 = self._pc("Diamonds", "7")
+        d7.set_debuff(True)
+        held = [self._pc("Hearts", "Ace"), h7, d7]
+        ctx = JokerContext(individual=True, cardarea="hand", other_card=d7, held_cards=held)
+        r = calculate_joker(fist, ctx)
+        assert r is not None and not getattr(r, "h_mult", 0)  # Debuffed message, no mult
+        ctx_h7 = JokerContext(individual=True, cardarea="hand", other_card=h7, held_cards=held)
+        r_h7 = calculate_joker(fist, ctx_h7)
+        assert r_h7 is None or not getattr(r_h7, "h_mult", 0)

@@ -45,9 +45,16 @@ class GameSnapshot:
     playing_cards_count: int = 52
     stone_tally: int = 0
     steel_tally: int = 0
+    nine_tally: int = 0
     enhanced_card_count: int = 0
     hands_left: int = 0
+    # current-round hands played (G.GAME.current_round.hands_played) —
+    # PRE-increment during scoring (vanilla increments after
+    # evaluate_play, state_events.lua:523-24); DNA / Sixth Sense == 0.
     hands_played: int = 0
+    # run-wide hands played (G.GAME.hands_played) — Loyalty Card's
+    # window (card.lua:3633); also pre-increment during scoring.
+    hands_played_run: int = 0
     discards_left: int = 0
     discards_used: int = 0
     probabilities_normal: float = 1.0
@@ -57,6 +64,9 @@ class GameSnapshot:
     ancient_suit: str | None = None
     castle_card_suit: str | None = None
     skips: int = 0
+    ante: int = 1
+    consumable_count: int = 0
+    consumable_slots: int = 2
 
 
 _DEFAULT_GAME = GameSnapshot()
@@ -93,6 +103,9 @@ class JokerContext:
     end_of_round: bool = False
     discard: bool = False
     pre_discard: bool = False
+    hook: bool = False
+    """True when the discard was forced by The Hook (state_events.lua:395
+    passes the flag; Burnt Joker is hook-gated, Green Joker is not)."""
     destroying_card: Card | None = None
     cards_destroyed: list[Card] | None = None
     buying_card: bool = False
@@ -350,8 +363,17 @@ def on_end_of_round(
     jokers: list[Card],
     game: GameSnapshot,
     rng: PseudoRandom | None = None,
+    hand_levels: Any = None,
+    blind: Any = None,
 ) -> dict[str, Any]:
     """Process all joker end-of-round effects.
+
+    Order matches vanilla: the calculate_joker end_of_round pass fires
+    at end_round (state_events.lua:96-110) BEFORE the cash-out screen
+    builds its calc_dollar_bonus rows — so Rocket's boss bump
+    (card.lua:2896, needs *blind*) lands before its payout is read
+    (live-verified: LSZ6YOW6 — live paid the post-bump $3 at the boss
+    cash-out, sim paid the pre-bump $1).
 
     Returns a dict with:
         dollars_earned: total dollars from calc_dollar_bonus
@@ -362,16 +384,14 @@ def on_end_of_round(
     removed: list[Card] = []
     mutations: list[dict[str, Any]] = []
 
-    # 1. Dollar bonuses (calc_dollar_bonus)
-    for joker in jokers:
-        dollars += calc_dollar_bonus(joker, game)
-
-    # 2. End-of-round calculate_joker effects
+    # 1. End-of-round calculate_joker effects (bumps/decays/destroys)
     ctx = JokerContext(
         end_of_round=True,
         jokers=jokers,
         rng=rng,
         game=game,
+        hand_levels=hand_levels,
+        blind=blind,
     )
     for joker in jokers:
         if joker.debuff:
@@ -382,6 +402,14 @@ def on_end_of_round(
                 removed.append(joker)
             if result.extra:
                 mutations.append(result.extra)
+
+    # 2. Dollar bonuses (calc_dollar_bonus) — after the mutations, and
+    #    a joker that self-destructed above pays nothing (vanilla's
+    #    eval rows are built after the destruction event).
+    for joker in jokers:
+        if joker in removed:
+            continue
+        dollars += calc_dollar_bonus(joker, game)
 
     return {
         "dollars_earned": dollars,
@@ -1064,8 +1092,10 @@ def _blackboard(card: Card, ctx: JokerContext) -> JokerResult | None:
     Uses ``flush_calc=True`` in is_suit calls (matching source).
     """
     if ctx.joker_main and ctx.held_cards is not None:
-        if not ctx.held_cards:
-            return None
+        # Vanilla loops G.hand.cards with no empty-check (card.lua:3951):
+        # ZERO held cards disqualify nothing, so the x3 fires vacuously —
+        # the classic all-in Blackboard play.  Found by lockstep: The Hook
+        # emptied the held hand, live scored x3, sim skipped it.
         for c in ctx.held_cards:
             if not (c.is_suit("Clubs", flush_calc=True) or c.is_suit("Spades", flush_calc=True)):
                 return None
@@ -1178,7 +1208,10 @@ def _loyalty_card(card: Card, ctx: JokerContext) -> JokerResult | None:
         extra = card.ability.get("extra", {})
         every = extra.get("every", 5)
         hands_at_create = card.ability.get("hands_played_at_create", 0)
-        remaining = (every - 1 - (ctx.game.hands_played - hands_at_create)) % (every + 1)
+        # RUN-WIDE counter (G.GAME.hands_played, card.lua:3633) — NOT
+        # the current-round one (live-verified: LSHACSAC, live's x4
+        # fired exactly 738*4=2952 where sim scored flat).
+        remaining = (every - 1 - (ctx.game.hands_played_run - hands_at_create)) % (every + 1)
         if remaining == every:
             return JokerResult(Xmult_mod=extra.get("Xmult", 4))
     return None
@@ -1201,7 +1234,13 @@ def _raised_fist(card: Card, ctx: JokerContext) -> JokerResult | None:
             lowest_id = 15
             lowest_card = None
             for c in ctx.held_cards:
-                if c.ability.get("effect") != "Stone Card" and c.get_id() < lowest_id:
+                # Vanilla's scan uses temp_ID >= id (card.lua:3324): on
+                # TIES the LAST card in hand order wins — with twin
+                # lowest cards the fist targets the later one, which
+                # matters when only one twin is debuffed (LSF5YVZ9:
+                # Pillar-debuffed D7 was vanilla's target → no mult;
+                # sim's strict < picked the clean H7 → +14).
+                if c.ability.get("effect") != "Stone Card" and c.get_id() <= lowest_id:
                     lowest_id = c.get_id()
                     lowest_card = c
             if ctx.other_card is lowest_card:
@@ -1338,12 +1377,22 @@ def _trading(card: Card, ctx: JokerContext) -> JokerResult | None:
 
 @register("j_todo_list")
 def _to_do_list(card: Card, ctx: JokerContext) -> JokerResult | None:
-    """To Do List: +$4 if hand matches to_do_poker_hand. Source: card.lua:3491."""
+    """To Do List: +$4 if hand matches to_do_poker_hand. Source: card.lua:3491.
+
+    The target rolls at creation (card.lua:311, wired in create_card) and
+    re-rolls at end of round from a pool excluding the current hand
+    (card.lua:2975).  Found dead by lockstep: nothing ever wrote the field.
+    """
     if ctx.joker_main and ctx.scoring_name:
         target = card.ability.get("to_do_poker_hand")
         if target and ctx.scoring_name == target:
             extra = card.ability.get("extra", {})
             return JokerResult(dollars=extra.get("dollars", 4))
+    if ctx.end_of_round and not ctx.blueprint and ctx.rng is not None:
+        from jackdaw.engine.card_factory import roll_to_do_hand
+
+        roll_to_do_hand(card, ctx.rng, ctx.hand_levels, exclude_current=True)
+        return JokerResult(message="Reset")
     return None
 
 
@@ -1354,8 +1403,16 @@ def _to_do_list(card: Card, ctx: JokerContext) -> JokerResult | None:
 
 @register("j_matador")
 def _matador(card: Card, ctx: JokerContext) -> JokerResult | None:
-    """Matador: +$8 when boss blind's debuff effect triggers. Source: card.lua:2736."""
-    if ctx.debuffed_hand and ctx.blind is not None and ctx.blind.triggered:
+    """Matador: +$8 when the boss blind's ability triggers this play.
+
+    Vanilla pays at TWO sites, both gated on blind.triggered (per-play
+    flag): the nope'd-hand path (card.lua:2736) and joker_main
+    (card.lua:3719) — the latter covers The Arm's level-down, Hook/Tooth
+    press_play effects, and debuffed scoring cards.  Live-verified:
+    LS7N21KX ($8 on The Arm).
+    """
+    triggered = ctx.blind is not None and getattr(ctx.blind, "triggered", False)
+    if (ctx.debuffed_hand or ctx.joker_main) and triggered:
         return JokerResult(dollars=card.ability.get("extra", 8))
     return None
 
@@ -1377,13 +1434,18 @@ def _find_right_neighbor(card: Card, ctx: JokerContext) -> Card | None:
 
 
 def _find_leftmost(card: Card, ctx: JokerContext) -> Card | None:
-    """Find the leftmost joker that isn't *card*."""
-    if ctx.jokers is None:
+    """Brainstorm's copy target: the LITERAL leftmost joker
+    (G.jokers.cards[1], card.lua:2322) — vanilla no-ops when that is
+    Brainstorm itself (`other_joker ~= self`, card.lua:2323).  The old
+    skip-self scan wrongly copied the SECOND joker when Brainstorm sat
+    leftmost (live-verified: LSOBR3XS — sim double-counted Gluttonous,
+    +3 mult on the scoring club)."""
+    if not ctx.jokers:
         return None
-    for j in ctx.jokers:
-        if j is not card:
-            return j
-    return None
+    leftmost = ctx.jokers[0]
+    if leftmost is card:
+        return None
+    return leftmost
 
 
 @register("j_blueprint")
@@ -2104,11 +2166,21 @@ def _hallucination(card: Card, ctx: JokerContext) -> JokerResult | None:
     """
     if ctx.open_booster:
         odds = card.ability.get("extra", 2)
+        # Vanilla room-gates BEFORE the roll: the slot check sits in the
+        # OUTER if (card.lua:2336) and pseudorandom('halu'+ante) in the
+        # INNER if (card.lua:2337) — at full consumable slots NO halu
+        # roll is consumed.  The old always-roll here desynced the halu
+        # stream after any full-slot pack open (live-verified:
+        # LSVRQFEU — sim fired The Moon at step 52, live's un-shifted
+        # roll stayed quiet).
+        if ctx.game.consumable_count >= ctx.game.consumable_slots:
+            return None
         if ctx.rng is not None:
-            if ctx.rng.random("hallucination") < ctx.game.probabilities_normal / odds:
+            roll = ctx.rng.random("halu" + str(ctx.game.ante))
+            if roll < ctx.game.probabilities_normal / odds:
                 return JokerResult(
                     extra={
-                        "create": {"type": "Tarot", "key": "hal"},
+                        "create": {"type": "Tarot", "count": 1, "seed": "hal"},
                     }
                 )
     return None
@@ -2256,8 +2328,13 @@ def _golden_dollars(card: Card, game: GameSnapshot) -> int:
 
 @register_dollars("j_cloud_9")
 def _cloud_9_dollars(card: Card, game: GameSnapshot) -> int:
-    """Cloud 9: +$1 per 9-rank card in full deck. Source: card.lua:1661."""
-    tally = card.ability.get("nine_tally", 0)
+    """Cloud 9: +$1 per 9-rank card in full deck. Source: card.lua:1661.
+
+    Vanilla keeps ability.nine_tally fresh from Card:update (card.lua:4192);
+    the sim computes the count into the end-of-round GameSnapshot instead
+    (found dead by lockstep: live paid $4 for four 9s, sim paid $0).
+    """
+    tally = game.nine_tally
     if tally > 0:
         return card.ability.get("extra", 1) * tally
     return 0
@@ -2310,12 +2387,18 @@ def _rocket(card: Card, ctx: JokerContext) -> JokerResult | None:
 
 @register("j_egg")
 def _egg(card: Card, ctx: JokerContext) -> JokerResult | None:
-    """Egg: +$3 to sell value per round. Source: card.lua:2940."""
+    """Egg: +$3 to sell value per round. Source: card.lua:2940.
+
+    Vanilla bumps extra_value then runs self:set_cost() — a set_cost
+    TRIGGER (the bug-#37 inventory), which also restores a couponed
+    pack-picked Egg's real buy cost (live-verified: LS5BUVXO — live
+    buy=4/sell=5, sim's direct sell bump left buy=$0).  The caller
+    runs the coupon-pop + set_cost.
+    """
     if ctx.end_of_round and not ctx.blueprint:
         inc = card.ability.get("extra", 3)
         card.ability["extra_value"] = card.ability.get("extra_value", 0) + inc
-        card.sell_cost = card.sell_cost + inc
-        return JokerResult()
+        return JokerResult(extra={"set_cost_cards": [card]})
     return None
 
 
@@ -2325,12 +2408,12 @@ def _gift_card(card: Card, ctx: JokerContext) -> JokerResult | None:
 
     Source: card.lua:2920. Iterates all jokers (and consumables).
     """
-    if ctx.end_of_round and not ctx.blueprint and ctx.jokers:
-        increment = card.ability.get("extra", 1)
-        for j in ctx.jokers:
-            j.ability["extra_value"] = j.ability.get("extra_value", 0) + increment
-            j.sell_cost = j.sell_cost + increment
-        return JokerResult()
+    if ctx.end_of_round and not ctx.blueprint:
+        # Applied by the round-end caller: vanilla bumps extra_value on
+        # every JOKER and CONSUMABLE and re-runs set_cost on each
+        # (card.lua:3325-3341) — that set_cost pass is also what
+        # restores a couponed card's real buy cost (LSM98F1Z).
+        return JokerResult(extra={"gift_card_bump": card.ability.get("extra", 1)})
     return None
 
 
@@ -2481,12 +2564,18 @@ def _ramen(card: Card, ctx: JokerContext) -> JokerResult | None:
 
 @register("j_mr_bones")
 def _mr_bones(card: Card, ctx: JokerContext) -> JokerResult | None:
-    """Mr. Bones: prevents death if score ≥ 25% of blind. Source: card.lua:3047.
+    """Mr. Bones: prevents death if round chips ≥ 25% of the blind.
 
-    Returns saved=True and remove=True (self-destructs after saving).
+    Vanilla checks G.GAME.chips / G.GAME.blind.chips >= 0.25
+    (card.lua:3047-48) — the old handler had NO ratio check and saved
+    unconditionally (live-verified: LSWPWW38 died at <25% with Bones
+    on board).  The caller passes the cumulative ratio via
+    ctx.chips_ratio.  Returns saved=True and remove=True
+    (self-destructs after saving).
     """
     if getattr(ctx, "game_over", False):
-        return JokerResult(saved=True, remove=True)
+        if getattr(ctx, "chips_ratio", 0.0) >= 0.25:
+            return JokerResult(saved=True, remove=True)
     return None
 
 
@@ -2496,7 +2585,7 @@ def _burnt(card: Card, ctx: JokerContext) -> JokerResult | None:
 
     Source: card.lua:2749. Fires in discard context when discards_used <= 0.
     """
-    if ctx.discard and not ctx.blueprint:
+    if ctx.discard and not ctx.blueprint and not ctx.hook:
         if ctx.game.discards_used <= 0 and ctx.other_card is not None:
             if ctx.full_hand and ctx.other_card is ctx.full_hand[-1]:
                 return JokerResult(level_up=True)
@@ -2514,10 +2603,15 @@ def _turtle_bean(card: Card, ctx: JokerContext) -> JokerResult | None:
         h_size = extra.get("h_size", 5)
         h_mod = extra.get("h_mod", 1)
         if h_size - h_mod <= 0:
+            # removal path calls remove_from_deck, which gives back the
+            # remaining h_size (card.lua:663)
             return JokerResult(remove=True)
         extra["h_size"] = h_size - h_mod
         card.ability["extra"] = extra
-        return JokerResult()
+        # G.hand:change_size(-h_mod) fires with the decay (card.lua:2927)
+        # — found by lockstep: live hand size shrank each round, sim's
+        # only decayed the ability field.
+        return JokerResult(extra={"hand_size_delta": -h_mod})
     return None
 
 
