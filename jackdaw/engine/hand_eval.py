@@ -151,11 +151,14 @@ def get_x_same(num: int, hand: list[Card]) -> list[list[Card]]:
     # vals[id] = list of cards with that id, only if count == num
     vals: dict[int, list[Card]] = {}
 
+    # get_id is pure (stone cards return a fixed -1 placeholder), so it can
+    # be hoisted out of the O(n^2) comparison loop.
+    ids = [c.get_id() for c in hand]
     for i in range(len(hand) - 1, -1, -1):
         curr = [hand[i]]
-        card_id = hand[i].get_id()
+        card_id = ids[i]
         for j in range(len(hand)):
-            if hand[i].get_id() == hand[j].get_id() and i != j:
+            if ids[i] == ids[j] and i != j:
                 curr.append(hand[j])
         if len(curr) == num:
             vals[card_id] = curr
