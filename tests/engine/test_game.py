@@ -29,6 +29,7 @@ from jackdaw.engine.actions import (
     UseConsumable,
     get_legal_actions,
 )
+from jackdaw.engine.blind import Blind
 from jackdaw.engine.card import Card
 from jackdaw.engine.game import IllegalActionError, step
 from jackdaw.engine.run_init import initialize_run
@@ -214,6 +215,252 @@ class TestSellCard:
         gs["jokers"] = [_joker_card(eternal=True)]
         with pytest.raises(IllegalActionError, match="eternal"):
             step(gs, SellCard(area="jokers", card_index=0))
+
+    def test_selling_luchador_disables_boss_blind(self):
+        gs = _init_gs()
+        gs["phase"] = GamePhase.SELECTING_HAND
+        boss = Blind.create("bl_water", ante=1)
+        boss.discards_sub = 2
+        gs["blind"] = boss
+        gs["current_round"]["discards_left"] = 1
+        luchador = Card()
+        luchador.set_ability("j_luchador")
+        luchador.center_key = "j_luchador"
+        luchador.sell_cost = 4
+        gs["jokers"] = [luchador]
+
+        step(gs, SellCard(area="jokers", card_index=0))
+
+        assert boss.disabled is True
+        assert gs["current_round"]["discards_left"] == 3
+        assert len(gs["jokers"]) == 0
+
+    def test_selling_luchador_restores_manacle_hand_size(self):
+        gs = _init_gs()
+        gs["phase"] = GamePhase.SELECTING_HAND
+        boss = Blind.create("bl_manacle", ante=1)
+        gs["blind"] = boss
+        gs["hand_size"] = 7
+        luchador = Card()
+        luchador.set_ability("j_luchador")
+        luchador.center_key = "j_luchador"
+        luchador.sell_cost = 4
+        gs["jokers"] = [luchador]
+
+        step(gs, SellCard(area="jokers", card_index=0))
+
+        assert boss.disabled is True
+        assert gs["hand_size"] == 8
+        assert len(gs["jokers"]) == 0
+
+    def test_selling_luchador_during_non_boss_blind(self):
+        gs = _init_gs()
+        gs["phase"] = GamePhase.SELECTING_HAND
+        small = Blind.create("bl_small", ante=1)
+        gs["blind"] = small
+        luchador = Card()
+        luchador.set_ability("j_luchador")
+        luchador.center_key = "j_luchador"
+        luchador.sell_cost = 4
+        gs["jokers"] = [luchador]
+
+        step(gs, SellCard(area="jokers", card_index=0))
+
+        assert small.disabled is False
+        assert len(gs["jokers"]) == 0
+
+    @staticmethod
+    def _diet_cola() -> Card:
+        cola = Card()
+        cola.set_ability("j_diet_cola")
+        cola.center_key = "j_diet_cola"
+        cola.sell_cost = 2
+        return cola
+
+    def test_selling_diet_cola_awards_a_double_tag(self):
+        """The tag must land in awarded_tags — the list the engine consumes.
+
+        gs["tags"] is a phantom key nothing reads (see _check_double_tag's
+        BUG HISTORY note), so asserting against it would pass while the
+        player received nothing.
+        """
+        gs = _init_gs()
+        gs["phase"] = GamePhase.SHOP
+        gs["jokers"] = [self._diet_cola()]
+
+        step(gs, SellCard(area="jokers", card_index=0))
+
+        assert [a["key"] for a in gs["awarded_tags"]] == ["tag_double"]
+
+    def test_diet_cola_double_duplicates_the_next_skip_tag(self):
+        """End-to-end: the awarded Double actually cashes in on a skip.
+
+        Skips and Diet Cola are the only tag sources, so this is the whole
+        observable payout path.
+        """
+        gs = _init_gs()
+        gs["phase"] = GamePhase.SHOP
+        gs["jokers"] = [self._diet_cola()]
+        step(gs, SellCard(area="jokers", card_index=0))
+
+        gs["phase"] = GamePhase.BLIND_SELECT
+        gs["round_resets"]["blind_tags"]["Small"] = "tag_economy"
+        step(gs, SkipBlind())
+
+        awarded = gs["awarded_tags"]
+        assert [a["key"] for a in awarded].count("tag_economy") == 2
+        assert not [a for a in awarded if a["key"] == "tag_double"]
+
+    def test_selling_diet_cola_mid_blind_awards_the_tag(self):
+        """Selling is not shop-only; the tag lands the same during a blind."""
+        gs = _init_gs()
+        gs["phase"] = GamePhase.SELECTING_HAND
+        gs["jokers"] = [self._diet_cola()]
+
+        step(gs, SellCard(area="jokers", card_index=0))
+
+        assert [a["key"] for a in gs["awarded_tags"]] == ["tag_double"]
+
+    def test_two_diet_colas_triple_the_next_skip_tag(self):
+        """Each Double contributes exactly one copy: 2 Doubles + 1 tag = 3."""
+        gs = _init_gs()
+        gs["phase"] = GamePhase.SHOP
+        gs["jokers"] = [self._diet_cola(), self._diet_cola()]
+        step(gs, SellCard(area="jokers", card_index=0))
+        step(gs, SellCard(area="jokers", card_index=0))
+
+        gs["phase"] = GamePhase.BLIND_SELECT
+        gs["round_resets"]["blind_tags"]["Small"] = "tag_economy"
+        step(gs, SkipBlind())
+
+        assert [a["key"] for a in gs["awarded_tags"]].count("tag_economy") == 3
+
+    def test_selling_invisible_joker_duplicates_another_joker(self):
+        gs = _init_gs()
+        gs["phase"] = GamePhase.SHOP
+        original = Card()
+        original.set_ability("j_joker")
+        original.center_key = "j_joker"
+        invisible = Card()
+        invisible.set_ability("j_invisible")
+        invisible.center_key = "j_invisible"
+        invisible.ability["invis_rounds"] = invisible.ability["extra"]
+        gs["jokers"] = [original, invisible]
+
+        step(gs, SellCard(area="jokers", card_index=1))
+
+        assert [joker.center_key for joker in gs["jokers"]] == ["j_joker", "j_joker"]
+        assert gs["jokers"][0] is original
+        assert gs["jokers"][1] is not original
+        assert "invisible" in gs["rng"].get_state()
+
+    @staticmethod
+    def _ripe_invisible() -> Card:
+        """An Invisible Joker that has met its round threshold."""
+        inv = Card()
+        inv.set_ability("j_invisible")
+        inv.center_key = "j_invisible"
+        inv.ability["invis_rounds"] = inv.ability["extra"]
+        return inv
+
+    def test_unripe_invisible_joker_does_not_duplicate(self):
+        """invis_rounds below extra: no copy, and the RNG stream is untouched.
+
+        Live only reaches pseudoseed('invisible') inside the duplication
+        branch (card.lua:2382), so a premature sell must not advance it.
+        """
+        gs = _init_gs()
+        gs["phase"] = GamePhase.SHOP
+        original = Card()
+        original.set_ability("j_joker")
+        original.center_key = "j_joker"
+        invisible = self._ripe_invisible()
+        invisible.ability["invis_rounds"] = invisible.ability["extra"] - 1
+        gs["jokers"] = [original, invisible]
+
+        step(gs, SellCard(area="jokers", card_index=1))
+
+        assert [j.center_key for j in gs["jokers"]] == ["j_joker"]
+        assert "invisible" not in gs["rng"].get_state()
+
+    def test_lone_invisible_joker_has_nothing_to_duplicate(self):
+        """No other joker to copy (card.lua:2388 k_no_other_jokers)."""
+        gs = _init_gs()
+        gs["phase"] = GamePhase.SHOP
+        gs["jokers"] = [self._ripe_invisible()]
+
+        step(gs, SellCard(area="jokers", card_index=0))
+
+        assert gs["jokers"] == []
+        assert "invisible" not in gs["rng"].get_state()
+
+    @staticmethod
+    def _plain_joker() -> Card:
+        j = Card()
+        j.set_ability("j_joker")
+        j.center_key = "j_joker"
+        j.sell_cost = 3
+        return j
+
+    def test_negative_invisible_joker_at_cap_duplicates_and_overshoots_slots(self):
+        """A Negative Invisible Joker's own edition earns the slot it needs.
+
+        At 6 jokers / 6 slots (5 base + 1 from this card's own Negative
+        edition) you are legitimately at cap, not already over it.  Selling
+        fires selling_self BEFORE this card's own slot bonus is removed
+        (card.lua:1599 vs card.lua:648's remove_from_deck), so the duplicate
+        check still sees room -- live gates on ``<=`` counting the sold card
+        (card.lua:2379) -- and fires.  Removing the sold card afterward drops
+        joker_slots back to 5: one card duplicated, one slot bonus lost,
+        landing at 6 jokers / 5 slots.
+        """
+        gs = _init_gs()
+        gs["phase"] = GamePhase.SHOP
+        invisible = self._ripe_invisible()
+        invisible.edition = {"negative": True}
+        invisible.add_to_deck(gs)  # earns its own +1 slot, as a real acquisition would
+        assert gs["joker_slots"] == 6
+        gs["jokers"] = [*[self._plain_joker() for _ in range(5)], invisible]
+
+        step(gs, SellCard(area="jokers", card_index=5))
+
+        assert [j.center_key for j in gs["jokers"]] == ["j_joker"] * 6
+        assert gs["joker_slots"] == 5
+
+    def test_invisible_joker_over_slot_limit_does_not_duplicate(self):
+        """Over cap (6 jokers / 5 slots), the duplicate does not fire.
+
+        This is the state the test above *creates*: selling a Negative
+        Invisible Joker duplicates and simultaneously surrenders its slot
+        bonus.  Selling a second ripe Invisible from there hits live's
+        k_no_room_ex branch (card.lua:2385).  Reaching it this way rather
+        than by hand-setting joker_slots keeps the precondition one the
+        engine can actually produce.
+
+        Real-play provenance (mine): needs Showman plus a *second, naturally
+        rolled* Negative Invisible Joker -- Invisible Joker is Rare, so
+        without Showman the used_jokers gate (pools.py:388) forbids the
+        duplicate roll.  Selling the first Negative duplicates and
+        surrenders its slot, leaving 7 jokers against 6 slots; the second
+        sell then finds no room.  Constructed minimally here.
+        """
+        gs = _init_gs()
+        gs["phase"] = GamePhase.SHOP
+        negative = self._ripe_invisible()
+        negative.edition = {"negative": True}
+        negative.add_to_deck(gs)
+        second = self._ripe_invisible()
+        gs["jokers"] = [*[self._plain_joker() for _ in range(4)], negative, second]
+
+        step(gs, SellCard(area="jokers", card_index=4))
+        assert len(gs["jokers"]) == 6
+        assert gs["joker_slots"] == 5  # over cap, legitimately
+
+        idx = [j.center_key for j in gs["jokers"]].index("j_invisible")
+        step(gs, SellCard(area="jokers", card_index=idx))
+
+        # One card left, none gained: the no-room branch declined to copy.
+        assert len(gs["jokers"]) == 5
 
 
 # ---------------------------------------------------------------------------
