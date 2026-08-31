@@ -676,8 +676,15 @@ def _analyze_draws(hand: list[Card]) -> _DrawAnalysis:
     )
 
 
-def encode_global_context(gs: dict[str, Any]) -> np.ndarray:
+def encode_global_context(
+    gs: dict[str, Any],
+    hand_analysis: tuple[np.ndarray, str, set[int]] | None = None,
+) -> np.ndarray:
     """Encode the fixed-size global context vector.
+
+    ``hand_analysis`` accepts a precomputed ``_compute_hand_analysis``
+    result for the live hand, so a caller that also encodes the hand
+    cards (which need the same analysis) can compute it once.
 
     Returns shape ``(D_GLOBAL,)`` float32 array (230 features).
 
@@ -827,10 +834,10 @@ def encode_global_context(gs: dict[str, Any]) -> np.ndarray:
     hand_levels: HandLevels | None = gs.get("hand_levels")
 
     # Hand type indicators + best hand analysis [211:223]
-    hand_type_vec, best_hand_name, _scoring_ids = _compute_hand_analysis(
-        hand,
-        jokers,
-        hand_levels,
+    hand_type_vec, best_hand_name, _scoring_ids = (
+        hand_analysis
+        if hand_analysis is not None
+        else _compute_hand_analysis(hand, jokers, hand_levels)
     )
     v[sbase : sbase + NUM_HAND_TYPES] = hand_type_vec
 
@@ -964,11 +971,16 @@ def _get_joker_buf(n: int) -> np.ndarray:
 def encode_playing_cards_batch(
     cards: list[Card],
     gs: dict[str, Any],
+    hand_analysis: tuple[np.ndarray, str, set[int]] | None = None,
 ) -> np.ndarray:
     """Encode multiple playing cards into a single array.
 
     Returns shape ``(len(cards), D_PLAYING_CARD)`` float32 array.
     Uses pre-allocated buffer to avoid per-call allocation.
+
+    ``hand_analysis`` accepts a precomputed ``_compute_hand_analysis``
+    result for *these* cards; pass it only when it was computed over the
+    same card list (the live hand), never for other areas (pack cards).
     """
     n = len(cards)
     if n == 0:
@@ -978,7 +990,11 @@ def encode_playing_cards_batch(
 
     # Compute which cards belong to the best detected hand
     jokers: list[Card] = gs.get("jokers", [])
-    _, _, scoring_ids = _compute_hand_analysis(cards, jokers, gs.get("hand_levels"))
+    _, _, scoring_ids = (
+        hand_analysis
+        if hand_analysis is not None
+        else _compute_hand_analysis(cards, jokers, gs.get("hand_levels"))
+    )
 
     for i, card in enumerate(cards):
         row = buf[i]  # already zeroed
@@ -1113,15 +1129,21 @@ def encode_observation(gs: dict[str, Any]) -> Observation:
     Observation
         Entity-based observation with variable-length arrays.
     """
+    # The best-hand analysis over the live hand is needed twice — by the
+    # global context (hand-type indicators, base score) and by the hand
+    # rows (scoring-card flags) — and it dominates encoding cost; compute
+    # it once and thread it through.
+    hand: list[Card] = gs.get("hand", [])
+    jokers: list[Card] = gs.get("jokers", [])
+    hand_analysis = _compute_hand_analysis(hand, jokers, gs.get("hand_levels"))
+
     # Global context
-    global_ctx = encode_global_context(gs)
+    global_ctx = encode_global_context(gs, hand_analysis=hand_analysis)
 
     # Hand cards — batch encode
-    hand: list[Card] = gs.get("hand", [])
-    hand_arr = encode_playing_cards_batch(hand, gs)
+    hand_arr = encode_playing_cards_batch(hand, gs, hand_analysis=hand_analysis)
 
     # Jokers — batch encode
-    jokers: list[Card] = gs.get("jokers", [])
     joker_arr = encode_jokers_batch(jokers, gs)
 
     # Consumables (small count, keep per-card)
