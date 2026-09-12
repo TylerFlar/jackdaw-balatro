@@ -640,7 +640,7 @@ class Card:
                 if isinstance(rng, PseudoRandom):
                     roll = rng.random("lucky_mult")
                     if roll < probabilities_normal / 5:
-                        self.ability["lucky_trigger"] = True
+                        self.lucky_trigger = True
                         return self.ability.get("mult", 0)
                 return 0
             return 0  # Without RNG, Lucky Card returns 0 (needs actual roll)
@@ -728,7 +728,7 @@ class Card:
                     if isinstance(rng, PseudoRandom):
                         roll = rng.random("lucky_money")
                         if roll < probabilities_normal / 15:
-                            self.ability["lucky_trigger"] = True
+                            self.lucky_trigger = True
                             ret += p_dollars
                 # Without RNG, Lucky Card $ returns 0
             else:

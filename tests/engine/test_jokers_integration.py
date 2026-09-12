@@ -1431,11 +1431,16 @@ class TestLuckyCat:
         c.lucky_trigger = True
         return c
 
-    def test_lucky_trigger_accumulates(self):
+    def test_scoring_trigger_is_transient(self):
         j = self._make()
-        lc = self._lucky_card()
-        ctx = JokerContext(individual=True, cardarea="play", other_card=lc)
-        calculate_joker(j, ctx)
+        lc = _card("Hearts", "5", enhancement="m_lucky")
+        levels = HandLevels()
+        blind = _small_blind()
+        rng = PseudoRandom("LUCKY_CAT")
+
+        score_hand([lc], [], [j], levels, blind, rng, probabilities_normal=100)
+        score_hand([lc], [], [j], levels, blind, rng, probabilities_normal=0)
+
         assert j.ability["x_mult"] == pytest.approx(1.25)
 
     def test_four_triggers(self):

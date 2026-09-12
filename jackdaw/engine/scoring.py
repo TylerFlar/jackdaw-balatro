@@ -280,6 +280,7 @@ def score_hand_base(
                 rng=rng,
                 probabilities_normal=probabilities_normal,
             )
+            card.lucky_trigger = None
 
             # Apply effects in source order (state_events.lua:702-776)
             if "chips" in ev:
@@ -704,6 +705,7 @@ def score_hand(
                         eff["card"] = joker
                         effects.append(eff)
 
+            card.lucky_trigger = None
             hand_chips, mult, dollars = _apply_individual_joker_effects(
                 effects,
                 hand_chips,
