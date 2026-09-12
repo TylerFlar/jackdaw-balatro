@@ -626,6 +626,10 @@ def score_hand(
         if result and result.extra and "create" in result.extra:
             joker_creates.append(result.extra["create"])
 
+    for card in scoring_cards:
+        if getattr(card, "vampired", False):
+            card.vampired = None
+
     # === Phase 6: Blind modify_hand (The Flint) ===
     new_mult, new_chips, modified = blind.modify_hand(mult, int(hand_chips))
     if modified:
@@ -775,7 +779,7 @@ def score_hand(
                 dollars,
             )
 
-    # === Phase 8d: individual_hand_end (Vampire strip, Obelisk check) ===
+    # === Phase 8d: individual_hand_end (Obelisk check) ===
     for joker in jokers:
         if joker.debuff:
             continue

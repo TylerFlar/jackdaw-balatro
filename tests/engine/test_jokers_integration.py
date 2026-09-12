@@ -1634,7 +1634,7 @@ class TestVampire:
         j = self._make()
         bonus = _card("Hearts", "5", enhancement="m_bonus")
         ctx = JokerContext(
-            individual_hand_end=True,
+            before=True,
             scoring_hand=[bonus],
         )
         calculate_joker(j, ctx)
@@ -1646,23 +1646,26 @@ class TestVampire:
         bonus = _card("Hearts", "5", enhancement="m_bonus")
         bonus.debuff = True
         ctx = JokerContext(
-            individual_hand_end=True,
+            before=True,
             scoring_hand=[bonus],
         )
         calculate_joker(j, ctx)
         assert j.ability["x_mult"] == 1
 
-    def test_accumulates_across_hands(self):
-        """3 hands, each with 1 enhanced card -> x_mult = 1.3."""
+    def test_accumulates_when_card_is_reenhanced(self):
         j = self._make()
-        for _ in range(3):
-            enhanced = _card("Hearts", "5", enhancement="m_bonus")
-            ctx = JokerContext(
-                individual_hand_end=True,
-                scoring_hand=[enhanced],
-            )
-            calculate_joker(j, ctx)
-        assert j.ability["x_mult"] == pytest.approx(1.3)
+        enhanced = _card("Hearts", "5", enhancement="m_bonus")
+        levels = HandLevels()
+        blind = _small_blind()
+        rng = PseudoRandom("VAMPIRE")
+
+        first = score_hand([enhanced], [], [j], levels, blind, rng)
+        enhanced.enhance("m_bonus")
+        second = score_hand([enhanced], [], [j], levels, blind, rng)
+
+        assert first.total == 11
+        assert second.total == 12
+        assert j.ability["x_mult"] == pytest.approx(1.2)
 
 
 class TestObelisk:

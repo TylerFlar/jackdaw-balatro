@@ -1771,10 +1771,10 @@ def _caino(card: Card, ctx: JokerContext) -> JokerResult | None:
 def _vampire(card: Card, ctx: JokerContext) -> JokerResult | None:
     """Vampire: +0.1 xMult per enhancement stripped from scored cards.
 
-    Source: card.lua:3465. Fires in individual_hand_end context.
+    Source: card.lua:3465. Fires in before context.
     Side effect: strips enhancement from scored cards (sets ability to c_base).
     """
-    if ctx.individual_hand_end and not ctx.blueprint and ctx.scoring_hand:
+    if ctx.before and not ctx.blueprint and ctx.scoring_hand:
         enhanced_count = 0
         for c in ctx.scoring_hand:
             if (
@@ -1790,7 +1790,7 @@ def _vampire(card: Card, ctx: JokerContext) -> JokerResult | None:
             card.ability["x_mult"] = (
                 card.ability.get("x_mult", 1) + card.ability.get("extra", 0.1) * enhanced_count
             )
-            return JokerResult(Xmult_mod=card.ability["x_mult"])
+            return JokerResult()
     if ctx.joker_main:
         x = card.ability.get("x_mult", 1)
         if x > 1:
