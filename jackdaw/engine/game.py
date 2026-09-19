@@ -1957,6 +1957,11 @@ def _joker_end_of_round_effects(gs: dict[str, Any]) -> dict[str, Any]:
     for mut in eor.get("mutations", []):
         if mut.get("hand_size_delta"):
             gs["hand_size"] = gs.get("hand_size", 8) + mut["hand_size_delta"]
+        # Gros Michel's self-destruct marks the species extinct
+        # (card.lua:3037): its no_pool_flag drops it from the Joker pool
+        # and Cavendish's yes_pool_flag admits Cavendish.
+        if mut.get("pool_flag"):
+            gs.setdefault("pool_flags", {})[mut["pool_flag"]] = True
         # Egg's round-end bump runs self:set_cost() (card.lua:2940) —
         # a set_cost trigger that restores a couponed buy cost too.
         for c in mut.get("set_cost_cards", []):

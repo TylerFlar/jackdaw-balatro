@@ -1832,9 +1832,8 @@ class TestCainoConsumableDestroyNotify:
 
 
 class TestEnhancementGatedJokersReachShop:
-    """Golden Ticket (and the other enhancement_gate jokers) never spawned
-    because the pool filter read a ``deck_enhancements`` key nothing wrote.
-    Shop pools must scan the run's playing cards (common_events.lua:2012)."""
+    """Shop Joker pools admit enhancement_gate jokers (Golden Ticket here) by
+    scanning the run's playing cards (common_events.lua:2012), issue #17."""
 
     @staticmethod
     def _first_shop_keys(seed: str, *, gold: bool) -> list[str]:
@@ -1854,3 +1853,81 @@ class TestEnhancementGatedJokersReachShop:
 
     def test_plain_deck_keeps_golden_ticket_out(self):
         assert "j_ticket" not in self._first_shop_keys("SHOP79", gold=False)
+
+
+# ---------------------------------------------------------------------------
+# Gros Michel extinction reaches the Joker pool (card.lua:3037)
+# ---------------------------------------------------------------------------
+
+
+class TestGrosMichelExtinctionFlag:
+    """Gros Michel's self-destruct writes ``gros_michel_extinct`` to
+    ``gs["pool_flags"]`` (card.lua:3037): Gros Michel leaves the Joker pool
+    and Cavendish (yes_pool_flag) enters it."""
+
+    @staticmethod
+    def _run_round_with_gros_michel(*, odds: int) -> dict[str, Any]:
+        from jackdaw.engine.card_factory import create_joker
+
+        gs = _init_gs("GM_FLAG")
+        gm = create_joker("j_gros_michel")
+        gm.ability["extra"]["odds"] = odds
+        gs["jokers"] = [gm]
+        step(gs, SelectBlind())
+        gs["blind"].chips = 1
+        step(gs, PlayHand(card_indices=(0, 1, 2, 3, 4)))
+        assert gs["phase"] == GamePhase.ROUND_EVAL
+        return gs
+
+    def test_extinction_sets_pool_flag_and_swaps_pool(self):
+        from jackdaw.engine.pools import get_current_pool
+        from jackdaw.engine.rng import PseudoRandom
+
+        gs = self._run_round_with_gros_michel(odds=1)  # roll < 1/1: always extinct
+        assert gs["jokers"] == []
+        assert gs["pool_flags"] == {"gros_michel_extinct": True}
+        pool, _ = get_current_pool(
+            "Joker", PseudoRandom("GM_POOL"), 1, rarity=1, pool_flags=gs["pool_flags"]
+        )
+        assert "j_cavendish" in pool
+        assert "j_gros_michel" not in pool
+
+    def test_survival_leaves_flag_unset(self):
+        gs = self._run_round_with_gros_michel(odds=10**9)
+        assert [j.center_key for j in gs["jokers"]] == ["j_gros_michel"]
+        assert gs["pool_flags"] == {}
+
+
+# ---------------------------------------------------------------------------
+# Showman re-admits held jokers to shop pools (common_events.lua:1987)
+# ---------------------------------------------------------------------------
+
+
+class TestShowmanReadmitsHeldJokerInShop:
+    """With a non-debuffed Showman on the board, a joker already held can be
+    drawn again for the shop; without Showman the used_jokers gate holds."""
+
+    @staticmethod
+    def _first_shop_keys(seed: str, *, showman: bool) -> list[str]:
+        from jackdaw.engine.card_factory import create_joker
+
+        gs = _init_gs(seed)
+        jokers = [create_joker("j_joker")]
+        if showman:
+            jokers.append(create_joker("j_ring_master"))
+        gs["jokers"] = jokers
+        for j in jokers:
+            gs["used_jokers"][j.center_key] = True
+        step(gs, SelectBlind())
+        gs["blind"].chips = 1
+        step(gs, PlayHand(card_indices=(0, 1, 2, 3, 4)))
+        step(gs, CashOut())
+        assert gs["phase"] == GamePhase.SHOP
+        return [c.center_key for c in gs["shop_cards"]]
+
+    def test_showman_puts_held_joker_in_first_shop(self):
+        # SHOW47's first shop draws the held j_joker again with Showman on the board.
+        assert "j_joker" in self._first_shop_keys("SHOW47", showman=True)
+
+    def test_without_showman_held_joker_stays_out(self):
+        assert "j_joker" not in self._first_shop_keys("SHOW47", showman=False)
