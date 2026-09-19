@@ -233,6 +233,35 @@ _RENTAL_THRESHOLD = 0.7
 _EP_KEY: dict[str, str] = {"shop": "etperpoll", "pack": "packetper"}
 _RENTAL_KEY: dict[str, str] = {"shop": "ssjr", "pack": "packssjr"}
 
+# Run-state areas that together hold every playing card the run owns —
+# the sim's equivalent of ``G.playing_cards``.
+_PLAYING_CARD_AREAS: tuple[str, ...] = ("deck", "hand", "discard_pile", "played_cards_area")
+
+
+def deck_enhancements_from_state(game_state: dict[str, Any]) -> set[str]:
+    """Enhancement center keys carried by the run's playing cards.
+
+    ``get_current_pool``'s ``enhancement_gate`` check (common_events.lua:
+    2012-2018) walks ``G.playing_cards`` — every playing card the run owns,
+    whichever zone it currently sits in — and admits a gated joker (Golden
+    Ticket, Steel Joker, Stone Joker, Lucky Cat, Glass Joker) only while
+    some card carries the gate's key.  Nothing in the engine ever wrote
+    ``gs["deck_enhancements"]``, so the gate always failed and those five
+    jokers could never enter a Joker pool (#17).
+
+    Scans the card areas live at pool-build time, like vanilla, and unions
+    in an explicit ``game_state["deck_enhancements"]`` for direct callers
+    that carry no card objects (oracle fixtures).
+    """
+    found: set[str] = set()
+    for area in _PLAYING_CARD_AREAS:
+        for card in game_state.get(area) or ():
+            key = getattr(card, "center_key", None) or ""
+            if key.startswith("m_"):
+                found.add(key)
+    found.update(game_state.get("deck_enhancements") or ())
+    return found
+
 
 def create_card(
     card_type: str,
@@ -300,6 +329,9 @@ def create_card(
         ``used_jokers``, ``used_vouchers``, ``banned_keys``, ``pool_flags``,
         ``has_showman``, ``deck_enhancements``, ``playing_card_count``,
         ``played_hand_types``, ``shop_vouchers``.
+        ``deck_enhancements`` is derived by :func:`deck_enhancements_from_state`
+        from the playing-card areas (``deck``, ``hand``, ``discard_pile``,
+        ``played_cards_area``); an explicit set is unioned in.
 
         Modifier-enable keys:
         ``enable_eternals_in_shop`` (bool), ``enable_perishables_in_shop``
@@ -361,7 +393,7 @@ def create_card(
             banned_keys=gs.get("banned_keys"),
             pool_flags=gs.get("pool_flags"),
             has_showman=gs.get("has_showman", False),
-            deck_enhancements=gs.get("deck_enhancements"),
+            deck_enhancements=deck_enhancements_from_state(gs),
             playing_card_count=gs.get("playing_card_count", 52),
             played_hand_types=gs.get("played_hand_types"),
             shop_vouchers=gs.get("shop_vouchers"),

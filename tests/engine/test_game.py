@@ -1824,3 +1824,33 @@ class TestCainoConsumableDestroyNotify:
         hand[1].set_base("S_J", "Spades", "Jack")
         step(gs, UseConsumable(card_index=0, target_indices=(0, 1)))
         assert caino.ability["caino_xmult"] == 3  # 1 + 1 per face
+
+
+# ---------------------------------------------------------------------------
+# Enhancement-gated jokers reach real shops (issue #17)
+# ---------------------------------------------------------------------------
+
+
+class TestEnhancementGatedJokersReachShop:
+    """Golden Ticket (and the other enhancement_gate jokers) never spawned
+    because the pool filter read a ``deck_enhancements`` key nothing wrote.
+    Shop pools must scan the run's playing cards (common_events.lua:2012)."""
+
+    @staticmethod
+    def _first_shop_keys(seed: str, *, gold: bool) -> list[str]:
+        gs = _init_gs(seed)
+        if gold:
+            gs["deck"][0].enhance("m_gold")
+        step(gs, SelectBlind())
+        gs["blind"].chips = 1
+        step(gs, PlayHand(card_indices=(0, 1, 2, 3, 4)))
+        step(gs, CashOut())
+        assert gs["phase"] == GamePhase.SHOP
+        return [c.center_key for c in gs["shop_cards"]]
+
+    def test_gold_card_puts_golden_ticket_in_first_shop(self):
+        # SHOP79's first shop draws j_ticket once the deck holds a Gold card.
+        assert "j_ticket" in self._first_shop_keys("SHOP79", gold=True)
+
+    def test_plain_deck_keeps_golden_ticket_out(self):
+        assert "j_ticket" not in self._first_shop_keys("SHOP79", gold=False)

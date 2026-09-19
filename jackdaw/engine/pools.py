@@ -95,7 +95,8 @@ def get_current_pool(
     has_showman:
         When True, duplicate-joker filtering is skipped.
     deck_enhancements:
-        Set of enhancement keys present on cards in the deck.  Required for
+        Set of enhancement keys carried by the run's playing cards, in any
+        zone (vanilla walks ``G.playing_cards``).  Required for
         ``enhancement_gate`` jokers.
     playing_card_count:
         Number of playing cards in the deck (unused in current filters but
