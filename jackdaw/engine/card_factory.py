@@ -233,6 +233,51 @@ _RENTAL_THRESHOLD = 0.7
 _EP_KEY: dict[str, str] = {"shop": "etperpoll", "pack": "packetper"}
 _RENTAL_KEY: dict[str, str] = {"shop": "ssjr", "pack": "packssjr"}
 
+# Run-state areas that together hold every playing card the run owns —
+# the sim's equivalent of ``G.playing_cards``.
+_PLAYING_CARD_AREAS: tuple[str, ...] = ("deck", "hand", "discard_pile", "played_cards_area")
+
+
+def deck_enhancements_from_state(game_state: dict[str, Any]) -> set[str]:
+    """Enhancement center keys carried by the run's playing cards.
+
+    ``get_current_pool``'s ``enhancement_gate`` check (common_events.lua:
+    2012-2018) walks ``G.playing_cards`` — every playing card the run owns,
+    whichever zone it currently sits in — and admits a gated joker (Golden
+    Ticket, Steel Joker, Stone Joker, Lucky Cat, Glass Joker) only while
+    some card carries the gate's key.
+
+    Scans the card areas live at pool-build time, like vanilla, and unions
+    in an explicit ``game_state["deck_enhancements"]`` for direct callers
+    that carry no card objects (oracle fixtures).
+    """
+    found: set[str] = set()
+    for area in _PLAYING_CARD_AREAS:
+        for card in game_state.get(area) or ():
+            key = getattr(card, "center_key", None) or ""
+            if key.startswith("m_"):
+                found.add(key)
+    found.update(game_state.get("deck_enhancements") or ())
+    return found
+
+
+def showman_active(game_state: dict[str, Any]) -> bool:
+    """True while a non-debuffed Showman sits on the joker board.
+
+    Both pool gates that Showman lifts — the run-wide duplicate exclusion
+    (common_events.lua:1987) and the Soul / Black Hole repeat guard
+    (common_events.lua:2100) — call ``find_joker("Showman")``, which skips
+    debuffed copies.  An explicit ``game_state["has_showman"]`` is honoured
+    for direct callers that carry no card objects.
+    """
+    if game_state.get("has_showman"):
+        return True
+    # Showman's center key is j_ring_master (game.lua:496).
+    return any(
+        getattr(j, "center_key", "") == "j_ring_master" and not getattr(j, "debuff", False)
+        for j in game_state.get("jokers") or ()
+    )
+
 
 def create_card(
     card_type: str,
@@ -300,6 +345,12 @@ def create_card(
         ``used_jokers``, ``used_vouchers``, ``banned_keys``, ``pool_flags``,
         ``has_showman``, ``deck_enhancements``, ``playing_card_count``,
         ``played_hand_types``, ``shop_vouchers``.
+        ``deck_enhancements`` is derived by :func:`deck_enhancements_from_state`
+        from the playing-card areas (``deck``, ``hand``, ``discard_pile``,
+        ``played_cards_area``); an explicit set is unioned in.
+        ``has_showman`` is derived by :func:`showman_active` from ``jokers``;
+        an explicit ``True`` is honoured.  ``shop_vouchers`` may hold Card
+        objects (run state) or keys.
 
         Modifier-enable keys:
         ``enable_eternals_in_shop`` (bool), ``enable_perishables_in_shop``
@@ -342,10 +393,7 @@ def create_card(
             rng,
             ante,
             used_jokers=gs.get("used_jokers"),
-            has_showman=any(
-                getattr(j, "center_key", "") == "j_showman" and not getattr(j, "debuff", False)
-                for j in gs.get("jokers", [])
-            ),
+            has_showman=showman_active(gs),
         )
 
     if key is None:
@@ -360,11 +408,13 @@ def create_card(
             used_vouchers=gs.get("used_vouchers"),
             banned_keys=gs.get("banned_keys"),
             pool_flags=gs.get("pool_flags"),
-            has_showman=gs.get("has_showman", False),
-            deck_enhancements=gs.get("deck_enhancements"),
+            has_showman=showman_active(gs),
+            deck_enhancements=deck_enhancements_from_state(gs),
             playing_card_count=gs.get("playing_card_count", 52),
             played_hand_types=gs.get("played_hand_types"),
-            shop_vouchers=gs.get("shop_vouchers"),
+            # Run state stores the displayed vouchers as Card objects
+            # (gs["shop_vouchers"]); the pool filter compares keys.
+            shop_vouchers={getattr(v, "center_key", v) for v in gs.get("shop_vouchers") or ()},
         )
 
     # ------------------------------------------------------------------

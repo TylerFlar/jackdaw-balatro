@@ -16,12 +16,15 @@ from jackdaw.engine.card_factory import (
     create_joker,
     create_playing_card,
     create_voucher,
+    deck_enhancements_from_state,
     resolve_create_descriptor,
     resolve_destroy_descriptor,
+    showman_active,
 )
 from jackdaw.engine.data.enums import Rank, Suit
 from jackdaw.engine.data.prototypes import JOKER_RARITY_POOLS, JOKERS, JokerProto
 from jackdaw.engine.rng import PseudoRandom
+from jackdaw.engine.run_init import initialize_run
 
 
 @pytest.fixture(autouse=True)
@@ -229,6 +232,140 @@ class TestCreateCardGameStateFiltering:
             game_state=_gs(banned_keys={normal}),
         ).center_key
         assert result != normal
+
+
+class TestCreateCardEnhancementGate:
+    """enhancement_gate jokers admit only while a run card carries the key (#17).
+
+    Vanilla walks ``G.playing_cards`` at pool-build time
+    (common_events.lua:2012-2018); the sim derives the same set from the
+    playing-card areas of the run state.
+    """
+
+    # Rarity-1 pool pick that lands on j_ticket once the gate opens.
+    GOLD_SEED = "GT89"
+
+    @staticmethod
+    def _card(enhancement: str = "c_base") -> Card:
+        return create_playing_card(Suit.HEARTS, Rank.ACE, enhancement=enhancement)
+
+    def _pick(self, seed: str, **areas) -> str:
+        return create_card(
+            "Joker",
+            PseudoRandom(seed),
+            1,
+            forced_rarity=1,
+            soulable=False,
+            game_state=_gs(**areas),
+        ).center_key
+
+    @pytest.mark.parametrize("area", ["deck", "hand", "discard_pile", "played_cards_area"])
+    def test_scan_reads_every_zone(self, area):
+        gs = _gs(**{area: [self._card("m_gold"), self._card()]})
+        assert deck_enhancements_from_state(gs) == {"m_gold"}
+
+    def test_plain_cards_yield_nothing(self):
+        gs = _gs(deck=[self._card(), self._card()], hand=[self._card()])
+        assert deck_enhancements_from_state(gs) == set()
+
+    def test_explicit_key_is_unioned_with_scan(self):
+        gs = _gs(deck=[self._card("m_gold")], deck_enhancements={"m_lucky"})
+        assert deck_enhancements_from_state(gs) == {"m_gold", "m_lucky"}
+
+    def test_initialized_run_state_is_scanned(self):
+        gs = initialize_run("b_red", 1, "GT_STATE")
+        assert deck_enhancements_from_state(gs) == set()
+        gs["deck"][0].enhance("m_gold")
+        gs["deck"][1].enhance("m_steel")
+        assert deck_enhancements_from_state(gs) == {"m_gold", "m_steel"}
+
+    def test_gold_card_admits_golden_ticket(self):
+        assert self._pick(self.GOLD_SEED, deck=[self._card("m_gold")]) == "j_ticket"
+
+    def test_gold_card_in_hand_admits_golden_ticket(self):
+        assert self._pick(self.GOLD_SEED, hand=[self._card("m_gold")]) == "j_ticket"
+
+    def test_plain_deck_never_yields_golden_ticket(self):
+        assert self._pick(self.GOLD_SEED, deck=[self._card()]) == "j_mystic_summit"
+        picks = {self._pick(f"GT{i}", deck=[self._card()]) for i in range(200)}
+        assert "j_ticket" not in picks
+
+
+class TestCreateCardShowman:
+    """Showman lifts the run-wide duplicate gate (common_events.lua:1987).
+
+    ``showman_active`` derives the flag from a non-debuffed ``j_ring_master``
+    on the joker board, with an explicit ``has_showman`` honoured.
+    """
+
+    # Rarity-1 pick that lands on the held j_joker once Showman lifts the gate.
+    SHOWMAN_SEED = "SM43"
+
+    @staticmethod
+    def _showman(*, debuff: bool = False) -> Card:
+        card = create_joker("j_ring_master")
+        card.debuff = debuff
+        return card
+
+    def _pick(self, seed: str, jokers: list[Card]) -> str:
+        return create_card(
+            "Joker",
+            PseudoRandom(seed),
+            1,
+            forced_rarity=1,
+            soulable=False,
+            game_state=_gs(jokers=jokers, used_jokers={"j_joker": True}),
+        ).center_key
+
+    def test_showman_active_reads_joker_board(self):
+        assert showman_active(_gs()) is False
+        assert showman_active(_gs(jokers=[create_joker("j_joker")])) is False
+        assert showman_active(_gs(jokers=[self._showman()])) is True
+
+    def test_debuffed_showman_is_inactive(self):
+        assert showman_active(_gs(jokers=[self._showman(debuff=True)])) is False
+
+    def test_explicit_flag_is_honoured(self):
+        assert showman_active(_gs(has_showman=True)) is True
+
+    def test_showman_readmits_held_joker(self):
+        assert self._pick(self.SHOWMAN_SEED, [self._showman()]) == "j_joker"
+
+    def test_debuffed_showman_keeps_held_joker_out(self):
+        assert self._pick(self.SHOWMAN_SEED, [self._showman(debuff=True)]) == "j_riff_raff"
+
+    def test_without_showman_held_joker_never_returns(self):
+        assert self._pick(self.SHOWMAN_SEED, []) == "j_riff_raff"
+        picks = {self._pick(f"SM{i}", []) for i in range(200)}
+        assert "j_joker" not in picks
+
+
+class TestCreateCardShopVoucherKeys:
+    """Run state keeps displayed vouchers as Cards; the pool filter wants keys.
+
+    ``create_card`` extracts the center key from each Card (plain keys pass
+    through) so a displayed voucher is excluded from a Voucher draw.
+    """
+
+    SEED = "VO0"  # draws v_seed_money from an unfiltered Voucher pool
+
+    def _pick(self, shop_vouchers) -> str:
+        return create_card(
+            "Voucher",
+            PseudoRandom(self.SEED),
+            1,
+            soulable=False,
+            game_state=_gs(shop_vouchers=shop_vouchers),
+        ).center_key
+
+    def test_unfiltered_draw(self):
+        assert self._pick([]) == "v_seed_money"
+
+    def test_displayed_voucher_card_is_excluded(self):
+        assert self._pick([Card(center_key="v_seed_money")]) == "v_magic_trick"
+
+    def test_plain_keys_still_excluded(self):
+        assert self._pick({"v_seed_money"}) == "v_magic_trick"
 
 
 # ============================================================================
