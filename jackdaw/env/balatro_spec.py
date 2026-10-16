@@ -123,11 +123,12 @@ def balatro_game_spec() -> GameSpec:
             needs_card_select=False,
             entity_type_index=SHOP_ITEM,
         ),
-        # 14: PickPackCard — target a pack card
+        # 14: PickPackCard — target a pack card + select cards (a targeting
+        # Tarot/Spectral is used on the dealt hand, like UseConsumable)
         ActionTypeSpec(
             "pick_pack_card",
             needs_entity_target=True,
-            needs_card_select=False,
+            needs_card_select=True,
             entity_type_index=PACK_CARD,
         ),
         # 15: SwapJokersLeft — target a joker

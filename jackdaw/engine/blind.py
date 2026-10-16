@@ -9,11 +9,17 @@ Source: blind.lua lines 5-751, blind chip target from misc_functions.lua:919.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Any
 
 from jackdaw.engine.data.blind_scaling import get_blind_amount
 from jackdaw.engine.data.prototypes import BLINDS
+
+
+def _truncate_chips(chips: float) -> int | float:
+    """``int()`` for a chip target, passing an overflowed (inf) one through."""
+    return int(chips) if math.isfinite(chips) else chips
 
 
 @dataclass
@@ -30,8 +36,9 @@ class Blind:
     name: str
     """Display name (e.g. ``"Small Blind"``, ``"The Hook"``)."""
 
-    chips: int
-    """Chip target to beat this blind."""
+    chips: int | float
+    """Chip target to beat this blind (``math.inf`` from ante 39 in endless
+    mode, where the target overflows a double)."""
 
     mult: float
     """Blind multiplier (Small=1, Big=1.5, Boss=2+)."""
@@ -85,7 +92,7 @@ class Blind:
         """
         proto = BLINDS[key]
         base = get_blind_amount(ante, scaling)
-        chip_target = int(base * proto.mult * ante_scaling)
+        chip_target = _truncate_chips(base * proto.mult * ante_scaling)
 
         dollars = proto.dollars
         if no_blind_reward:
@@ -461,11 +468,11 @@ class Blind:
             result["restore_hands"] = self.hands_sub
 
         if self.name == "The Wall":
-            self.chips = int(self.chips / 2)
+            self.chips = _truncate_chips(self.chips / 2)
             result["halve_chips"] = True
 
         if self.name == "Violet Vessel":
-            self.chips = int(self.chips / 3)
+            self.chips = _truncate_chips(self.chips / 3)
             result["halve_chips"] = True
 
         if self.name == "Cerulean Bell":
@@ -490,6 +497,16 @@ class Blind:
         if self.name and self.name != "":
             return "Boss"
         return ""
+
+    def beaten_by(self, chips: float) -> bool:
+        """Vanilla's win check, ``G.GAME.chips - G.GAME.blind.chips >= 0``
+        (state_events.lua:96, game.lua:3196).
+
+        Written as a subtraction, an overflowed target can never be met:
+        ``inf - inf`` is NaN, so even an infinite score fails.  A plain
+        ``chips >= self.chips`` would let an inf score beat an inf blind.
+        """
+        return math.isfinite(self.chips) and chips >= self.chips
 
     def __repr__(self) -> str:
         return (

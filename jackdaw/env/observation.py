@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import math
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -20,8 +21,9 @@ import numpy as np
 
 from jackdaw.engine.actions import GamePhase
 from jackdaw.engine.card import Card
-from jackdaw.engine.consumables import can_use_consumable
+from jackdaw.engine.consumables import consumable_block_reason
 from jackdaw.engine.data.hands import HAND_BASE, HandType
+from jackdaw.engine.economy import can_afford
 from jackdaw.engine.hand_eval import (
     get_best_hand,
     get_hand_eval_flags,
@@ -305,6 +307,21 @@ def _log_scale_arr(arr: np.ndarray) -> np.ndarray:
     return signs * np.log2(1.0 + np.abs(arr))
 
 
+_MAX_FLOAT = sys.float_info.max
+
+
+def _finite(x: float) -> float:
+    """Clamp an overflowed chip count to the largest double.
+
+    Endless mode overflows blind targets (ante 39+) and big scores to inf
+    (vanilla's "naneinf"); features built from them must stay finite for
+    the network.  NaN counts as overflowed.
+    """
+    if math.isfinite(x):
+        return x
+    return -_MAX_FLOAT if x < 0 else _MAX_FLOAT
+
+
 def _edition_idx(edition: dict[str, Any] | None) -> int:
     """Map edition dict to integer index."""
     if not edition:
@@ -475,20 +492,10 @@ def encode_consumable(
     v[1] = _CARD_SET_IDX.get(card_set, 0) / 9.0
     v[2] = _log_scale(card.sell_cost)
 
-    # can_use — check without highlighting (conservative: some need targets)
-
-    hand_cards: list[Card] = gs.get("hand", [])
-    jokers: list[Card] = gs.get("jokers", [])
-    consumables: list[Card] = gs.get("consumables", [])
-    can_use = can_use_consumable(
-        card,
-        hand_cards=hand_cards,
-        jokers=jokers,
-        consumables=consumables,
-        consumable_limit=gs.get("consumable_slots", 2),
-        joker_limit=gs.get("joker_slots", 5),
-    )
-    v[3] = float(can_use)
+    # can_use — usable now with some legal selection; the same gate as the
+    # UseConsumable mask, so a targeting tarot reads usable when the hand
+    # can satisfy it.
+    v[3] = float(consumable_block_reason(card, gs) is None)
 
     # Targeting info from consumable config
     cfg = card.ability.get("consumeable", {})
@@ -529,8 +536,7 @@ def encode_shop_item(
     v[1] = _CARD_SET_IDX.get(card_set, 0) / 9.0
     v[2] = _log_scale(card.cost)
 
-    dollars = gs.get("dollars", 0)
-    v[3] = float(card.cost <= dollars)
+    v[3] = float(can_afford(gs, card.cost))
 
     # Has slot check
     jokers: list[Card] = gs.get("jokers", [])
@@ -722,8 +728,8 @@ def encode_global_context(
     rr = gs.get("round_resets", {})
     cr = gs.get("current_round", {})
     blind = gs.get("blind")
-    blind_chips = getattr(blind, "chips", 0) if blind else 0
-    chips = gs.get("chips", 0)
+    blind_chips = _finite(getattr(blind, "chips", 0) if blind else 0)
+    chips = _finite(gs.get("chips", 0))
     blind_key = getattr(blind, "key", "") if blind else ""
 
     v[10] = rr.get("ante", 1) / 8.0

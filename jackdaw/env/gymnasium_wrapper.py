@@ -4,11 +4,13 @@ Flattens the factored action space into a ``Discrete(MAX_ACTIONS)`` space by
 enumerating all legal :class:`FactoredAction` instances each step.  Exposes an
 ``action_masks()`` method so ``sb3_contrib.MaskablePPO`` can mask illegal slots.
 
+The reward is pluggable: pass ``reward_fn`` (see :mod:`jackdaw.env.rewards`).
+
 Example::
 
-    from jackdaw.env import BalatroGymnasiumEnv, DirectAdapter
+    from jackdaw.env import BalatroGymnasiumEnv, DirectAdapter, ShapedReward
 
-    env = BalatroGymnasiumEnv(adapter_factory=DirectAdapter)
+    env = BalatroGymnasiumEnv(adapter_factory=DirectAdapter, reward_fn=ShapedReward())
     obs, info = env.reset()
     mask = env.action_masks()
 """
@@ -28,6 +30,7 @@ from jackdaw.env.balatro_env import BalatroEnvironment
 from jackdaw.env.balatro_spec import balatro_game_spec
 from jackdaw.env.game_interface import GameAdapter
 from jackdaw.env.game_spec import FactoredAction, GameActionMask, GameObservation
+from jackdaw.env.rewards import RewardFn, ShapedReward, Transition, sparse_reward
 
 MAX_ACTIONS: int = 500
 CARD_COMBO_BUDGET: int = 200
@@ -43,12 +46,18 @@ _SIMPLE_TYPES: frozenset[int] = frozenset(
     for i, at in enumerate(_SPEC.action_types)
     if not at.needs_entity_target and not at.needs_card_select
 )
-# Entity-only action types (entity target, no card select) — excludes UseConsumable
+# Entity-only action types (entity target, no card select)
 _ENTITY_ONLY_TYPES: frozenset[int] = frozenset(
     i
     for i, at in enumerate(_SPEC.action_types)
     if at.needs_entity_target and not at.needs_card_select
 )
+# Entity + optional card select — the game_state list each entity indexes.
+# A targeting Tarot/Spectral takes card targets; anything else takes none.
+_TARGETED_ENTITY_SOURCES: dict[int, str] = {
+    ActionType.UseConsumable: "consumables",
+    ActionType.PickPackCard: "pack_cards",
+}
 # Card-only action types (card select, no entity) — PlayHand, Discard
 _CARD_ONLY_TYPES: frozenset[int] = frozenset(
     i
@@ -86,12 +95,20 @@ class BalatroGymnasiumEnv(gymnasium.Env):
     ----------
     adapter_factory:
         Callable that creates a fresh :class:`GameAdapter`.
-    back_keys, stakes, max_steps, seed_prefix:
-        Forwarded to :class:`BalatroEnvironment`.
+    back_keys, stakes, max_steps, seed_prefix, end_on_win:
+        Forwarded to :class:`BalatroEnvironment`.  ``end_on_win`` (default
+        True) ends the episode when the run is won; pass False to play on
+        into endless mode.
+    reward_fn:
+        ``reward_fn(transition) -> float``, called once per step with a
+        :class:`~jackdaw.env.rewards.Transition`.  If it has a ``reset()``
+        method, that is called on every :meth:`reset`.  See
+        :mod:`jackdaw.env.rewards` for the built-in examples and how to
+        write your own.
     reward_shaping:
-        If True, use dense multi-signal reward: blind-beaten bonuses scaled
-        by ante, score-progress within blinds, efficient-clear bonuses, and
-        reduced terminal rewards.  When False, use sparse ±1.0 at terminal.
+        Shorthand when ``reward_fn`` is not given: True selects
+        :class:`~jackdaw.env.rewards.ShapedReward`, False (default)
+        :func:`~jackdaw.env.rewards.sparse_reward`.
     """
 
     metadata: dict[str, Any] = {"render_modes": []}
@@ -104,6 +121,8 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         max_steps: int = 10_000,
         seed_prefix: str = "TRAIN",
         reward_shaping: bool = False,
+        reward_fn: RewardFn | None = None,
+        end_on_win: bool = True,
     ) -> None:
         super().__init__()
         self._inner = BalatroEnvironment(
@@ -112,8 +131,13 @@ class BalatroGymnasiumEnv(gymnasium.Env):
             stakes=stakes,
             max_steps=max_steps,
             seed_prefix=seed_prefix,
+            end_on_win=end_on_win,
         )
-        self._reward_shaping = reward_shaping
+        if reward_fn is not None and reward_shaping:
+            raise ValueError("Pass either reward_fn or reward_shaping=True, not both")
+        if reward_fn is None:
+            reward_fn = ShapedReward() if reward_shaping else sparse_reward
+        self.reward_fn: RewardFn = reward_fn
 
         # Observation space
         obs_spaces: dict[str, spaces.Space] = {
@@ -141,11 +165,8 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         # Internal state
         self._action_table: list[FactoredAction] = []
         self._rng = np.random.default_rng()
-        self._prev_ante: int = 1
-        self._prev_round: int = 0
-        self._prev_chips: int = 0
         self._episode_max_ante: int = 1
-        self._episode_max_round: int = 0
+        self._episode_blinds_beaten: int = 0
 
     # ------------------------------------------------------------------
     # Gymnasium API
@@ -166,11 +187,11 @@ class BalatroGymnasiumEnv(gymnasium.Env):
             kwargs["seed"] = str(seed)
 
         game_obs, game_mask, info = self._inner.reset(**kwargs)
-        self._prev_ante = self._inner.episode_ante
-        self._prev_round = 0
-        self._prev_chips = 0
-        self._episode_max_ante = 1
-        self._episode_max_round = 0
+        self._episode_max_ante = self._inner.episode_ante
+        self._episode_blinds_beaten = 0
+        reward_reset = getattr(self.reward_fn, "reset", None)
+        if callable(reward_reset):
+            reward_reset()
         self._action_table = self._enumerate_actions(game_mask, info)
         obs = self._build_obs(game_obs)
         return obs, {"action_mask": self.action_masks()}
@@ -179,7 +200,13 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         factored = self._action_table[action]
         game_obs, terminated, truncated, game_mask, info = self._inner.step(factored)
 
-        reward = self._compute_reward(info, terminated, truncated)
+        transition = Transition.from_step(factored, terminated, truncated, info)
+        reward = self._compute_reward(transition)
+
+        # Episode stats, tracked whatever the reward function
+        self._episode_max_ante = max(self._episode_max_ante, transition.curr.ante)
+        if transition.blind_beaten:
+            self._episode_blinds_beaten += 1
 
         # Rebuild action table for next step
         if not (terminated or truncated):
@@ -191,7 +218,7 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         step_info: dict[str, Any] = {"action_mask": self.action_masks()}
         if terminated or truncated:
             step_info["balatro/ante_reached"] = self._episode_max_ante
-            step_info["balatro/rounds_beaten"] = self._episode_max_round
+            step_info["balatro/rounds_beaten"] = self._episode_blinds_beaten
             step_info["balatro/won"] = self._inner.episode_won
         return obs, reward, terminated, truncated, step_info
 
@@ -205,53 +232,10 @@ class BalatroGymnasiumEnv(gymnasium.Env):
     # Internals
     # ------------------------------------------------------------------
 
-    def _compute_reward(self, info: dict[str, Any], terminated: bool, truncated: bool) -> float:
-        """Compute step reward from game state deltas."""
-        if not self._reward_shaping:
-            if terminated or truncated:
-                return 1.0 if self._inner.episode_won else -1.0
-            return 0.0
-
-        gs: dict[str, Any] = info.get("raw_state", {})
-        phase = gs.get("phase")
-
-        # Step cost — discourages stalling; doubled in shop phase
-        reward = -0.002 if phase == "shop" else -0.001
-
-        ante = gs.get("round_resets", {}).get("ante", 1)
-        round_num = gs.get("round", 0)
-        chips = gs.get("chips", 0)
-        ante_scale = ante / 8.0
-
-        # 1. Blind beaten: round increased → +0.15 * ante_scale
-        if round_num > self._prev_round:
-            reward += 0.15 * ante_scale
-            # 2. Boss blind beaten (ante increased) → extra +0.1 * ante_scale
-            if ante > self._prev_ante:
-                reward += 0.1 * ante_scale
-            # 3. Efficient clear: hands remaining bonus
-            hands_left = gs.get("current_round", {}).get("hands_left", 0)
-            reward += 0.01 * hands_left
-
-        # 4. Score progress within a blind: chips gained toward target
-        blind = gs.get("blind")
-        blind_target = getattr(blind, "chips", 0) if blind is not None else 0
-        if blind_target > 0 and chips > self._prev_chips:
-            chip_delta = chips - self._prev_chips
-            reward += 0.02 * min(chip_delta / blind_target, 1.0)
-
-        # 5. Terminal
-        if terminated or truncated:
-            reward += 0.5 if self._inner.episode_won else -0.2
-
-        # Update trackers
-        self._prev_round = round_num
-        self._prev_ante = ante
-        self._prev_chips = chips
-        self._episode_max_ante = max(self._episode_max_ante, ante)
-        self._episode_max_round = max(self._episode_max_round, round_num)
-
-        return reward
+    def _compute_reward(self, transition: Transition) -> float:
+        """Reward for one step.  Delegates to :attr:`reward_fn`; prefer
+        passing a ``reward_fn`` over overriding this."""
+        return float(self.reward_fn(transition))
 
     def _build_obs(self, game_obs: GameObservation) -> dict[str, np.ndarray]:
         obs: dict[str, np.ndarray] = {
@@ -300,15 +284,15 @@ class BalatroGymnasiumEnv(gymnasium.Env):
                 for combo in combos:
                     actions.append(FactoredAction(action_type=t, card_target=combo))
 
-            # --- UseConsumable (entity + optional cards) ---
-            elif t == ActionType.UseConsumable:
+            # --- Entity + optional cards (UseConsumable / PickPackCard) ---
+            elif t in _TARGETED_ENTITY_SOURCES:
                 if t in mask.entity_masks:
                     legal_entities = np.nonzero(mask.entity_masks[t])[0]
-                    raw_consumables = info.get("raw_state", {}).get("consumables", [])
-                    for c_idx in legal_entities:
-                        c_idx_int = int(c_idx)
-                        if c_idx_int < len(raw_consumables):
-                            card = raw_consumables[c_idx_int]
+                    source = info.get("raw_state", {}).get(_TARGETED_ENTITY_SOURCES[t], [])
+                    for e_idx in legal_entities:
+                        e_idx_int = int(e_idx)
+                        if e_idx_int < len(source):
+                            card = source[e_idx_int]
                             min_cards, max_cards, needs = get_consumable_target_info(card)
                             if needs:
                                 legal_cards = np.nonzero(mask.card_mask)[0]
@@ -318,13 +302,13 @@ class BalatroGymnasiumEnv(gymnasium.Env):
                                     actions.append(
                                         FactoredAction(
                                             action_type=t,
-                                            entity_target=c_idx_int,
+                                            entity_target=e_idx_int,
                                             card_target=combo,
                                         )
                                     )
                             else:
                                 actions.append(
-                                    FactoredAction(action_type=t, entity_target=c_idx_int)
+                                    FactoredAction(action_type=t, entity_target=e_idx_int)
                                 )
 
         # Subsample to budget if needed

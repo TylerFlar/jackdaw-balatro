@@ -153,8 +153,9 @@ class Back:
 
                 Kwargs: ``chips`` (float), ``mult`` (float).
 
-                Return shape: ``{'chips': int, 'mult': int}`` — both set to
-                ``floor((chips + mult) / 2)`` for Plasma Deck.
+                Return shape: ``{'chips': float, 'mult': float}`` — both set
+                to ``floor((chips + mult) / 2)`` for Plasma Deck (a double,
+                as in Lua).
 
             ``'eval'``
                 Called after blind evaluation (boss-blind defeat check).
@@ -175,7 +176,11 @@ class Back:
             chips: float = kwargs["chips"]
             mult: float = kwargs["mult"]
             total = chips + mult
-            averaged = math.floor(total / 2)
+            # Lua's math.floor returns a double and passes inf through; an
+            # int here would turn chips x mult into exact big-int math that
+            # never overflows the way vanilla's score does.
+            half = total / 2
+            averaged = float(math.floor(half)) if math.isfinite(half) else half
             return {"chips": averaged, "mult": averaged}
 
         # -- Anaglyph Deck: create Double Tag on boss defeat --

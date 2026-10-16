@@ -15,9 +15,10 @@ import random
 import numpy as np
 import pytest
 
+from jackdaw.engine.actions import GamePhase
 from jackdaw.env.action_space import ActionMask, ActionType, FactoredAction
 from jackdaw.env.balatro_env import BalatroEnvironment
-from jackdaw.env.game_interface import DirectAdapter
+from jackdaw.env.game_interface import DirectAdapter, GameState
 from jackdaw.env.game_spec import GameActionMask, GameEnvironment, GameObservation
 from jackdaw.env.observation import Observation
 
@@ -110,6 +111,53 @@ class TestStep:
         action = _pick_valid_action(game_mask, info)
         env.step(action)
         assert env.episode_length == 1
+
+    def test_info_snapshots_before_and_after(self, env: BalatroEnvironment) -> None:
+        """raw_state is the live engine dict, mutated in place by step(), so
+        the before-state has to be a snapshot taken ahead of the action."""
+        _, _, info = env.reset()
+        assert isinstance(info["state"], GameState)
+        assert info["state"].phase == GamePhase.BLIND_SELECT
+
+        _, _, _, _, info = env.step(FactoredAction(action_type=ActionType.SelectBlind))
+        assert info["prev_state"].phase == GamePhase.BLIND_SELECT
+        assert info["prev_state"].round == 0
+        assert info["state"].phase == GamePhase.SELECTING_HAND
+        assert info["state"].round == 1
+        assert info["raw_state"]["round"] == 1
+
+
+class TestEndOnWin:
+    """Beating the ante-8 boss ends the episode by default, as vanilla's
+    win screen does; end_on_win=False plays on into endless mode."""
+
+    @staticmethod
+    def _win_run(env: BalatroEnvironment) -> tuple[bool, dict]:
+        env.reset()
+        gs = env._adapter.raw_state
+        gs["round_resets"]["ante"] = 8
+        gs["round_resets"]["blind_choices"]["Boss"] = "bl_wall"  # no side effects
+        gs["blind_on_deck"] = "Boss"
+        env.step(FactoredAction(action_type=ActionType.SelectBlind))
+        gs["blind"].chips = 1
+        _, terminated, _, _, info = env.step(
+            FactoredAction(action_type=ActionType.PlayHand, card_target=(0, 1, 2, 3, 4))
+        )
+        return terminated, info
+
+    def test_won_run_ends_the_episode(self) -> None:
+        env = BalatroEnvironment(adapter_factory=DirectAdapter)
+        terminated, info = self._win_run(env)
+        assert info["state"].won
+        assert env.episode_won
+        assert terminated
+
+    def test_end_on_win_false_continues_into_endless(self) -> None:
+        env = BalatroEnvironment(adapter_factory=DirectAdapter, end_on_win=False)
+        terminated, info = self._win_run(env)
+        assert info["state"].won
+        assert not terminated
+        assert info["state"].phase == GamePhase.ROUND_EVAL
 
 
 class TestIntegration:

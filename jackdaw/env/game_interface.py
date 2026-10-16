@@ -18,7 +18,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
+import numpy as np
+
 from jackdaw.engine.actions import Action, GamePhase
+from jackdaw.env.action_space import ActionMask, ActionType
 
 # ---------------------------------------------------------------------------
 # GameState — lightweight frozen snapshot
@@ -188,6 +191,31 @@ class DirectAdapter:
 # BridgeAdapter — wraps any Backend (SimBackend or LiveBackend)
 # ---------------------------------------------------------------------------
 
+# The balatrobot endpoint each factored action type is sent to.
+_BOT_METHOD_FOR_ACTION: dict[ActionType, str] = {
+    ActionType.PlayHand: "play",
+    ActionType.Discard: "discard",
+    ActionType.SelectBlind: "select",
+    ActionType.SkipBlind: "skip",
+    ActionType.CashOut: "cash_out",
+    ActionType.Reroll: "reroll",
+    ActionType.NextRound: "next_round",
+    ActionType.SkipPack: "pack",
+    ActionType.BuyCard: "buy",
+    ActionType.SellJoker: "sell",
+    ActionType.SellConsumable: "sell",
+    ActionType.UseConsumable: "use",
+    ActionType.RedeemVoucher: "buy",
+    ActionType.OpenBooster: "buy",
+    ActionType.PickPackCard: "pack",
+    ActionType.SwapJokersLeft: "rearrange",
+    ActionType.SwapJokersRight: "rearrange",
+    ActionType.SwapHandLeft: "rearrange",
+    ActionType.SwapHandRight: "rearrange",
+    ActionType.SortHandRank: "rearrange",
+    ActionType.SortHandSuit: "rearrange",
+}
+
 
 class BridgeAdapter:
     """Adapter that wraps a :class:`~jackdaw.bridge.backend.Backend`.
@@ -239,18 +267,45 @@ class BridgeAdapter:
         return _snapshot(self._last_gs)
 
     def get_legal_actions(self) -> list[Action]:
-        from jackdaw.bridge.backend import SimBackend
+        """Legal actions the balatrobot protocol will execute.
 
-        # Fast path: SimBackend has the live engine state
-        if isinstance(self._backend, SimBackend) and self._backend._gs is not None:
-            from jackdaw.engine.actions import get_legal_actions as engine_legal
-
-            return engine_legal(self._backend._gs)
-
-        # Slow path: reconstruct from JSON response
+        The engine follows vanilla, which allows more than balatrobot's
+        endpoints accept (e.g. using a consumable while a pack is open).
+        """
+        from jackdaw.bridge.balatrobot_adapter import bot_accepts
         from jackdaw.engine.actions import get_legal_actions as engine_legal
 
-        return engine_legal(self._last_gs)
+        gs = self.raw_state
+        return [a for a in engine_legal(gs) if bot_accepts(a, gs)]
+
+    def restrict_mask(self, mask: ActionMask) -> ActionMask:
+        """Narrow an action mask to what the balatrobot protocol will
+        execute in the current state.
+
+        :class:`~jackdaw.env.balatro_env.BalatroEnvironment` calls this on
+        adapters that define it, so agents playing over the bridge are never
+        offered an action the bot refuses.
+        """
+        from jackdaw.bridge.balatrobot_adapter import bot_refusal
+
+        gs = self.raw_state
+        for type_idx in np.nonzero(mask.type_mask)[0]:
+            at = ActionType(int(type_idx))
+            method = _BOT_METHOD_FOR_ACTION[at]
+            if at == ActionType.UseConsumable:
+                # Judged per consumable: use.lua refuses card-selecting
+                # ones outside SELECTING_HAND.
+                entity_mask = mask.entity_masks[at]
+                for i in np.nonzero(entity_mask)[0]:
+                    if bot_refusal(method, {"consumable": int(i)}, gs) is not None:
+                        entity_mask[i] = False
+                usable = bool(entity_mask.any())
+            else:
+                usable = bot_refusal(method, {}, gs) is None
+            if not usable:
+                mask.type_mask[at] = False
+                mask.entity_masks.pop(at, None)
+        return mask
 
     @property
     def raw_state(self) -> dict[str, Any]:

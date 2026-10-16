@@ -121,11 +121,6 @@ class ConsumableResult:
     money_set: int | None = None
     """Wraith sets money to 0."""
 
-    notify_jokers_consumeable: bool = False
-    """When True, the state machine must call calculate_joker with
-    {using_consumeable=True, consumeable=card} on each joker after applying
-    this result.  Set for all Planet uses (Constellation, Glass Joker, etc.)."""
-
 
 # ---------------------------------------------------------------------------
 # Handler registry
@@ -211,10 +206,9 @@ def pack_pick_block_reason(
       consumable slot, and The Fool a consumable slot *plus* a prior
       tarot/planet that is not itself a Fool (``card.lua:1550-1563``).
 
-    The decision for consumables is delegated to
-    :func:`can_use_consumable`, which is the same predicate vanilla's use
-    button consults — so the pack gate can never drift from the tray gate.
-    The message is diagnostic only.
+    Consumables are judged by :func:`consumable_block_reason`, the same
+    gate an owned consumable is used through — so the pack gate can never
+    drift from the tray gate.  The message is diagnostic only.
 
     Shared by the ``PickPackCard`` executor and the action mask: an action
     the mask offers must never raise, and both sides move together.
@@ -232,20 +226,38 @@ def pack_pick_block_reason(
     if card_set not in ("Tarot", "Planet", "Spectral"):
         return None  # playing cards out of a standard pack: nowhere to be full
 
+    return consumable_block_reason(card, gs, targets)
+
+
+def consumable_block_reason(
+    card: Any, gs: dict[str, Any], targets: tuple[int, ...] | None = None
+) -> str | None:
+    """Why consumable *card* cannot be used right now, else ``None``.
+
+    Covers an owned consumable in the tray and one picked from an open
+    pack alike.  *targets* is the caller's explicit hand selection;
+    without one, the selection :func:`default_use_targets` would choose is
+    judged, so a pass guarantees a targetless use with that default works.
+
+    Judging against the current hand is all vanilla's state gate needs
+    here: hand-dependent consumables are usable only in SELECTING_HAND or
+    a Tarot/Spectral/Planet pack (card.lua:1564), and outside those the
+    hand is empty.  The message is diagnostic only.
+    """
     key = getattr(card, "center_key", "") or ""
     consumables = gs.get("consumables", [])
     consumable_limit = gs.get("consumable_slots", 2)
 
     # One predicate governs every consumable, evaluated against the
-    # selection the pick would actually be used with: the caller's
+    # selection the use would actually be made with: the caller's
     # explicit targets, or the same default the executor would choose.
     # Anything narrower drifts — a key-list gate here once let the
     # hand-size spectrals (c_familiar/c_grim/c_immolate...) be offered
     # on an empty hand, and let targeting picks be offered when the
     # dealt hand could not satisfy min_highlighted.
-    selection = targets if targets is not None else pack_pick_default_targets(card, gs)
-    if selection is None and targets is None and _pick_needs_targets(card):
-        return f"{key}: no legal target in the dealt hand"
+    selection = targets if targets is not None else default_use_targets(card, gs)
+    if selection is None and targets is None and _needs_targets(card):
+        return f"{key}: no legal target in hand"
 
     hand = gs.get("hand", [])
     highlighted = [hand[i] for i in (selection or ()) if 0 <= i < len(hand)]
@@ -270,7 +282,7 @@ def pack_pick_block_reason(
         return f"{key}: no tarot or planet to copy"
     if key in _NEED_HAND_CARDS:
         return f"{key}: needs more than one card in hand"
-    return f"{key}: not usable on the dealt hand"
+    return f"{key}: not usable on the current hand"
 
 
 # Cards whose selection requirement is special-cased inside
@@ -279,8 +291,8 @@ def pack_pick_block_reason(
 _SPECIAL_SELECTION_MIN = {"c_aura": 1}
 
 
-def _pick_selection_size(card: Any) -> int | None:
-    """How many hand cards this pack pick is used against, else ``None``."""
+def _selection_size(card: Any) -> int | None:
+    """How many hand cards this consumable is used against, else ``None``."""
     key = getattr(card, "center_key", "") or ""
     if key in _SPECIAL_SELECTION_MIN:
         return _SPECIAL_SELECTION_MIN[key]
@@ -293,25 +305,26 @@ def _pick_selection_size(card: Any) -> int | None:
     return None
 
 
-def _pick_needs_targets(card: Any) -> bool:
-    """True if this pack card is used against a highlighted selection."""
-    return _pick_selection_size(card) is not None
+def _needs_targets(card: Any) -> bool:
+    """True if this consumable is used against a highlighted selection."""
+    return _selection_size(card) is not None
 
 
-def pack_pick_default_targets(card: Any, gs: dict[str, Any]) -> tuple[int, ...] | None:
-    """The hand selection a bare (targetless) pack pick will be used with.
+def default_use_targets(card: Any, gs: dict[str, Any]) -> tuple[int, ...] | None:
+    """The hand selection a bare (targetless) use of *card* is made with.
 
-    ``None`` for picks that take no selection, and for targeting picks
-    with no legal selection at all.  The action mask and the executor
-    both route through this, so the selection the mask judged legal is
-    the selection the pick is made with — they cannot disagree.
+    Applies to pack picks and owned consumables alike.  ``None`` for
+    consumables that take no selection, and for targeting ones with no
+    legal selection at all.  The action mask and the executor both route
+    through this, so the selection the mask judged legal is the selection
+    the use is made with — they cannot disagree.
 
     Prefers the lowest indices (the historical "first ``min_h`` cards"
     default) and only searches further when that selection is invalid —
     ``c_aura`` on an already-editioned first card being the case that
     forced the search.
     """
-    min_h = _pick_selection_size(card)
+    min_h = _selection_size(card)
     if min_h is None:
         return None
     hand = gs.get("hand", [])
@@ -820,10 +833,7 @@ def _make_planet_handler(hand_type: str) -> ConsumableHandler:
 
     def handler(card: Card, ctx: ConsumableContext) -> ConsumableResult:
         _track_planet_usage(card, ctx)
-        return ConsumableResult(
-            level_up=[(hand_type, 1)],
-            notify_jokers_consumeable=True,
-        )
+        return ConsumableResult(level_up=[(hand_type, 1)])
 
     return handler
 
@@ -838,14 +848,12 @@ def _black_hole(card: Card, ctx: ConsumableContext) -> ConsumableResult:
 
     Source: card.lua:1175 — iterates G.GAME.hands and calls level_up_hand.
     Usage totals are tracked centrally in use_consumable.
+
+    Black Hole is a Spectral, so it never becomes The Fool's target:
+    set_consumeable_usage only writes last_tarot_planet for Tarot and
+    Planet centers (misc_functions.lua:1212).
     """
-    gs = ctx.game_state
-    if gs is not None:
-        gs["last_tarot_planet"] = card.center_key
-    return ConsumableResult(
-        level_up=[(ht, 1) for ht in _ALL_HAND_TYPES],
-        notify_jokers_consumeable=True,
-    )
+    return ConsumableResult(level_up=[(ht, 1) for ht in _ALL_HAND_TYPES])
 
 
 # ---------------------------------------------------------------------------

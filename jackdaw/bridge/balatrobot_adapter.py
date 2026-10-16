@@ -133,6 +133,69 @@ def action_to_rpc(action: Action, game_state: dict[str, Any] | None = None) -> d
 
 
 # ---------------------------------------------------------------------------
+# What live balatrobot will execute
+# ---------------------------------------------------------------------------
+
+# Game states each balatrobot endpoint accepts, in its declared order
+# (``requires_state`` in balatrobot's src/lua/endpoints/*.lua).  The engine
+# follows vanilla, which allows more: consumables can also be used at blind
+# select, on the cash-out screen and while a pack is open, and sold at
+# blind select and while a pack is open.  Anything sent over the bridge
+# has to stay inside these.
+BOT_METHOD_PHASES: dict[str, tuple[GamePhase, ...]] = {
+    "play": (GamePhase.SELECTING_HAND,),
+    "discard": (GamePhase.SELECTING_HAND,),
+    "select": (GamePhase.BLIND_SELECT,),
+    "skip": (GamePhase.BLIND_SELECT,),
+    "cash_out": (GamePhase.ROUND_EVAL,),
+    "buy": (GamePhase.SHOP,),
+    "reroll": (GamePhase.SHOP,),
+    "next_round": (GamePhase.SHOP,),
+    "pack": (GamePhase.PACK_OPENING,),
+    "sell": (GamePhase.SELECTING_HAND, GamePhase.SHOP),
+    "use": (GamePhase.SELECTING_HAND, GamePhase.SHOP),
+    "rearrange": (GamePhase.SELECTING_HAND, GamePhase.SHOP, GamePhase.PACK_OPENING),
+}
+
+_BOT_STATE_NAMES: dict[GamePhase, str] = {phase: name for name, phase in _STATE_MAP.items()}
+
+
+def bot_refusal(method: str, params: dict[str, Any], game_state: dict[str, Any]) -> str | None:
+    """Why live balatrobot would refuse this call in the current state, else None.
+
+    Mirrors its dispatcher's state gate, plus the one state rule inside an
+    endpoint: a consumable that needs card selection can only be used in
+    SELECTING_HAND (use.lua).  Messages match balatrobot's.
+    """
+    phase = game_state.get("phase")
+    allowed = BOT_METHOD_PHASES.get(method)
+    if allowed is not None and phase not in allowed:
+        states = ", ".join(_BOT_STATE_NAMES[p] for p in allowed)
+        return f"Method '{method}' requires one of these states: {states}"
+
+    if method == "use" and phase != GamePhase.SELECTING_HAND:
+        from jackdaw.engine.consumables import _resolve_consumable_config
+
+        consumables = game_state.get("consumables", [])
+        idx = params.get("consumable", -1)
+        if 0 <= idx < len(consumables):
+            card = consumables[idx]
+            if _resolve_consumable_config(card).get("max_highlighted") is not None:
+                name = card.ability.get("name", card.center_key)
+                return (
+                    f"Consumable '{name}' requires card selection and can only be"
+                    " used in SELECTING_HAND state"
+                )
+    return None
+
+
+def bot_accepts(action: Action, game_state: dict[str, Any]) -> bool:
+    """Whether live balatrobot would execute *action* in the current state."""
+    rpc = action_to_rpc(action, game_state)
+    return bot_refusal(rpc["method"], rpc["params"], game_state) is None
+
+
+# ---------------------------------------------------------------------------
 # Balatrobot state → game_state
 # ---------------------------------------------------------------------------
 

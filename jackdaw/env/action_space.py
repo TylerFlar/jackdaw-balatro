@@ -105,9 +105,11 @@ from jackdaw.engine.actions import (
 )
 from jackdaw.engine.consumables import (
     _resolve_consumable_config,
-    can_use_consumable,
+    consumable_block_reason,
+    default_use_targets,
     pack_pick_block_reason,
 )
+from jackdaw.engine.economy import can_afford, spendable_dollars
 from jackdaw.env.game_spec import FactoredAction  # noqa: F401 — re-export
 
 # ---------------------------------------------------------------------------
@@ -207,7 +209,6 @@ def get_action_mask(game_state: dict[str, Any]) -> ActionMask:
     jokers = game_state.get("jokers", [])
     consumables = game_state.get("consumables", [])
     cr = game_state.get("current_round", {})
-    dollars = game_state.get("dollars", 0)
 
     # Card mask: all hand cards are selectable by default
     card_mask = np.ones(len(hand), dtype=bool) if hand else np.zeros(0, dtype=bool)
@@ -266,7 +267,7 @@ def get_action_mask(game_state: dict[str, Any]) -> ActionMask:
         # Reroll
         reroll_cost = cr.get("reroll_cost", 5)
         free_rerolls = cr.get("free_rerolls", 0)
-        if free_rerolls > 0 or dollars >= reroll_cost:
+        if free_rerolls > 0 or can_afford(game_state, reroll_cost):
             type_mask[ActionType.Reroll] = True
 
         type_mask[ActionType.NextRound] = True
@@ -303,6 +304,11 @@ def get_action_mask(game_state: dict[str, Any]) -> ActionMask:
         type_mask[ActionType.SkipPack] = True
         _mask_sell_jokers(type_mask, entity_masks, jokers)
         _mask_sell_consumables(type_mask, entity_masks, consumables)
+        # Owned consumables stay usable while a pack is open; an Arcana or
+        # Spectral pack's dealt hand is their target.  The pick is not
+        # spent (button_callbacks.lua:2269: a G.consumeables use just
+        # restores the pack).
+        _mask_consumables(type_mask, entity_masks, game_state)
 
     return ActionMask(type_mask, card_mask, entity_masks, max_card_select, min_card_select)
 
@@ -321,7 +327,6 @@ def _mask_shop_buy(
     shop_cards = gs.get("shop_cards", [])
     if not shop_cards:
         return
-    dollars = gs.get("dollars", 0)
     jokers = gs.get("jokers", [])
     joker_slots = gs.get("joker_slots", 5)
     consumables = gs.get("consumables", [])
@@ -329,7 +334,7 @@ def _mask_shop_buy(
 
     mask = np.zeros(len(shop_cards), dtype=bool)
     for i, card in enumerate(shop_cards):
-        if card.cost > dollars:
+        if not can_afford(gs, card.cost):
             continue
         card_set = card.ability.get("set", "") if isinstance(card.ability, dict) else ""
         # check_for_buy_space (button_callbacks.lua:2392) raises the limit by
@@ -381,27 +386,20 @@ def _mask_consumables(
     entity_masks: dict[int, np.ndarray],
     gs: dict[str, Any],
 ) -> None:
-    """Set UseConsumable mask based on can_use_consumable checks."""
+    """Set UseConsumable mask: consumables usable now with some selection.
+
+    Judged by :func:`~jackdaw.engine.consumables.consumable_block_reason`
+    against the default selection, so a targeting tarot is offered
+    whenever the hand can satisfy it — the policy picks the cards, or
+    :func:`factored_to_engine_action` falls back to that default.
+    """
     consumables = gs.get("consumables", [])
     if not consumables:
         return
-    hand = gs.get("hand", [])
-    jokers = gs.get("jokers", [])
-    joker_limit = gs.get("joker_slots", 5)
-    consumable_limit = gs.get("consumable_slots", 2)
-
-    mask = np.zeros(len(consumables), dtype=bool)
-    for i, card in enumerate(consumables):
-        if can_use_consumable(
-            card,
-            hand_cards=hand,
-            jokers=jokers,
-            consumables=consumables,
-            consumable_limit=consumable_limit,
-            joker_limit=joker_limit,
-        ):
-            mask[i] = True
-
+    mask = np.array(
+        [consumable_block_reason(card, gs) is None for card in consumables],
+        dtype=bool,
+    )
     if mask.any():
         type_mask[ActionType.UseConsumable] = True
         entity_masks[ActionType.UseConsumable] = mask
@@ -412,12 +410,15 @@ def _mask_vouchers(
     entity_masks: dict[int, np.ndarray],
     gs: dict[str, Any],
 ) -> None:
-    """Set RedeemVoucher mask for affordable vouchers."""
+    """Set RedeemVoucher mask for affordable vouchers.
+
+    ``can_redeem`` has no free-item exemption, unlike buy/open/reroll.
+    """
     vouchers = gs.get("shop_vouchers", [])
     if not vouchers:
         return
-    dollars = gs.get("dollars", 0)
-    mask = np.array([v.cost <= dollars for v in vouchers], dtype=bool)
+    spendable = spendable_dollars(gs)
+    mask = np.array([v.cost <= spendable for v in vouchers], dtype=bool)
     if mask.any():
         type_mask[ActionType.RedeemVoucher] = True
         entity_masks[ActionType.RedeemVoucher] = mask
@@ -432,8 +433,7 @@ def _mask_boosters(
     boosters = gs.get("shop_boosters", [])
     if not boosters:
         return
-    dollars = gs.get("dollars", 0)
-    mask = np.array([b.cost <= dollars for b in boosters], dtype=bool)
+    mask = np.array([can_afford(gs, b.cost) for b in boosters], dtype=bool)
     if mask.any():
         type_mask[ActionType.OpenBooster] = True
         entity_masks[ActionType.OpenBooster] = mask
@@ -535,9 +535,22 @@ def _default_pick_targets(game_state: dict[str, Any], pack_index: int) -> tuple[
     ability = getattr(card, "ability", None) or {}
     if ability.get("set") not in ("Tarot", "Spectral"):
         return None
-    from jackdaw.engine.consumables import pack_pick_default_targets
+    return default_use_targets(card, game_state)
 
-    return pack_pick_default_targets(card, game_state)
+
+def _default_use_targets(
+    game_state: dict[str, Any], consumable_index: int
+) -> tuple[int, ...] | None:
+    """Default hand targets for using an owned consumable.
+
+    The same engine default as pack picks, so a consumable the mask
+    offers is usable without card targets.  Returns None for
+    consumables that take no selection.
+    """
+    consumables = game_state.get("consumables", [])
+    if consumable_index >= len(consumables):
+        return None
+    return default_use_targets(consumables[consumable_index], game_state)
 
 
 def factored_to_engine_action(
@@ -612,6 +625,11 @@ def factored_to_engine_action(
         if fa.entity_target is None:
             raise ValueError("UseConsumable requires entity_target")
         target_indices = fa.card_target if fa.card_target else None
+        if target_indices is None:
+            # As with PickPackCard: a targeting consumable used without
+            # card targets gets the default selection the mask judged
+            # legal (c_aura included, whose target has to be editionless).
+            target_indices = _default_use_targets(game_state, fa.entity_target)
         return EngineUseConsumable(
             card_index=fa.entity_target,
             target_indices=target_indices,

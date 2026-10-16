@@ -50,6 +50,13 @@ from jackdaw.env.observation import (
     Observation,
     encode_observation,
 )
+from jackdaw.env.rewards import (
+    RewardFn,
+    ShapedReward,
+    Transition,
+    blind_progress_reward,
+    sparse_reward,
+)
 
 __all__ = [
     "ActionMask",
@@ -75,7 +82,11 @@ __all__ = [
     "NUM_CENTER_KEYS",
     "Observation",
     "RandomAgent",
+    "RewardFn",
+    "ShapedReward",
+    "Transition",
     "balatro_game_spec",
+    "blind_progress_reward",
     "encode_observation",
     "engine_action_to_factored",
     "factored_to_engine_action",
@@ -83,5 +94,6 @@ __all__ = [
     "get_consumable_target_info",
     "get_consumable_target_spec",
     "get_valid_target_cards",
+    "sparse_reward",
     "validate_card_targets",
 ]

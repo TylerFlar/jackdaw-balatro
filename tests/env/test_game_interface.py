@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import random
 
+import numpy as np
 import pytest
 
 from jackdaw.engine.actions import (
@@ -292,6 +293,75 @@ class TestBridgeAdapterSim:
         actions = _run_to_completion(adapter, max_actions=5000)
         assert actions > 0
         assert adapter.done or adapter.won
+
+
+def _open_celestial_pack_with_tray_planet(adapter: GameAdapter) -> None:
+    from jackdaw.engine.card_factory import create_consumable
+
+    gs = adapter.raw_state
+    gs["phase"] = GamePhase.PACK_OPENING
+    gs["pack_type"] = "Celestial"
+    gs["pack_cards"] = [create_consumable("c_mercury")]
+    gs["pack_choices_remaining"] = 1
+    gs["consumables"] = [create_consumable("c_pluto")]
+
+
+class TestBridgeFollowsBalatrobot:
+    """Vanilla lets a consumable be used or sold while a pack is open;
+    balatrobot's use/sell endpoints only run in SELECTING_HAND and SHOP.
+    The bridge offers only what the bot will execute."""
+
+    def test_legal_actions(self):
+        from jackdaw.bridge.backend import SimBackend
+        from jackdaw.engine.actions import SellCard, UseConsumable
+
+        for adapter, offered in ((DirectAdapter(), True), (BridgeAdapter(SimBackend()), False)):
+            adapter.reset(BACK, STAKE, SEED)
+            _open_celestial_pack_with_tray_planet(adapter)
+            legal = adapter.get_legal_actions()
+            assert any(isinstance(a, UseConsumable) for a in legal) is offered
+            assert any(isinstance(a, SellCard) for a in legal) is offered
+
+    def test_env_mask(self):
+        from jackdaw.bridge.backend import SimBackend
+        from jackdaw.env.action_space import ActionType
+        from jackdaw.env.balatro_env import BalatroEnvironment
+
+        for factory, offered in (
+            (DirectAdapter, True),
+            (lambda: BridgeAdapter(SimBackend()), False),
+        ):
+            env = BalatroEnvironment(adapter_factory=factory)
+            env.reset(seed=SEED)
+            _open_celestial_pack_with_tray_planet(env._adapter)
+            mask = env._action_mask(env._adapter.raw_state)
+            assert bool(mask.type_mask[ActionType.UseConsumable]) is offered
+            assert bool(mask.type_mask[ActionType.SellConsumable]) is offered
+            assert mask.type_mask[ActionType.PickPackCard]  # the bot can pick
+
+    def test_card_selecting_consumable_masked_in_the_shop(self):
+        # use.lua refuses a consumable that needs card selection outside
+        # SELECTING_HAND, even where the endpoint itself is allowed.
+        from jackdaw.bridge.backend import SimBackend
+        from jackdaw.engine.card_factory import create_consumable
+        from jackdaw.env.action_space import ActionMask, ActionType
+
+        adapter = BridgeAdapter(SimBackend())
+        adapter.reset(BACK, STAKE, SEED)
+        gs = adapter.raw_state
+        gs["phase"] = GamePhase.SHOP
+        gs["consumables"] = [create_consumable("c_pluto"), create_consumable("c_magician")]
+        type_mask = np.zeros(21, dtype=bool)
+        type_mask[ActionType.UseConsumable] = True
+        mask = ActionMask(
+            type_mask=type_mask,
+            card_mask=np.zeros(0, dtype=bool),
+            entity_masks={ActionType.UseConsumable: np.array([True, True])},
+            max_card_select=5,
+            min_card_select=1,
+        )
+        mask = adapter.restrict_mask(mask)
+        assert list(mask.entity_masks[ActionType.UseConsumable]) == [True, False]
 
 
 # ---------------------------------------------------------------------------

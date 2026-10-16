@@ -337,7 +337,8 @@ def apply_voucher(key: str, game_state: dict[str, Any]) -> dict[str, Any]:
 
     # -----------------------------------------------------------------------
     # Blank — unlock check only; no gameplay mutation (card.lua:1943)
-    # Telescope, Observatory — passive effects handled in scoring/pack logic
+    # Telescope — passive, read by pack generation (packs.py)
+    # Observatory — passive, read by scoring (held Planets, scoring.py)
     # -----------------------------------------------------------------------
 
     return mutations
