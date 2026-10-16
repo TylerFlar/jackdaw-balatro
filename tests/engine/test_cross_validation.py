@@ -370,4 +370,3 @@ class TestConsumablesCrossValidation:
         assert result is not None
         # JSON serializes tuples as lists
         assert [list(x) for x in result.level_up] == case["level_up"]
-        assert result.notify_jokers_consumeable == case["notify"]

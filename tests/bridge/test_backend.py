@@ -106,16 +106,66 @@ class TestSimNoActiveRun:
 class TestSimIllegalAction:
     def test_play_during_blind_select(self, sim):
         _start_run(sim)
-        # In BLIND_SELECT, playing cards is illegal
-        with pytest.raises(RPCError) as exc_info:
+        # Like balatrobot's dispatcher: wrong state is INVALID_STATE
+        with pytest.raises(RPCError, match="requires one of these states") as exc_info:
             sim.handle("play", {"cards": [0, 1, 2]})
-        assert exc_info.value.code == NOT_ALLOWED
+        assert exc_info.value.code == INVALID_STATE
 
     def test_cash_out_during_blind_select(self, sim):
         _start_run(sim)
         with pytest.raises(RPCError) as exc_info:
             sim.handle("cash_out", {})
+        assert exc_info.value.code == INVALID_STATE
+
+    def test_illegal_move_in_the_right_state(self, sim):
+        _start_run(sim)
+        sim.handle("select", {})
+        with pytest.raises(RPCError) as exc_info:
+            sim.handle("play", {"cards": [0, 1, 2, 3, 4, 5]})  # six cards
         assert exc_info.value.code == NOT_ALLOWED
+
+
+class TestSimMatchesBalatrobotStates:
+    """The engine follows vanilla, which allows more than balatrobot's
+    endpoints accept; the sim refuses what the live bot refuses."""
+
+    def test_use_refused_outside_hand_and_shop(self, sim):
+        _start_run(sim)
+        sim._gs["consumables"] = [_planet()]
+        with pytest.raises(RPCError) as exc_info:
+            sim.handle("use", {"consumable": 0})  # blind select
+        assert exc_info.value.code == INVALID_STATE
+
+    def test_sell_refused_at_blind_select(self, sim):
+        _start_run(sim)
+        sim._gs["consumables"] = [_planet()]
+        with pytest.raises(RPCError) as exc_info:
+            sim.handle("sell", {"consumable": 0})
+        assert exc_info.value.code == INVALID_STATE
+
+    def test_use_and_sell_accepted_while_selecting_hand(self, sim):
+        _start_run(sim)
+        sim.handle("select", {})
+        sim._gs["consumables"] = [_planet(), _planet()]
+        sim.handle("use", {"consumable": 0})
+        sim.handle("sell", {"consumable": 0})
+        assert sim._gs["consumables"] == []
+
+    def test_card_selecting_consumable_only_while_selecting_hand(self, sim):
+        from jackdaw.bridge.balatrobot_adapter import bot_refusal
+        from jackdaw.engine.actions import GamePhase
+        from jackdaw.engine.card_factory import create_consumable
+
+        gs = {"phase": GamePhase.SHOP, "consumables": [create_consumable("c_magician")]}
+        assert "SELECTING_HAND" in bot_refusal("use", {"consumable": 0}, gs)
+        gs["phase"] = GamePhase.SELECTING_HAND
+        assert bot_refusal("use", {"consumable": 0}, gs) is None
+
+
+def _planet():
+    from jackdaw.engine.card_factory import create_consumable
+
+    return create_consumable("c_pluto")
 
 
 class TestSimBadParams:

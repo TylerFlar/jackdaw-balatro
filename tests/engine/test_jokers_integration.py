@@ -536,6 +536,28 @@ class TestBaseballCard:
         assert result.mult == 10.0
         assert result.total == 320
 
+    def test_pipeline_debuffed_uncommon_still_counts(self):
+        """Vanilla's joker-on-joker loop has no debuff check on the card
+        being reacted to (state_events.lua:877-917): a debuffed Uncommon
+        scores nothing itself, but Baseball still pays X1.5 for it."""
+        played = [_card("Spades", "Ace"), _card("Clubs", "Ace")]
+        held = [_card("Spades", "5")]
+        blackboard = _joker("j_blackboard", extra=3)  # rarity 2
+        blackboard.debuff = True
+        baseball = _joker("j_baseball", extra=1.5)
+
+        result = score_hand(
+            played,
+            held,
+            [blackboard, baseball],
+            HandLevels(),
+            _small_blind(),
+            PseudoRandom("TEST"),
+        )
+        # Blackboard's own x3 is lost to the debuff; Baseball's x1.5 is not.
+        assert result.mult == pytest.approx(3.0)
+        assert result.total == 96
+
 
 class TestSwashbuckler:
     """j_swashbuckler: mult from other jokers' sell costs."""
@@ -1564,23 +1586,59 @@ class TestConstellation:
 
 
 class TestGlassJoker:
+    """Vanilla counts Glass Cards that have *shattered* when the
+    destroyed-cards notify fires (scoring and discard destruction set the
+    flag first), plus the highlighted Glass Cards a used Hanged Man takes
+    (card.lua:2687-2716)."""
+
     def _make(self):
         return _joker("j_glass", x_mult=1, extra=0.75)
 
+    @staticmethod
+    def _shattered_glass(suit: str, rank: str) -> Card:
+        c = _card(suit, rank, enhancement="m_glass")
+        c.shattered = True  # as scoring / discard destruction leaves it
+        return c
+
     def test_one_glass_destroyed(self):
         j = self._make()
-        glass = _card("Hearts", "5", enhancement="m_glass")
-        ctx = JokerContext(cards_destroyed=[glass])
+        ctx = JokerContext(cards_destroyed=[self._shattered_glass("Hearts", "5")])
         calculate_joker(j, ctx)
         assert j.ability["x_mult"] == pytest.approx(1.75)
 
     def test_two_glass_destroyed(self):
         j = self._make()
-        glass1 = _card("Hearts", "5", enhancement="m_glass")
-        glass2 = _card("Spades", "3", enhancement="m_glass")
+        glass1 = self._shattered_glass("Hearts", "5")
+        glass2 = self._shattered_glass("Spades", "3")
         ctx = JokerContext(cards_destroyed=[glass1, glass2])
         calculate_joker(j, ctx)
         assert j.ability["x_mult"] == pytest.approx(2.5)
+
+    def test_unshattered_glass_not_counted(self):
+        # Familiar / Grim / Incantation / Immolate shatter in a queued event,
+        # after the notify — vanilla's Glass Joker never sees them.
+        j = self._make()
+        glass = _card("Hearts", "5", enhancement="m_glass")
+        calculate_joker(j, JokerContext(cards_destroyed=[glass]))
+        assert j.ability["x_mult"] == 1
+
+    def test_hanged_man_counts_highlighted_glass(self):
+        j = self._make()
+        hanged_man = Card(center_key="c_hanged_man")
+        hanged_man.ability = {"set": "Tarot", "name": "The Hanged Man"}
+        highlighted = [_card("Hearts", "5", enhancement="m_glass"), _card("Spades", "3")]
+        ctx = JokerContext(using_consumeable=True, consumeable=hanged_man, highlighted=highlighted)
+        calculate_joker(j, ctx)
+        assert j.ability["x_mult"] == pytest.approx(1.75)
+
+    def test_other_consumables_count_nothing(self):
+        j = self._make()
+        immolate = Card(center_key="c_immolate")
+        immolate.ability = {"set": "Spectral", "name": "Immolate"}
+        highlighted = [_card("Hearts", "5", enhancement="m_glass")]
+        ctx = JokerContext(using_consumeable=True, consumeable=immolate, highlighted=highlighted)
+        calculate_joker(j, ctx)
+        assert j.ability["x_mult"] == 1
 
 
 class TestCaino:
@@ -1622,6 +1680,7 @@ class TestCaino:
         caino = self._make()
         glass_j = _joker("j_glass", x_mult=1, extra=0.75)
         glass_king = _card("Hearts", "King", enhancement="m_glass")
+        glass_king.shattered = True  # broke during scoring
         ctx = JokerContext(cards_destroyed=[glass_king])
 
         calculate_joker(caino, ctx)

@@ -18,7 +18,7 @@ from jackdaw.env.action_space import (
     get_action_mask,
 )
 from jackdaw.env.balatro_spec import balatro_game_spec
-from jackdaw.env.game_interface import GameAdapter
+from jackdaw.env.game_interface import GameAdapter, _snapshot
 from jackdaw.env.game_spec import GameActionMask, GameObservation, GameSpec
 from jackdaw.env.observation import encode_observation
 
@@ -39,6 +39,11 @@ class BalatroEnvironment:
     so the generic RL pipeline can interact with Balatro without importing
     any Balatro-specific modules.
 
+    ``info["raw_state"]`` is the adapter's live engine dict, which the next
+    step mutates in place.  For before/after comparisons (rewards), use the
+    :class:`~jackdaw.env.game_interface.GameState` snapshots in
+    ``info["prev_state"]`` and ``info["state"]``.
+
     Parameters
     ----------
     adapter_factory:
@@ -51,6 +56,10 @@ class BalatroEnvironment:
         Maximum steps before truncation.
     seed_prefix:
         Prefix for deterministic seed generation.
+    end_on_win:
+        End the episode (``terminated``) when the run is won, the way
+        vanilla stops at its win screen.  False plays on into endless mode
+        until the run is lost or truncated.
     """
 
     def __init__(
@@ -60,6 +69,7 @@ class BalatroEnvironment:
         stakes: list[int] | None = None,
         max_steps: int = 10_000,
         seed_prefix: str = "TRAIN",
+        end_on_win: bool = True,
     ) -> None:
         self._adapter_factory = adapter_factory
         self._adapter = adapter_factory()
@@ -67,6 +77,7 @@ class BalatroEnvironment:
         self._stakes = stakes or [1]
         self._max_steps = max_steps
         self._seed_prefix = seed_prefix
+        self._end_on_win = end_on_win
         self._spec = balatro_game_spec()
 
         self._episode_count = 0
@@ -102,11 +113,12 @@ class BalatroEnvironment:
 
         gs = self._adapter.raw_state
         obs = encode_observation(gs)
-        mask = get_action_mask(gs)
+        mask = self._action_mask(gs)
         game_obs = obs.to_game_observation()
         game_mask = _action_mask_to_game(mask)
         info: dict[str, object] = {
             "raw_state": gs,
+            "state": _snapshot(gs),
             "shop_splits": _compute_shop_splits(gs),
             "observation": obs,
             "action_mask": mask,
@@ -119,6 +131,9 @@ class BalatroEnvironment:
     ) -> tuple[GameObservation, bool, bool, GameActionMask, dict[str, object]]:
         """Execute an action and return (obs, terminated, truncated, mask, info)."""
         gs_prev = self._adapter.raw_state
+        # Snapshot BEFORE stepping: in-process adapters mutate raw_state in
+        # place, so gs_prev is about to become the post-step state.
+        prev_state = _snapshot(gs_prev)
         engine_action = factored_to_engine_action(action, gs_prev)
         self._adapter.step(engine_action)
 
@@ -126,7 +141,7 @@ class BalatroEnvironment:
         self.episode_length += 1
         self._step_count += 1
 
-        terminated = self._adapter.done
+        terminated = self._adapter.done or (self._end_on_win and self._adapter.won)
         truncated = self._step_count >= self._max_steps
 
         # Track episode stats
@@ -135,17 +150,25 @@ class BalatroEnvironment:
         self.episode_won = self._adapter.won
 
         obs = encode_observation(gs)
-        mask = get_action_mask(gs)
+        mask = self._action_mask(gs)
         game_obs = obs.to_game_observation()
         game_mask = _action_mask_to_game(mask)
         info: dict[str, object] = {
             "raw_state": gs,
-            "prev_raw_state": gs_prev,
+            "prev_state": prev_state,
+            "state": _snapshot(gs),
             "shop_splits": _compute_shop_splits(gs),
             "observation": obs,
             "action_mask": mask,
         }
         return game_obs, terminated, truncated, game_mask, info
+
+    def _action_mask(self, gs: dict[str, Any]) -> ActionMask:
+        """The action mask, narrowed by an adapter that can't execute
+        everything the engine allows (the balatrobot bridge)."""
+        mask = get_action_mask(gs)
+        restrict = getattr(self._adapter, "restrict_mask", None)
+        return restrict(mask) if restrict is not None else mask
 
 
 def _action_mask_to_game(mask: ActionMask) -> GameActionMask:

@@ -126,3 +126,26 @@ class TestRandomAgent:
             # Must be convertible without error
             engine_action = factored_to_engine_action(fa, gs)
             adapter.step(engine_action)
+
+    def test_chooses_targets_for_a_targeting_pack_pick(self):
+        """A pack Tarot that works on hand cards gets a card_target within
+        its bounds (The Magician: 1-2 cards), like a tray use does."""
+        from jackdaw.engine.actions import SelectBlind
+        from jackdaw.engine.card_factory import create_consumable
+        from jackdaw.env.action_space import ActionType
+
+        adapter = DirectAdapter()
+        adapter.reset(BACK, STAKE, SEED)
+        adapter.step(SelectBlind())  # deal a hand to target
+        gs = adapter.raw_state
+        gs["phase"] = GamePhase.PACK_OPENING
+        gs["pack_type"] = "Arcana"
+        gs["pack_cards"] = [create_consumable("c_magician")]
+        gs["pack_choices_remaining"] = 1
+        mask = get_action_mask(gs)
+        mask.type_mask[:] = False
+        mask.type_mask[ActionType.PickPackCard] = True
+
+        fa = RandomAgent().act({}, mask, {"raw_state": gs})
+        assert fa.entity_target == 0
+        assert fa.card_target is not None and 1 <= len(fa.card_target) <= 2

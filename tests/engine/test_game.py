@@ -5,6 +5,8 @@ Coverage: one test per action handler + key edge cases + integration.
 
 from __future__ import annotations
 
+import math
+import sys
 from typing import Any
 
 import pytest
@@ -19,6 +21,7 @@ from jackdaw.engine.actions import (
     OpenBooster,
     PickPackCard,
     PlayHand,
+    RedeemVoucher,
     Reroll,
     SelectBlind,
     SellCard,
@@ -1931,3 +1934,422 @@ class TestShowmanReadmitsHeldJokerInShop:
 
     def test_without_showman_held_joker_stays_out(self):
         assert "j_joker" not in self._first_shop_keys("SHOW47", showman=False)
+
+
+# ---------------------------------------------------------------------------
+# Owned consumables while a pack is open (#20)
+# ---------------------------------------------------------------------------
+
+
+class TestConsumablesUsableDuringPack:
+    """Tray consumables stay usable while a pack is open, and using one
+    spends no pick: use_card just restores the pack when the card came
+    from G.consumeables (button_callbacks.lua:2269)."""
+
+    @staticmethod
+    def _celestial_pack_with_pluto() -> dict[str, Any]:
+        from jackdaw.engine.card_factory import create_consumable
+
+        gs = _init_gs("PACK_USE")
+        gs["phase"] = GamePhase.PACK_OPENING
+        gs["pack_type"] = "Celestial"
+        gs["pack_cards"] = [create_consumable("c_mercury")]
+        gs["pack_choices_remaining"] = 1
+        gs["consumables"] = [create_consumable("c_pluto")]
+        return gs
+
+    def test_use_consumable_is_legal(self):
+        gs = self._celestial_pack_with_pluto()
+        assert UseConsumable(card_index=0) in get_legal_actions(gs)
+
+    def test_use_keeps_pack_open_and_pick_unspent(self):
+        from jackdaw.engine.data.hands import HandType
+
+        gs = self._celestial_pack_with_pluto()
+        level = gs["hand_levels"][HandType.HIGH_CARD].level
+        step(gs, UseConsumable(card_index=0))
+        assert gs["hand_levels"][HandType.HIGH_CARD].level == level + 1
+        assert gs["phase"] == GamePhase.PACK_OPENING
+        assert gs["pack_choices_remaining"] == 1
+        assert gs["consumables"] == []
+
+    def test_tarot_targets_the_arcana_dealt_hand(self):
+        from jackdaw.engine.card_factory import create_consumable
+
+        gs = _setup_shop("ARCANA_TRAY_DEATH")
+        gs["consumables"] = [create_consumable("c_death")]
+        pack = Card(center_key="p_arcana_normal_1", cost=0)
+        pack.ability = {"set": "Booster", "name": "Arcana Pack"}
+        gs["shop_boosters"] = [pack]
+        # In the shop itself there is no hand to target (card.lua:1564).
+        assert not any(isinstance(a, UseConsumable) for a in get_legal_actions(gs))
+
+        step(gs, OpenBooster(card_index=0))
+        [use] = [a for a in get_legal_actions(gs) if isinstance(a, UseConsumable)]
+        left, right = (gs["hand"][i] for i in use.target_indices)
+        step(gs, use)
+        # Death copies the rightmost selected card onto the other.
+        assert (left.base.rank, left.base.suit) == (right.base.rank, right.base.suit)
+        assert gs["phase"] == GamePhase.PACK_OPENING
+        assert gs["pack_choices_remaining"] == 1
+
+
+class TestTargetingConsumablesFromTray:
+    """Tray consumables used to be judged with no selection and no
+    game_state, so targeting tarots and The Fool were never legal."""
+
+    def test_targeting_tarot_offered_with_default_targets(self):
+        from jackdaw.engine.card_factory import create_consumable
+
+        gs = _init_gs("TRAY_MAGICIAN")
+        step(gs, SelectBlind())
+        gs["consumables"] = [create_consumable("c_magician")]
+        [use] = [a for a in get_legal_actions(gs) if isinstance(a, UseConsumable)]
+        assert use.target_indices == (0,)
+        target = gs["hand"][0]
+        step(gs, use)  # executable exactly as returned
+        assert target.center_key == "m_lucky"
+
+    def test_fool_offered_once_there_is_something_to_copy(self):
+        from jackdaw.engine.card_factory import create_consumable
+
+        gs = _setup_shop("TRAY_FOOL")
+        gs["consumables"] = [create_consumable("c_fool")]
+        gs["last_tarot_planet"] = None
+        assert UseConsumable(card_index=0) not in get_legal_actions(gs)
+
+        gs["last_tarot_planet"] = "c_mercury"
+        assert UseConsumable(card_index=0) in get_legal_actions(gs)
+        step(gs, UseConsumable(card_index=0))
+        assert [c.center_key for c in gs["consumables"]] == ["c_mercury"]
+
+
+class TestLegalActionsFollowTheExecutor:
+    """get_legal_actions offers what step() accepts: selling in every
+    phase vanilla allows it (card.lua:1640 has no state gate), and Spectral
+    pack picks — balatrobot's old highlight limit is no rule of the game."""
+
+    def test_selling_offered_outside_the_shop(self):
+        from jackdaw.engine.card_factory import create_consumable
+
+        gs = _init_gs("SELL_ANYWHERE")
+        gs["jokers"] = [_joker_card()]
+        gs["consumables"] = [create_consumable("c_pluto")]
+        expected = {
+            SellCard(area="jokers", card_index=0),
+            SellCard(area="consumables", card_index=0),
+        }
+        assert expected <= set(get_legal_actions(gs))  # blind select
+        step(gs, SelectBlind())
+        assert expected <= set(get_legal_actions(gs))  # selecting hand
+        step(gs, SellCard(area="jokers", card_index=0))
+        assert gs["jokers"] == []
+
+    def test_spectral_pack_picks_offered(self):
+        from jackdaw.engine.card_factory import create_consumable
+
+        gs = _setup_shop("SPECTRAL_PICKS")
+        pack = Card(center_key="p_spectral_normal_1", cost=0)
+        pack.ability = {"set": "Booster", "name": "Spectral Pack"}
+        gs["shop_boosters"] = [pack]
+        step(gs, OpenBooster(card_index=0))
+        gs["pack_cards"] = [create_consumable("c_talisman")]  # gold seal, 1 target
+        [pick] = [a for a in get_legal_actions(gs) if isinstance(a, PickPackCard)]
+        assert pick.target_indices == (0,)
+        target = gs["hand"][0]
+        step(gs, pick)
+        assert target.seal == "Gold"
+
+
+class TestLegalPackPicksExecutable:
+    """Pack picks go through the executor's own gate and carry their
+    default selection: bare markers for targeting tarots used to raise in
+    step(), ending simulate_run (and the benchmark collectors) early."""
+
+    def test_only_usable_picks_offered_with_targets(self):
+        from jackdaw.engine.card_factory import create_consumable
+
+        gs = _setup_shop("ARCANA_PICKS")
+        pack = Card(center_key="p_arcana_normal_1", cost=0)
+        pack.ability = {"set": "Booster", "name": "Arcana Pack"}
+        gs["shop_boosters"] = [pack]
+        step(gs, OpenBooster(card_index=0))
+        gs["consumables"] = [create_consumable("c_pluto"), create_consumable("c_pluto")]
+        gs["pack_cards"] = [
+            create_consumable("c_justice"),  # targets 1 card
+            create_consumable("c_emperor"),  # no room for its tarots
+            create_consumable("c_fool"),  # no room, nothing to copy
+        ]
+        picks = [a for a in get_legal_actions(gs) if isinstance(a, PickPackCard)]
+        assert picks == [PickPackCard(card_index=0, target_indices=(0,))]
+        target = gs["hand"][0]
+        step(gs, picks[0])
+        assert target.center_key == "m_glass"
+
+
+class TestUsingConsumeableNotify:
+    """Every consumable use, tray or pack, notifies the jokers once with
+    the card used (button_callbacks.lua:2219-2221)."""
+
+    @staticmethod
+    def _round_with(*jokers: str, glass: int = 0) -> tuple[dict[str, Any], list]:
+        from jackdaw.engine.card_factory import create_joker
+
+        gs = _init_gs("USING_CONSUMEABLE")
+        step(gs, SelectBlind())
+        made = [create_joker(k) for k in jokers]
+        gs["jokers"] = made
+        for c in gs["hand"][:glass]:
+            c.set_ability("m_glass")
+        return gs, made
+
+    def test_hanged_man_on_glass_grows_glass_joker_once(self):
+        from jackdaw.engine.card_factory import create_consumable
+
+        gs, [glass_joker] = self._round_with("j_glass", glass=2)
+        gs["consumables"] = [create_consumable("c_hanged_man")]
+        step(gs, UseConsumable(card_index=0, target_indices=(0, 1)))
+        assert glass_joker.ability["x_mult"] == pytest.approx(2.5)
+
+    def test_immolate_on_glass_does_not(self):
+        # Immolate shatters its Glass Cards in a queued event, after the
+        # destroyed-cards notify: vanilla's Glass Joker never counts them.
+        from jackdaw.engine.card_factory import create_consumable
+
+        gs, [glass_joker] = self._round_with("j_glass", glass=8)
+        gs["consumables"] = [create_consumable("c_immolate")]
+        step(gs, UseConsumable(card_index=0))
+        assert len(gs["hand"]) == 3  # five were destroyed
+        assert glass_joker.ability["x_mult"] == 1
+
+    def test_glass_destroyed_on_discard_grows_glass_joker(self):
+        # Trading Card destroys a lone first discard, which shatters on the
+        # spot (state_events.lua:413) before the notify.
+        gs, [_, glass_joker] = self._round_with("j_trading", "j_glass", glass=1)
+        step(gs, Discard(card_indices=(0,)))
+        assert glass_joker.ability["x_mult"] == pytest.approx(1.75)
+
+    def test_planet_from_a_pack_counts_once(self):
+        from jackdaw.engine.card_factory import create_consumable, create_joker
+
+        gs = _init_gs("PACK_PLANET")
+        constellation = create_joker("j_constellation")
+        gs["jokers"] = [constellation]
+        gs["phase"] = GamePhase.PACK_OPENING
+        gs["pack_type"] = "Celestial"
+        gs["pack_cards"] = [create_consumable("c_mercury")]
+        gs["pack_choices_remaining"] = 1
+        step(gs, PickPackCard(card_index=0))
+        assert constellation.ability["x_mult"] == pytest.approx(1.1)
+
+
+# ---------------------------------------------------------------------------
+# Black Hole is not The Fool's target (#21)
+# ---------------------------------------------------------------------------
+
+
+class TestFoolIgnoresBlackHole:
+    """Black Hole is a Spectral: set_consumeable_usage records only Tarot
+    and Planet uses as The Fool's target (misc_functions.lua:1212)."""
+
+    @staticmethod
+    def _pick_black_hole(gs: dict[str, Any]) -> None:
+        from jackdaw.engine.card_factory import create_consumable
+
+        gs["phase"] = GamePhase.PACK_OPENING
+        gs["pack_cards"] = [create_consumable("c_black_hole")]
+        gs["pack_choices_remaining"] = 1
+        step(gs, PickPackCard(card_index=0))
+
+    def test_black_hole_leaves_fool_target_alone(self):
+        from jackdaw.engine.card_factory import create_consumable
+
+        gs = _init_gs("FOOL")
+        gs["last_tarot_planet"] = "c_mercury"
+        self._pick_black_hole(gs)
+        assert gs["last_tarot_planet"] == "c_mercury"
+
+        gs["consumables"].append(create_consumable("c_fool"))
+        step(gs, UseConsumable(card_index=0))
+        assert [c.center_key for c in gs["consumables"]] == ["c_mercury"]
+
+    def test_fool_has_nothing_to_copy_after_only_black_hole(self):
+        from jackdaw.engine.card_factory import create_consumable
+
+        gs = _init_gs("FOOL")
+        self._pick_black_hole(gs)
+        assert gs["last_tarot_planet"] is None
+
+        gs["consumables"].append(create_consumable("c_fool"))
+        with pytest.raises(IllegalActionError):
+            step(gs, UseConsumable(card_index=0))
+
+
+# ---------------------------------------------------------------------------
+# Observatory: held Planets give X1.5 (#22)
+# ---------------------------------------------------------------------------
+
+
+class TestObservatoryHeldPlanets:
+    """With Observatory redeemed, each held Planet whose hand matches the
+    scoring hand gives X1.5.  Consumables follow the jokers in vanilla's
+    joker_main loop (state_events.lua:877; card.lua:2293-2302)."""
+
+    @staticmethod
+    def _score_pair_of_twos(*, observatory: bool, planets=("c_mercury",), jokers=()) -> int:
+        from jackdaw.engine.card_factory import create_consumable, create_joker
+
+        def card(key, suit, rank):
+            c = Card()
+            c.set_base(key, suit, rank)
+            c.set_ability("c_base")
+            return c
+
+        gs = _init_gs("OBSERVATORY")
+        step(gs, SelectBlind())
+        gs["blind"].chips = 10**9  # don't end the round
+        gs["hand"] = [card("H_2", "Hearts", "2"), card("S_2", "Spades", "2")]
+        gs["jokers"] = [create_joker(k) for k in jokers]
+        gs["consumables"] = [create_consumable(k) for k in planets]
+        if observatory:
+            gs["used_vouchers"]["v_observatory"] = True
+        step(gs, PlayHand(card_indices=(0, 1)))
+        return gs["chips"]
+
+    def test_baseline_pair_of_twos(self):
+        assert self._score_pair_of_twos(observatory=False) == 28  # (10+2+2) x 2
+
+    def test_matching_planet_gives_x1_5(self):
+        assert self._score_pair_of_twos(observatory=True) == 42  # 14 x (2 x 1.5)
+
+    def test_other_consumables_do_nothing(self):
+        assert self._score_pair_of_twos(observatory=True, planets=("c_venus", "c_fool")) == 28
+
+    def test_each_matching_planet_multiplies(self):
+        assert self._score_pair_of_twos(observatory=True, planets=("c_mercury",) * 2) == 63
+
+    def test_applies_after_the_jokers(self):
+        # The Joker's +4 Mult lands first: 14 x (2 + 4) x 1.5, not 14 x (3 + 4).
+        assert self._score_pair_of_twos(observatory=True, jokers=("j_joker",)) == 126
+
+
+# ---------------------------------------------------------------------------
+# Credit Card's debt floor (#23)
+# ---------------------------------------------------------------------------
+
+
+class TestCreditCardDebt:
+    """Credit Card lowers bankrupt_at to -20; every vanilla shop gate
+    measures cost against dollars - bankrupt_at (button_callbacks.lua:56,
+    97, 112, 2077)."""
+
+    @staticmethod
+    def _shop(*, credit_card: bool = True, dollars: int = 0) -> tuple[dict[str, Any], Card]:
+        from jackdaw.engine.card_factory import create_joker
+
+        gs = _setup_shop("CREDIT_CARD")
+        gs["jokers"] = []
+        if credit_card:
+            cc = create_joker("j_credit_card")
+            gs["jokers"] = [cc]
+            cc.add_to_deck(gs)
+            assert gs["bankrupt_at"] == -20
+        target = create_joker("j_joker")
+        target.set_cost()
+        gs["shop_cards"] = [target]
+        gs["dollars"] = dollars
+        return gs, target
+
+    def test_buy_goes_into_debt(self):
+        gs, target = self._shop()
+        assert BuyCard(shop_index=0) in get_legal_actions(gs)
+        step(gs, BuyCard(shop_index=0))
+        assert gs["dollars"] == -target.cost
+
+    def test_debt_floor_still_binds(self):
+        gs, target = self._shop()
+        gs["dollars"] = -20 + target.cost - 1
+        assert BuyCard(shop_index=0) not in get_legal_actions(gs)
+        with pytest.raises(IllegalActionError, match="Cannot afford"):
+            step(gs, BuyCard(shop_index=0))
+
+    def test_reroll_goes_into_debt(self):
+        gs, _ = self._shop()
+        cr = gs["current_round"]
+        cr["free_rerolls"] = 0
+        cost = cr["reroll_cost"]
+        assert Reroll() in get_legal_actions(gs)
+        step(gs, Reroll())
+        assert gs["dollars"] == -cost
+
+    def test_booster_and_voucher_go_into_debt(self):
+        from jackdaw.engine.card_factory import create_voucher
+
+        gs, _ = self._shop()
+        pack = Card(center_key="p_arcana_normal_1", cost=4)
+        pack.ability = {"set": "Booster", "name": "Arcana Pack"}
+        voucher = create_voucher("v_overstock_norm")
+        voucher.cost = 10
+        gs["shop_boosters"] = [pack]
+        gs["shop_vouchers"] = [voucher]
+        legal = get_legal_actions(gs)
+        assert OpenBooster(card_index=0) in legal
+        assert RedeemVoucher(card_index=0) in legal
+        step(gs, RedeemVoucher(card_index=0))
+        assert gs["dollars"] == -10
+
+    def test_no_debt_without_credit_card(self):
+        gs, _ = self._shop(credit_card=False)
+        assert BuyCard(shop_index=0) not in get_legal_actions(gs)
+
+    def test_free_card_is_buyable_while_broke(self):
+        # can_buy's cost > 0 guard: a couponed $0 card needs no money at all.
+        gs, target = self._shop(credit_card=False, dollars=-3)
+        target.cost = 0
+        target.ability["couponed"] = True
+        assert BuyCard(shop_index=0) in get_legal_actions(gs)
+        step(gs, BuyCard(shop_index=0))
+        assert gs["dollars"] == -3
+
+
+# ---------------------------------------------------------------------------
+# Endless-mode overflow: "naneinf" blinds and scores (#24)
+# ---------------------------------------------------------------------------
+
+
+class TestEndlessOverflow:
+    """From ante 39 the blind target overflows a double.  Vanilla keeps
+    running, and its chips - blind.chips >= 0 check can never pass there;
+    an overflowed score still beats any finite blind."""
+
+    @staticmethod
+    def _round_at_ante(ante: int) -> dict[str, Any]:
+        gs = _init_gs("ENDLESS")
+        gs["round_resets"]["ante"] = ante
+        step(gs, SelectBlind())
+        return gs
+
+    def test_ante_39_round_plays(self):
+        gs = self._round_at_ante(39)
+        assert gs["blind"].chips == math.inf
+        step(gs, PlayHand(card_indices=(0, 1, 2, 3, 4)))
+        assert gs["phase"] == GamePhase.SELECTING_HAND
+
+    def test_infinite_score_cannot_beat_infinite_blind(self):
+        gs = self._round_at_ante(40)
+        gs["chips"] = math.inf
+        gs["current_round"]["hands_left"] = 1
+        step(gs, PlayHand(card_indices=(0, 1, 2, 3, 4)))
+        assert gs["phase"] == GamePhase.GAME_OVER
+
+    def test_overflowing_score_saturates_and_wins(self):
+        gs = self._round_at_ante(1)
+        gs["chips"] = int(sys.float_info.max)
+        step(gs, PlayHand(card_indices=(0, 1, 2, 3, 4)))
+        assert gs["chips"] == math.inf
+        assert gs["phase"] == GamePhase.ROUND_EVAL
+
+    def test_disabling_an_overflowed_wall(self):
+        wall = Blind.create("bl_wall", 39)
+        wall.disable()
+        assert wall.chips == math.inf

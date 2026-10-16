@@ -620,8 +620,9 @@ def buy_card(
     1. **Space check** — ``to_area.has_space(negative_bonus)`` where
        *negative_bonus* is 1 if the card has a Negative edition.  Returns
        ``{'ok': False, 'reason': 'no_space'}`` if full.
-    2. **Funds check** — ``game_state['dollars'] >= card.cost``.  Returns
-       ``{'ok': False, 'reason': 'insufficient_funds'}`` if short.
+    2. **Funds check** — :func:`~jackdaw.engine.economy.can_afford`
+       (``cost <= dollars - bankrupt_at``, free cards always pass).
+       Returns ``{'ok': False, 'reason': 'insufficient_funds'}`` if short.
     3. **Remove** card from *from_area*.
     4. **Passive effects** — ``card.add_to_deck(game_state)``.
     5. **Place** card in *to_area*.
@@ -665,6 +666,7 @@ def buy_card(
         ``{'ok': True}`` on success, or ``{'ok': False, 'reason': str}``
         on failure.
     """
+    from jackdaw.engine.economy import can_afford
     from jackdaw.engine.jokers import JokerContext, calculate_joker
 
     # -- 1. Space check --
@@ -673,7 +675,7 @@ def buy_card(
         return {"ok": False, "reason": "no_space"}
 
     # -- 2. Funds check --
-    if game_state.get("dollars", 0) < card.cost:
+    if not can_afford(game_state, card.cost):
         return {"ok": False, "reason": "insufficient_funds"}
 
     # -- 3. Remove from shop --
@@ -819,8 +821,9 @@ def reroll_shop(
     Flow
     ~~~~
     1. **Cost** — ``calculate_reroll_cost(game_state)`` (reads current cost
-       without incrementing yet).  If the player has insufficient funds,
-       return ``{'ok': False, 'reason': 'insufficient_funds'}``.
+       without incrementing yet).  If the player can't afford it
+       (:func:`~jackdaw.engine.economy.can_afford`), return
+       ``{'ok': False, 'reason': 'insufficient_funds'}``.
     2. **Decrement free_rerolls** — ``current_round.free_rerolls -= 1``
        (clamped to 0), recorded as *was_free*.
     3. **Deduct cost** — if cost > 0, ``game_state['dollars'] -= cost``.
@@ -862,13 +865,14 @@ def reroll_shop(
         ``{'ok': False, 'reason': str}`` on failure.
     """
     from jackdaw.engine.card_factory import create_card
+    from jackdaw.engine.economy import can_afford
     from jackdaw.engine.jokers import JokerContext, calculate_joker
 
     cr = game_state.setdefault("current_round", {})
 
     # -- 1. Cost --
     cost = calculate_reroll_cost(game_state)
-    if game_state.get("dollars", 0) < cost:
+    if not can_afford(game_state, cost):
         return {"ok": False, "reason": "insufficient_funds"}
 
     # -- 2. Decrement free_rerolls --

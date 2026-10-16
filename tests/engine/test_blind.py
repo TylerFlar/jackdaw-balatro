@@ -6,6 +6,8 @@ reward dollars, and scaling across antes and stake levels.
 
 from __future__ import annotations
 
+import math
+
 import pytest
 
 from jackdaw.engine.blind import Blind, get_ante_blinds, get_new_boss
@@ -498,6 +500,55 @@ class TestExponentialFormula:
         expected = EXPONENTIAL_TRUTH[scaling][ante]
         actual = get_blind_amount(ante, scaling)
         assert actual == expected, f"scaling={scaling} ante={ante}: {actual} != {expected}"
+
+
+# Deep endless antes, from LuaJIT.  Vanilla rounds in doubles, so these
+# carry its float error (9.199999999999999e+30, not 9.2e30) — exact
+# integer arithmetic used to drift from them by an ulp.
+ENDLESS_TRUTH = {
+    1: {
+        16: 8.6e20,
+        18: 9.199999999999999e30,
+        21: 9.699999999999999e50,
+        25: 2.4000000000000003e87,
+        32: 2.7000000000000004e179,
+        37: 2.6999999999999997e268,
+        38: 4.5e288,
+    },
+    2: {21: 1.9000000000000002e51, 26: 3.9000000000000006e98, 36: 2.2000000000000002e249},
+    3: {21: 3.8000000000000004e51, 26: 7.800000000000001e98, 36: 4.4000000000000004e249},
+}
+
+
+class TestEndlessAntes:
+    """Endless mode: exact LuaJIT values up to ante 38, then overflow."""
+
+    @pytest.mark.parametrize(
+        ("scaling", "ante"),
+        [(s, a) for s, antes in ENDLESS_TRUTH.items() for a in antes],
+    )
+    def test_matches_luajit(self, scaling: int, ante: int):
+        assert float(get_blind_amount(ante, scaling)) == ENDLESS_TRUTH[scaling][ante]
+
+    @pytest.mark.parametrize("scaling", [1, 2, 3])
+    @pytest.mark.parametrize("ante", [39, 40, 50, 100])
+    def test_overflow_is_inf(self, scaling: int, ante: int):
+        # Vanilla's double overflows here (its rounding then yields NaN);
+        # the blind can never be beaten either way.
+        assert get_blind_amount(ante, scaling) == math.inf
+        assert get_blind_target(ante, "Boss", scaling) == math.inf
+        assert Blind.create("bl_small", ante, scaling).chips == math.inf
+
+    def test_overflowed_blind_cannot_be_beaten(self):
+        blind = Blind.create("bl_small", 39)
+        assert not blind.beaten_by(10**300)
+        assert not blind.beaten_by(math.inf)  # vanilla: inf - inf is NaN
+
+    def test_finite_blind_is_beaten_by_overflowed_score(self):
+        blind = Blind.create("bl_small", 1)
+        assert not blind.beaten_by(299)
+        assert blind.beaten_by(300)
+        assert blind.beaten_by(math.inf)
 
 
 # ============================================================================

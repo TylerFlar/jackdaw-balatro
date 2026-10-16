@@ -166,12 +166,20 @@ class SimBackend:
         if self._gs is None:
             raise RPCError(INVALID_STATE, "No active run — call 'start' first")
 
+        from jackdaw.bridge.balatrobot_adapter import bot_refusal
         from jackdaw.bridge.deserializer import rpc_to_action
 
         try:
             action = rpc_to_action(method, params)
         except ValueError as exc:
             raise RPCError(BAD_REQUEST, str(exc)) from exc
+
+        # balatrobot checks the game state after the schema and before the
+        # endpoint runs; refuse what it refuses, though the engine (vanilla)
+        # would allow it, so the in-process bridge behaves like the live one.
+        refusal = bot_refusal(method, params, self._gs)
+        if refusal is not None:
+            raise RPCError(INVALID_STATE, refusal)
 
         if action is None:
             return self._serialize()

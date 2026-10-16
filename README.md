@@ -76,7 +76,7 @@ from jackdaw.bridge import LiveBackend, BridgeAdapter
 env = BalatroEnvironment(
     adapter_factory=lambda: BridgeAdapter(LiveBackend("127.0.0.1", 12346))
 )
-# Same obs, same masks, same actions
+# Same obs and actions; the mask only offers what BalatroBot can execute
 ```
 
 ## Architecture

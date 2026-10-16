@@ -12,17 +12,18 @@ Each phase permits a specific subset of actions:
 +---------------------+------------------------------------------------------+
 | Phase               | Valid actions                                         |
 +=====================+======================================================+
-| BLIND_SELECT        | SelectBlind, SkipBlind                               |
+| BLIND_SELECT        | SelectBlind, SkipBlind, SellCard, UseConsumable      |
 +---------------------+------------------------------------------------------+
-| SELECTING_HAND      | PlayHand, Discard, SortHand, UseConsumable,          |
-|                     | SwapHandLeft/Right, SwapJokersLeft/Right             |
+| SELECTING_HAND      | PlayHand, Discard, SortHand, SellCard,               |
+|                     | UseConsumable, SwapHandLeft/Right,                   |
+|                     | SwapJokersLeft/Right                                 |
 +---------------------+------------------------------------------------------+
 | SHOP                | BuyCard, SellCard, UseConsumable, RedeemVoucher,     |
 |                     | OpenBooster, Reroll, SwapJokersLeft/Right, NextRound |
 +---------------------+------------------------------------------------------+
-| PACK_OPENING        | PickPackCard, SkipPack                               |
+| PACK_OPENING        | PickPackCard, SkipPack, SellCard, UseConsumable      |
 +---------------------+------------------------------------------------------+
-| ROUND_EVAL          | CashOut                                              |
+| ROUND_EVAL          | CashOut, UseConsumable                               |
 +---------------------+------------------------------------------------------+
 | GAME_OVER           | *(terminal — no valid actions)*                      |
 +---------------------+------------------------------------------------------+
@@ -307,6 +308,7 @@ def get_legal_actions(game_state: dict[str, Any]) -> list[Action]:
         * ``current_round`` (dict) — ``hands_left``, ``discards_left``,
           ``reroll_cost``, ``free_rerolls``.
         * ``dollars`` (int) — current bank balance.
+        * ``bankrupt_at`` (int) — debt floor (-20 with Credit Card).
         * ``round_resets`` (dict) — ``blind_states`` dict.
         * ``blind_on_deck`` (str | None) — ``"Small"``/``"Big"``/``"Boss"``.
         * ``hand`` (list[Card]) — cards in the player's hand.
@@ -362,6 +364,8 @@ def _legal_blind_select(gs: dict[str, Any]) -> list[Action]:
     if blind_on_deck in ("Small", "Big"):
         actions.append(SkipBlind())
 
+    actions.extend(_sell_actions(gs))
+
     # Consumables usable during blind select
     actions.extend(_usable_consumables(gs))
     return actions
@@ -389,6 +393,8 @@ def _legal_selecting_hand(gs: dict[str, Any]) -> list[Action]:
         for i in range(len(hand) - 1):
             actions.append(SwapHandRight(idx=i))
 
+    actions.extend(_sell_actions(gs))
+
     # Consumables usable during hand selection
     actions.extend(_usable_consumables(gs))
 
@@ -410,8 +416,9 @@ def _legal_round_eval(gs: dict[str, Any]) -> list[Action]:
 
 
 def _legal_shop(gs: dict[str, Any]) -> list[Action]:
+    from jackdaw.engine.economy import can_afford, spendable_dollars
+
     actions: list[Action] = []
-    dollars: int = gs.get("dollars", 0)
     jokers: list[Card] = gs.get("jokers", [])
     joker_slots: int = gs.get("joker_slots", 5)
     consumables: list[Card] = gs.get("consumables", [])
@@ -420,7 +427,7 @@ def _legal_shop(gs: dict[str, Any]) -> list[Action]:
     # Buy cards from shop
     shop_cards: list[Card] = gs.get("shop_cards", [])
     for i, card in enumerate(shop_cards):
-        if card.cost > dollars:
+        if not can_afford(gs, card.cost):
             continue
         # Check slot availability
         card_set = card.ability.get("set", "") if isinstance(card.ability, dict) else ""
@@ -433,35 +440,28 @@ def _legal_shop(gs: dict[str, Any]) -> list[Action]:
                 continue  # No room — agent must use/sell a consumable first
         actions.append(BuyCard(shop_index=i))
 
-    # Sell jokers (non-eternal)
-    for i, joker in enumerate(jokers):
-        if not joker.eternal:
-            actions.append(SellCard(area="jokers", card_index=i))
-
-    # Sell consumables
-    for i in range(len(consumables)):
-        actions.append(SellCard(area="consumables", card_index=i))
+    actions.extend(_sell_actions(gs))
 
     # Use owned consumables
     actions.extend(_usable_consumables(gs))
 
-    # Redeem vouchers
+    # Redeem vouchers (can_redeem: no free-item exemption)
     shop_vouchers: list[Card] = gs.get("shop_vouchers", [])
     for i, voucher in enumerate(shop_vouchers):
-        if voucher.cost <= dollars:
+        if voucher.cost <= spendable_dollars(gs):
             actions.append(RedeemVoucher(card_index=i))
 
     # Open boosters
     shop_boosters: list[Card] = gs.get("shop_boosters", [])
     for i, booster in enumerate(shop_boosters):
-        if booster.cost <= dollars:
+        if can_afford(gs, booster.cost):
             actions.append(OpenBooster(card_index=i))
 
     # Reroll
     cr = gs.get("current_round", {})
     reroll_cost = cr.get("reroll_cost", 5)
     free_rerolls = cr.get("free_rerolls", 0)
-    if free_rerolls > 0 or dollars >= reroll_cost:
+    if free_rerolls > 0 or can_afford(gs, reroll_cost):
         actions.append(Reroll())
 
     # Next round (always available in shop)
@@ -481,28 +481,44 @@ def _legal_pack_opening(gs: dict[str, Any]) -> list[Action]:
     actions: list[Action] = []
     pack_cards: list[Card] = gs.get("pack_cards", [])
     remaining: int = gs.get("pack_choices_remaining", 0)
-    pack_type: str = gs.get("pack_type", "")
 
-    # Spectral packs: balatrobot cannot handle Spectral card highlighting
-    # via RPC, so only SkipPack is offered.  RNG stays in sync because
-    # the pack is generated normally — we just force the agent to skip.
-    if remaining > 0 and pack_type != "Spectral":
-        # Vanilla gate (button_callbacks.lua:2112-2113): a Joker in a pack
-        # is selectable only if joker slots have room or it is negative.
-        jokers: list[Card] = gs.get("jokers", [])
-        joker_limit: int = gs.get("joker_slots", 5)
-        board_full = len(jokers) >= joker_limit
+    if remaining > 0:
+        from jackdaw.engine.consumables import default_use_targets, pack_pick_block_reason
+
+        # Vanilla greys out a pack card with nowhere to go — a Joker with
+        # no free slot (button_callbacks.lua:2112-2113), a creator
+        # consumable with no room for what it makes.  This is the gate the
+        # PickPackCard executor raises on, and a targeting tarot carries
+        # its default selection, so every pick offered can go to step.
         for i, card in enumerate(pack_cards):
-            if board_full:
-                ability = getattr(card, "ability", None) or {}
-                edition = getattr(card, "edition", None) or {}
-                is_joker = ability.get("set", "") == "Joker"
-                negative = bool(edition.get("negative")) if isinstance(edition, dict) else False
-                if is_joker and not negative:
-                    continue
-            actions.append(PickPackCard(card_index=i))
+            if pack_pick_block_reason(card, gs) is None:
+                actions.append(
+                    PickPackCard(card_index=i, target_indices=default_use_targets(card, gs))
+                )
 
     actions.append(SkipPack())
+    actions.extend(_sell_actions(gs))
+
+    # Owned consumables stay usable while a pack is open, without
+    # spending a pick (button_callbacks.lua:2269).
+    actions.extend(_usable_consumables(gs))
+    return actions
+
+
+def _sell_actions(gs: dict[str, Any]) -> list[Action]:
+    """SellCard for every non-eternal joker and every consumable.
+
+    Selling is not shop-only: vanilla's Card:can_sell_card (card.lua:1640)
+    has no state gate, so the executor accepts it in every phase in
+    ``_SELLABLE_PHASES`` (game.py) and these callers mirror that set.
+    """
+    jokers: list[Card] = gs.get("jokers", [])
+    actions: list[Action] = [
+        SellCard(area="jokers", card_index=i) for i, joker in enumerate(jokers) if not joker.eternal
+    ]
+    actions.extend(
+        SellCard(area="consumables", card_index=i) for i in range(len(gs.get("consumables", [])))
+    )
     return actions
 
 
@@ -512,27 +528,22 @@ def _legal_pack_opening(gs: dict[str, Any]) -> list[Action]:
 
 
 def _usable_consumables(gs: dict[str, Any]) -> list[Action]:
-    """Return UseConsumable actions for each usable owned consumable."""
+    """Return a UseConsumable action for each owned consumable usable now.
+
+    A consumable that needs a hand selection (The Magician, Death, ...)
+    carries the default one from
+    :func:`~jackdaw.engine.consumables.default_use_targets`, so every
+    action returned can go straight to ``step``; callers may substitute
+    any other legal selection.
+    """
     consumables: list[Card] = gs.get("consumables", [])
     if not consumables:
         return []
 
-    from jackdaw.engine.consumables import can_use_consumable
+    from jackdaw.engine.consumables import consumable_block_reason, default_use_targets
 
-    actions: list[Action] = []
-    hand: list[Card] = gs.get("hand", [])
-    jokers: list[Card] = gs.get("jokers", [])
-    joker_limit: int = gs.get("joker_slots", 5)
-    consumable_limit: int = gs.get("consumable_slots", 2)
-
-    for i, card in enumerate(consumables):
-        if can_use_consumable(
-            card,
-            hand_cards=hand,
-            jokers=jokers,
-            consumables=consumables,
-            consumable_limit=consumable_limit,
-            joker_limit=joker_limit,
-        ):
-            actions.append(UseConsumable(card_index=i))
-    return actions
+    return [
+        UseConsumable(card_index=i, target_indices=default_use_targets(card, gs))
+        for i, card in enumerate(consumables)
+        if consumable_block_reason(card, gs) is None
+    ]

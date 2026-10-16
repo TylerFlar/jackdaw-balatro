@@ -134,6 +134,8 @@ class JokerContext:
     hand_levels: HandLevels | None = None
     held_cards: list[Card] | None = None
     consumeable: Card | None = None
+    highlighted: list[Card] | None = None
+    """Hand cards the consumable was used on (``G.hand.highlighted``)."""
     cards: list[Card] | None = None
 
     # Blueprint
@@ -1726,19 +1728,39 @@ def _constellation(card: Card, ctx: JokerContext) -> JokerResult | None:
     return None
 
 
+def _is_glass_card(c: Card) -> bool:
+    return c.ability.get("effect") == "Glass Card" or c.ability.get("name") == "Glass Card"
+
+
 @register("j_glass")
 def _glass_joker(card: Card, ctx: JokerContext) -> JokerResult | None:
-    """Glass Joker: +0.75 xMult per Glass Card destroyed. Source: card.lua:2647."""
+    """Glass Joker: +0.75 xMult per Glass Card destroyed. Source: card.lua:2647.
+
+    Vanilla counts them two ways (card.lua:2687-2716):
+
+    * ``remove_playing_cards`` counts only cards already *shattered* when
+      it fires: Glass Cards broken in scoring (state_events.lua:967) or
+      destroyed on discard (state_events.lua:414).  Consumables shatter
+      their Glass Cards in a queued event, after that notification, so
+      Familiar / Grim / Incantation / Immolate add nothing.
+    * ``using_consumeable`` with The Hanged Man counts the highlighted
+      Glass Cards it is about to destroy.
+    """
     if ctx.cards_destroyed and not ctx.blueprint:
-        glass_count = sum(
-            1
-            for c in ctx.cards_destroyed
-            if c.ability.get("effect") == "Glass Card" or c.ability.get("name") == "Glass Card"
-        )
+        glass_count = sum(1 for c in ctx.cards_destroyed if getattr(c, "shattered", False))
         if glass_count > 0:
             card.ability["x_mult"] = (
                 card.ability.get("x_mult", 1) + card.ability.get("extra", 0.75) * glass_count
             )
+            return JokerResult()
+    if ctx.using_consumeable and not ctx.blueprint:
+        used = ctx.consumeable
+        if used is not None and used.center_key == "c_hanged_man":
+            glass_count = sum(1 for c in ctx.highlighted or () if _is_glass_card(c))
+            if glass_count > 0:
+                card.ability["x_mult"] = (
+                    card.ability.get("x_mult", 1) + card.ability.get("extra", 0.75) * glass_count
+                )
             return JokerResult()
     if ctx.joker_main:
         x = card.ability.get("x_mult", 1)

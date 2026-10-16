@@ -7,6 +7,8 @@ and between balatrobot game state responses and engine game_state dicts.
 from jackdaw.bridge.backend import Backend, LiveBackend, RPCError, SimBackend
 from jackdaw.bridge.balatrobot_adapter import (
     action_to_rpc,
+    bot_accepts,
+    bot_refusal,
     bot_state_to_game_state,
     extract_comparison_keys,
     game_state_to_bot_response,
@@ -21,6 +23,8 @@ from jackdaw.bridge.serializer import (
 __all__ = [
     # adapter (original)
     "action_to_rpc",
+    "bot_accepts",
+    "bot_refusal",
     "bot_state_to_game_state",
     "extract_comparison_keys",
     "game_state_to_bot_response",

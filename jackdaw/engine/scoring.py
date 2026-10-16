@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from jackdaw.engine.blind import Blind
     from jackdaw.engine.card import Card
     from jackdaw.engine.hand_levels import HandLevels
+    from jackdaw.engine.jokers import JokerResult
     from jackdaw.engine.rng import PseudoRandom
 
 
@@ -145,8 +146,9 @@ class ScoreResult:
     mult: float
     """Final mult value (after all additive and multiplicative bonuses)."""
 
-    total: int
-    """``floor(chips * mult)`` — the score added to G.GAME.chips."""
+    total: int | float
+    """``floor(chips * mult)`` — the score added to G.GAME.chips (inf when
+    the product overflows a double, see :func:`_floor_score`)."""
 
     dollars_earned: int
     """Dollars earned from scoring (Gold Seal, Lucky Card, etc.)."""
@@ -168,6 +170,15 @@ class ScoreResult:
 
     joker_creates: list[dict] = field(default_factory=list)
     """Card creation descriptors from joker effects (Vagabond, 8-Ball, etc.)."""
+
+
+def _floor_score(score: float) -> int | float:
+    """``math.floor`` with Lua's handling of an overflowed score.
+
+    Lua's ``math.floor(inf)`` is inf — that is how "naneinf" scores
+    happen — while Python's raises.  Non-finite scores pass through.
+    """
+    return math.floor(score) if math.isfinite(score) else score
 
 
 # ---------------------------------------------------------------------------
@@ -323,8 +334,8 @@ def score_hand_base(
                 mult *= ev["x_mult"]
 
     # === Phase 12: Final score ===
-    total = math.floor(hand_chips * mult)
-    breakdown.append(f"Final: {int(hand_chips)} x {mult:.1f} = {total}")
+    total = _floor_score(hand_chips * mult)
+    breakdown.append(f"Final: {hand_chips:.0f} x {mult:.1f} = {total}")
 
     return ScoreResult(
         hand_type=hand_type,
@@ -389,6 +400,27 @@ def _apply_held_joker_effects(
     return mult, dollars
 
 
+def _planet_joker_main(
+    card: Card, scoring_name: str, game_state: dict[str, Any]
+) -> JokerResult | None:
+    """The Planet branch of ``Card:calculate_joker`` (card.lua:2293-2302).
+
+    With Observatory redeemed, a held Planet whose hand_type is the scoring
+    hand gives X``v_observatory.config.extra``.  Any other consumable, or
+    a debuffed one, returns nothing.
+    """
+    if card.debuff or card.ability.get("set") != "Planet":
+        return None
+    if not (game_state.get("used_vouchers") or {}).get("v_observatory"):
+        return None
+    if (card.ability.get("consumeable") or {}).get("hand_type") != scoring_name:
+        return None
+    from jackdaw.engine.data.prototypes import VOUCHERS
+    from jackdaw.engine.jokers import JokerResult
+
+    return JokerResult(Xmult_mod=VOUCHERS["v_observatory"].config["extra"])
+
+
 def score_hand(
     played_cards: list[Card],
     held_cards: list[Card],
@@ -400,7 +432,8 @@ def score_hand(
     probabilities_normal: float = 1.0,
     game_state: dict[str, Any] | None = None,
     back_key: str | None = None,
-    blind_chips: int = 0,
+    blind_chips: int | float = 0,
+    consumables: list[Card] | None = None,
 ) -> ScoreResult:
     """Full scoring pipeline with joker effects (Phases 1-14).
 
@@ -415,6 +448,8 @@ def score_hand(
         game_state: Pre-computed game state dict.
         back_key: Deck back key (e.g. ``'b_plasma'`` for Plasma Deck).
         blind_chips: Blind chip target (for Mr. Bones save check).
+        consumables: Held consumables in slot order — scored after the
+            jokers in Phase 9 (Observatory's held-Planet X1.5).
     """
     from jackdaw.engine.hand_eval import evaluate_hand
     from jackdaw.engine.jokers import GameSnapshot, JokerContext, calculate_joker
@@ -534,7 +569,11 @@ def score_hand(
 
         saved = False
         _round_chips_now = gs.get("chips", 0)  # debuffed play adds 0
-        if blind_chips > 0 and _round_chips_now < blind_chips and gs.get("hands_left", 0) == 0:
+        if (
+            0 < blind_chips < math.inf
+            and _round_chips_now < blind_chips
+            and gs.get("hands_left", 0) == 0
+        ):
             for joker in jokers:
                 if joker.debuff:
                     continue
@@ -791,20 +830,30 @@ def score_hand(
             if ihe_result.Xmult_mod:
                 mult *= ihe_result.Xmult_mod
 
-    # === Phase 9: Joker main effects (left to right) ===
-    for joker in jokers:
-        if joker.debuff:
-            continue
-
+    # === Phase 9: Joker main effects (left to right), then consumables ===
+    # Vanilla's loop runs over #G.jokers.cards + #G.consumeables.cards
+    # (state_events.lua:877): each held consumable takes the same edition
+    # -> calculate_joker -> joker-on-joker -> edition x_mult turn after the
+    # jokers.  Of the consumables, only a Planet answers calculate_joker.
+    #
+    # A debuffed card adds nothing itself — get_edition and calculate_joker
+    # both return nil for it (card.lua:1016/2292) — but the loop does not
+    # skip it, so the other jokers still react to it: Baseball Card pays
+    # X1.5 for a debuffed Uncommon.
+    n_jokers = len(jokers)
+    for i, card in enumerate([*jokers, *(consumables or ())]):
         # 9a: Edition additive (chip_mod, mult_mod) BEFORE joker effect
-        edition = joker.get_edition()
+        edition = card.get_edition()
         if edition:
             hand_chips += edition.get("chip_mod", 0)
             mult += edition.get("mult_mod", 0)
 
         # 9b: Main joker effect
-        main_ctx = JokerContext(joker_main=True, **_shared)
-        result = calculate_joker(joker, main_ctx)
+        if i < n_jokers:
+            main_ctx = JokerContext(joker_main=True, **_shared)
+            result = calculate_joker(card, main_ctx)
+        else:
+            result = _planet_joker_main(card, hand_type, gs)
         if result:
             if result.mult_mod:
                 mult += result.mult_mod
@@ -819,9 +868,9 @@ def score_hand(
 
         # 9c: Joker-on-joker (other_joker context)
         for other in jokers:
-            if other is joker or other.debuff:
+            if other is card or other.debuff:
                 continue
-            j2j_ctx = JokerContext(other_joker=joker, **_shared)
+            j2j_ctx = JokerContext(other_joker=card, **_shared)
             j2j = calculate_joker(other, j2j_ctx)
             if j2j:
                 if j2j.mult_mod:
@@ -847,8 +896,8 @@ def score_hand(
             hand_chips = _back_effect["chips"]
             mult = _back_effect["mult"]
             breakdown.append(
-                f"Plasma: ({int(prev_chips + prev_mult)}) / 2"
-                f" -> {int(hand_chips)} chips, {int(mult)} mult"
+                f"Plasma: ({prev_chips + prev_mult:.0f}) / 2"
+                f" -> {hand_chips:.0f} chips, {mult:.0f} mult"
             )
 
     # === Phase 11: Card destruction ===
@@ -878,6 +927,10 @@ def score_hand(
             if rng.random("glass") < probabilities_normal / 4:
                 destroyed = True
         if destroyed:
+            # A destroyed Glass Card shatters (state_events.lua:967), which
+            # is what Glass Joker counts in the notify below.
+            if sc.ability.get("name") == "Glass Card":
+                sc.shattered = True
             cards_destroyed.append(sc)
 
     # Notify jokers of destruction (Caino, Glass Joker xMult growth)
@@ -892,8 +945,8 @@ def score_hand(
             calculate_joker(joker, dest_notify_ctx)
 
     # === Phase 12: Final score ===
-    total = math.floor(hand_chips * mult)
-    breakdown.append(f"Final: {int(hand_chips)} x {mult:.1f} = {total}")
+    total = _floor_score(hand_chips * mult)
+    breakdown.append(f"Final: {hand_chips:.0f} x {mult:.1f} = {total}")
 
     # === Phase 13: "after" joker pass (scaling mutations) ===
     jokers_removed: list[Card] = []
@@ -910,9 +963,15 @@ def score_hand(
     # >= 25% ratio (card.lua:3047-48: G.GAME.chips/G.GAME.blind.chips,
     # both cumulative — live-verified: LSWPWW38 died at <25% with
     # Bones on board while the old unconditional save advanced).
+    # An overflowed (inf) target is skipped: vanilla's ratio is 0 or NaN
+    # there, never >= 0.25, and a huge int / inf would raise here.
     saved = False
     _round_chips_after = gs.get("chips", 0) + total
-    if blind_chips > 0 and _round_chips_after < blind_chips and gs.get("hands_left", 0) == 0:
+    if (
+        0 < blind_chips < math.inf
+        and _round_chips_after < blind_chips
+        and gs.get("hands_left", 0) == 0
+    ):
         for joker in jokers:
             if joker.debuff:
                 continue

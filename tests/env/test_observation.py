@@ -474,3 +474,45 @@ class TestIndividualEncoders:
         assert vec.shape == (D_SHOP,)
         assert vec[3] == 1.0  # affordable (cost 4 <= dollars 10)
         assert vec[4] == 1.0  # has_slot (0 jokers < 5 slots)
+
+    def test_shop_item_affordable_on_credit(self):
+        from jackdaw.engine.card import Card
+
+        gs = _make_adapter().raw_state
+        gs["dollars"] = 0
+        card = Card()
+        card.set_ability("j_joker")
+        card.cost = 4
+        assert encode_shop_item(card, gs)[3] == 0.0
+        gs["bankrupt_at"] = -20  # Credit Card
+        assert encode_shop_item(card, gs)[3] == 1.0
+
+    def test_consumable_can_use_matches_the_mask(self):
+        """A targeting tarot reads usable once the hand can satisfy it."""
+        from jackdaw.engine.card_factory import create_consumable
+
+        adapter = _make_adapter()
+        gs = adapter.raw_state
+        card = create_consumable("c_magician")
+        gs["consumables"] = [card]
+        assert encode_consumable(card, gs)[3] == 0.0  # blind select: no hand
+        _step_to_hand(adapter)
+        assert encode_consumable(card, gs)[3] == 1.0
+
+
+class TestEndlessOverflowEncoding:
+    """Endless mode overflows blind targets (ante 39+) and big scores to
+    inf; the encoding must stay finite for the network."""
+
+    def test_overflowed_blind_and_score_encode_finite(self):
+        import math
+
+        adapter = _make_adapter()
+        gs = adapter.raw_state
+        gs["round_resets"]["ante"] = 39
+        _step_to_hand(adapter)
+        assert gs["blind"].chips == math.inf
+        for chips in (0, 10**300, math.inf, math.nan):
+            gs["chips"] = chips
+            obs = encode_observation(gs)
+            assert np.isfinite(obs.global_context).all(), f"chips={chips}"

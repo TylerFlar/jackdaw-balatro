@@ -1,7 +1,8 @@
-"""End-of-round money calculation.
+"""End-of-round money calculation and shop affordability.
 
 Ports ``evaluate_round`` (state_events.lua:1135) and rental deduction
-(state_events.lua:108) as pure functions.
+(state_events.lua:108) as pure functions, plus the ``bankrupt_at``-aware
+affordability gates (:func:`spendable_dollars`, :func:`can_afford`).
 
 **Order of operations** (matching Lua source):
 
@@ -106,6 +107,34 @@ def calculate_discard_cost(game_state: dict[str, Any]) -> int:
     Returns 0 if no discard cost modifier is active.
     """
     return game_state.get("modifiers", {}).get("discard_cost", 0)
+
+
+# ---------------------------------------------------------------------------
+# Affordability (Credit Card's bankruptcy floor)
+# ---------------------------------------------------------------------------
+
+
+def spendable_dollars(game_state: dict[str, Any]) -> int:
+    """Money available to spend: ``dollars - bankrupt_at``.
+
+    ``bankrupt_at`` is 0 unless Credit Card lowers it by $20, which lets
+    purchases dip into debt.  Every vanilla shop gate measures cost against
+    ``G.GAME.dollars - G.GAME.bankrupt_at`` (button_callbacks.lua:56, 97,
+    112, 2077).
+    """
+    return game_state.get("dollars", 0) - game_state.get("bankrupt_at", 0)
+
+
+def can_afford(game_state: dict[str, Any], cost: int) -> bool:
+    """Whether a shop card, booster pack or reroll at *cost* is affordable.
+
+    Mirrors ``G.FUNCS.can_buy`` / ``can_open`` / ``can_reroll``: free
+    items are always affordable, otherwise *cost* must fit within
+    :func:`spendable_dollars`.  Vouchers go through ``can_redeem``, which
+    has no free-item exemption: compare against :func:`spendable_dollars`
+    directly.
+    """
+    return cost <= 0 or cost <= spendable_dollars(game_state)
 
 
 # ---------------------------------------------------------------------------

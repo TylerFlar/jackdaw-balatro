@@ -32,7 +32,7 @@ BLIND_MULT: dict[str, float] = {
 }
 
 
-def get_blind_amount(ante: int, scaling: int = 1) -> int:
+def get_blind_amount(ante: int, scaling: int = 1) -> int | float:
     """Return the base chip requirement for a given ante and scaling level.
 
     Args:
@@ -41,7 +41,8 @@ def get_blind_amount(ante: int, scaling: int = 1) -> int:
             1 = White/Red stake (default), 2 = Green-Blue, 3 = Purple-Gold.
 
     Returns:
-        Base chip amount (before blind_mult and ante_scaling multipliers).
+        Base chip amount (before blind_mult and ante_scaling multipliers),
+        or ``math.inf`` once the amount overflows a double (ante 39+).
     """
     if ante < 1:
         return 100
@@ -51,23 +52,37 @@ def get_blind_amount(ante: int, scaling: int = 1) -> int:
     if ante <= 8:
         return amounts[ante - 1]  # 0-indexed
 
-    # Exponential formula for antes 9+ (misc_functions.lua:927-929)
+    # Exponential formula for antes 9+ (misc_functions.lua:927-929),
+    # evaluated in doubles exactly as LuaJIT does.
     k = 0.75
     a = amounts[7]  # ante 8 base amount
     b = 1.6
     c = ante - 8
     d = 1 + 0.2 * c
 
-    amount = math.floor(a * (b + (k * c) ** d) ** c)
+    try:
+        amount = a * (b + (k * c) ** d) ** c
+    except OverflowError:
+        # Python's ** raises where Lua's ^ returns inf (ante 40+).
+        amount = math.inf
 
-    # Significant-figure rounding (misc_functions.lua:929)
-    # amount = amount - amount % (10 ^ floor(log10(amount) - 1))
-    if amount > 0:
-        digits = math.floor(math.log10(amount)) - 1
-        rounding = 10**digits
-        amount = amount - amount % rounding
+    # From ante 39 the double overflows — the "naneinf" blind.  Vanilla's
+    # rounding below then computes inf % inf = NaN, and since its win check
+    # is chips - blind.chips >= 0, that blind can never be beaten.  inf keeps
+    # that outcome under the same check (inf - inf is NaN too) without
+    # NaN's habit of failing every comparison.
+    if not math.isfinite(amount):
+        return math.inf
 
-    return amount
+    # Significant-figure rounding (misc_functions.lua:929):
+    #   amount = amount - amount % (10 ^ floor(log10(amount) - 1))
+    # with Lua's a % b == a - floor(a/b)*b, in doubles.  Exact integer
+    # arithmetic drifts an ulp from vanilla at some endless antes.
+    amount = float(math.floor(amount))
+    m = 10.0 ** math.floor(math.log10(amount) - 1)
+    lua_mod = amount - math.floor(amount / m) * m
+
+    return int(amount - lua_mod)
 
 
 def get_blind_target(
@@ -75,7 +90,7 @@ def get_blind_target(
     blind_type: str,
     scaling: int = 1,
     ante_scaling: float = 1.0,
-) -> int:
+) -> int | float:
     """Return the actual chip target for a specific blind.
 
     Args:
@@ -85,8 +100,10 @@ def get_blind_target(
         ante_scaling: Deck ante scaling (1.0 normally, 2.0 for Plasma).
 
     Returns:
-        Chip target the player must reach to beat this blind.
+        Chip target the player must reach to beat this blind
+        (``math.inf`` from ante 39, see :func:`get_blind_amount`).
     """
     base = get_blind_amount(ante, scaling)
     mult = BLIND_MULT.get(blind_type, 2.0)
-    return math.floor(base * mult * ante_scaling)
+    target = base * mult * ante_scaling
+    return math.floor(target) if math.isfinite(target) else target

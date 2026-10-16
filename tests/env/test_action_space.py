@@ -1218,7 +1218,7 @@ class TestMaskConsistencyWithEngine:
         dealt card already has an edition the historical "first min_h
         cards" default was illegal, so a mask-legal pick raised.
         """
-        from jackdaw.engine.consumables import pack_pick_default_targets
+        from jackdaw.engine.consumables import default_use_targets
 
         hand = _make_hand(4)
         hand[0].edition = {"type": "foil", "foil": True}
@@ -1230,7 +1230,7 @@ class TestMaskConsistencyWithEngine:
         mask = get_action_mask(gs)
         assert mask.entity_masks[ActionType.PickPackCard][0]
         # not card 0 — it already has an edition
-        assert pack_pick_default_targets(gs["pack_cards"][0], gs) == (1,)
+        assert default_use_targets(gs["pack_cards"][0], gs) == (1,)
 
     def test_pack_pick_fool_needs_room_and_something_to_copy(self):
         """The Fool's own clause (card.lua:1554), both halves.
@@ -1759,3 +1759,121 @@ class TestSwapHandRoundtrip:
 
         assert not failures, f"{len(failures)} failures:\n" + "\n".join(failures[:20])
         assert total_tested > 200, f"Only tested {total_tested} cases"
+
+
+# =========================================================================
+# Tests: owned consumables — targeting tarots, The Fool, open packs (#20)
+# =========================================================================
+
+
+class TestMaskOwnedConsumables:
+    """The UseConsumable mask judges each owned consumable against the
+    selection it would be used with, in every phase that allows use."""
+
+    def test_targeting_tarot_offered_with_a_hand(self):
+        gs = _selecting_hand_state(consumables=[_pack_consumable("c_magician", "Tarot")])
+        mask = get_action_mask(gs)
+        assert mask.type_mask[ActionType.UseConsumable]
+        assert mask.entity_masks[ActionType.UseConsumable][0]
+
+    def test_targeting_tarot_not_offered_without_a_hand(self):
+        # Outside SELECTING_HAND and the dealt packs the hand is empty —
+        # vanilla's state gate for hand-dependent consumables (card.lua:1564).
+        gs = _shop_state(consumables=[_pack_consumable("c_magician", "Tarot")])
+        assert not get_action_mask(gs).type_mask[ActionType.UseConsumable]
+
+    def test_death_needs_two_cards(self):
+        gs = _selecting_hand_state(
+            hand=_make_hand(1), consumables=[_pack_consumable("c_death", "Tarot")]
+        )
+        assert not get_action_mask(gs).type_mask[ActionType.UseConsumable]
+
+    def test_fool_reads_last_tarot_planet(self):
+        fool = _pack_consumable("c_fool", "Tarot")
+        gs = _shop_state(consumables=[fool])
+        assert not get_action_mask(gs).type_mask[ActionType.UseConsumable]
+        gs["last_tarot_planet"] = "c_strength"
+        assert get_action_mask(gs).type_mask[ActionType.UseConsumable]
+
+    def test_offered_during_pack_opening(self):
+        gs = _pack_opening_state(consumables=[_make_planet()])
+        mask = get_action_mask(gs)
+        assert mask.type_mask[ActionType.UseConsumable]
+        assert mask.entity_masks[ActionType.UseConsumable][0]
+
+    def test_tarot_targets_the_dealt_hand_during_pack(self):
+        gs = _pack_opening_state(
+            pack_type="Arcana",
+            hand=_make_hand(5),
+            consumables=[_pack_consumable("c_strength", "Tarot")],
+        )
+        assert get_action_mask(gs).type_mask[ActionType.UseConsumable]
+
+
+class TestUseConsumableDefaultTargets:
+    """A UseConsumable without card targets gets the default selection the
+    mask judged legal, as PickPackCard does."""
+
+    @staticmethod
+    def _use(gs: dict[str, Any], card_target: tuple[int, ...] | None = None):
+        fa = FactoredAction(ActionType.UseConsumable, entity_target=0, card_target=card_target)
+        return factored_to_engine_action(fa, gs)
+
+    def test_targeting_tarot_gets_lowest_indices(self):
+        gs = _selecting_hand_state(consumables=[_pack_consumable("c_death", "Tarot")])
+        assert self._use(gs) == EngineUseConsumable(card_index=0, target_indices=(0, 1))
+
+    def test_aura_skips_an_editioned_card(self):
+        hand = _make_hand(4)
+        hand[0].edition = {"type": "foil", "foil": True}
+        gs = _selecting_hand_state(hand=hand, consumables=[_pack_consumable("c_aura", "Spectral")])
+        assert get_action_mask(gs).entity_masks[ActionType.UseConsumable][0]
+        assert self._use(gs).target_indices == (1,)
+
+    def test_explicit_targets_are_kept(self):
+        gs = _selecting_hand_state(consumables=[_pack_consumable("c_magician", "Tarot")])
+        assert self._use(gs, card_target=(3, 5)).target_indices == (3, 5)
+
+    def test_untargeted_consumable_stays_targetless(self):
+        gs = _selecting_hand_state(consumables=[_make_planet()])
+        assert self._use(gs).target_indices is None
+
+
+# =========================================================================
+# Tests: Credit Card's debt floor in the shop masks (#23)
+# =========================================================================
+
+
+class TestMaskCreditCardDebt:
+    """``bankrupt_at`` (-20 with Credit Card) extends every shop
+    affordability mask (button_callbacks.lua:56, 97, 112, 2077)."""
+
+    def test_everything_affordable_on_credit(self):
+        gs = _shop_state(
+            dollars=0,
+            bankrupt_at=-20,
+            shop_cards=[_make_shop_card(cost=3)],
+            shop_vouchers=[_make_voucher(10)],
+            shop_boosters=[_make_booster(4)],
+        )
+        mask = get_action_mask(gs)
+        assert mask.type_mask[ActionType.BuyCard]
+        assert mask.type_mask[ActionType.RedeemVoucher]
+        assert mask.type_mask[ActionType.OpenBooster]
+        assert mask.type_mask[ActionType.Reroll]
+
+    def test_debt_floor_still_binds(self):
+        gs = _shop_state(
+            dollars=-18,  # $2 above the floor
+            bankrupt_at=-20,
+            shop_cards=[_make_shop_card(cost=3)],
+            shop_boosters=[_make_booster(4)],
+        )
+        mask = get_action_mask(gs)
+        assert not mask.type_mask[ActionType.BuyCard]
+        assert not mask.type_mask[ActionType.OpenBooster]
+        assert not mask.type_mask[ActionType.Reroll]
+
+    def test_no_credit_by_default(self):
+        gs = _shop_state(dollars=0, shop_cards=[_make_shop_card(cost=3)])
+        assert not get_action_mask(gs).type_mask[ActionType.BuyCard]

@@ -77,14 +77,19 @@ class RandomAgent:
                 selected = sorted(_random.sample(list(legal_cards), count))
                 card_target = tuple(int(i) for i in selected)
 
-        # Card target for UseConsumable (if it needs targets)
-        if at == ActionType.UseConsumable and entity_target is not None:
+        # Card target for a targeting Tarot/Spectral, used from the tray or
+        # picked from a pack (anything else takes the engine default)
+        source_key = {
+            ActionType.UseConsumable: "consumables",
+            ActionType.PickPackCard: "pack_cards",
+        }.get(ActionType(at))
+        if source_key is not None and entity_target is not None:
             gs = info.get("raw_state", {})
-            consumables = gs.get("consumables", [])
-            if entity_target < len(consumables):
+            source = gs.get(source_key, [])
+            if entity_target < len(source):
                 from jackdaw.env.action_space import get_consumable_target_info
 
-                card = consumables[entity_target]
+                card = source[entity_target]
                 min_cards, max_cards, needs = get_consumable_target_info(card)
                 if needs:
                     legal_cards = np.nonzero(action_mask.card_mask)[0]

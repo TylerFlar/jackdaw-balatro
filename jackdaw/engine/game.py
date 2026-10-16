@@ -19,6 +19,8 @@ Usage::
 
 from __future__ import annotations
 
+import math
+import sys
 from typing import Any
 
 from jackdaw.engine.actions import (
@@ -699,6 +701,7 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
         game_state=gs,
         back_key=gs.get("selected_back_key"),
         blind_chips=blind.chips,
+        consumables=gs.get("consumables", []),
     )
 
     # hands_played counters increment AFTER evaluate_play completes
@@ -710,8 +713,11 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
     # ------------------------------------------------------------------
     # 7. Process scoring side-effects
     # ------------------------------------------------------------------
-    # Accumulate chips
-    gs["chips"] = gs.get("chips", 0) + result.total
+    # Accumulate chips.  G.GAME.chips is a double in vanilla, so a total
+    # past the largest double reads as inf ("naneinf") instead of growing
+    # into an int too large for the float math downstream.
+    chips = gs.get("chips", 0) + result.total
+    gs["chips"] = math.inf if chips > sys.float_info.max else chips
     gs["last_score_result"] = result
 
     # Dollars from scoring (Gold Seal, Lucky Card, joker economy)
@@ -773,7 +779,7 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
     # ------------------------------------------------------------------
     # 10. Determine next phase
     # ------------------------------------------------------------------
-    if gs["chips"] >= blind.chips:
+    if blind.beaten_by(gs["chips"]):
         _round_won(gs)
     elif cr["hands_left"] <= 0:
         if not result.saved:
@@ -984,6 +990,10 @@ def _handle_discard(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str, A
                             jokers_to_remove.append(joker)
 
         if card_destroyed:
+            # Destroyed on discard, a Glass Card shatters on the spot
+            # (state_events.lua:413) — Glass Joker counts it.
+            if card.ability.get("name") == "Glass Card":
+                card.shattered = True
             destroyed.append(card)
 
     # ------------------------------------------------------------------
@@ -1190,8 +1200,10 @@ def _handle_buy_card(gs: dict[str, Any], idx: int) -> dict[str, Any]:
     if idx < 0 or idx >= len(shop_cards):
         raise IllegalActionError(f"Invalid shop index {idx}")
 
+    from jackdaw.engine.economy import can_afford
+
     card = shop_cards[idx]
-    if card.cost > gs.get("dollars", 0):
+    if not can_afford(gs, card.cost):
         raise IllegalActionError("Cannot afford card")
 
     # Space check — mirrors shop.py:buy_card; Negative cards need no room.
@@ -1393,20 +1405,27 @@ def _handle_use_consumable(
 ) -> dict[str, Any]:
     """Use a consumable from the player's consumable slots.
 
-    Consumables can be used in BLIND_SELECT, SELECTING_HAND,
-    ROUND_EVAL, and SHOP phases.  The phase does NOT change after use.
+    Consumables can be used in BLIND_SELECT, SELECTING_HAND, ROUND_EVAL,
+    SHOP and PACK_OPENING phases.  The phase does NOT change after use,
+    and during a pack no pick is spent: vanilla's use_card just restores
+    the open pack when the used card came from G.consumeables
+    (button_callbacks.lua:2269).  An Arcana/Spectral pack's dealt hand is
+    the target hand.
 
     Sequence:
     1. Validate phase and index
     2. Pop card from consumables
     3. Use via ``_use_consumable_card`` (builds ConsumableContext,
-       calls handler, applies ConsumableResult mutations)
-    4. Fire ``using_consumeable`` joker context if the result
-       requests it (Constellation +xMult when Planet used)
-    5. Track usage stats (last_tarot_planet)
+       calls handler, applies ConsumableResult mutations, tracks
+       last_tarot_planet, fires the ``using_consumeable`` joker context)
     """
     _require_phase(
-        gs, GamePhase.BLIND_SELECT, GamePhase.SELECTING_HAND, GamePhase.ROUND_EVAL, GamePhase.SHOP
+        gs,
+        GamePhase.BLIND_SELECT,
+        GamePhase.SELECTING_HAND,
+        GamePhase.ROUND_EVAL,
+        GamePhase.SHOP,
+        GamePhase.PACK_OPENING,
     )
 
     consumables: list = gs.get("consumables", [])
@@ -1458,8 +1477,11 @@ def _handle_redeem_voucher(gs: dict[str, Any], idx: int) -> dict[str, Any]:
     if idx < 0 or idx >= len(vouchers):
         raise IllegalActionError(f"Invalid voucher index {idx}")
 
+    from jackdaw.engine.economy import spendable_dollars
+
     card = vouchers[idx]
-    if card.cost > gs.get("dollars", 0):
+    # can_redeem has no free-item exemption (button_callbacks.lua:97).
+    if card.cost > spendable_dollars(gs):
         raise IllegalActionError("Cannot afford voucher")
 
     gs["dollars"] -= card.cost
@@ -1514,8 +1536,10 @@ def _handle_open_booster(gs: dict[str, Any], idx: int) -> dict[str, Any]:
     if idx < 0 or idx >= len(boosters):
         raise IllegalActionError(f"Invalid booster index {idx}")
 
+    from jackdaw.engine.economy import can_afford
+
     pack = boosters[idx]
-    if pack.cost > gs.get("dollars", 0):
+    if not can_afford(gs, pack.cost):
         raise IllegalActionError("Cannot afford booster")
 
     gs["dollars"] -= pack.cost
@@ -1655,12 +1679,10 @@ def _handle_pick_pack_card(
     gs["pack_choices_remaining"] = remaining - 1
 
     if card_set in ("Tarot", "Planet", "Spectral"):
-        # Consumable: use immediately (Arcana/Spectral/Celestial pack)
+        # Consumable: use immediately (Arcana/Spectral/Celestial pack);
+        # this notifies the jokers (using_consumeable) like a tray use.
         _use_consumable_card(gs, card, targets)
         _release_used_key(gs, card)
-
-        # Fire using_consumeable joker context
-        _fire_shop_joker_context(gs, using_consumeable=True)
 
     elif card_set == "Joker":
         # Buffoon pack: add to joker slots
@@ -1707,13 +1729,15 @@ def _handle_reroll(gs: dict[str, Any]) -> dict[str, Any]:
     """
     _require_phase(gs, GamePhase.SHOP)
 
+    from jackdaw.engine.economy import can_afford
+
     cr = gs.get("current_round", {})
     free = cr.get("free_rerolls", 0)
     cost = cr.get("reroll_cost", 5)
 
     if free > 0:
         cr["free_rerolls"] = free - 1
-    elif gs.get("dollars", 0) >= cost:
+    elif can_afford(gs, cost):
         gs["dollars"] -= cost
     else:
         raise IllegalActionError("Cannot afford reroll")
@@ -2452,12 +2476,13 @@ def _use_consumable_card(
     """Build a ConsumableContext and use a consumable card.
 
     Bridges the game_state dict with the ``use_consumable(card, ctx)`` API.
+    Shared by tray uses and pack picks, which both go through
+    ``G.FUNCS.use_card`` in vanilla.
 
     1. Build ConsumableContext from game_state + target_indices
     2. Call handler → ConsumableResult
-    3. Apply all result mutations
-    4. Fire ``using_consumeable`` joker context if result requests it
-    5. Track usage (last_tarot_planet)
+    3. Apply all result mutations (incl. last_tarot_planet)
+    4. Fire the ``using_consumeable`` joker context
     """
     from jackdaw.engine.consumables import ConsumableContext, use_consumable
 
@@ -2477,32 +2502,31 @@ def _use_consumable_card(
         game_state=gs,
     )
     result = use_consumable(card, ctx)
+    if result is not None:
+        _apply_consumable_result(gs, result, card)
 
-    if result is None:
-        return
+    # Every use notifies the jokers right after use_consumeable
+    # (button_callbacks.lua:2219-2221), from the tray or a pack alike:
+    # Constellation counts Planets, Glass Joker the Glass Cards The Hanged
+    # Man was used on.
+    from jackdaw.engine.jokers import GameSnapshot, JokerContext, calculate_joker
 
-    # Apply all mutations
-    _apply_consumable_result(gs, result, card)
-
-    # Fire using_consumeable joker context (Constellation, etc.)
-    if getattr(result, "notify_jokers_consumeable", False):
-        from jackdaw.engine.jokers import GameSnapshot, JokerContext, calculate_joker
-
-        jokers: list = gs.get("jokers", [])
-        game_snap = GameSnapshot(
-            joker_count=len(jokers),
-            money=gs.get("dollars", 0),
+    jokers: list = gs.get("jokers", [])
+    game_snap = GameSnapshot(
+        joker_count=len(jokers),
+        money=gs.get("dollars", 0),
+    )
+    for joker in list(jokers):
+        if getattr(joker, "debuff", False):
+            continue
+        jctx = JokerContext(
+            using_consumeable=True,
+            consumeable=card,
+            highlighted=highlighted,
+            jokers=jokers,
+            game=game_snap,
         )
-        for joker in list(jokers):
-            if getattr(joker, "debuff", False):
-                continue
-            jctx = JokerContext(
-                using_consumeable=True,
-                consumeable=card,
-                jokers=jokers,
-                game=game_snap,
-            )
-            calculate_joker(joker, jctx)
+        calculate_joker(joker, jctx)
 
 
 def _apply_consumable_result(
@@ -3219,6 +3243,10 @@ def _fire_discard_effects(gs: dict[str, Any], discarded: list, *, hook: bool) ->
                     elif joker not in jokers_to_remove:
                         jokers_to_remove.append(joker)
         if card_destroyed:
+            # Destroyed on discard, a Glass Card shatters on the spot
+            # (state_events.lua:413) — Glass Joker counts it.
+            if card.ability.get("name") == "Glass Card":
+                card.shattered = True
             destroyed.append(card)
 
     if dollars_earned:

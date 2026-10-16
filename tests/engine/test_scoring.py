@@ -528,3 +528,48 @@ class TestDebuffedHandAfterPass:
         assert r.debuffed is True
         assert r.saved is True
         assert bones in r.jokers_removed
+
+
+# ============================================================================
+# Score overflow ("naneinf")
+# ============================================================================
+
+
+class TestScoreOverflow:
+    """A chips x mult product past the largest double is inf in vanilla
+    (Lua's math.floor(inf) is inf); Python's floor raises."""
+
+    @staticmethod
+    def _overflowing_levels() -> HandLevels:
+        levels = HandLevels()
+        levels.level_up("Pair", 10**155)  # ~1.5e156 chips x ~1e155 mult
+        return levels
+
+    @pytest.mark.parametrize("back_key", [None, "b_plasma"])
+    def test_total_is_inf(self, back_key):
+        played = [_card("Hearts", "2"), _card("Spades", "2")]
+        r = score_hand(
+            played,
+            [],
+            [],
+            self._overflowing_levels(),
+            _small_blind(),
+            PseudoRandom("T"),
+            back_key=back_key,
+        )
+        assert r.total == float("inf")
+
+    def test_mr_bones_ignores_overflowed_target(self):
+        played = [_card("Hearts", "2"), _card("Spades", "2")]
+        bones = _joker("j_mr_bones")
+        r = score_hand(
+            played,
+            [],
+            [bones],
+            HandLevels(),
+            Blind.create("bl_small", ante=39),
+            PseudoRandom("T"),
+            blind_chips=float("inf"),
+            game_state={"hands_left": 0, "chips": 10**308},
+        )
+        assert r.saved is False
