@@ -5,8 +5,9 @@ whole engine state dict, observations, masks, action tables) after every
 step.  Any behavioural change, including one that only moves an RNG draw,
 changes a digest.
 
-Shared references are encoded by first-visit order, so aliasing (the same
-Card in two areas) is part of the fingerprint and cycles terminate.
+Shared references to mutable objects are encoded by first-visit order, so
+aliasing (the same Card in two areas) is part of the fingerprint and cycles
+terminate.  Immutable values are encoded by value.
 """
 
 from __future__ import annotations
@@ -18,6 +19,14 @@ import types
 from typing import Any
 
 import numpy as np
+
+
+def _is_mutable(obj: Any) -> bool:
+    if isinstance(obj, (tuple, frozenset)):
+        return False
+    if dataclasses.is_dataclass(obj):
+        return not type(obj).__dataclass_params__.frozen
+    return True
 
 
 class Fingerprinter:
@@ -57,13 +66,18 @@ class Fingerprinter:
             w(f"T:{getattr(obj, '__module__', '')}.{getattr(obj, '__qualname__', obj)!r};")
             return
 
-        # Containers / objects: track identity for aliasing and cycles.
-        oid = id(obj)
-        if oid in self._seen:
-            w(f"@{self._seen[oid]};")
-            return
-        self._seen[oid] = len(self._seen)
-        self._keepalive.append(obj)
+        # Mutable containers / objects: track identity, since aliasing is
+        # observable (mutating one alias changes the other) and cycles must
+        # terminate.  Immutable values (tuples, frozensets, frozen
+        # dataclasses) are encoded by value, so sharing one cached instance
+        # is not a behaviour change.
+        if _is_mutable(obj):
+            oid = id(obj)
+            if oid in self._seen:
+                w(f"@{self._seen[oid]};")
+                return
+            self._seen[oid] = len(self._seen)
+            self._keepalive.append(obj)
 
         if isinstance(obj, dict):
             w(f"{{{type(obj).__name__}:{len(obj)}:")
