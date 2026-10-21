@@ -582,6 +582,7 @@ def score_hand(
             for joker in jokers:
                 if joker.debuff:
                     continue
+                # Fresh per joker (not shared): game_over/chips_ratio are set on it.
                 bones_ctx = JokerContext(**_debuffed_shared)
                 bones_ctx.game_over = True  # type: ignore[attr-defined]
                 bones_ctx.chips_ratio = _round_chips_now / blind_chips  # type: ignore[attr-defined]
@@ -1006,6 +1007,7 @@ def score_hand(
         for joker in jokers:
             if joker.debuff:
                 continue
+            # Fresh per joker (not shared): game_over/chips_ratio are set on it.
             bones_ctx = JokerContext(**_shared)
             bones_ctx.game_over = True  # type: ignore[attr-defined]
             bones_ctx.chips_ratio = _round_chips_after / blind_chips  # type: ignore[attr-defined]
