@@ -545,10 +545,10 @@ def score_hand(
             game=snapshot,
         )
         # Phase 3a: Matador check on debuffed hands
+        ctx = JokerContext(debuffed_hand=True, **_debuffed_shared)
         for joker in jokers:
             if joker.debuff:
                 continue
-            ctx = JokerContext(debuffed_hand=True, **_debuffed_shared)
             result = calculate_joker(joker, ctx)
             if result and result.dollars:
                 dollars += result.dollars
@@ -560,10 +560,11 @@ def score_hand(
         # 5-chip decay x5 mult).  Same for the Mr. Bones save on a
         # debuffed final hand.
         jokers_removed_debuffed: list[Card] = []
+        after_ctx = JokerContext(after=True, **_debuffed_shared)
         for joker in jokers:
             if joker.debuff:
                 continue
-            after_result = calculate_joker(joker, JokerContext(after=True, **_debuffed_shared))
+            after_result = calculate_joker(joker, after_ctx)
             if after_result and after_result.remove:
                 jokers_removed_debuffed.append(joker)
 
@@ -632,7 +633,10 @@ def score_hand(
     # (play counts recorded before the debuff check, matching
     # state_events.lua:574)
 
-    # Shared context fields (lightweight — references snapshot, not copies)
+    # Shared context fields (lightweight — references snapshot, not copies).
+    # Handlers only read their context (Blueprint/Brainstorm copy it with
+    # dataclasses.replace), so each pass builds one context per phase/card
+    # and hands it to every joker instead of one per joker.
     _shared = dict(
         full_hand=played_cards,
         scoring_hand=scoring_cards,
@@ -651,10 +655,10 @@ def score_hand(
     joker_creates: list[dict] = []
 
     # === Phase 5: "before" joker pass ===
+    ctx = JokerContext(before=True, **_shared)
     for joker in jokers:
         if joker.debuff:
             continue
-        ctx = JokerContext(before=True, **_shared)
         result = calculate_joker(joker, ctx)
         if result and result.level_up:
             hand_levels.level_up(hand_type)
@@ -692,21 +696,27 @@ def score_hand(
             for _ in range(seal_result["repetitions"]):
                 reps.append(seal_result)
 
+        rep_ctx = JokerContext(
+            repetition=True,
+            cardarea="play",
+            other_card=card,
+            **_shared,
+        )
         for joker in jokers:
             if joker.debuff:
                 continue
-            rep_ctx = JokerContext(
-                repetition=True,
-                cardarea="play",
-                other_card=card,
-                **_shared,
-            )
             rep_result = calculate_joker(joker, rep_ctx)
             if rep_result and rep_result.repetitions > 0:
                 for _ in range(rep_result.repetitions):
                     reps.append(rep_result)
 
         # 7b-d: Each repetition
+        ind_ctx = JokerContext(
+            individual=True,
+            cardarea="play",
+            other_card=card,
+            **_shared,
+        )
         for _rep in reps:
             # Card's own effects
             ev = eval_card(
@@ -721,12 +731,6 @@ def score_hand(
             for joker in jokers:
                 if joker.debuff:
                     continue
-                ind_ctx = JokerContext(
-                    individual=True,
-                    cardarea="play",
-                    other_card=card,
-                    **_shared,
-                )
                 ind_result = calculate_joker(joker, ind_ctx)
                 if ind_result:
                     eff: dict[str, Any] = {}
@@ -768,21 +772,27 @@ def score_hand(
             for _ in range(seal_result["repetitions"]):
                 reps.append(seal_result)
 
+        rep_ctx = JokerContext(
+            repetition=True,
+            cardarea="hand",
+            other_card=card,
+            **_shared,
+        )
         for joker in jokers:
             if joker.debuff:
                 continue
-            rep_ctx = JokerContext(
-                repetition=True,
-                cardarea="hand",
-                other_card=card,
-                **_shared,
-            )
             rep_result = calculate_joker(joker, rep_ctx)
             if rep_result and rep_result.repetitions > 0:
                 for _ in range(rep_result.repetitions):
                     reps.append(rep_result)
 
         # 8b-c: Each repetition
+        ind_ctx = JokerContext(
+            individual=True,
+            cardarea="hand",
+            other_card=card,
+            **_shared,
+        )
         for _rep in reps:
             ev = eval_card(
                 card,
@@ -796,12 +806,6 @@ def score_hand(
             for joker in jokers:
                 if joker.debuff:
                     continue
-                ind_ctx = JokerContext(
-                    individual=True,
-                    cardarea="hand",
-                    other_card=card,
-                    **_shared,
-                )
                 ind_result = calculate_joker(joker, ind_ctx)
                 if ind_result:
                     eff_h: dict[str, Any] = {}
@@ -821,10 +825,10 @@ def score_hand(
             )
 
     # === Phase 8d: individual_hand_end (Obelisk check) ===
+    ihe_ctx = JokerContext(individual_hand_end=True, **_shared)
     for joker in jokers:
         if joker.debuff:
             continue
-        ihe_ctx = JokerContext(individual_hand_end=True, **_shared)
         ihe_result = calculate_joker(joker, ihe_ctx)
         if ihe_result:
             if ihe_result.Xmult_mod:
@@ -841,6 +845,7 @@ def score_hand(
     # skip it, so the other jokers still react to it: Baseball Card pays
     # X1.5 for a debuffed Uncommon.
     n_jokers = len(jokers)
+    main_ctx = JokerContext(joker_main=True, **_shared)
     for i, card in enumerate([*jokers, *(consumables or ())]):
         # 9a: Edition additive (chip_mod, mult_mod) BEFORE joker effect
         edition = card.get_edition()
@@ -850,7 +855,6 @@ def score_hand(
 
         # 9b: Main joker effect
         if i < n_jokers:
-            main_ctx = JokerContext(joker_main=True, **_shared)
             result = calculate_joker(card, main_ctx)
         else:
             result = _planet_joker_main(card, hand_type, gs)
@@ -867,10 +871,10 @@ def score_hand(
                 joker_creates.append(result.extra["create"])
 
         # 9c: Joker-on-joker (other_joker context)
+        j2j_ctx = JokerContext(other_joker=card, **_shared)
         for other in jokers:
             if other is card or other.debuff:
                 continue
-            j2j_ctx = JokerContext(other_joker=card, **_shared)
             j2j = calculate_joker(other, j2j_ctx)
             if j2j:
                 if j2j.mult_mod:
@@ -907,13 +911,13 @@ def score_hand(
             continue
         destroyed = False
         # Joker destroying_card checks (Sixth Sense, etc.)
+        dest_ctx = JokerContext(
+            destroying_card=sc,
+            **_shared,
+        )
         for joker in jokers:
             if joker.debuff:
                 continue
-            dest_ctx = JokerContext(
-                destroying_card=sc,
-                **_shared,
-            )
             dest_result = calculate_joker(joker, dest_ctx)
             if dest_result and dest_result.remove:
                 # Sixth Sense destroys the six AND creates a Spectral
@@ -935,13 +939,13 @@ def score_hand(
 
     # Notify jokers of destruction (Caino, Glass Joker xMult growth)
     if cards_destroyed:
+        dest_notify_ctx = JokerContext(
+            cards_destroyed=cards_destroyed,
+            **_shared,
+        )
         for joker in jokers:
             if joker.debuff:
                 continue
-            dest_notify_ctx = JokerContext(
-                cards_destroyed=cards_destroyed,
-                **_shared,
-            )
             calculate_joker(joker, dest_notify_ctx)
 
     # === Phase 12: Final score ===
@@ -950,10 +954,10 @@ def score_hand(
 
     # === Phase 13: "after" joker pass (scaling mutations) ===
     jokers_removed: list[Card] = []
+    after_ctx = JokerContext(after=True, **_shared)
     for joker in jokers:
         if joker.debuff:
             continue
-        after_ctx = JokerContext(after=True, **_shared)
         after_result = calculate_joker(joker, after_ctx)
         if after_result and after_result.remove:
             jokers_removed.append(joker)
