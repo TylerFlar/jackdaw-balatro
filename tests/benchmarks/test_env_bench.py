@@ -20,18 +20,18 @@ from jackdaw.env.gymnasium_wrapper import BalatroGymnasiumEnv
 from jackdaw.env.observation import encode_observation
 
 
-def _resolve_action(action, gs: dict):
+def _resolve_action(action, gs: dict, rng=random):
     """Fill in card indices for marker PlayHand/Discard actions."""
     hand = gs.get("hand", [])
     if isinstance(action, PlayHand) and not action.card_indices and hand:
         n = min(5, len(hand))
-        count = random.randint(1, n)
-        indices = tuple(sorted(random.sample(range(len(hand)), count)))
+        count = rng.randint(1, n)
+        indices = tuple(sorted(rng.sample(range(len(hand)), count)))
         return PlayHand(card_indices=indices)
     if isinstance(action, Discard) and not action.card_indices and hand:
         n = min(5, len(hand))
-        count = random.randint(1, n)
-        indices = tuple(sorted(random.sample(range(len(hand)), count)))
+        count = rng.randint(1, n)
+        indices = tuple(sorted(rng.sample(range(len(hand)), count)))
         return Discard(card_indices=indices)
     return action
 
@@ -183,14 +183,14 @@ class TestWrapperThroughput:
 
     def test_balatro_environment_steps_per_second(self):
         env = BalatroEnvironment(adapter_factory=DirectAdapter, seed_prefix="BENCH_FACTORED")
-        random.seed(1)
+        rng = random.Random(1)
         _, _, info = env.reset()
         n = 2000
         t0 = time.perf_counter()
         for _ in range(n):
             gs = info["raw_state"]
             legal = env._adapter.get_legal_actions()
-            action = engine_action_to_factored(_resolve_action(random.choice(legal), gs), gs)
+            action = engine_action_to_factored(_resolve_action(rng.choice(legal), gs, rng), gs)
             _, terminated, truncated, _, info = env.step(action)
             if terminated or truncated:
                 _, _, info = env.reset()

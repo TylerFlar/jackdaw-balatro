@@ -1,9 +1,9 @@
 """Behaviour-equivalence guard: replay pinned trajectories and compare digests.
 
 A failure means observable behaviour changed: game state, RNG stream,
-observation encoding, action mask, Gym action table or reward.  Performance
-work must keep these passing unchanged.  If a change is meant to alter
-behaviour, regenerate the fixture with
+observation encoding, action mask, Gym action table, env info or reward.
+Performance work must keep these passing unchanged.  If a change is meant
+to alter behaviour, regenerate the fixtures with
 ``uv run python scripts/generate_golden_trajectories.py`` and explain why.
 """
 
@@ -14,18 +14,13 @@ from pathlib import Path
 
 import pytest
 
-from tests.golden.trajectories import (
-    CHECKPOINT_EVERY,
-    Result,
-    engine_specs,
-    gym_specs,
-    run_engine,
-    run_gym,
-)
+from tests.golden.trajectories import CHECKPOINT_EVERY, Result, all_cases
 
-FIXTURE = Path(__file__).resolve().parent.parent / "fixtures" / "golden_trajectories.json"
-_DATA = json.loads(FIXTURE.read_text())
+FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
+_DATA = json.loads((FIXTURES / "golden_trajectories.json").read_text())
 _EXPECTED = _DATA["trajectories"]
+_TAPES = json.loads((FIXTURES / "golden_tapes.json").read_text())
+_CASES = all_cases()
 
 
 def _check(name: str, got: Result) -> None:
@@ -42,21 +37,18 @@ def _check(name: str, got: Result) -> None:
     )
     where = f"diverged by record {first_bad}" if first_bad else "diverged after last checkpoint"
     pytest.fail(
-        f"{name}: behaviour changed ({where}; steps {got.steps} vs expected {exp['steps']})"
+        f"{name}: behaviour changed ({where}; records {got.steps} vs expected {exp['steps']})"
     )
 
 
-def test_fixture_matches_specs():
-    names = {s.name for s in engine_specs()} | {s.name for s in gym_specs()}
-    assert names == set(_EXPECTED)
+def test_fixture_matches_cases():
+    assert {name for name, _, _ in _CASES} == set(_EXPECTED)
     assert _DATA["checkpoint_every"] == CHECKPOINT_EVERY
 
 
-@pytest.mark.parametrize("spec", engine_specs(), ids=lambda s: s.name)
-def test_engine_trajectory(spec):
-    _check(spec.name, run_engine(spec))
-
-
-@pytest.mark.parametrize("spec", gym_specs(), ids=lambda s: s.name)
-def test_gym_trajectory(spec):
-    _check(spec.name, run_gym(spec))
+@pytest.mark.parametrize(("name", "runner", "spec"), _CASES, ids=[c[0] for c in _CASES])
+def test_golden(name, runner, spec):
+    got = runner(spec, _TAPES.get(name, []))
+    for check, ok in got.checks.items():
+        assert ok, f"{name}: scenario check {check!r} no longer holds"
+    _check(name, got)
