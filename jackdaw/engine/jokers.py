@@ -89,6 +89,10 @@ class JokerContext:
     passed as keyword arguments — they are ``InitVar`` parameters that
     auto-build a ``GameSnapshot`` in ``__post_init__`` when ``game`` is
     not provided directly.
+
+    ``score_hand`` shares one context between every joker in a pass, so
+    handlers must not mutate or retain it; derive a new one with
+    ``dataclasses.replace`` (as Blueprint/Brainstorm do) instead.
     """
 
     # Phase flags (exactly one set per call)
