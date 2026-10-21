@@ -60,9 +60,13 @@
    "steps": 247
   },
   "boss_bl_final_bell": {
-   "checkpoints": [],
-   "digest": "1b89a1c913b17952755bb8802c35b8054849cd2cbe19c6e697497f972576edd9",
-   "steps": 4
+   "checkpoints": [
+    "f12413eb17f75f80",
+    "23c9bc608be79897",
+    "beff6f4cd0ffeed5"
+   ],
+   "digest": "a4f4a1bb5144c5c726143b69b1ebe180a356257cd137a9e4a54f0b13acc4dcd5",
+   "steps": 89
   },
   "boss_bl_final_heart": {
    "checkpoints": [
@@ -764,22 +768,23 @@
   },
   "gym_smart_red": {
    "checkpoints": [
-    "d3b2aa83a8b5cad6"
+    "1dc7e4e289b44df6",
+    "e25060d180e43279"
    ],
-   "digest": "c8d54b56df247297dbb7fd22fc08c2b5ee1f944c496a0159d925b1c0352b5fdb",
-   "steps": 36
+   "digest": "e789c88d1bde8a11e4d63691cf2766cc5a165b31040e9604d9e75101d412142f",
+   "steps": 63
   },
   "gym_smart_shaped": {
    "checkpoints": [],
-   "digest": "f64af566bbeb7616639d12bae79b1a78712fd7bd3a74a5e8362a5f9db7935dd0",
+   "digest": "9e8ce737a7c42f6e259a33fa7ca9c02916e3877cb0c45f1424d09b43b7bfb2ff",
    "steps": 12
   },
   "gym_truncated": {
    "checkpoints": [
-    "42f3c8a260627785",
-    "93f565fe17bffecb"
+    "465aaf8c74b6ac2a",
+    "f75e7ca1757e71c9"
    ],
-   "digest": "5a63678f3022eb323f6aed7dd7eb92bb4e288322732dc983fd783278f343ea03",
+   "digest": "e1a99608b86f79eabd1d8d61a9744b3625382e7d2236c5552095cc5b5fca3c5d",
    "steps": 62
   },
   "jokers_0": {

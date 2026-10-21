@@ -162,12 +162,23 @@ def _resolve(action: Any, gs: dict[str, Any], rng: random.Random) -> Any:
     return action
 
 
+def _with_forced_card(action: Any, gs: dict[str, Any]) -> Any:
+    """Include Cerulean Bell's forced card, which vanilla always selects."""
+    if not isinstance(action, (A.PlayHand, A.Discard)):
+        return action
+    forced = [i for i, c in enumerate(gs.get("hand", [])) if c.ability.get("forced_selection")]
+    if not forced or forced[0] in action.card_indices:
+        return action
+    kept = [i for i in action.card_indices][:4]
+    return type(action)(card_indices=tuple(sorted({*kept, forced[0]})))
+
+
 def _mixed_policy(gs: dict[str, Any], legal: list[Any], rng: random.Random, eps: float) -> Any:
     from jackdaw.cli.smart_agent import smart_agent
 
     if rng.random() < eps:
-        return _resolve(rng.choice(legal), gs, rng)
-    return smart_agent(gs, legal)
+        return _with_forced_card(_resolve(rng.choice(legal), gs, rng), gs)
+    return _with_forced_card(smart_agent(gs, legal), gs)
 
 
 # ---------------------------------------------------------------------------
@@ -588,9 +599,16 @@ def _gym_smart_index(env: BalatroGymnasiumEnv, policy: np.random.Generator) -> i
     if legal:
         try:
             wanted = engine_action_to_factored(smart_agent(gs, legal), gs)
-            return table.index(wanted)
         except (ValueError, KeyError, IndexError):
-            pass
+            wanted = None
+        if wanted is not None:
+            if wanted in table:
+                return table.index(wanted)
+            # The exact card selection was subsampled out of the table:
+            # take another action of the same type so the run keeps going.
+            same = [i for i, a in enumerate(table) if a.action_type == wanted.action_type]
+            if same:
+                return int(policy.choice(same))
     return int(policy.choice(len(table)))
 
 
@@ -678,8 +696,9 @@ def _rng_probe(res: Result) -> None:
     from jackdaw.engine import rng as R
 
     pi, e = R._PI, R._E
-    # Seeds whose k-th seeding iterate lands near 0, hitting the u < MIN
-    # adjustment for state word k (plus neighbours).
+    # Seeds whose k-th seeding iterate lands near 0.  Only word 0's u < MIN
+    # adjustment is reachable from a double (via exactly -e/pi); the others
+    # need an iterate within ~1e-318 of 0.  Neighbours are included too.
     edge: list[float] = []
     target = 0.0
     for _ in range(4):
