@@ -168,7 +168,7 @@ def _tw223_step(state: list[int]) -> int:
 _WARMUP_STEPS = 10
 
 
-def _build_warmup_tables() -> tuple[list[list[int]], ...]:
+def _build_warmup_tables() -> tuple[tuple[tuple[int, ...], ...], ...]:
     tables = []
     for word in range(4):
         # W of each single bit, then every byte value by linearity.
@@ -185,8 +185,8 @@ def _build_warmup_tables() -> tuple[list[list[int]], ...]:
             for v in range(1, 256):
                 low = v & -v
                 row[v] = row[v ^ low] ^ basis[8 * k + low.bit_length() - 1]
-            per_byte.append(row)
-        tables.append(per_byte)
+            per_byte.append(tuple(row))
+        tables.append(tuple(per_byte))
     return tuple(tables)
 
 
@@ -198,7 +198,8 @@ def _luajit_seed(seed_double: float) -> list[int]:
 
     The double is iteratively transformed (``d = d*pi + e``), reinterpreted
     as uint64 via IEEE 754 bit pattern, and stored into 4 state words.
-    A minimum-bit threshold is applied per word, then 10 warm-up steps are run.
+    A minimum-bit threshold is applied per word, then the 10 warm-up steps are
+    applied through precomputed lookup tables (see ``_WARMUP``).
     """
     pack_d = _PACK_D.pack
     unpack_q = _PACK_Q.unpack
@@ -226,6 +227,8 @@ def _luajit_seed(seed_double: float) -> list[int]:
         u3 += _MIN3
 
     # 10 warm-up iterations (lj_prng_u64, discards output); see _WARMUP.
+    # Each u is below 2**64 (a <Q unpack, plus at most a small minimum), so
+    # u >> 56 is already a byte.
     t0, t1, t2, t3 = _WARMUP
     return [
         t0[0][u0 & 255] ^ t0[1][(u0 >> 8) & 255] ^ t0[2][(u0 >> 16) & 255]
