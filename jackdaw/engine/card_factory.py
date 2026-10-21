@@ -409,7 +409,9 @@ def create_card(
             banned_keys=gs.get("banned_keys"),
             pool_flags=gs.get("pool_flags"),
             has_showman=showman_active(gs),
-            deck_enhancements=deck_enhancements_from_state(gs),
+            # Only the Joker pool reads it (enhancement_gate), so skip the
+            # scan over every owned playing card for the other pools.
+            deck_enhancements=(deck_enhancements_from_state(gs) if card_type == "Joker" else None),
             playing_card_count=gs.get("playing_card_count", 52),
             played_hand_types=gs.get("played_hand_types"),
             # Run state stores the displayed vouchers as Card objects

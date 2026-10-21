@@ -189,6 +189,20 @@ def _x_same_from_groups(num: int, groups: dict[int, list[Card]]) -> list[list[Ca
     ]
 
 
+def _x_same_by_size(groups: dict[int, list[Card]]) -> dict[int, list[list[Card]]]:
+    """All rank groups bucketed by size, each bucket highest rank first."""
+    by_size: dict[int, list[list[Card]]] = {}
+    for rank_id in range(14, 0, -1):
+        group = groups.get(rank_id)
+        if group is not None:
+            bucket = by_size.get(len(group))
+            if bucket is None:
+                by_size[len(group)] = [group]
+            else:
+                bucket.append(group)
+    return by_size
+
+
 def get_x_same(num: int, hand: list[Card]) -> list[list[Card]]:
     """Find all groups of exactly *num* cards sharing the same rank.
 
@@ -346,10 +360,11 @@ def evaluate_poker_hand(
     if groups is None:
         _5, _4, _3, _2 = (_x_same_scan(k, hand) for k in (5, 4, 3, 2))
     else:
-        _5 = _x_same_from_groups(5, groups)
-        _4 = _x_same_from_groups(4, groups)
-        _3 = _x_same_from_groups(3, groups)
-        _2 = _x_same_from_groups(2, groups)
+        by_size = _x_same_by_size(groups)
+        _5 = by_size.get(5, [])
+        _4 = by_size.get(4, [])
+        _3 = by_size.get(3, [])
+        _2 = by_size.get(2, [])
     _flush = get_flush(hand, four_fingers=four_fingers, smeared=smeared)
     _straight = get_straight(hand, four_fingers=four_fingers, shortcut=shortcut)
     _highest = get_highest(hand)
