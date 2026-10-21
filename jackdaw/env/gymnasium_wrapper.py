@@ -17,6 +17,8 @@ Example::
 
 from __future__ import annotations
 
+import math
+import operator
 from collections.abc import Callable, Sequence
 from functools import lru_cache
 from itertools import combinations
@@ -67,47 +69,73 @@ _CARD_ONLY_TYPES: frozenset[int] = frozenset(
 )
 
 
-def _subsample(items: Sequence[Any], budget: int, rng: np.random.Generator) -> list[Any]:
+def _subsample(items: Sequence[Any], budget: int, rng: np.random.Generator) -> Sequence[Any]:
     """Return *items* if within budget, else a random subsample (order kept)."""
     if len(items) <= budget:
-        return list(items)
+        return items
     indices = rng.choice(len(items), size=budget, replace=False)
     indices.sort()
     return [items[i] for i in indices.tolist()]
 
 
-@lru_cache(maxsize=256)
-def _card_combos(
-    legal_cards: tuple[int, ...],
-    min_select: int,
-    max_select: int,
-) -> tuple[tuple[int, ...], ...]:
-    """Enumerate all card-index combinations within the selection range."""
-    upper = min(len(legal_cards), max_select)
+def _selection_sizes(n_cards: int, min_select: Any, max_select: Any) -> tuple[int, int]:
+    """``(first, stop)`` of the selection-size range, validated like ``range()``."""
+    upper = min(n_cards, max_select)
     lower = min(min_select, upper)
+    return operator.index(lower), operator.index(upper + 1)
+
+
+def _card_combos(legal_cards: tuple[int, ...], first: int, stop: int) -> list[tuple[int, ...]]:
+    """Enumerate all card-index combinations with sizes in ``range(first, stop)``."""
     result: list[tuple[int, ...]] = []
-    for k in range(lower, upper + 1):
+    for k in range(first, stop):
         result.extend(combinations(legal_cards, k))
-    return tuple(result)
+    return result
 
 
 # FactoredAction is frozen, so identical actions can be shared across steps
-# instead of being rebuilt (hundreds per step for PlayHand/Discard).
+# instead of being rebuilt (hundreds per step for PlayHand/Discard).  Only
+# modest selection spaces are cached, which bounds the cache's memory
+# (at most _CARD_ACTIONS_CACHE entries of _CACHE_MAX_COMBOS actions).
+_CACHE_MAX_COMBOS = 1024
+_CARD_ACTIONS_CACHE = 128
 
 
-@lru_cache(maxsize=256)
+@lru_cache(maxsize=_CARD_ACTIONS_CACHE)
+def _cached_card_actions(
+    action_type: int,
+    entity_target: int | None,
+    legal_cards: tuple[int, ...],
+    first: int,
+    stop: int,
+) -> tuple[FactoredAction, ...]:
+    return tuple(
+        FactoredAction(action_type=action_type, entity_target=entity_target, card_target=combo)
+        for combo in _card_combos(legal_cards, first, stop)
+    )
+
+
 def _card_actions(
     action_type: int,
     entity_target: int | None,
     legal_cards: tuple[int, ...],
-    min_select: int,
-    max_select: int,
-) -> tuple[FactoredAction, ...]:
-    """Every card-selecting :class:`FactoredAction` for one action type/entity."""
-    return tuple(
+    min_select: Any,
+    max_select: Any,
+    rng: np.random.Generator,
+) -> Sequence[FactoredAction]:
+    """Card-selecting actions for one action type/entity, subsampled to budget."""
+    first, stop = _selection_sizes(len(legal_cards), min_select, max_select)
+    n = len(legal_cards)
+    if sum(math.comb(n, k) for k in range(max(first, 0), stop)) <= _CACHE_MAX_COMBOS:
+        actions = _cached_card_actions(action_type, entity_target, legal_cards, first, stop)
+        return _subsample(actions, CARD_COMBO_BUDGET, rng)
+    # Large selection spaces: sample the combinations first, then build only
+    # the sampled actions (same draw: the population size is identical).
+    combos = _subsample(_card_combos(legal_cards, first, stop), CARD_COMBO_BUDGET, rng)
+    return [
         FactoredAction(action_type=action_type, entity_target=entity_target, card_target=combo)
-        for combo in _card_combos(legal_cards, min_select, max_select)
-    )
+        for combo in combos
+    ]
 
 
 @lru_cache(maxsize=1024)
@@ -287,9 +315,13 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         self, mask: GameActionMask, info: dict[str, Any]
     ) -> list[FactoredAction]:
         actions: list[FactoredAction] = []
+        type_mask = mask.type_mask
         legal_cards: tuple[int, ...] | None = None
 
-        for t in np.flatnonzero(mask.type_mask).tolist():
+        for t in range(len(type_mask)):
+            if not type_mask[t]:
+                continue
+
             # --- Simple (no targets) ---
             if t in _SIMPLE_TYPES:
                 actions.append(_target_action(t))
@@ -297,31 +329,37 @@ class BalatroGymnasiumEnv(gymnasium.Env):
             # --- Entity-only ---
             elif t in _ENTITY_ONLY_TYPES:
                 if t in mask.entity_masks:
-                    for idx in np.flatnonzero(mask.entity_masks[t]).tolist():
+                    for idx in np.nonzero(mask.entity_masks[t])[0].tolist():
                         actions.append(_target_action(t, idx))
 
             # --- Card-only (PlayHand / Discard) ---
             elif t in _CARD_ONLY_TYPES:
                 if legal_cards is None:
-                    legal_cards = tuple(np.flatnonzero(mask.card_mask).tolist())
-                combos = _card_actions(
-                    t, None, legal_cards, mask.min_card_select, mask.max_card_select
-                )
-                actions.extend(_subsample(combos, CARD_COMBO_BUDGET, self._rng))
+                    legal_cards = tuple(np.nonzero(mask.card_mask)[0].tolist())
+                actions.extend(
+                    _card_actions(
+                        t, None, legal_cards, mask.min_card_select, mask.max_card_select,
+                        self._rng,
+                    )
+                )  # fmt: skip
 
             # --- Entity + optional cards (UseConsumable / PickPackCard) ---
             elif t in _TARGETED_ENTITY_SOURCES:
                 if t in mask.entity_masks:
+                    legal_entities = np.nonzero(mask.entity_masks[t])[0].tolist()
                     source = info.get("raw_state", {}).get(_TARGETED_ENTITY_SOURCES[t], [])
-                    for e_idx in np.flatnonzero(mask.entity_masks[t]).tolist():
+                    for e_idx in legal_entities:
                         if e_idx < len(source):
                             card = source[e_idx]
                             min_cards, max_cards, needs = get_consumable_target_info(card)
                             if needs:
                                 if legal_cards is None:
-                                    legal_cards = tuple(np.flatnonzero(mask.card_mask).tolist())
-                                combos = _card_actions(t, e_idx, legal_cards, min_cards, max_cards)
-                                actions.extend(_subsample(combos, CARD_COMBO_BUDGET, self._rng))
+                                    legal_cards = tuple(np.nonzero(mask.card_mask)[0].tolist())
+                                actions.extend(
+                                    _card_actions(
+                                        t, e_idx, legal_cards, min_cards, max_cards, self._rng
+                                    )
+                                )
                             else:
                                 actions.append(_target_action(t, e_idx))
 

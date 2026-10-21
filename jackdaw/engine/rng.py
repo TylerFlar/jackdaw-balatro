@@ -265,29 +265,35 @@ def _select_element(table: dict | list, tw_state: list[int]) -> tuple:
 
     Returns ``(selected_value, selected_key)``.
     """
-    if isinstance(table, (list, tuple)) and table:
+    # An exact list/tuple enumerates as it indexes, so its (i + 1, v)
+    # entries need not be materialised unless they have to be sorted.
+    plain_seq = type(table) is list or type(table) is tuple
+    if plain_seq:
+        if not table:
+            raise ValueError("cannot select from empty table")
         first_val = table[0]
-        if not (isinstance(first_val, dict) and "sort_id" in first_val) and not hasattr(
-            first_val, "sort_id"
-        ):
-            # Keys are 1..n, already in sorted order: index directly.
-            idx = _luajit_random_int(tw_state, 1, len(table))
-            return table[idx - 1], idx
-
-    if isinstance(table, dict):
-        entries = list(table.items())
     else:
-        entries = [(i + 1, v) for i, v in enumerate(table)]
-
-    if not entries:
-        raise ValueError("cannot select from empty table")
+        if isinstance(table, dict):
+            entries = list(table.items())
+        else:
+            entries = [(i + 1, v) for i, v in enumerate(table)]
+        if not entries:
+            raise ValueError("cannot select from empty table")
+        first_val = entries[0][1]
 
     # Deterministic sort (matches Lua pseudorandom_element)
-    first_val = entries[0][1]
     if isinstance(first_val, dict) and "sort_id" in first_val:
+        if plain_seq:
+            entries = [(i + 1, v) for i, v in enumerate(table)]
         entries.sort(key=lambda e: e[1]["sort_id"])
     elif hasattr(first_val, "sort_id"):
+        if plain_seq:
+            entries = [(i + 1, v) for i, v in enumerate(table)]
         entries.sort(key=lambda e: e[1].sort_id)
+    elif plain_seq:
+        # Keys 1..n are already in sorted order: index directly.
+        idx = _luajit_random_int(tw_state, 1, len(table))
+        return table[idx - 1], idx
     else:
         entries.sort(key=lambda e: (isinstance(e[0], str), e[0]))
 
