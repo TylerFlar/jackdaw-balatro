@@ -786,7 +786,13 @@ def _hand_eval_probe(res: Result) -> None:
 
 
 def _pools_probe(res: Result) -> None:
-    from jackdaw.engine.card_factory import create_card, create_joker, create_playing_card
+    from jackdaw.engine.card_factory import (
+        create_card,
+        create_joker,
+        create_playing_card,
+        deck_enhancements_from_state,
+        showman_active,
+    )
     from jackdaw.engine.data.enums import Rank, Suit
     from jackdaw.engine.data.prototypes import CENTER_POOLS
     from jackdaw.engine.pools import get_current_pool
@@ -833,7 +839,16 @@ def _pools_probe(res: Result) -> None:
             showman = create_joker("j_ring_master")
             showman.debuff = i % 8 == 0
             gs["jokers"].append(showman)
-        for card_type in ("Joker", "Tarot", "Planet", "Spectral", "Base", "Enhanced"):
+        # The gated Joker pools as get_current_pool sees them for this state
+        # (enhancement gates read every owned playing card, in any area).
+        for rarity in (1, 2, 3):
+            pool = get_current_pool(
+                "Joker", PseudoRandom(f"G{i}"), 1, rarity=rarity,
+                deck_enhancements=deck_enhancements_from_state(gs),
+                has_showman=showman_active(gs), used_jokers=gs["used_jokers"],
+            )  # fmt: skip
+            res.push(fingerprint("gated", rarity, pool))
+        for card_type in ("Joker", "Tarot", "Planet", "Spectral", "Base", "Enhanced") * 3:
             try:
                 card = create_card(card_type, rng, 1 + i % 8, game_state=gs, append=f"p{i}")
                 out: Any = (card.center_key, card.card_key, card.edition, card.ability)
