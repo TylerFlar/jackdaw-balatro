@@ -124,8 +124,8 @@ def _card_actions(
     rng: np.random.Generator,
 ) -> Sequence[FactoredAction]:
     """Card-selecting actions for one action type/entity, subsampled to budget."""
-    first, stop = _selection_sizes(len(legal_cards), min_select, max_select)
     n = len(legal_cards)
+    first, stop = _selection_sizes(n, min_select, max_select)
     if sum(math.comb(n, k) for k in range(max(first, 0), stop)) <= _CACHE_MAX_COMBOS:
         actions = _cached_card_actions(action_type, entity_target, legal_cards, first, stop)
         return _subsample(actions, CARD_COMBO_BUDGET, rng)
@@ -336,12 +336,10 @@ class BalatroGymnasiumEnv(gymnasium.Env):
             elif t in _CARD_ONLY_TYPES:
                 if legal_cards is None:
                     legal_cards = tuple(np.nonzero(mask.card_mask)[0].tolist())
+                min_select, max_select = mask.min_card_select, mask.max_card_select
                 actions.extend(
-                    _card_actions(
-                        t, None, legal_cards, mask.min_card_select, mask.max_card_select,
-                        self._rng,
-                    )
-                )  # fmt: skip
+                    _card_actions(t, None, legal_cards, min_select, max_select, self._rng)
+                )
 
             # --- Entity + optional cards (UseConsumable / PickPackCard) ---
             elif t in _TARGETED_ENTITY_SOURCES:
