@@ -761,22 +761,25 @@ def encode_global_context(
     # Hand levels [30:90] — 12 hand types × 5 features
     hand_levels: HandLevels | None = gs.get("hand_levels")
     base_idx = 30
-    for j, ht in enumerate(_HAND_TYPES):
-        offset = base_idx + j * 5
-        if hand_levels is not None:
+    if hand_levels is not None:
+        for j, ht in enumerate(_HAND_TYPES):
+            offset = base_idx + j * 5
             hs = hand_levels.get_state(ht)
             v[offset + 0] = hs.level / 20.0
-            v[offset + 1] = _log_scale(hs.chips)
-            v[offset + 2] = _log_scale(hs.mult)
-            v[offset + 3] = _log_scale(hs.played)
+            v[offset + 1] = _ls(hs.chips)
+            v[offset + 2] = _ls(hs.mult)
+            v[offset + 3] = _ls(hs.played)
             v[offset + 4] = float(hs.visible)
 
     # --- Vouchers owned [90:122] — 32-dim binary vector ---
     used_vouchers = gs.get("used_vouchers", {})
     vbase = _D_BASE  # 90
-    for vk, vi in _VOUCHER_IDX.items():
-        if used_vouchers.get(vk):
-            v[vbase + vi] = 1.0
+    # Iterate what is owned (a few keys) rather than all 32 voucher slots.
+    for vk, owned in used_vouchers.items():
+        if owned:
+            vi = _VOUCHER_IDX.get(vk)
+            if vi is not None:
+                v[vbase + vi] = 1.0
 
     # --- Blind effect features [122:130] — 8 dims ---
     bbase = vbase + NUM_VOUCHERS  # 122
@@ -825,10 +828,16 @@ def encode_global_context(
         base = getattr(card, "base", None)
         if base is None:
             continue
-        suit_str = base.suit.value if hasattr(base.suit, "value") else str(base.suit)
-        rank_str = base.rank.value if hasattr(base.rank, "value") else str(base.rank)
-        si = _SUIT_IDX.get(suit_str)
-        ri_val = _RANK_IDX.get(rank_str)
+        suit_key = base.suit
+        rank_key = base.rank
+        # Suit/Rank are StrEnums: a member hashes and compares equal to its
+        # value, so it indexes the str-keyed tables directly.
+        if not isinstance(suit_key, str):
+            suit_key = suit_key.value if hasattr(suit_key, "value") else str(suit_key)
+        if not isinstance(rank_key, str):
+            rank_key = rank_key.value if hasattr(rank_key, "value") else str(rank_key)
+        si = _SUIT_IDX.get(suit_key)
+        ri_val = _RANK_IDX.get(rank_key)
         if si is not None and ri_val is not None:
             v[dbase + si * NUM_RANKS + ri_val] = 1.0
 
@@ -849,6 +858,7 @@ def encode_global_context(
 
     # Base score estimate [223:226]
     score_base = sbase + NUM_HAND_TYPES  # 223
+    base_score_val = 0.0
     if best_hand_name and hand_levels is not None:
         try:
             ht_enum = HandType(best_hand_name)
@@ -861,20 +871,12 @@ def encode_global_context(
             v[score_base + 0] = _log_scale(base_chips)
             v[score_base + 1] = _log_scale(base_mult)
             v[score_base + 2] = _log_scale(base_score)
+            base_score_val = base_score
         except (ValueError, KeyError):
             pass
 
-    # Score-to-blind ratio [226]
+    # Score-to-blind ratio [226] (uses base_score_val from above)
     ratio_base = score_base + 3  # 226
-    base_score_val = 0.0
-    if best_hand_name and hand_levels is not None:
-        try:
-            ht_enum = HandType(best_hand_name)
-            bd = HAND_BASE[ht_enum]
-            hs = hand_levels.get_state(ht_enum)
-            base_score_val = bd.chips_at(hs.level) * bd.mult_at(hs.level)
-        except (ValueError, KeyError):
-            pass
     if base_score_val > 0 and blind_chips > 0:
         v[ratio_base] = min(math.log1p(base_score_val) / math.log1p(blind_chips), 2.0) / 2.0
 
@@ -898,21 +900,27 @@ def encode_global_context(
     outs_base = int_base + 1  # 230
     deck: list = gs.get("deck", [])
     deck_size = len(deck)
-    if draws.best_flush_count < 5 and draws.best_flush_suit and deck_size > 0:
-        suited_in_deck = sum(
-            1
-            for c in deck
-            if getattr(c, "base", None) is not None and c.base.suit.value == draws.best_flush_suit
-        )
-        v[outs_base] = suited_in_deck / deck_size
-
     # Straight draw outs [231] — P(drawing rank-completing card) from remaining deck
-    if draws.straight_gap_ranks and deck_size > 0:
+    # Both counts come from one pass over the deck.
+    want_flush = draws.best_flush_count < 5 and bool(draws.best_flush_suit) and deck_size > 0
+    want_straight = bool(draws.straight_gap_ranks) and deck_size > 0
+    if want_flush or want_straight:
+        flush_suit = draws.best_flush_suit
         gap_set = set(draws.straight_gap_ranks)
-        matching_in_deck = sum(
-            1 for c in deck if getattr(c, "base", None) is not None and c.base.id in gap_set
-        )
-        v[outs_base + 1] = matching_in_deck / deck_size
+        suited_in_deck = 0
+        matching_in_deck = 0
+        for c in deck:
+            base = getattr(c, "base", None)
+            if base is None:
+                continue
+            if want_flush and base.suit.value == flush_suit:
+                suited_in_deck += 1
+            if want_straight and base.id in gap_set:
+                matching_in_deck += 1
+        if want_flush:
+            v[outs_base] = suited_in_deck / deck_size
+        if want_straight:
+            v[outs_base + 1] = matching_in_deck / deck_size
 
     # Boss blind debuff impact [232] — fraction of hand cards debuffed
     debuff_base = outs_base + 2  # 232
@@ -994,13 +1002,16 @@ def encode_playing_cards_batch(
     buf = _get_hand_buf(n)
     splash = bool(gs.get("splash", 0))
 
-    # Compute which cards belong to the best detected hand
+    # Compute which cards belong to the best detected hand.  Only face-up
+    # playing cards read it, so skip the analysis for areas with none
+    # (Arcana/Celestial/Buffoon/Spectral pack contents).
     jokers: list[Card] = gs.get("jokers", [])
-    _, _, scoring_ids = (
-        hand_analysis
-        if hand_analysis is not None
-        else _compute_hand_analysis(cards, jokers, gs.get("hand_levels"))
-    )
+    if hand_analysis is not None:
+        _, _, scoring_ids = hand_analysis
+    elif any(c.facing != "back" and c.base is not None for c in cards):
+        _, _, scoring_ids = _compute_hand_analysis(cards, jokers, gs.get("hand_levels"))
+    else:
+        scoring_ids = set()
 
     for i, card in enumerate(cards):
         row = buf[i]  # already zeroed
