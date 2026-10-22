@@ -342,6 +342,28 @@ class TestFaceDownHidesIdentity:
         other.facing = "back"
         np.testing.assert_array_equal(encode_jokers_batch([jokers[0], other, jokers[2]], gs), batch)
 
+    def test_amber_acorn_jokers_hidden(self):
+        from jackdaw.engine.actions import SkipBlind
+        from jackdaw.engine.card import Card
+
+        adapter = DirectAdapter()
+        adapter.reset(BACK, STAKE, "ACORN")
+        gs = adapter.raw_state
+        for key in ("j_joker", "j_greedy_joker", "j_blueprint"):
+            j = Card()
+            j.set_ability(key)
+            gs["jokers"].append(j)
+        adapter.step(SkipBlind())
+        adapter.step(SkipBlind())
+        adapter.raw_state["round_resets"]["blind_choices"]["Boss"] = "bl_final_acorn"
+        adapter.step(SelectBlind())
+        gs = adapter.raw_state
+        assert all(j.facing == "back" for j in gs["jokers"])
+
+        rows = encode_observation(gs).jokers
+        np.testing.assert_array_equal(rows[:, 9], np.arange(3, dtype=np.float32) / 20.0)
+        assert not np.delete(rows, 9, axis=1).any()
+
 
 # ---------------------------------------------------------------------------
 # Empty areas
