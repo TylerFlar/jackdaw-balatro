@@ -17,6 +17,7 @@ import random
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from jackdaw.engine.actions import (
     Discard,
@@ -277,6 +278,20 @@ class TestFaceDownHidesIdentity:
                     for a, b in zip(ref, _encodings(gs), strict=True):
                         np.testing.assert_array_equal(a, b, err_msg=f"{seed} {key}")
                 card.base, card.card_key = true_base, true_key
+                # Enhancements (Stone, Wild change hand evaluation), editions,
+                # seals and debuff are hidden too.
+                saved = (card.center_key, card.ability, card.edition, card.seal, card.debuff)
+                for enh in ("m_stone", "m_wild", "m_glass", "m_lucky"):
+                    card.set_ability(enh)
+                    for a, b in zip(ref, _encodings(gs), strict=True):
+                        np.testing.assert_array_equal(a, b, err_msg=f"{seed} {enh}")
+                card.center_key, card.ability = saved[0], saved[1]
+                card.set_edition({"polychrome": True})
+                card.set_seal("Red")
+                card.debuff = True
+                for a, b in zip(ref, _encodings(gs), strict=True):
+                    np.testing.assert_array_equal(a, b, err_msg=f"{seed} edition/seal/debuff")
+                card.center_key, card.ability, card.edition, card.seal, card.debuff = saved
                 card.facing = "front"
 
     def test_hidden_card_excluded_from_best_hand(self):
@@ -294,7 +309,7 @@ class TestFaceDownHidesIdentity:
         gs = _dealt_state("LEAK1")
         hand = gs["hand"]
         hand[0].debuff = True
-        assert encode_observation(gs).global_context[232] == 1.0 / len(hand)
+        assert encode_observation(gs).global_context[232] == pytest.approx(1.0 / len(hand))
         hand[0].facing = "back"
         assert encode_observation(gs).global_context[232] == 0.0
 
