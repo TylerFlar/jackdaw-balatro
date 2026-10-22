@@ -226,6 +226,123 @@ class TestFaceDownCards:
         assert abs(vec[0] - 14.0 / 14.0) < 1e-6
 
 
+_SUITS = ("Spades", "Hearts", "Clubs", "Diamonds")
+_RANKS = ("2", "3", "4", "5", "6", "7", "8", "9", "10", "Jack", "Queen", "King", "Ace")
+_KEY_RANK = {"10": "T", "Jack": "J", "Queen": "Q", "King": "K", "Ace": "A"}
+
+
+def _identities():
+    for suit in _SUITS:
+        for rank in _RANKS:
+            yield f"{suit[0]}_{_KEY_RANK.get(rank, rank)}", suit, rank
+
+
+def _dealt_state(seed: str) -> dict:
+    adapter = DirectAdapter()
+    adapter.reset(BACK, STAKE, seed)
+    adapter.step(SelectBlind())
+    gs = adapter.raw_state
+    assert gs["phase"] == GamePhase.SELECTING_HAND
+    return gs
+
+
+def _encodings(gs: dict) -> list[np.ndarray]:
+    """Every encoder path that sees the hand: the full observation plus the
+    global context and hand rows computed with their own defaults."""
+    from jackdaw.env.observation import encode_global_context, encode_playing_cards_batch
+
+    obs = encode_observation(gs)
+    return [
+        obs.global_context,
+        obs.hand_cards,
+        obs.jokers,
+        encode_global_context(gs),
+        encode_playing_cards_batch(gs["hand"], gs),
+    ]
+
+
+class TestFaceDownHidesIdentity:
+    """A face-down card's identity must not reach any part of the observation
+    (issue #25): two states a player cannot tell apart encode identically."""
+
+    def test_hidden_hand_card_identity_not_observable(self):
+        for seed in ("LEAK1", "LEAK2", "LEAK3"):
+            gs = _dealt_state(seed)
+            for card in gs["hand"]:
+                card.facing = "back"
+                true_base, true_key = card.base, card.card_key
+                ref = _encodings(gs)
+                for key, suit, rank in _identities():
+                    card.set_base(key, suit, rank)
+                    for a, b in zip(ref, _encodings(gs), strict=True):
+                        np.testing.assert_array_equal(a, b, err_msg=f"{seed} {key}")
+                card.base, card.card_key = true_base, true_key
+                card.facing = "front"
+
+    def test_hidden_card_excluded_from_best_hand(self):
+        gs = _dealt_state("LEAK1")
+        hand = gs["hand"]
+        for card in hand[1:]:
+            card.facing = "back"
+        obs = encode_observation(gs)
+        # A lone visible card can only form High Card, and it is that card.
+        assert obs.hand_cards[0, 13] == 1.0
+        assert not obs.hand_cards[1:, 13].any()
+        assert (obs.hand_cards[1:, [7]] == 1.0).all()
+
+    def test_hidden_debuffed_card_not_counted(self):
+        gs = _dealt_state("LEAK1")
+        hand = gs["hand"]
+        hand[0].debuff = True
+        assert encode_observation(gs).global_context[232] == 1.0 / len(hand)
+        hand[0].facing = "back"
+        assert encode_observation(gs).global_context[232] == 0.0
+
+    def test_no_face_down_cards_unchanged(self):
+        from jackdaw.env.observation import (
+            _compute_hand_analysis,
+            encode_global_context,
+            encode_playing_cards_batch,
+        )
+
+        gs = _dealt_state("LEAK2")
+        analysis = _compute_hand_analysis(gs["hand"], gs["jokers"], gs["hand_levels"])
+        obs = encode_observation(gs)
+        np.testing.assert_array_equal(
+            obs.global_context, encode_global_context(gs, hand_analysis=analysis)
+        )
+        np.testing.assert_array_equal(
+            obs.hand_cards, encode_playing_cards_batch(gs["hand"], gs, hand_analysis=analysis)
+        )
+
+    def test_face_down_joker_encodes_position_only(self):
+        from jackdaw.engine.card import Card
+        from jackdaw.env.observation import encode_joker, encode_jokers_batch
+
+        gs = _dealt_state("LEAK1")
+        jokers = []
+        for key in ("j_joker", "j_merry_andy", "j_blueprint"):
+            j = Card()
+            j.set_ability(key)
+            jokers.append(j)
+        face_up = encode_jokers_batch(jokers, gs)
+        assert face_up[:, 0].all()
+
+        jokers[1].facing = "back"
+        batch = encode_jokers_batch(jokers, gs)
+        expected = np.zeros(D_JOKER, dtype=np.float32)
+        expected[9] = 1 / 20.0
+        np.testing.assert_array_equal(batch[1], expected)
+        np.testing.assert_array_equal(encode_joker(jokers[1], 1, gs), expected)
+        np.testing.assert_array_equal(batch[[0, 2]], face_up[[0, 2]])
+
+        # Swapping which joker is face down in that slot changes nothing.
+        other = Card()
+        other.set_ability("j_cavendish")
+        other.facing = "back"
+        np.testing.assert_array_equal(encode_jokers_batch([jokers[0], other, jokers[2]], gs), batch)
+
+
 # ---------------------------------------------------------------------------
 # Empty areas
 # ---------------------------------------------------------------------------
