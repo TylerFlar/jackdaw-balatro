@@ -153,7 +153,7 @@ Keys: `deck` (index 0 is the bottom; cards are drawn from the end), `hand`
 | `ability` | `self.ability`, **minus** the keys derived from the center (`name`, `effect`, `set`, `order`, `consumeable`, `type`) and the sticker fields, which live under `stickers`. `extra` keeps its Lua shape: null, a number, a string, or an object |
 | `edition` | The Lua edition table, e.g. `{"foil": true, "chips": 50, "type": "foil"}`, or null |
 | `seal` | `Red`, `Blue`, `Gold`, `Purple`, or null |
-| `debuff`, `facing` | Boolean; `front`/`back` |
+| `debuff`, `facing` | Boolean; `front`/`back`. Cards in `deck` and `discard` are always written `front`: Lua turns them face down every frame (`CardArea:align_cards`, cardarea.lua:410-430), so their facing carries nothing, and a card drawn from them faces whichever way the draw decides |
 | `added_to_deck` | `Card.added_to_deck`: whether the card's `add_to_deck` effects (passives, a Negative's slot) are applied. True for owned jokers and consumables; false while a joker is debuffed (its passives are off), for shop and pack cards, and for playing cards (the sim never runs their no-op `add_to_deck`) |
 | `costs` | `{base_cost, extra_cost, cost, sell_cost}` |
 

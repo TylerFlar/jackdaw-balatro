@@ -39,6 +39,10 @@ AREAS: tuple[tuple[str, str], ...] = (
     ("pack_cards", "pack_cards"),
 )
 
+#: Lua turns every card in these areas face down each frame (CardArea:align_cards,
+#: cardarea.lua:410-430), so their facing carries nothing; the snapshot writes them face up.
+FACE_DOWN_AREAS = frozenset({"deck", "discard"})
+
 GAME_SCALARS: tuple[str, ...] = (
     "dollars",
     "chips",
@@ -194,6 +198,14 @@ def export_ability(c: Any, gs: dict[str, Any] | None = None) -> dict[str, Any]:
     # visible.
     if c.perishable and "perish_tally" in out and out["perish_tally"] == c.perish_tally:
         del out["perish_tally"]
+    return out
+
+
+def _export_area(cards: list[Any], name: str, gs: dict[str, Any]) -> list[dict[str, Any]]:
+    out = [export_card(c, gs) for c in cards]
+    if name in FACE_DOWN_AREAS:
+        for card in out:
+            card["facing"] = "front"
     return out
 
 
@@ -370,7 +382,7 @@ def export_state(gs: dict[str, Any]) -> dict[str, Any]:
             "by_key": {k: v.get("count", 0) for k, v in usage.items()},
             "totals": plain(gs.get("consumable_usage_total") or {}),
         },
-        "areas": {name: [export_card(c, gs) for c in gs.get(key, []) or []] for key, name in AREAS},
+        "areas": {name: _export_area(gs.get(key, []) or [], name, gs) for key, name in AREAS},
         "pack": _export_pack(gs),
         "rng": _export_rng(gs["rng"]),
         "sim": {
