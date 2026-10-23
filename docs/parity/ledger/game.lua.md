@@ -143,7 +143,7 @@ Source: `balatro_source/game.lua` (Balatro 1.0.1o). 436 rows: 20 function, 11 rn
 | game/entity/joker/j_riff_raff | game.lua:438 | entity | Joker: Riff-raff (`j_riff_raff`) | named in Card:calculate_joker | unreviewed |  |  |  |  |
 | game/entity/joker/j_vampire | game.lua:439 | entity | Joker: Vampire (`j_vampire`) | named in Card:calculate_joker | unreviewed |  |  |  |  |
 | game/entity/joker/j_shortcut | game.lua:440 | entity | Joker: Shortcut (`j_shortcut`) | named in get_straight | unreviewed |  |  |  |  |
-| game/entity/joker/j_hologram | game.lua:441 | entity | Joker: Hologram (`j_hologram`) | named in Card:calculate_joker | gap |  |  | G19 |  |
+| game/entity/joker/j_hologram | game.lua:441 | entity | Joker: Hologram (`j_hologram`) | named in Card:calculate_joker | verified | crates/jackdaw-core/src/joker/batch_e.rs::hologram | tests/parity/test_jokers_batch_e.py::test_hologram_grows_for_each_card_bought; tests/parity/test_audit_sweep.py | G19 |  |
 | game/entity/joker/j_vagabond | game.lua:442 | entity | Joker: Vagabond (`j_vagabond`) | named in Card:calculate_joker | unreviewed |  |  |  |  |
 | game/entity/joker/j_baron | game.lua:443 | entity | Joker: Baron (`j_baron`) | named in Card:calculate_joker | unreviewed |  |  |  |  |
 | game/entity/joker/j_cloud_9 | game.lua:444 | entity | Joker: Cloud 9 (`j_cloud_9`) | named in Card:calculate_dollar_bonus, Card:update | unreviewed |  |  |  |  |
@@ -180,7 +180,7 @@ Source: `balatro_source/game.lua` (Balatro 1.0.1o). 436 rows: 20 function, 11 rn
 | game/entity/joker/j_smiley | game.lua:477 | entity | Joker: Smiley Face (`j_smiley`) | named in Card:calculate_joker | unreviewed |  |  |  |  |
 | game/entity/joker/j_campfire | game.lua:478 | entity | Joker: Campfire (`j_campfire`) | named in Card:calculate_joker | unreviewed |  |  |  |  |
 | game/entity/joker/j_ticket | game.lua:480 | entity | Joker: Golden Ticket (`j_ticket`) | named in Card:calculate_joker | unreviewed |  |  |  |  |
-| game/entity/joker/j_mr_bones | game.lua:481 | entity | Joker: Mr. Bones (`j_mr_bones`) | named in Card:calculate_joker | gap |  |  | G25 |  |
+| game/entity/joker/j_mr_bones | game.lua:481 | entity | Joker: Mr. Bones (`j_mr_bones`) | named in Card:calculate_joker | verified | crates/jackdaw-core/src/joker/batch_d.rs::mr_bones | tests/parity/test_jokers_batch_d.py::TestMrBones | G25 |  |
 | game/entity/joker/j_acrobat | game.lua:482 | entity | Joker: Acrobat (`j_acrobat`) | named in Card:calculate_joker | unreviewed |  |  |  |  |
 | game/entity/joker/j_sock_and_buskin | game.lua:483 | entity | Joker: Sock and Buskin (`j_sock_and_buskin`) | named in Card:calculate_joker | unreviewed |  |  |  |  |
 | game/entity/joker/j_swashbuckler | game.lua:484 | entity | Joker: Swashbuckler (`j_swashbuckler`) | named in Card:calculate_joker, Card:update | unreviewed |  |  |  |  |
@@ -212,7 +212,7 @@ Source: `balatro_source/game.lua` (Balatro 1.0.1o). 436 rows: 20 function, 11 rn
 | game/entity/joker/j_stuntman | game.lua:512 | entity | Joker: Stuntman (`j_stuntman`) | named in Card:add_to_deck, Card:remove_from_deck, Card:calculate_joker | unreviewed |  |  |  |  |
 | game/entity/joker/j_invisible | game.lua:513 | entity | Joker: Invisible Joker (`j_invisible`) | named in Card:set_ability, Card:calculate_joker | unreviewed |  |  |  |  |
 | game/entity/joker/j_brainstorm | game.lua:514 | entity | Joker: Brainstorm (`j_brainstorm`) | named in Card:calculate_joker, Card:update | unreviewed |  |  |  |  |
-| game/entity/joker/j_satellite | game.lua:515 | entity | Joker: Satellite (`j_satellite`) | named in Card:calculate_dollar_bonus | gap |  |  | G17 |  |
+| game/entity/joker/j_satellite | game.lua:515 | entity | Joker: Satellite (`j_satellite`) | named in Card:calculate_dollar_bonus | verified | crates/jackdaw-core/src/round.rs::calculate_dollar_bonus | tests/parity/test_rust_lockstep.py (boss_bl_psychic) | G17 |  |
 | game/entity/joker/j_shoot_the_moon | game.lua:516 | entity | Joker: Shoot the Moon (`j_shoot_the_moon`) | named in Card:calculate_joker | unreviewed |  |  |  |  |
 | game/entity/joker/j_drivers_license | game.lua:517 | entity | Joker: Driver's License (`j_drivers_license`) | named in Card:calculate_joker, Card:update | unreviewed |  |  |  |  |
 | game/entity/joker/j_cartomancer | game.lua:518 | entity | Joker: Cartomancer (`j_cartomancer`) | named in Card:calculate_joker | unreviewed |  |  |  |  |
@@ -222,7 +222,7 @@ Source: `balatro_source/game.lua` (Balatro 1.0.1o). 436 rows: 20 function, 11 rn
 | game/entity/joker/j_caino | game.lua:522 | entity | Joker: Caino (`j_caino`) | named in Card:set_ability, Card:calculate_joker | unreviewed |  |  |  |  |
 | game/entity/joker/j_triboulet | game.lua:523 | entity | Joker: Triboulet (`j_triboulet`) | named in Card:calculate_joker | unreviewed |  |  |  |  |
 | game/entity/joker/j_yorick | game.lua:524 | entity | Joker: Yorick (`j_yorick`) | named in Card:set_ability, Card:calculate_joker | unreviewed |  |  |  |  |
-| game/entity/joker/j_chicot | game.lua:525 | entity | Joker: Chicot (`j_chicot`) | named in Card:add_to_deck, Card:calculate_joker | gap |  |  | G07 |  |
+| game/entity/joker/j_chicot | game.lua:525 | entity | Joker: Chicot (`j_chicot`) | named in Card:add_to_deck, Card:calculate_joker | verified | crates/jackdaw-core/src/joker/batch_d.rs::chicot; crates/jackdaw-core/src/cards.rs::Game::add_to_deck | tests/parity/test_jokers_batch_d.py::TestChicot | G07 |  |
 | game/entity/joker/j_perkeo | game.lua:526 | entity | Joker: Perkeo (`j_perkeo`) | named in Card:calculate_joker | unreviewed |  |  |  |  |
 | game/entity/tarot/c_fool | game.lua:533 | entity | Tarot: The Fool (`c_fool`) | named in Card:use_consumeable, Card:can_use_consumeable | unreviewed |  |  |  |  |
 | game/entity/tarot/c_magician | game.lua:534 | entity | Tarot: The Magician (`c_magician`) | not named in code (data-driven) | unreviewed |  |  |  |  |
@@ -266,7 +266,7 @@ Source: `balatro_source/game.lua` (Balatro 1.0.1o). 436 rows: 20 function, 11 rn
 | game/entity/spectral/c_wraith | game.lua:576 | entity | Spectral: Wraith (`c_wraith`) | named in Card:use_consumeable, Card:can_use_consumeable | unreviewed |  |  |  |  |
 | game/entity/spectral/c_sigil | game.lua:577 | entity | Spectral: Sigil (`c_sigil`) | named in Card:use_consumeable, Card:can_use_consumeable | unreviewed |  |  |  |  |
 | game/entity/spectral/c_ouija | game.lua:578 | entity | Spectral: Ouija (`c_ouija`) | named in Card:use_consumeable, Card:can_use_consumeable | unreviewed |  |  |  |  |
-| game/entity/spectral/c_ectoplasm | game.lua:579 | entity | Spectral: Ectoplasm (`c_ectoplasm`) | named in Card:use_consumeable, Card:can_use_consumeable, Card:update | gap |  |  | G27 |  |
+| game/entity/spectral/c_ectoplasm | game.lua:579 | entity | Spectral: Ectoplasm (`c_ectoplasm`) | named in Card:use_consumeable, Card:can_use_consumeable, Card:update | verified | crates/jackdaw-core/src/consumables/run.rs::edition_joker | tests/parity/test_consumables_rust.py::test_ectoplasm_twice | G27 |  |
 | game/entity/spectral/c_immolate | game.lua:580 | entity | Spectral: Immolate (`c_immolate`) | named in Card:use_consumeable, Card:can_use_consumeable | unreviewed |  |  |  |  |
 | game/entity/spectral/c_ankh | game.lua:581 | entity | Spectral: Ankh (`c_ankh`) | named in Card:use_consumeable, Card:can_use_consumeable, Card:check_use | unreviewed |  |  |  |  |
 | game/entity/spectral/c_deja_vu | game.lua:582 | entity | Spectral: Deja Vu (`c_deja_vu`) | named in Card:use_consumeable | unreviewed |  |  |  |  |
