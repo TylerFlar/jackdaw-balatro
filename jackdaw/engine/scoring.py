@@ -936,11 +936,13 @@ def score_hand(
                 f" -> {hand_chips:.0f} chips, {mult:.0f} mult"
             )
 
-    # === Phase 11: Card destruction ===
+    # === Phase 11: Card destruction (state_events.lua:950-973) ===
+    # Every scoring card, debuffed ones included, is offered to the jokers'
+    # destroying_card context (Sixth Sense reads get_id(), which ignores the
+    # debuff); then a non-debuffed Glass Card rolls 'glass' whether or not a
+    # joker already destroyed it.
     cards_destroyed: list[Card] = []
     for sc in scoring_cards:
-        if sc.debuff:
-            continue
         destroyed = False
         # Joker destroying_card checks (Sixth Sense, etc.)
         dest_ctx = None
@@ -960,9 +962,11 @@ def score_hand(
                     joker_creates.append(dest_result.extra["create"])
                 destroyed = True
                 break
-        # Glass Card self-shatter: 1 in (1/probabilities_normal * 4) chance
-        if not destroyed and sc.ability.get("name") == "Glass Card":
-            if rng.random("glass") < probabilities_normal / 4:
+        # Glass Card self-shatter: pseudorandom('glass') <
+        # G.GAME.probabilities.normal / ability.extra (state_events.lua:961)
+        if sc.ability.get("name") == "Glass Card" and not sc.debuff:
+            odds = sc.ability.get("extra") or 4
+            if rng.random("glass") < probabilities_normal / odds:
                 destroyed = True
         if destroyed:
             # A destroyed Glass Card shatters (state_events.lua:967), which
