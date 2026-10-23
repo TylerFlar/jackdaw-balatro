@@ -10,14 +10,151 @@ import math
 
 import pytest
 
-from jackdaw.engine.actions import GamePhase, PlayHand, SelectBlind
+from jackdaw.engine.actions import (
+    Discard,
+    GamePhase,
+    PlayHand,
+    SelectBlind,
+    SellCard,
+    UseConsumable,
+)
 from jackdaw.engine.blind import Blind
 from jackdaw.engine.data.blind_scaling import get_blind_amount, get_blind_target
+from jackdaw.engine.data.enums import Suit
 from jackdaw.engine.game import step
 from jackdaw.engine.rng import PseudoRandom
-from tests.engine.audit._boards import force_boss, give_joker, ids, new_run
+from tests.engine.audit._boards import (
+    force_boss,
+    give_consumable,
+    give_joker,
+    ids,
+    index_of,
+    new_run,
+    start_boss,
+)
 from tests.parity import canon
 from tests.parity.py_export import export_state
+
+# ---------------------------------------------------------------------------
+# G13 — boss debuffs are re-checked when a card or the joker set changes
+# ---------------------------------------------------------------------------
+
+
+def _club_in_hand(gs):
+    return next(c for c in gs["hand"] if c.base.suit is Suit.CLUBS)
+
+
+def test_g13_suit_change_lifts_a_suit_debuff_at_once():
+    """change_suit -> set_base runs G.GAME.blind:debuff_card(self) and so does
+    change_suit itself (card.lua:143, 560-561): a Club turned into a Diamond
+    by The Star under The Club is no longer debuffed, so it scores at once."""
+    gs = start_boss(new_run("AUDIT_G13"), "bl_club")
+    club = _club_in_hand(gs)
+    assert club.debuff
+    give_consumable(gs, "c_star")
+
+    step(gs, UseConsumable(card_index=0, target_indices=(index_of(gs["hand"], club),)))
+
+    assert club.base.suit is Suit.DIAMONDS
+    assert not club.debuff
+    step(gs, PlayHand(card_indices=(index_of(gs["hand"], club),)))
+    assert not gs["last_score_result"].debuffed
+    assert gs["last_score_result"].chips > 5  # the card's own chips counted
+
+
+def test_g13_enhancement_change_rechecks_the_debuff():
+    """set_ability (not initial) ends with G.GAME.blind:debuff_card(self)
+    (card.lua:365).  Under The Club, The Lovers' Wild Card is_suit('Clubs')
+    and is debuffed; The Tower's Stone Card is no suit and is freed."""
+    gs = start_boss(new_run("AUDIT_G13E"), "bl_club")
+    other = next(c for c in gs["hand"] if c.base.suit is not Suit.CLUBS)
+    club = _club_in_hand(gs)
+    give_consumable(gs, "c_lovers")
+    give_consumable(gs, "c_tower")
+
+    step(gs, UseConsumable(card_index=0, target_indices=(index_of(gs["hand"], other),)))
+    step(gs, UseConsumable(card_index=0, target_indices=(index_of(gs["hand"], club),)))
+
+    assert other.debuff  # now Wild: counts as a Club
+    assert not club.debuff  # now Stone: no suit
+
+
+def test_g13_rank_change_rechecks_a_face_debuff():
+    """Strength's set_base (card.lua:1134) re-checks too: under The Plant a 10
+    raised to a Jack is a face card and is debuffed at once."""
+    gs = start_boss(new_run("AUDIT_G13R"), "bl_plant")  # this seed deals a 10
+    ten = next(c for c in gs["hand"] if c.base.id == 10)
+    assert not ten.debuff
+    give_consumable(gs, "c_strength")
+
+    step(gs, UseConsumable(card_index=0, target_indices=(index_of(gs["hand"], ten),)))
+
+    assert ten.base.id == 11
+    assert ten.debuff
+
+
+def test_g13_selling_pareidolia_rechecks_every_card():
+    """remove_from_deck queues G.GAME.blind:set_blind(nil, true) (card.lua:698),
+    a reset that re-runs debuff_card over G.playing_cards (blind.lua:207-210).
+    Under The Plant with Pareidolia every card is a face card and debuffed;
+    selling Pareidolia frees the non-face cards at once."""
+    gs = new_run("AUDIT_G13P")
+    give_joker(gs, "j_pareidolia")
+    force_boss(gs, "bl_plant")
+    step(gs, SelectBlind())
+    assert all(c.debuff for c in gs["hand"])
+
+    step(gs, SellCard(area="jokers", card_index=0))
+
+    for card in gs["hand"] + gs["deck"]:
+        assert card.debuff == (card.get_id() in (11, 12, 13))
+
+
+def test_g13_adding_pareidolia_rechecks_every_card():
+    """add_to_deck queues the same reset (card.lua:641)."""
+    gs = start_boss(new_run("AUDIT_G13A"), "bl_plant")
+    assert not all(c.debuff for c in gs["hand"])
+
+    give_joker(gs, "j_pareidolia")
+
+    assert all(c.debuff for c in gs["hand"] + gs["deck"])
+
+
+def test_g13_cards_created_mid_round_are_not_debuffed_by_a_draw():
+    """Debuffs come from set_blind's pass over G.playing_cards (blind.lua:207-210)
+    and the re-checks above — never from a draw.  Familiar's new face cards
+    (create_playing_card, no debuff_card call, card.lua:1320-1335) stay
+    playable under The Plant through the next draw."""
+    gs = start_boss(new_run("AUDIT_G13F"), "bl_plant")
+    give_consumable(gs, "c_familiar")
+    before = list(gs["hand"])
+    step(gs, UseConsumable(card_index=0))
+    made = [c for c in gs["hand"] if all(c is not b for b in before)]
+    assert len(made) == 3 and not any(c.debuff for c in made)
+    keep = {id(c) for c in made}
+
+    discard = tuple(i for i, c in enumerate(gs["hand"]) if id(c) not in keep)[:1]
+    step(gs, Discard(card_indices=discard))
+
+    assert not any(c.debuff for c in made)
+
+
+def test_g13_vampire_rechecks_the_card_it_strips():
+    """Vampire strips an enhancement with set_ability(c_base) in the 'before'
+    pass (card.lua:3465-3482), which re-checks the debuff (card.lua:365): a
+    Stone Club under The Club becomes a plain, debuffed Club mid-play."""
+    gs = start_boss(new_run("AUDIT_G13V"), "bl_club")
+    club = _club_in_hand(gs)
+    give_consumable(gs, "c_tower")
+    step(gs, UseConsumable(card_index=0, target_indices=(index_of(gs["hand"], club),)))
+    assert not club.debuff
+    give_joker(gs, "j_vampire")
+
+    step(gs, PlayHand(card_indices=(index_of(gs["hand"], club),)))
+
+    assert club.center_key == "c_base"
+    assert club.debuff
+
 
 # ---------------------------------------------------------------------------
 # G10 — Amber Acorn flips at set time and shuffles three times with 'aajk'

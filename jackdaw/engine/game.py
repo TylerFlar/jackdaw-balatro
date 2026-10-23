@@ -191,6 +191,12 @@ def _handle_select_blind(gs: dict[str, Any]) -> dict[str, Any]:
     # ------------------------------------------------------------------
     start_round(gs)
 
+    # set_blind's debuff pass over every playing card (blind.lua:207-210)
+    # runs inside set_blind, before the jokers' setting_blind context: a
+    # card a setting_blind effect creates (Marble Joker's stone) is not
+    # checked here.
+    reapply_blind_debuffs(gs)
+
     # ------------------------------------------------------------------
     # 3. Fire joker setting_blind context
     # ------------------------------------------------------------------
@@ -226,19 +232,6 @@ def _handle_select_blind(gs: dict[str, Any]) -> dict[str, Any]:
     # ------------------------------------------------------------------
     if blind.boss and not blind.disabled:
         _apply_boss_blind_effects(gs, blind)
-
-    # Debuff playing cards based on boss blind
-    deck: list = gs.get("deck", [])
-    pareidolia = any(
-        getattr(j, "center_key", None) == "j_pareidolia" and not getattr(j, "debuff", False)
-        for j in jokers
-    )
-    smeared = any(
-        getattr(j, "center_key", None) == "j_smeared" and not getattr(j, "debuff", False)
-        for j in jokers
-    )
-    for card in deck:
-        blind.debuff_card(card, pareidolia=pareidolia, smeared=smeared)
 
     # ------------------------------------------------------------------
     # 6. Per-round deck shuffle (state_events.lua:344)
@@ -277,12 +270,10 @@ def _handle_select_blind(gs: dict[str, Any]) -> dict[str, Any]:
             entry["rsb_fired"] = True
 
     # ------------------------------------------------------------------
-    # 7. Draw hand from deck
+    # 7. Draw hand from deck (debuffs were set by set_blind's pass; a
+    #    draw never re-checks them)
     # ------------------------------------------------------------------
     _draw_hand(gs)
-    # Debuff hand cards too (they were drawn from the deck)
-    for card in gs.get("hand", []):
-        blind.debuff_card(card, pareidolia=pareidolia, smeared=smeared)
 
     # ------------------------------------------------------------------
     # 7b. Boss drawn_to_hand effects (Cerulean Bell, Crimson Heart)
@@ -329,10 +320,10 @@ def _handle_select_blind(gs: dict[str, Any]) -> dict[str, Any]:
         _hand_before = list(gs.get("hand", []))
         _apply_setting_blind_mutations(gs, fhd_muts, jokers)
         # Blind-debuff any card the mutations added to the hand
-        # (vanilla debuff_cards the created cert card, card.lua:2475).
+        # (vanilla debuff_cards the created cert card, card.lua:2473).
         for c in gs.get("hand", []):
-            if c not in _hand_before:
-                blind.debuff_card(c, pareidolia=pareidolia, smeared=smeared)
+            if all(c is not b for b in _hand_before):
+                blind_debuff_card(gs, c)
     return gs
 
 
@@ -828,18 +819,9 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
         else:
             _draw_hand(gs)
 
-        # Re-debuff hand cards for boss blind (new cards from deck)
-        if blind.boss and not blind.disabled:
-            pareidolia = any(
-                getattr(j, "center_key", None) == "j_pareidolia" and not getattr(j, "debuff", False)
-                for j in jokers
-            )
-            smeared = any(
-                getattr(j, "center_key", None) == "j_smeared" and not getattr(j, "debuff", False)
-                for j in jokers
-            )
-            for card in gs.get("hand", []):
-                blind.debuff_card(card, pareidolia=pareidolia, smeared=smeared)
+        # No debuff re-check here: a draw never runs debuff_card; the
+        # drawn cards carry the state set_blind's pass (and any re-check
+        # since) left them in.
 
         # The Fish flips ONLY the newly drawn replacements, handled
         # per-drawn-card by Blind.stay_flipped inside _draw_hand
@@ -1107,20 +1089,10 @@ def _handle_discard(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str, A
         _draw_hand(gs)
 
     # ------------------------------------------------------------------
-    # 11. Re-debuff drawn cards for boss blind
+    # 11. Boss drawn_to_hand effects (no debuff re-check: a draw never
+    #     runs debuff_card)
     # ------------------------------------------------------------------
     if blind and getattr(blind, "boss", False) and not getattr(blind, "disabled", False):
-        pareidolia = any(
-            getattr(j, "center_key", None) == "j_pareidolia" and not getattr(j, "debuff", False)
-            for j in jokers
-        )
-        smeared = any(
-            getattr(j, "center_key", None) == "j_smeared" and not getattr(j, "debuff", False)
-            for j in jokers
-        )
-        for card in gs.get("hand", []):
-            blind.debuff_card(card, pareidolia=pareidolia, smeared=smeared)
-
         # Boss drawn_to_hand effects on discard redraw
         rng = gs.get("rng")
         dth = blind.drawn_to_hand(
@@ -1953,6 +1925,50 @@ def _draw_hand(gs: dict[str, Any]) -> None:
     _draw_cards(gs, min(len(gs.get("deck", [])), gs.get("hand_size", 8) - len(hand)))
 
 
+def _boss_flags(gs: dict[str, Any]) -> tuple[bool, bool]:
+    """(Pareidolia, Smeared Joker) for debuff checks: ``find_joker`` skips
+    debuffed jokers (misc_functions.lua:903-917)."""
+    pareidolia = smeared = False
+    for j in gs.get("jokers", ()):
+        if not j.debuff:
+            key = j.center_key
+            pareidolia = pareidolia or key == "j_pareidolia"
+            smeared = smeared or key == "j_smeared"
+    return pareidolia, smeared
+
+
+def blind_debuff_card(gs: dict[str, Any], card: Any) -> None:
+    """``G.GAME.blind:debuff_card(card)`` (blind.lua:624-652) on one card."""
+    blind = gs.get("blind")
+    if blind is None:
+        return
+    pareidolia, smeared = _boss_flags(gs)
+    blind.debuff_card(
+        card,
+        is_joker_area=any(j is card for j in gs.get("jokers", ())),
+        pareidolia=pareidolia,
+        smeared=smeared,
+        game_state=gs,
+    )
+
+
+def reapply_blind_debuffs(gs: dict[str, Any]) -> None:
+    """``G.GAME.blind:set_blind(nil, true)``: the reset re-runs debuff_card
+    over every playing card (blind.lua:207-210) and leaves the jokers alone
+    (blind.lua:211-213); none of set_blind's set-time effects run.  Queued
+    by every joker or consumable's add_to_deck / remove_from_deck
+    (card.lua:641, 698), and also set_blind's own pass at round start."""
+    blind = gs.get("blind")
+    if blind is None:
+        return
+    from jackdaw.engine.card_factory import _PLAYING_CARD_AREAS
+
+    pareidolia, smeared = _boss_flags(gs)
+    for area in (*_PLAYING_CARD_AREAS, "pending_deck_bottom"):
+        for card in gs.get(area) or ():
+            blind.debuff_card(card, pareidolia=pareidolia, smeared=smeared)
+
+
 def change_hand_size(gs: dict[str, Any], delta: int) -> None:
     """``G.hand:change_size(delta)`` (cardarea.lua:94-111).
 
@@ -2673,24 +2689,30 @@ def _apply_consumable_result(
             gs["last_tarot_planet"] = card_key
 
     # ---- Card modifications ----
+    # A non-initial set_ability / set_base ends with
+    # G.GAME.blind:debuff_card(self) (card.lua:143, 365), and change_suit
+    # runs it again (card.lua:561): the boss debuff is re-checked at once.
 
     # a. Enhancement
     if getattr(result, "enhance", None):
         for target, enh_key in result.enhance:
             if hasattr(target, "set_ability"):
                 target.set_ability(enh_key)
+                blind_debuff_card(gs, target)
 
     # b. Suit changes
     if getattr(result, "change_suit", None):
         for target, suit in result.change_suit:
             if hasattr(target, "change_suit"):
                 target.change_suit(suit)
+                blind_debuff_card(gs, target)
 
     # c. Rank changes
     if getattr(result, "change_rank", None):
         for target, delta in result.change_rank:
             if hasattr(target, "change_rank"):
                 target.change_rank(delta)
+                blind_debuff_card(gs, target)
 
     # d. Copy card (Death)
     if getattr(result, "copy_card", None):
@@ -2709,6 +2731,9 @@ def _apply_consumable_result(
             target.seal = source.seal
             if hasattr(source, "center_key") and hasattr(target, "set_ability"):
                 target.set_ability(source.center_key)
+        # copy_card's set_ability / set_base re-check the debuff
+        # (card.lua:143, 365; common_events.lua:2158-2160).
+        blind_debuff_card(gs, target)
 
     # e. Destroy playing cards
     if getattr(result, "destroy", None):

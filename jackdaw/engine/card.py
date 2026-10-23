@@ -43,6 +43,16 @@ def _change_hand_size(game_state: dict, delta: int) -> None:
     change_hand_size(game_state, delta)
 
 
+def _reapply_blind_debuffs(game_state: dict) -> None:
+    """``G.GAME.blind:set_blind(nil, true)``, which add_to_deck and
+    remove_from_deck queue (card.lua:641, 698): every playing card's boss
+    debuff is re-checked against the new joker set (Pareidolia, Smeared).
+    See :func:`jackdaw.engine.game.reapply_blind_debuffs`."""
+    from jackdaw.engine.game import reapply_blind_debuffs
+
+    reapply_blind_debuffs(game_state)
+
+
 # ---------------------------------------------------------------------------
 # Face nominal values (from Card:set_base, card.lua:131-134)
 # ---------------------------------------------------------------------------
@@ -907,6 +917,7 @@ class Card:
             else:
                 key = self._negative_slot_key()
                 game_state[key] = game_state.get(key, 0) + 1
+        _reapply_blind_debuffs(game_state)
 
     def remove_from_deck(self, game_state: dict, from_debuff: bool = False) -> None:
         """Reverse joker's passive effects when removed from deck (card.lua:Card:remove_from_deck).
@@ -976,6 +987,7 @@ class Card:
             else:
                 key = self._negative_slot_key()
                 game_state[key] = game_state.get(key, 0) - 1
+        _reapply_blind_debuffs(game_state)
 
     def __repr__(self) -> str:
         if self.base:
