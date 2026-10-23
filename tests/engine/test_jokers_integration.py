@@ -170,7 +170,9 @@ class TestDna:
         ctx = JokerContext(before=True, full_hand=played, hands_played=1)
         assert calculate_joker(j, ctx) is None
 
-    def test_blueprint_does_not_copy(self):
+    def test_blueprint_copies(self):
+        """DNA's before branch has no `not context.blueprint` guard
+        (card.lua:3501), so a Blueprint copy makes another copy."""
         j = _joker("j_dna")
         played = [_card("Hearts", "Ace")]
         ctx = JokerContext(
@@ -179,7 +181,9 @@ class TestDna:
             hands_played=0,
             blueprint=1,
         )
-        assert calculate_joker(j, ctx) is None
+        result = calculate_joker(j, ctx)
+        assert result is not None
+        assert result.extra["create"]["type"] == "playing_card_copy"
 
 
 class TestRiffRaff:
@@ -893,7 +897,9 @@ class TestHiker:
         assert r2.chips == 42.0
         assert played[0].ability["perma_bonus"] == 10
 
-    def test_blueprint_does_not_mutate(self):
+    def test_blueprint_copy_adds_bonus(self):
+        """Hiker's branch has no `not context.blueprint` guard
+        (card.lua:3067), so a Blueprint copy adds its own +5."""
         j = _joker("j_hiker", extra=5)
         ace = _card("Hearts", "Ace")
         ctx = JokerContext(
@@ -903,7 +909,7 @@ class TestHiker:
             blueprint=1,
         )
         calculate_joker(j, ctx)
-        assert ace.ability.get("perma_bonus", 0) == 0
+        assert ace.ability.get("perma_bonus", 0) == 5
 
 
 # ============================================================================

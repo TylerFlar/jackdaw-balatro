@@ -2,10 +2,84 @@
 
 from __future__ import annotations
 
-from jackdaw.engine.actions import GamePhase, UseConsumable
+from jackdaw.engine.actions import GamePhase, NextRound, UseConsumable
 from jackdaw.engine.game import step
 
-from ._helpers import give_card, give_consumable, give_joker, new_run, play, select_blind
+from ._helpers import (
+    discard,
+    give_card,
+    give_consumable,
+    give_joker,
+    new_run,
+    play,
+    select_blind,
+    to_shop,
+)
+
+
+class TestBlueprintGuards:
+    """Blueprint/Brainstorm copy a joker by calling its calculate_joker with
+    context.blueprint set (card.lua:2304-2334); only branches guarded by
+    ``not context.blueprint`` refuse.  Hiker, DNA, Perkeo and Burnt Joker have
+    no guard; Trading Card has one."""
+
+    def test_hiker_is_copied(self):
+        """Hiker: individual/play, no guard (card.lua:3067-3074)."""
+        gs = select_blind(new_run("AUDIT_BP_HIKER"))
+        give_joker(gs, "j_blueprint")
+        give_joker(gs, "j_hiker")
+        card = give_card(gs, "S_9")
+        play(gs, card)
+        assert card.ability["perma_bonus"] == 10
+
+    def test_hiker_is_copied_by_brainstorm(self):
+        gs = select_blind(new_run("AUDIT_BS_HIKER"))
+        give_joker(gs, "j_hiker")
+        give_joker(gs, "j_brainstorm")
+        card = give_card(gs, "S_9")
+        play(gs, card)
+        assert card.ability["perma_bonus"] == 10
+
+    def test_dna_is_copied(self):
+        """DNA: before, no guard (card.lua:3501-3523)."""
+        gs = select_blind(new_run("AUDIT_BP_DNA"))
+        give_joker(gs, "j_blueprint")
+        give_joker(gs, "j_dna")
+        card = give_card(gs, "S_9")
+        play(gs, card)
+        copies = [c for c in gs["hand"] if c.card_key == "S_9" and c is not card]
+        assert len(copies) == 2
+
+    def test_burnt_joker_is_copied(self):
+        """Burnt Joker: pre_discard, no guard (card.lua:2748-2755): the first
+        discard's hand levels up once per copy."""
+        gs = select_blind(new_run("AUDIT_BP_BURNT"))
+        give_joker(gs, "j_blueprint")
+        give_joker(gs, "j_burnt")
+        a = give_card(gs, "S_9")
+        b = give_card(gs, "H_9")
+        discard(gs, a, b)
+        assert gs["hand_levels"]["Pair"].level == 3
+
+    def test_perkeo_is_copied(self):
+        """Perkeo: ending_shop, no guard (card.lua:2412-2426)."""
+        gs = to_shop(new_run("AUDIT_BP_PERKEO"))
+        give_joker(gs, "j_blueprint")
+        give_joker(gs, "j_perkeo")
+        give_consumable(gs, "c_pluto")
+        step(gs, NextRound())
+        assert len(gs["consumables"]) == 3
+
+    def test_trading_card_is_not_copied(self):
+        """Trading Card: discard, guarded (card.lua:2802-2812): $3 once."""
+        gs = select_blind(new_run("AUDIT_BP_TRADING"))
+        give_joker(gs, "j_blueprint")
+        give_joker(gs, "j_trading")
+        card = give_card(gs, "S_9")
+        dollars = gs["dollars"]
+        discard(gs, card)
+        assert gs["dollars"] == dollars + 3
+        assert card not in gs["discard_pile"]
 
 
 class TestMrBones:

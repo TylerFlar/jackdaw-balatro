@@ -1376,9 +1376,10 @@ def _mail(card: Card, ctx: JokerContext) -> JokerResult | None:
 def _trading(card: Card, ctx: JokerContext) -> JokerResult | None:
     """Trading Card: first discard of round, single card → +$3, destroy card.
 
-    Source: card.lua:2802. Returns extra={'destroy': True} to signal destruction.
+    Source: card.lua:2802-2812 (``not context.blueprint``: copies do
+    nothing). Returns extra={'destroy': True} to signal destruction.
     """
-    if ctx.discard and ctx.full_hand is not None:
+    if ctx.discard and not ctx.blueprint and ctx.full_hand is not None:
         if ctx.game.discards_used <= 0 and len(ctx.full_hand) == 1:
             return JokerResult(
                 dollars=card.ability.get("extra", 3),
@@ -2050,10 +2051,11 @@ def _marble(card: Card, ctx: JokerContext) -> JokerResult | None:
 def _dna(card: Card, ctx: JokerContext) -> JokerResult | None:
     """DNA: copy first card into deck on first hand (1 card played).
 
-    Source: card.lua:3501. Fires in before context when hands_played == 0
-    and exactly 1 card in full_hand.
+    Source: card.lua:3501-3523. Fires in before context when hands_played
+    == 0 and exactly 1 card in full_hand.  No ``not context.blueprint``
+    guard: each Blueprint/Brainstorm copy makes another copy.
     """
-    if ctx.before and not ctx.blueprint:
+    if ctx.before:
         if ctx.game.hands_played == 0 and ctx.full_hand and len(ctx.full_hand) == 1:
             return JokerResult(
                 extra={
@@ -2341,13 +2343,14 @@ def _midas_mask(card: Card, ctx: JokerContext) -> JokerResult | None:
 def _hiker(card: Card, ctx: JokerContext) -> JokerResult | None:
     """Hiker: +5 permanent chip bonus per scored card.
 
-    Source: card.lua:3067. Fires in individual/play context.
-    Mutates other_card.ability.perma_bonus in-place.
+    Source: card.lua:3067-3074. Fires in individual/play context and
+    mutates other_card.ability.perma_bonus in place.  The branch has no
+    ``not context.blueprint`` guard, so Blueprint/Brainstorm copies add
+    their own bonus.
     """
     if ctx.individual and ctx.cardarea == "play" and ctx.other_card is not None:
-        if not ctx.blueprint:
-            pb = ctx.other_card.ability.get("perma_bonus", 0)
-            ctx.other_card.ability["perma_bonus"] = pb + card.ability.get("extra", 5)
+        pb = ctx.other_card.ability.get("perma_bonus", 0)
+        ctx.other_card.ability["perma_bonus"] = pb + card.ability.get("extra", 5)
         return JokerResult()
     return None
 
@@ -2614,7 +2617,8 @@ def _mr_bones(card: Card, ctx: JokerContext) -> JokerResult | None:
     ctx.chips_ratio.  Returns saved=True and remove=True
     (self-destructs after saving).
     """
-    if getattr(ctx, "game_over", False):
+    # Inside end_of_round's `elseif not context.blueprint` (card.lua:2888).
+    if getattr(ctx, "game_over", False) and not ctx.blueprint:
         if getattr(ctx, "chips_ratio", 0.0) >= 0.25:
             return JokerResult(saved=True, remove=True)
     return None
@@ -2622,14 +2626,16 @@ def _mr_bones(card: Card, ctx: JokerContext) -> JokerResult | None:
 
 @register("j_burnt")
 def _burnt(card: Card, ctx: JokerContext) -> JokerResult | None:
-    """Burnt Joker: level up discard hand on first discard of round.
+    """Burnt Joker: level up the discarded hand on the first discard of a round.
 
-    Source: card.lua:2749. Fires in discard context when discards_used <= 0.
+    Source: card.lua:2748-2755 — the ``pre_discard`` context (once per
+    discard, before any card is processed), gated on discards_used <= 0
+    and not The Hook's forced discard.  No ``not context.blueprint`` guard:
+    each Blueprint/Brainstorm copy levels the hand again.  The caller
+    detects the hand (get_poker_hand_info on the highlighted cards).
     """
-    if ctx.discard and not ctx.blueprint and not ctx.hook:
-        if ctx.game.discards_used <= 0 and ctx.other_card is not None:
-            if ctx.full_hand and ctx.other_card is ctx.full_hand[-1]:
-                return JokerResult(level_up=True)
+    if ctx.pre_discard and not ctx.hook and ctx.game.discards_used <= 0:
+        return JokerResult(level_up=True)
     return None
 
 
@@ -2658,8 +2664,12 @@ def _turtle_bean(card: Card, ctx: JokerContext) -> JokerResult | None:
 
 @register("j_perkeo")
 def _perkeo(card: Card, ctx: JokerContext) -> JokerResult | None:
-    """Perkeo: copy random consumable when leaving shop. Source: card.lua:2413."""
-    if ctx.ending_shop and not ctx.blueprint:
+    """Perkeo: copy random consumable when leaving shop.
+
+    Source: card.lua:2412-2426 — no ``not context.blueprint`` guard, so a
+    Blueprint/Brainstorm copy duplicates another consumable.
+    """
+    if ctx.ending_shop:
         return JokerResult(
             extra={
                 "create": {"type": "consumable_copy", "edition": "negative", "key": "perkeo"},

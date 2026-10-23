@@ -955,7 +955,9 @@ def _handle_discard(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str, A
         if result:
             pre_discard_effects.append(result)
 
-    # Burnt Joker: level up the hand type of discarded cards
+    # Burnt Joker (and each Blueprint/Brainstorm copy): level up the hand
+    # get_poker_hand_info finds in the highlighted cards (card.lua:2750-2753);
+    # detection honours Four Fingers / Shortcut / Smeared like vanilla's.
     for eff in pre_discard_effects:
         if eff.level_up:
             hand_levels = gs.get("hand_levels")
@@ -1000,15 +1002,6 @@ def _handle_discard(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str, A
             result = calculate_joker(joker, ctx)
             if result:
                 dollars_earned += result.dollars
-                if result.level_up:
-                    # Burnt Joker: level up the discard hand type
-                    hl = gs.get("hand_levels")
-                    if hl is not None:
-                        from jackdaw.engine.hand_eval import evaluate_hand as _eval
-
-                        det = _eval(discarded)
-                        if det.detected_hand and det.detected_hand != "NULL":
-                            hl.level_up(det.detected_hand)
                 if result.remove:
                     # Trading Card: destroy the discarded card
                     if result.extra and result.extra.get("destroy"):
