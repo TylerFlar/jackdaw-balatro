@@ -10,6 +10,8 @@ use jackdaw_env::observation::{Encoder, Observation};
 use pyo3::prelude::*;
 use pyo3::types::PyByteArray;
 
+mod bot;
+
 pyo3::create_exception!(
     _core,
     IllegalActionError,
@@ -137,15 +139,29 @@ impl Game {
     }
 
     /// The legal actions here, as a JSON list of tape-form actions, in the Python engine's
-    /// order (`jackdaw.engine.actions.get_legal_actions`).
-    fn legal_actions(&self) -> String {
-        let list: Vec<serde_json::Value> = self
-            .inner
-            .legal_actions()
-            .iter()
-            .map(jackdaw_core::action::Action::to_json)
-            .collect();
-        serde_json::Value::Array(list).to_string()
+    /// order (`jackdaw.engine.actions.get_legal_actions`). ``legality`` is ``"vanilla"`` (the
+    /// default) or ``"balatrobot"``: only what the live BalatroBot also executes.
+    #[pyo3(signature = (legality=None))]
+    fn legal_actions(&self, legality: Option<&str>) -> PyResult<String> {
+        bot::legal_actions(&self.inner, legality)
+    }
+
+    /// BalatroBot's gamestate view of the run (JSON text, as the bot encodes it).
+    fn bot_view(&self) -> PyResult<String> {
+        bot::bot_view(&self.inner)
+    }
+
+    /// The BalatroBot request that performs an action (tape form, JSON text):
+    /// ``(method, params_json)``, or ``None`` for a sim-only action.
+    fn bot_translate(&self, action: &str) -> PyResult<Option<(String, String)>> {
+        bot::translate(&self.inner, action)
+    }
+
+    /// Apply one parity setup operation (JSON text, `tests/parity/harness.py`): ``force_boss``,
+    /// ``action``, ``add`` (BalatroBot's ``add`` with the oracle's names) or ``set``.
+    fn apply_setup(&mut self, op: &str) -> PyResult<()> {
+        let value: serde_json::Value = serde_json::from_str(op).map_err(value_error)?;
+        self.inner.apply_setup_op(&value).map_err(value_error)
     }
 
     /// An independent copy of the run.
@@ -221,6 +237,14 @@ mod _core {
 
     #[pymodule_export]
     use super::{Game, IllegalActionError, NotPortedError};
+
+    #[pymodule_export]
+    use super::bot::{BotSession, serve};
+
+    /// The BalatroBot release the bot layer ports.
+    #[allow(non_upper_case_globals)]
+    #[pymodule_export]
+    const BALATROBOT_VERSION: &str = jackdaw_bot::BALATROBOT_VERSION;
 
     /// Version of the Rust crates; matches the `jackdaw` distribution version.
     #[allow(non_upper_case_globals)]

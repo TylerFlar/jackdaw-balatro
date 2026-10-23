@@ -97,7 +97,11 @@ fn leaving_the_shop_keeps_its_areas() {
     let v = ok(&mut s, "next_round", "{}");
     assert_eq!(path(&v, &["state"]), &Json::str("BLIND_SELECT"));
     let shop = path(&v, &["shop"]);
-    assert_eq!(path(shop, &["count"]), &Json::Num(2.0), "the last frame's count");
+    assert_eq!(
+        path(shop, &["count"]),
+        &Json::Num(2.0),
+        "the last frame's count"
+    );
     assert!(cards(shop).is_empty(), "the removed area has no cards");
     assert_eq!(path(&v, &["vouchers", "count"]), &Json::Num(1.0));
 }
@@ -224,7 +228,11 @@ fn add_validation_and_cards() {
     assert_eq!(path(&j, &["label"]), &Json::str("Joker"));
     let v = ok(&mut s, "add", r#"{"key": "v_overstock_norm"}"#);
     assert_eq!(path(&v, &["vouchers", "count"]), &Json::Num(2.0));
-    let v = ok(&mut s, "add", r#"{"key": "c_pluto", "edition": "NEGATIVE"}"#);
+    let v = ok(
+        &mut s,
+        "add",
+        r#"{"key": "c_pluto", "edition": "NEGATIVE"}"#,
+    );
     let c = cards(path(&v, &["consumables"])).last().unwrap().clone();
     assert_eq!(path(&c, &["modifier", "edition"]), &Json::str("NEGATIVE"));
     assert_eq!(
@@ -247,7 +255,10 @@ fn the_won_flag() {
     );
     ok(&mut s, "skip", "{}");
     let v = ok(&mut s, "skip", "{}");
-    assert_eq!(path(&v, &["blinds", "small", "status"]), &Json::str("SKIPPED"));
+    assert_eq!(
+        path(&v, &["blinds", "small", "status"]),
+        &Json::str("SKIPPED")
+    );
     assert_eq!(
         err(&mut s, "skip", "{}"),
         ("NOT_ALLOWED".into(), "Cannot skip Boss blind".into())
