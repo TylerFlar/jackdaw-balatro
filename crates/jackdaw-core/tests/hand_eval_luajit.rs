@@ -125,7 +125,7 @@ fn get_nominal_matches_the_game() {
                 suit,
                 value: rank,
                 suit_nominal_original: original.nominal_original(),
-                original_value: rank,
+                original_value: Some(rank),
                 times_played: 0.0,
             };
             let stone = c["enh"] == "stone";

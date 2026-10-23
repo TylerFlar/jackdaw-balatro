@@ -48,6 +48,7 @@ dependencies = [
  "jackdaw-core",
  "jackdaw-env",
  "pyo3",
+ "serde_json",
 ]
 
 [[package]]

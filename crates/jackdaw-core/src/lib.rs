@@ -8,13 +8,16 @@
 //! Crate rules: no PyO3 dependency, no global mutable state, and every public state type is
 //! `Send + Sync + Clone`.
 //!
-//! Not ported yet: this is the Phase 0 stub.
+//! Ported so far: Lua numerics, the RNG, the card model, poker hand evaluation, the run state
+//! and its canonical snapshots.
 #![forbid(unsafe_code)]
 
 pub mod card;
 pub mod hand_eval;
 pub mod lua;
 pub mod rng;
+pub mod snapshot;
+pub mod state;
 
 /// The generated data tables the engine runs on.
 pub use jackdaw_data as data;

@@ -40,6 +40,20 @@ mod _core {
         info.set_item("rustc", super::BUILD_RUSTC)?;
         Ok(info)
     }
+
+    /// Import a canonical snapshot (JSON text) into the Rust run state and export it again.
+    ///
+    /// Raises ``ValueError`` when the Rust state can't hold the snapshot. The parity tests use
+    /// it to check that the Rust state keeps everything the snapshot records.
+    #[pyfunction]
+    fn _snapshot_roundtrip(text: &str) -> PyResult<String> {
+        use pyo3::exceptions::PyValueError;
+        let value: serde_json::Value = serde_json::from_str(text)
+            .map_err(|e| PyValueError::new_err(format!("snapshot: bad JSON: {e}")))?;
+        let gs = jackdaw_core::snapshot::import(&value)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        Ok(jackdaw_core::snapshot::export(&gs).to_string())
+    }
 }
 
 #[cfg(test)]

@@ -133,13 +133,13 @@ Keys: `deck` (index 0 is the bottom; cards are drawn from the end), `hand`
 | `center` | `P_CENTERS` key (`c_base`, `m_glass`, `j_joker`, `c_fool`, `v_hone`, `p_arcana_normal_1`, …) |
 | `front` | `P_CARDS` key for playing cards (`H_A`), else null |
 | `base` | Playing cards only: `{suit, value, id, nominal, suit_nominal, suit_nominal_original, face_nominal, original_value, times_played}`, else null |
-| `ability` | `self.ability`, **minus** the keys derived from the center: `name`, `effect`, `set`, `order`, `consumeable`, `type`. `extra` keeps its Lua shape: null, a number, a string, or an object |
+| `ability` | `self.ability`, **minus** the keys derived from the center (`name`, `effect`, `set`, `order`, `consumeable`, `type`) and the sticker fields, which live under `stickers`. `extra` keeps its Lua shape: null, a number, a string, or an object |
 | `edition` | The Lua edition table, e.g. `{"foil": true, "chips": 50, "type": "foil"}`, or null |
 | `seal` | `Red`, `Blue`, `Gold`, `Purple`, or null |
 | `debuff`, `facing` | Boolean; `front`/`back` |
 | `playing_card` | `self.playing_card` index, or null |
 | `costs` | `{base_cost, extra_cost, cost, sell_cost}` |
-| `stickers` | `{eternal, perishable, perish_tally (null unless perishable), rental, pinned}` |
+| `stickers` | `{eternal, perishable, perish_tally (null unless perishable), rental, pinned}`. Lua keeps the first four in `self.ability` |
 
 ### `pack`
 

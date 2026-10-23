@@ -1019,26 +1019,26 @@
    "actions": 18,
    "checkpoints": [
     "f7ed655b711e598a",
-    "2bf019cc5cd4223c",
-    "2cf5445a68e7ab20"
+    "21b4933521ec1832",
+    "729868be9caaeeee"
    ],
    "checks": {},
-   "digest": "ee3f4fb4a56d60c9194c62715ca66bdbdbab3ff6acbeded0b7cf9c9698c61820",
+   "digest": "504267de13351bcd3c97b464f6cdbc56bee45639fcfd4c21d2234a6cb19737b8",
    "records": 39
   },
   "deck_b_ghost": {
    "actions": 36,
    "checkpoints": [
     "2f5ef695fea25591",
-    "6f35174624701d73",
-    "54a97f565c2e940f",
-    "a544ccc48c498515",
-    "e5c5de93bc84044a",
-    "b477bdbd109d7546",
-    "23d23af65df1ff96"
+    "3b800bcfd86427e1",
+    "9beecbf4ad603cf9",
+    "ceda942b0050249c",
+    "13c5e25139b24ac9",
+    "896b837092d05eed",
+    "26cdbfe2729492dc"
    ],
    "checks": {},
-   "digest": "bdd7e9d8314f4f0b1dae0c4b1bd4414d089cf56da732af3284a1cd1fdfc1c3da",
+   "digest": "aeb0ec72c68ee737d5efbe9e1ab27428d0c30fc82a5b343773ac75874203f468",
    "records": 75
   },
   "deck_b_green": {
@@ -2449,14 +2449,14 @@
     "8cb963bb308add22",
     "037811077e4a380c",
     "429c94fec24224ef",
-    "b4e4761cd2732268",
-    "8817303c31a4c59a",
-    "ae052ca5f9b2efee",
-    "a0983ff55494d5d5",
-    "6e5979cb7b475698"
+    "2fbc8d0dcf3167a3",
+    "87cfa7de046dd86b",
+    "d6352af2456a9212",
+    "d954489d7e19df5d",
+    "5539b649522b7346"
    ],
    "checks": {},
-   "digest": "2237efedcbd346a6ec78db84dfe59a111ab9ce14571e10bc175c6f4441375535",
+   "digest": "fa2c782d845697f749e8d93bd2faefa7d553d2fba5a5ad6443eba3151b3de8d4",
    "records": 117
   }
  }

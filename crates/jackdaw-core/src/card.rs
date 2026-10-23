@@ -195,8 +195,9 @@ pub struct Base {
     pub value: Rank,
     /// The suit nominal of the card's first suit; kept through suit changes.
     pub suit_nominal_original: f64,
-    /// The rank the card was created with; kept through rank changes.
-    pub original_value: Rank,
+    /// The rank the card was created with. Only the initial `set_base` records it, so a later
+    /// suit or rank change leaves it unset (card.lua:136). Nothing reads it.
+    pub original_value: Option<Rank>,
     pub times_played: f64,
 }
 
@@ -225,11 +226,12 @@ impl Base {
 }
 
 /// `Card:set_base(card, initial)` (card.lua:97-145) for a front, given the current base (if any).
+/// The base is rebuilt from scratch (`times_played` restarts at 0); only the suit nominal of the
+/// first suit carries over.
 pub fn set_base(current: Option<&Base>, front: CardId, initial: bool) -> Base {
     let proto = front.get();
     let suit = Suit::from_name(proto.suit).expect("front suit");
     let value = Rank::from_name(proto.value).expect("front value");
-    // The original suit nominal survives later set_base calls (suit changes).
     let suit_nominal_original = current
         .map(|b| b.suit_nominal_original)
         .unwrap_or_else(|| suit.nominal_original());
@@ -238,11 +240,7 @@ pub fn set_base(current: Option<&Base>, front: CardId, initial: bool) -> Base {
         suit,
         value,
         suit_nominal_original,
-        original_value: if initial {
-            value
-        } else {
-            current.map_or(value, |b| b.original_value)
-        },
+        original_value: initial.then_some(value),
         times_played: 0.0,
     }
 }
@@ -371,8 +369,9 @@ impl Seal {
 // Ability
 // ---------------------------------------------------------------------------
 
-/// A string in `ability.extra`: static data, or text built at runtime.
-#[derive(Clone, Debug, PartialEq)]
+/// A string in `ability.extra`: static data, or text built at runtime. Compares by content, as
+/// Lua strings do.
+#[derive(Clone, Debug)]
 pub enum LuaStr {
     Static(&'static str),
     Owned(Box<str>),
@@ -384,6 +383,12 @@ impl LuaStr {
             LuaStr::Static(s) => s,
             LuaStr::Owned(s) => s,
         }
+    }
+}
+
+impl PartialEq for LuaStr {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_str() == other.as_str()
     }
 }
 
@@ -971,6 +976,8 @@ mod tests {
     #[test]
     fn suit_change_keeps_the_original_nominal() {
         let mut c = playing("H_7", 1);
+        assert_eq!(c.base.unwrap().original_value, Some(Rank::Seven));
+        c.base.as_mut().unwrap().times_played = 3.0;
         let new = set_base(
             c.base.as_ref(),
             Base::front_for(Suit::Spades, Rank::Seven),
@@ -979,7 +986,9 @@ mod tests {
         c.base = Some(new);
         assert_eq!(new.suit, Suit::Spades);
         assert_eq!(new.suit_nominal_original, Suit::Hearts.nominal_original());
-        assert_eq!(new.original_value, Rank::Seven);
+        // Only the initial set_base records original_value; the rebuilt base starts fresh.
+        assert_eq!(new.original_value, None);
+        assert_eq!(new.times_played, 0.0);
     }
 
     #[test]

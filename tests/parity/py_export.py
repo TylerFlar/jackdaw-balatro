@@ -156,8 +156,15 @@ def _truthy_keys(d: Any) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def export_ability(ability: dict[str, Any]) -> dict[str, Any]:
-    return {k: plain(v) for k, v in ability.items() if k not in DERIVED_ABILITY_KEYS}
+def export_ability(c: Any) -> dict[str, Any]:
+    out = {k: plain(v) for k, v in c.ability.items() if k not in DERIVED_ABILITY_KEYS}
+    # Once a perishable's countdown runs, Python mirrors the tally into
+    # ability.perish_tally (round_lifecycle._set_perish_tally).  The snapshot
+    # carries the tally once, under stickers; a mirror that disagrees stays
+    # visible.
+    if c.perishable and "perish_tally" in out and out["perish_tally"] == c.perish_tally:
+        del out["perish_tally"]
+    return out
 
 
 def export_card(c: Any) -> dict[str, Any]:
@@ -179,7 +186,7 @@ def export_card(c: Any) -> dict[str, Any]:
             "original_value": plain(base.original_value),
             "times_played": base.times_played,
         },
-        "ability": export_ability(c.ability),
+        "ability": export_ability(c),
         "edition": plain(c.edition) if c.edition else None,
         "seal": c.seal,
         "debuff": bool(c.debuff),
