@@ -312,6 +312,8 @@ model.learn(total_timesteps=500_000)
 model.save("balatro_ppo")
 ```
 
+The repository's [`examples/`](https://github.com/TylerFlar/jackdaw-balatro/tree/main/examples) trains this setup for real: 32 envs in SB3's `DummyVecEnv`, TensorBoard logs, checkpoints, and an evaluation against a random agent and the hand-written `smart_agent` on the same seeds. In a clone, `uv sync --group train` installs what it needs.
+
 ### Rewards
 
 The reward is pluggable: pass any callable `reward_fn(transition) -> float`. Three examples ship in `jackdaw.env.rewards`, from sparse to dense:
@@ -374,6 +376,8 @@ A reward function that keeps per-episode state can define a `reset()` method, wh
 | `loss` | The episode ends short of a win | -0.2 |
 
 `ante` is the ante of the blind just beaten. Override any weight by keyword: `ShapedReward(win=1.0, step_cost=0.0)`. The penalties (`step_cost`, `shop_step_cost`, `loss`) are positive magnitudes that get subtracted, so write `loss=0.5`, not `-0.5`. The step cost discourages stalling in shops and menus, while the blind-beaten and score-progress signals give credit for partial progress even when the agent fails to clear a blind.
+
+Mind the discount factor: a policy that puts off the end of a lost run gains `loss * (1 - gamma)` per step from the discounted `loss`, and free moves (sorting or swapping cards) can put it off forever. With the default weights that gain matches `step_cost` at `gamma = 0.995` and exceeds it below, so stalling costs nothing or pays. A higher `gamma`, a smaller `loss` or a larger `step_cost` removes the incentive; the [training demo](https://github.com/TylerFlar/jackdaw-balatro/tree/main/examples) uses `loss=0`.
 
 By default, beating ante 8 ends the episode (`end_on_win=True`), so `run_won` and `done` arrive on the same step. With `end_on_win=False`, play continues into endless mode: `run_won` still fires once on the winning step, and a run that dies later in endless mode still counts as won.
 

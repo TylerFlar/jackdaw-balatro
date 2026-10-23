@@ -78,6 +78,9 @@ class RunMemory:
     copies: set[int] = field(default_factory=set)
     #: What each cash_out paid in the shadow, in order (BB-CASHOUT-RACE).
     payouts: list[float] = field(default_factory=list)
+    #: The last request beat a boss: what the boss had done, for checks at the win screen
+    #: (BB-BOSS-DEFEAT). None after any other request.
+    defeat: dict[str, Any] | None = None
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -85,6 +88,7 @@ class RunMemory:
             "certificate_antes": sorted(self.certificate_antes),
             "copies": sorted(self.copies),
             "payouts": list(self.payouts),
+            "defeat": self.defeat,
         }
 
     @classmethod
@@ -94,6 +98,7 @@ class RunMemory:
             set(data.get("certificate_antes", ())),
             set(data.get("copies", ())),
             list(data.get("payouts", ())),
+            data.get("defeat"),
         )
 
 
@@ -661,6 +666,41 @@ def _boss_beaten(ctx: StepContext) -> bool:
     )
 
 
+def _defeat_record(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """What a boss had done before it was beaten: its key, its debuffed cards (sort id ->
+    center) and the jokers it had turned face down."""
+    areas = snapshot["areas"]
+    return {
+        "boss": (snapshot.get("blind") or {}).get("key"),
+        "disabled": bool((snapshot.get("blind") or {}).get("disabled")),
+        "debuffed": {
+            str(c["sort_id"]): c["center"]
+            for cards in areas.values()
+            for c in cards
+            if c.get("debuff")
+        },
+        "face_down": [c["sort_id"] for c in areas["jokers"] if c["facing"] == "back"],
+    }
+
+
+def _defeat_observe(ctx: StepContext) -> None:
+    ctx.memory.defeat = _defeat_record(ctx.pre_snapshot) if _boss_beaten(ctx) else None
+
+
+def _boss_defeat_trigger(ctx: StepContext) -> bool:
+    """The play that beat a boss; or a gamestate check right after it once the run is won:
+    win_game pauses the game at the win screen (state_events.lua, `G.SETTINGS.paused`) with
+    the defeat's events still queued, so the live game shows the boss's work until the
+    player goes on in endless mode."""
+    if _boss_beaten(ctx):
+        return True
+    return (
+        ctx.method == "gamestate"
+        and ctx.memory.defeat is not None
+        and bool((ctx.post_view or {}).get("won"))
+    )
+
+
 #: The view fields a joker's passive changes when Card:add_to_deck gives it back
 #: (card.lua:586-604), by the jokers that have one.
 _PASSIVES: dict[str, frozenset[str]] = {
@@ -679,8 +719,11 @@ def _boss_defeat_accepts(diff: FieldDiff, ctx: StepContext) -> bool:
     play, in any area (the view leaves out the discard pile), or a joker it had turned
     face down (Amber Acorn); The Manacle's lost hand size; under Crimson Heart, the
     passive its debuffed joker hasn't got back."""
-    areas = ctx.pre_snapshot["areas"].values()
-    debuffed = {c["sort_id"]: c["center"] for cards in areas for c in cards if c.get("debuff")}
+    record = ctx.memory.defeat if ctx.method == "gamestate" else _defeat_record(ctx.pre_snapshot)
+    if record is None:
+        return False
+    debuffed = {int(k): v for k, v in record["debuffed"].items()}
+    active = None if record["disabled"] else record["boss"]
     match = _CARD_STATE.fullmatch(diff.path)
     if match is not None:
         cards = _cards(ctx.post_view, match.group(1))
@@ -689,12 +732,10 @@ def _boss_defeat_accepts(diff: FieldDiff, ctx: StepContext) -> bool:
             return False
         if match.group(3) == "debuff":
             return cards[i].get("id") in debuffed
-        jokers = ctx.pre_snapshot["areas"]["jokers"]
-        face_down = {c["sort_id"] for c in jokers if c["facing"] == "back"}
-        return match.group(1) == "jokers" and cards[i].get("id") in face_down
-    if diff.path == "hand.limit" and _boss_active(ctx.pre_snapshot, "bl_manacle"):
+        return match.group(1) == "jokers" and cards[i].get("id") in set(record["face_down"])
+    if diff.path == "hand.limit" and active == "bl_manacle":
         return diff.sim == diff.live + 1
-    if not _boss_active(ctx.pre_snapshot, "bl_final_heart"):
+    if active != "bl_final_heart":
         return False
     keys = _PASSIVES.get(diff.path, frozenset())
     return any(center in keys for center in debuffed.values())
@@ -1014,14 +1055,16 @@ CATALOG: tuple[Deviation, ...] = (
             "jokers.cards[*].state.hidden",
             *_PASSIVES,
         ),
-        trigger=_boss_beaten,
+        trigger=_boss_defeat_trigger,
         accepts=_boss_defeat_accepts,
+        observe=_defeat_observe,
         note="play can answer before evaluate_round's Blind:defeat runs (from a run's second "
         "round, see BB-CASHOUT-RACE): The Manacle's hand size and Amber Acorn's face-down "
         "jokers are still there. Its set_blind(nil), which lifts the debuffs (and gives "
         "Crimson Heart's joker its passive back), runs in a non-blockable event 0.95 x 1.3 s "
         "after it (blind.lua:296-343). The next answer has them: only what the boss did is "
-        "dropped.",
+        "dropped. When the boss was the run's last, win_game pauses the game at the win "
+        "screen before then: a gamestate check there is covered too.",
     ),
     Deviation(
         "BB-CASHOUT-RACE",

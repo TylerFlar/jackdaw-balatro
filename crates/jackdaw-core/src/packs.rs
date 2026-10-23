@@ -83,7 +83,7 @@ impl Game {
         };
         let kind = booster.center().kind.expect("a booster kind");
         let size = booster.ability.extra.num().expect("a booster's size");
-        let ante = crate::lua::tostring_number(self.gs.round_resets.ante);
+        let ante = self.gs.round_resets.ante;
         let area = AreaId::PackCards;
         let mut cards = Vec::new();
         let mut i = 1.0;
@@ -114,18 +114,27 @@ impl Game {
                     self.create_card(CardSpec::new(PoolType::Spectral, area, "spe").soulable())
                 }
                 "Standard" => {
-                    let ty = if self.gs.rng.random(&format!("stdset{ante}")) > 0.6 {
+                    let ty = if self.gs.rng.random(&crate::rng::Key::new("stdset").n(ante)) > 0.6 {
                         PoolType::Enhanced
                     } else {
                         PoolType::Base
                     };
                     let mut card = self.create_card(CardSpec::new(ty, area, "sta").soulable());
                     let cost = self.cost_context(area);
-                    let edition =
-                        self.poll_edition(&format!("standard_edition{ante}"), 2.0, true, false);
+                    let edition = self.poll_edition(
+                        &crate::rng::Key::new("standard_edition").n(ante),
+                        2.0,
+                        true,
+                        false,
+                    );
                     card.set_edition(edition, &cost);
-                    if self.gs.rng.random(&format!("stdseal{ante}")) > 1.0 - 0.02 * 10.0 {
-                        let t = self.gs.rng.random(&format!("stdsealtype{ante}"));
+                    if self.gs.rng.random(&crate::rng::Key::new("stdseal").n(ante))
+                        > 1.0 - 0.02 * 10.0
+                    {
+                        let t = self
+                            .gs
+                            .rng
+                            .random(&crate::rng::Key::new("stdsealtype").n(ante));
                         let seal = if t > 0.75 {
                             Seal::Red
                         } else if t > 0.5 {

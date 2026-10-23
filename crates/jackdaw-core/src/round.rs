@@ -237,10 +237,7 @@ impl Game {
 
     /// `pseudoseed(key .. ante)`.
     fn ante_seed(&mut self, key: &str) -> f64 {
-        let k = format!(
-            "{key}{}",
-            crate::lua::tostring_number(self.gs.round_resets.ante)
-        );
+        let k = crate::rng::Key::new(key).n(self.gs.round_resets.ante);
         self.gs.rng.seed(&k)
     }
 
