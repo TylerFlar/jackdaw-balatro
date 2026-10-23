@@ -76,8 +76,8 @@ oracle with its regression test; Rust still pending), `fixed` (both engines, tes
 |---|---|---|---|---|---|---|---|
 | B01 | env | The four dead observation features (`four_fingers`, `shortcut`, `smeared`, `splash`); `obs_version=2` fixes them. | — |  |  |  | open |
 | B02 | env | Gym observations drop rows beyond the max counts, but the action table still indexes them. | — |  |  |  | open |
-| B03 | bridge | `SimBackend`: `set shop` crashes. | — |  |  |  | open |
-| B04 | bridge | `SimBackend`: `add` double-counts `d_size`. | — |  |  |  | open |
+| B03 | bridge | `SimBackend`: `set shop` crashes. | — | SimBackend._restock_shop: SHOP only (else NOT_ALLOWED), frees the old shop cards' keys, clears used_packs and reruns the cash-out restock (game._populate_shop), as set.lua:170-189 does |  | tests/engine/audit/test_bridge.py::test_set_shop_restocks_the_shop | python-fixed |
+| B04 | bridge | `SimBackend`: `add` double-counts `d_size`. | — | SimBackend._handle_add no longer adds d_size to discards_left again (add_to_deck already does) |  | tests/engine/audit/test_bridge.py::test_add_counts_a_jokers_discards_once | python-fixed |
 | B05 | bridge | `SimBackend`: a `rearrange` permutation applies only its first adjacent swap. | — |  |  |  | open |
 | B06 | bridge | `SimBackend`: `add` can't add vouchers or packs. | — |  |  |  | open |
 | B07 | bridge | `SimBackend`: the BalatroBot view mismatches listed in the plan's view section (hand `example` lists, `highlighted_limit`, card limits, labels, playing-card costs, `modifier.enhancement`, omitted false fields and `[]` for empty tables, `used_vouchers`, blind `score`, the MENU view, leftover shop areas). | — |  |  |  | open |

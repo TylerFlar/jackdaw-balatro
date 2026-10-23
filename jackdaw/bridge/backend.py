@@ -266,19 +266,12 @@ class SimBackend:
                     card.set_edition(polled)
             card.set_cost()
             self._gs["jokers"].append(card)
-            # Apply passive effects (hand_size, discards, joker_slots, etc.)
+            # Apply passive effects (hand_size, discards, joker_slots, etc.).
+            # add_to_deck also gives the current round its extra discards
+            # (ease_discard, card.lua:589-592); hand count changes (h_plays)
+            # take effect on future rounds via round_resets.
             old_hand_size = self._gs.get("hand_size", 8)
             card.add_to_deck(self._gs)
-            # Also update current round counters for mid-round adds.
-            # Only discards are adjusted immediately — extra discards are
-            # usable in the current round.  Hand count changes (h_plays)
-            # take effect on future rounds via round_resets (already set
-            # by add_to_deck), matching balatrobot behaviour.
-            cr = self._gs.get("current_round")
-            if cr is not None:
-                d_size = card.ability.get("d_size", 0)
-                if d_size > 0:
-                    cr["discards_left"] = cr.get("discards_left", 0) + d_size
             # If hand_size increased mid-round, draw cards to fill the new
             # size — matches balatrobot which immediately fills on add.
             if self._gs.get("hand_size", 8) > old_hand_size and phase == GamePhase.SELECTING_HAND:
@@ -337,11 +330,30 @@ class SimBackend:
             self._gs["chips"] = params["chips"]
 
         if "shop" in params and params["shop"]:
-            from jackdaw.engine.shop import populate_shop
-
-            populate_shop(self._gs)
+            self._restock_shop()
 
         return self._serialize()
+
+    def _restock_shop(self) -> None:
+        """BalatroBot ``set`` with ``shop=true`` (endpoints/set.lua:170-189).
+
+        Only in SHOP.  It removes G.shop — the shop cards dissolve, freeing
+        their keys (Card:remove, card.lua:4741-4748) — nils
+        ``current_round.used_packs`` so the packs are rolled again, and
+        reruns ``G:update_shop()`` (game.lua:3072-3181): new jokers, the
+        same voucher (``current_round.voucher``), new packs and the shop
+        tag hooks — the cash-out restock.
+        """
+        gs = self._gs
+        assert gs is not None
+        if gs.get("phase") != GamePhase.SHOP:
+            raise RPCError(NOT_ALLOWED, "Can re-stock shop only in SHOP state")
+        from jackdaw.engine.game import _populate_shop, _release_used_key
+
+        for card in gs.get("shop_cards", []) + gs.get("shop_boosters", []):
+            _release_used_key(gs, card)
+        gs.setdefault("current_round", {})["used_packs"] = []
+        _populate_shop(gs)
 
     def _require_gamestate(self) -> dict[str, Any]:
         if self._gs is None:
