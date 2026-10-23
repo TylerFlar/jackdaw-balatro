@@ -52,7 +52,7 @@ test landed) or `wontfix` (with the reason in the summary).
 | G32 | consumables | A debuffed Purple Seal makes no Tarot. | card.lua:2243 |  |  |  | open |
 | G33 | consumables | Sticker eligibility: `eternal_compat` / `perishable_compat`; Eternal and Perishable are mutually exclusive; the Perishable roll is capped at 0.7. | card.lua:506-519; common_events.lua:2141 |  |  |  | open |
 | G34 | scoring | The `glass` roll happens even after a joker destroyed the card, and `destroying_card` runs for debuffed cards too. | state_events.lua:950 |  |  |  | open |
-| G35 | scoring | A hand becomes `visible` when played, not when leveled. | state_events.lua:578; common_events.lua:464 |  |  |  | open |
+| G35 | scoring | A hand becomes `visible` when played, not when leveled. | state_events.lua:578; common_events.lua:464 | `hand_levels.py`: `HandLevels.level_up` no longer reveals a hand; `record_play` (evaluate_play's counters) sets `visible`. Secret hands leveled by Planet X/Ceres/Eris or Black Hole stay out of the To Do List, Telescope, Obelisk and Orbital pools until played |  | `tests/engine/audit/test_hand_mechanics.py::test_g35_leveling_a_secret_hand_keeps_it_hidden`, `::test_g35_black_hole_keeps_secret_hands_hidden`, `::test_g35_playing_a_secret_hand_reveals_it` | python-fixed |
 | G36 | scoring | The round must end when hand, deck and play are all empty, and the game must end when hand size ≤ 0 with an empty hand; Python soft-locks instead. | game.lua:3056; state_events.lua:356 |  |  |  | open |
 | G37 | scoring | Growing the hand size mid-round draws immediately. | cardarea.lua:100 |  |  |  | open |
 | G38 | scoring | Cards added to the deck go to the bottom. | cardarea.lua:33 |  |  |  | open |

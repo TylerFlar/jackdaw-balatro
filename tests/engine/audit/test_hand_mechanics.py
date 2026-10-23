@@ -117,3 +117,52 @@ def test_g50_checkered_deck_keeps_original_suit_tiebreak():
     assert converted.base.original_value is None
     assert native.base.original_value is Rank.ACE
     assert converted.get_nominal() < native.get_nominal()
+
+
+# ---------------------------------------------------------------------------
+# G35 — a hand becomes visible when played, never by leveling
+# ---------------------------------------------------------------------------
+
+
+def test_g35_leveling_a_secret_hand_keeps_it_hidden():
+    """level_up_hand (common_events.lua:464-468) only moves level, mult and
+    chips; it never touches ``visible``.  A Planet X used before any Five of
+    a Kind is played levels the hand but leaves it out of the visible pools
+    (To Do List card.lua:314, Telescope card.lua:1740, Obelisk card.lua:3547,
+    Orbital Tag UI_definitions.lua:1512)."""
+    gs = new_run("AUDIT_G35")
+    step(gs, SelectBlind())
+    give_consumable(gs, "c_planet_x")
+
+    step(gs, UseConsumable(card_index=0))
+
+    five = gs["hand_levels"].get_state("Five of a Kind")
+    assert five.level == 2
+    assert not five.visible
+
+
+def test_g35_black_hole_keeps_secret_hands_hidden():
+    """Black Hole levels every hand through level_up_hand (card.lua:1179-1181)."""
+    gs = new_run("AUDIT_G35B")
+    step(gs, SelectBlind())
+    give_consumable(gs, "c_black_hole")
+
+    step(gs, UseConsumable(card_index=0))
+
+    for secret in ("Flush Five", "Flush House", "Five of a Kind"):
+        state = gs["hand_levels"].get_state(secret)
+        assert state.level == 2
+        assert not state.visible
+
+
+def test_g35_playing_a_secret_hand_reveals_it():
+    """evaluate_play sets ``G.GAME.hands[text].visible = true`` for the hand
+    it just counted (state_events.lua:574-578)."""
+    gs = new_run("AUDIT_G35P")
+    step(gs, SelectBlind())
+    gs["hand"][:5] = [playing_card("Spades", "Ace") for _ in range(5)]
+
+    step(gs, PlayHand(card_indices=(0, 1, 2, 3, 4)))
+
+    assert gs["last_score_result"].hand_type == "Flush Five"
+    assert gs["hand_levels"].get_state("Flush Five").visible

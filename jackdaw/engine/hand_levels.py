@@ -78,16 +78,21 @@ class HandLevels:
         h.level = max(0, h.level + amount)
         h.chips = max(0, base.s_chips + base.l_chips * (h.level - 1))
         h.mult = max(1, base.s_mult + base.l_mult * (h.level - 1))
-
-        # Make visible once leveled (secret hands become visible)
-        if h.level > 1:
-            h.visible = True
+        # Leveling never reveals a hand: level_up_hand only sets level, mult
+        # and chips (common_events.lua:464-468).  Playing it does, below.
 
     def record_play(self, hand_type: HandType | str) -> None:
-        """Record that *hand_type* was played once."""
+        """Record that *hand_type* was played once.
+
+        evaluate_play bumps both play counters and reveals the hand
+        (``G.GAME.hands[text].visible = true``, state_events.lua:574-578) —
+        a secret hand becomes visible only by being played.
+        """
         ht = HandType(hand_type) if isinstance(hand_type, str) else hand_type
-        self._hands[ht].played += 1
-        self._hands[ht].played_this_round += 1
+        h = self._hands[ht]
+        h.played += 1
+        h.played_this_round += 1
+        h.visible = True
 
     def reset_round_counts(self) -> None:
         """Reset ``played_this_round`` for all types (called at round start)."""
