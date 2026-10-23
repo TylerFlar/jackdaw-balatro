@@ -13,7 +13,7 @@ use crate::area::AreaId;
 use crate::card::Seal;
 use crate::event::Event;
 use crate::game::{Game, LuaState};
-use crate::hand_eval::PAIRS_ORDER;
+use crate::hand_eval::HandType;
 use crate::joker::{Ctx, Kind};
 use crate::pools::{CardSpec, PoolType};
 use crate::state::{PackState, Phase};
@@ -150,7 +150,8 @@ impl Game {
     fn telescope_planet(&self) -> Option<CenterId> {
         let mut best = None;
         let mut tally = 0.0;
-        for h in PAIRS_ORDER.into_iter().rev() {
+        // `G.handlist` is the display order (`HandType::ALL`), not `pairs`.
+        for h in HandType::ALL {
             let hs = self.gs.hand(h);
             if hs.visible && hs.played > tally {
                 best = Some(h);

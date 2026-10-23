@@ -175,23 +175,25 @@ HAND_BASE: dict[HandType, HandBaseData] = {
 # (card.lua:313-322, 2977-2984), the Orbital Tag's pool
 # (UI_definitions.lua:1511-1513) and the tie-break of
 # ``current_round.most_played_poker_hand`` that The Ox reads
-# (state_events.lua:129-138).  jackdaw freezes ONE order for all of them —
-# the order the engine has used for To Do List and the Orbital Tag
-# (``tags._ORBITAL_HANDS``) — to be confirmed against live captures.
+# (state_events.lua:129-138).  The order below is what the game's own
+# LuaJIT 2.0.5 (``lua51.dll``) gives on ``init_game_object``'s ``hands``
+# constructor (G182, ``scripts/luajit205_probe.py hands-order``); LuaJIT 2.0
+# hashes strings without a seed, and Steamodded only rewrites the existing
+# keys, so a new run has this layout live too.  To confirm with a live capture.
 
 HANDS_PAIRS_ORDER: tuple[HandType, ...] = (
-    HandType.HIGH_CARD,
-    HandType.PAIR,
-    HandType.TWO_PAIR,
-    HandType.THREE_OF_A_KIND,
-    HandType.STRAIGHT,
-    HandType.FLUSH,
-    HandType.FULL_HOUSE,
-    HandType.FOUR_OF_A_KIND,
-    HandType.STRAIGHT_FLUSH,
-    HandType.FIVE_OF_A_KIND,
     HandType.FLUSH_HOUSE,
+    HandType.FULL_HOUSE,
+    HandType.FLUSH,
+    HandType.PAIR,
+    HandType.HIGH_CARD,
+    HandType.STRAIGHT_FLUSH,
+    HandType.STRAIGHT,
+    HandType.TWO_PAIR,
     HandType.FLUSH_FIVE,
+    HandType.FIVE_OF_A_KIND,
+    HandType.THREE_OF_A_KIND,
+    HandType.FOUR_OF_A_KIND,
 )
 
 # ---------------------------------------------------------------------------

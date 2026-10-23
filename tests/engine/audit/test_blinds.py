@@ -288,8 +288,9 @@ def test_g09_most_played_hand_is_set_when_a_boss_is_beaten():
     win_round(gs)  # one High Card: Pair 1, High Card 1 — a tie
 
     # Ties go to the hand pairs(G.GAME.hands) visits last (end_round never
-    # updates its _order, so ``_order > v.order`` is always true).
-    assert gs["current_round"]["most_played_poker_hand"] == "Pair"
+    # updates its _order, so ``_order > v.order`` is always true); High Card
+    # comes after Pair in that order (G182).
+    assert gs["current_round"]["most_played_poker_hand"] == "High Card"
 
 
 def test_g09_most_played_tie_break_follows_the_pairs_order():
@@ -305,7 +306,7 @@ def test_g09_most_played_tie_break_follows_the_pairs_order():
     assert most_played_poker_hand(levels) == HANDS_PAIRS_ORDER[-1].value  # all 0: the last
     for hand in ("Flush", "Pair", "High Card"):
         levels.record_play(hand)
-    assert most_played_poker_hand(levels) == "Flush"  # Flush comes last of the three
+    assert most_played_poker_hand(levels) == "High Card"  # last of the three (G182)
     levels.record_play("Pair")
     assert most_played_poker_hand(levels) == "Pair"
 

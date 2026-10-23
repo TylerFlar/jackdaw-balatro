@@ -69,7 +69,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from jackdaw.engine.data.hands import HandType
+from jackdaw.engine.data.hands import HANDS_PAIRS_ORDER, HandType
 from jackdaw.engine.data.prototypes import TAGS
 
 if TYPE_CHECKING:
@@ -126,26 +126,11 @@ class TagResult:
     """Make all shop items free (coupon tag)."""
 
 
-# The frozen ``pairs(G.GAME.hands)`` iteration order.  The source cannot
-# tell it (it is LuaJIT hash order), so it is a shared constant: the Orbital
-# Tag (UI_definitions.lua:1510-1515) and To Do List (card.lua:313-320) both
-# collect the visible hands with ``pairs`` into an array, and
-# pseudorandom_element indexes that array as built.  To Do List's roll in
-# this order was confirmed live (seed LSVZ27Z7).
-_ORBITAL_HANDS: list[HandType] = [
-    HandType.HIGH_CARD,
-    HandType.PAIR,
-    HandType.TWO_PAIR,
-    HandType.THREE_OF_A_KIND,
-    HandType.STRAIGHT,
-    HandType.FLUSH,
-    HandType.FULL_HOUSE,
-    HandType.FOUR_OF_A_KIND,
-    HandType.STRAIGHT_FLUSH,
-    HandType.FIVE_OF_A_KIND,
-    HandType.FLUSH_HOUSE,
-    HandType.FLUSH_FIVE,
-]
+# The ``pairs(G.GAME.hands)`` iteration order (HANDS_PAIRS_ORDER, G182): the
+# Orbital Tag (UI_definitions.lua:1510-1515) and To Do List
+# (card.lua:313-320) both collect the visible hands with ``pairs`` into an
+# array, and pseudorandom_element indexes that array as built.
+_ORBITAL_HANDS: list[HandType] = list(HANDS_PAIRS_ORDER)
 
 
 class Tag:

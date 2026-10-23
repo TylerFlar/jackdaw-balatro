@@ -59,23 +59,25 @@ impl HandType {
     }
 }
 
-/// The order `pairs(G.GAME.hands)` visits the hands in. The game's hash table order can't be
-/// read from the source; this is the documented assumption the Python engine shares
-/// (`jackdaw.engine.data.hands.HANDS_PAIRS_ORDER`), to confirm with live captures. The most
-/// played hand's tie-break, To Do List and the Orbital Tag depend on it.
+/// The order `pairs(G.GAME.hands)` visits the hands in: the game's own LuaJIT 2.0.5 on
+/// `init_game_object`'s `hands` constructor (G182, `scripts/luajit205_probe.py hands-order`;
+/// LuaJIT 2.0 hashes strings without a seed, and Steamodded only rewrites the existing keys).
+/// The Python engine shares it (`jackdaw.engine.data.hands.HANDS_PAIRS_ORDER`); to confirm
+/// with a live capture. The most played hand's tie-break, To Do List and the Orbital Tag
+/// depend on it.
 pub const PAIRS_ORDER: [HandType; 12] = [
-    HandType::HighCard,
-    HandType::Pair,
-    HandType::TwoPair,
-    HandType::ThreeOfAKind,
-    HandType::Straight,
-    HandType::Flush,
-    HandType::FullHouse,
-    HandType::FourOfAKind,
-    HandType::StraightFlush,
-    HandType::FiveOfAKind,
     HandType::FlushHouse,
+    HandType::FullHouse,
+    HandType::Flush,
+    HandType::Pair,
+    HandType::HighCard,
+    HandType::StraightFlush,
+    HandType::Straight,
+    HandType::TwoPair,
     HandType::FlushFive,
+    HandType::FiveOfAKind,
+    HandType::ThreeOfAKind,
+    HandType::FourOfAKind,
 ];
 
 /// Lua's flush-suit order in `get_flush`.
