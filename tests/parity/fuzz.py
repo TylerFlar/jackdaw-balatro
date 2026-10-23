@@ -42,6 +42,7 @@ from tests.golden.trajectories import (
     encode_action,
 )
 from tests.parity import canon
+from tests.parity.harness import ROOT
 from tests.parity.pyengine import PyEngine
 from tests.parity.rust_step import plain
 
@@ -57,6 +58,17 @@ _WEIGHTS = {
     "Reroll": 0.5,
 }
 _EDITIONS = ("foil", "holo", "polychrome", "negative")
+_SEALS = ("Red", "Blue", "Gold", "Purple")
+
+
+def _centers(*sets: str) -> list[str]:
+    data = json.loads((ROOT / "jackdaw" / "engine" / "data" / "centers.json").read_text("utf-8"))
+    return sorted(k for k, v in data.items() if v.get("set") in sets)
+
+
+_CONSUMABLES = _centers("Tarot", "Planet", "Spectral")
+_ENHANCEMENTS = _centers("Enhanced")
+_FRONTS = [f"{s}_{r}" for s in "HDCS" for r in "23456789TJQKA"]
 
 
 @dataclass
@@ -110,6 +122,21 @@ def random_case(index: int, rng: random.Random, max_steps: int = 400) -> Case:
             if r.random() < 0.2:
                 op["edition"] = r.choice(_EDITIONS)
             setup.append(op)
+        # Consumables and modified playing cards, which shops alone rarely combine with a
+        # given board. Added cards join the hand (BalatroBot add in SELECTING_HAND).
+        if r.random() < 0.5:
+            for key in r.sample(_CONSUMABLES, r.randint(1, 2)):
+                setup.append({"op": "add", "key": key})
+        if r.random() < 0.5:
+            for _ in range(r.randint(1, 4)):
+                op = {"op": "add", "key": r.choice(_FRONTS)}
+                if r.random() < 0.7:
+                    op["enhancement"] = r.choice(_ENHANCEMENTS)
+                if r.random() < 0.4:
+                    op["seal"] = r.choice(_SEALS)
+                if r.random() < 0.3:
+                    op["edition"] = r.choice(_EDITIONS[:3])
+                setup.append(op)
         setup.append({"op": "set", "dollars": r.choice([4, 15, 40, 100])})
         # Random play rarely survives ante 4: start some boards later, so late
         # antes (blind sizes, showdown bosses, pools) get played too.

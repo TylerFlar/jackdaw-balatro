@@ -2585,6 +2585,12 @@ def _round_won(gs: dict[str, Any]) -> None:
     # nothing (cardarea.lua:100).
     gs["phase"] = GamePhase.ROUND_EVAL
 
+    # end_round adds the round's discards left to unused_discards
+    # (state_events.lua:124) before the ease_discard events its joker pass
+    # queued have run: a perishing Drunkard or Merry Andy's remove_from_deck
+    # takes its discard away in an event (card.lua:686-693, G262).
+    discards_left = cr.get("discards_left", 0)
+
     # ------------------------------------------------------------------
     # 1-2. Joker end_of_round effects + perishable/rental — shared with
     # the LOSS path (vanilla's end_round fires these for every outcome,
@@ -2653,7 +2659,7 @@ def _round_won(gs: dict[str, Any]) -> None:
     #    - G.GAME.unused_discards += current_round.discards_left  (state_events.lua:124)
     #    - G.GAME.hands_played += 1 per hand  (state_events.lua:523, tracked at line 522)
     # ------------------------------------------------------------------
-    gs["unused_discards"] = gs.get("unused_discards", 0) + cr.get("discards_left", 0)
+    gs["unused_discards"] = gs.get("unused_discards", 0) + discards_left
 
     # 6b. After a boss, end_round re-tallies the most played hand — the one
     #     The Ox reads until the next boss falls (state_events.lua:129-138).
