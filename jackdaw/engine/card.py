@@ -408,13 +408,28 @@ class Card:
         """Set the card's seal."""
         self.seal = seal
 
-    def set_eternal(self, eternal: bool) -> None:
-        self.eternal = eternal
+    def _center_flag(self, flag: str) -> bool:
+        try:
+            return bool(_resolve_center(self.center_key).get(flag))
+        except KeyError:
+            return False
 
-    def set_perishable(self, perishable: bool) -> None:
-        self.perishable = perishable
-        if perishable:
-            self.perish_tally = 5
+    def set_eternal(self, eternal: bool) -> None:
+        """Card:set_eternal (card.lua:506-511): only an ``eternal_compat``
+        center that is not Perishable takes the sticker."""
+        self.eternal = False
+        if self._center_flag("eternal_compat") and not self.perishable:
+            self.eternal = bool(eternal)
+
+    def set_perishable(self, perishable: bool = True, *, rounds: int = 5) -> None:
+        """Card:set_perishable (card.lua:513-519): only a ``perishable_compat``
+        center that is not Eternal takes the sticker, with ``perish_tally`` =
+        ``G.GAME.perishable_rounds`` (*rounds*).  Vanilla only ever calls it
+        to add the sticker; ``False`` just clears it here."""
+        self.perishable = False
+        if perishable and self._center_flag("perishable_compat") and not self.eternal:
+            self.perishable = True
+            self.perish_tally = rounds
 
     def set_rental(self, rental: bool) -> None:
         self.rental = rental

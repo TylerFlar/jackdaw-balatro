@@ -211,8 +211,11 @@ class TestAllModifiers:
         card = _playing_card("Hearts", "King", enhancement="m_glass")
         card.set_edition({"polychrome": True})
         card.set_seal("Purple")
-        card.set_eternal(True)
-        card.set_perishable(True)
+        # Every sticker at once, set directly: Card.set_eternal/set_perishable
+        # follow card.lua:506-519 (compatible centers only, mutually exclusive).
+        card.eternal = True
+        card.perishable = True
+        card.perish_tally = 5
         card.set_rental(True)
         card.set_debuff(True)
 

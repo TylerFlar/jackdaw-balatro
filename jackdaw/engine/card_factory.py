@@ -487,16 +487,23 @@ def create_card(
                 "enable_rentals_in_shop", gs.get("enable_rentals_in_shop", False)
             )
 
-            # -- Eternal / Perishable (shared roll) --
+            # -- Eternal / Perishable (shared roll, common_events.lua:2138-2143):
+            # Eternal above 0.7, Perishable in (0.4, 0.7]; the setters skip
+            # incompatible centers (card.lua:506-519).
             ep_roll = rng.random(_EP_KEY[area] + str(ante))
-            if ep_roll > _EP_ETERNAL_THRESHOLD and enable_eternals:
+            if enable_eternals and ep_roll > _EP_ETERNAL_THRESHOLD:
                 card.set_eternal(True)
-            elif ep_roll > _EP_PERISHABLE_THRESHOLD and enable_perishables:
-                card.set_perishable(True)
+            elif (
+                enable_perishables
+                and ep_roll > _EP_PERISHABLE_THRESHOLD
+                and ep_roll <= _EP_ETERNAL_THRESHOLD
+            ):
+                card.set_perishable(True, rounds=gs.get("perishable_rounds", 5))
 
-            # -- Rental (independent roll) --
-            r_roll = rng.random(_RENTAL_KEY[area] + str(ante))
-            if r_roll > _RENTAL_THRESHOLD and enable_rentals:
+            # -- Rental: `enable_rentals_in_shop and pseudorandom(...) > 0.7`
+            # short-circuits, so the stream is only drawn with rentals on
+            # (common_events.lua:2144).
+            if enable_rentals and rng.random(_RENTAL_KEY[area] + str(ante)) > _RENTAL_THRESHOLD:
                 card.set_rental(True)
 
         # ...but the EDITION poll runs for EVERY created Joker —
