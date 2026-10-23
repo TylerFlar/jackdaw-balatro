@@ -10,6 +10,7 @@ Reviewers fill in where each unit lives in Rust and which test covers it.
 - [`ledger/`](ledger/): one table per scope file, e.g. [`ledger/card.lua.md`](ledger/card.lua.md).
 - [`gaps.md`](gaps.md): the gap register. G01–G51 are gameplay gaps found during planning; B01–B14
   are the non-gameplay fixes.
+- [`smods-diffs.md`](smods-diffs.md): where the live game (Steamodded, BalatroBot) differs from vanilla; `smods-diff` rows cite its ids.
 - This README: commands, row kinds, statuses, the review protocol and the generated summary.
 
 ## Commands
