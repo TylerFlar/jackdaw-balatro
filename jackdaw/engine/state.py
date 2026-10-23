@@ -73,12 +73,9 @@ Lifecycle legend for the **set by** column:
                                          Set by init.
     bankrupt_at        int               Maximum debt floor (default 0).
                                          Set by init.  Stake 5+ allows negative.
-    money_per_hand     int               Dollars per hand played (Green Deck).
-                                         Set by back (if applicable).
-    money_per_discard  int               Dollars per discard used (Green Deck).
-                                         Set by back (if applicable).
-    no_interest        bool              Disable interest (Green Deck).
-                                         Set by back (if applicable).
+
+The Green Deck's ``money_per_hand`` / ``money_per_discard`` / ``no_interest``
+live in ``gs["modifiers"]`` (back.lua:269-277), see below.
 
 
 .. rubric:: Card areas
@@ -365,9 +362,10 @@ Run-wide rule flags, set by stakes and challenges.
     enable_perishables_in_shop bool          Perishable jokers appear (stake ≥ 7).
     enable_rentals_in_shop     bool          Rental jokers appear (stake ≥ 8).
     no_extra_hand_money    bool              Unused hands give no bonus (challenge).
-    money_per_hand         int               Override $/hand for unused-hand bonus.
-    money_per_discard      int               Override $/discard for unused-discard bonus.
-    no_interest            bool              Disable interest entirely (challenge).
+    money_per_hand         int               Override $/hand for unused-hand bonus (Green Deck).
+    money_per_discard      int               Override $/discard for unused-discard bonus
+                                             (Green Deck).
+    no_interest            bool              Disable interest entirely (challenge, Green Deck).
     discard_cost           int               Cost per discard action (Golden Needle).
 
 

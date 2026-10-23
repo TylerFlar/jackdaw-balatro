@@ -18,7 +18,7 @@ oracle with its regression test; Rust still pending), `fixed` (both engines, tes
 
 | id | area | summary | lua | python fix | rust | test | status |
 |---|---|---|---|---|---|---|---|
-| G01 | setup | Green Deck economy broken: the values are stored at the top level, but `economy.py` reads `modifiers`. Result: $1/hand, no $/discard, interest still paid. | back.lua:269-277 |  |  |  | open |
+| G01 | setup | Green Deck economy broken: the values are stored at the top level, but `economy.py` reads `modifiers`. Result: $1/hand, no $/discard, interest still paid. | back.lua:269-277 | run_init writes money_per_hand, money_per_discard and no_interest into `modifiers` (jackdaw/engine/run_init.py), where economy reads them |  | tests/engine/audit/test_run_setup.py::test_green_deck_pays_per_hand_and_discard_and_no_interest | python-fixed |
 | G02 | setup | Magic Deck (2× The Fool) and Ghost Deck (Hex) start without their consumables. | back.lua:184-196 |  |  |  | open |
 | G03 | setup | Challenge starting jokers and consumables are never created (17/20 challenges), and there is no `pinned` logic. Ledger check: in the 1.0.1o source 12/20 challenges start with jokers (only `c_bram_poker_1` also with consumables) and 3 with vouchers; the 12 are linked. | game.lua:2067-2088; cardarea.lua:528 |  |  |  | open |
 | G04 | setup | Missing challenge rules: `chips_dollar_cap`, `flipped_cards`, `minus_hand_size_per_X_dollar`, `all_eternal`, `debuff_played_cards`, `set_eternal_ante` / `set_joker_slots_ante`, `inflation`. | common_events.lua:2134; misc_functions.lua:684; cardarea.lua:601; cardarea.lua:245; state_events.lua:1077; state_events.lua:240; button_callbacks.lua:2455; card.lua:1800/1858 |  |  |  | open |
