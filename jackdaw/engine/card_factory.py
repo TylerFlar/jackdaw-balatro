@@ -708,10 +708,13 @@ def resolve_create_descriptor(
         if not rank_str or not suit_str:
             return None
         enhancement = descriptor.get("enhancement", "c_base")
+        # Card:init's set_ability stamps hands_played_at_create =
+        # G.GAME.hands_played (card.lua:337; G131).
         return create_playing_card(
             Suit(suit_str),
             Rank(rank_str),
             enhancement=enhancement,
+            hands_played=game_state.get("hands_played", 0),
         )
 
     # ------------------------------------------------------------------

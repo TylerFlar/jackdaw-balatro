@@ -522,9 +522,13 @@ def _legal_shop(gs: dict[str, Any]) -> list[Action]:
 
     for i, card in enumerate(shop_cards):
         ability = card.ability if isinstance(card.ability, dict) else {}
-        if not ability.get("consumeable") or not can_afford(gs, card.cost):
+        # ability.consumeable is the center's config table, truthy in Lua even
+        # when empty (UI_definitions.lua:335; G135).
+        if ability.get("consumeable") is None or not can_afford(gs, card.cost):
             continue
-        if consumable_block_reason(card, gs) is None:
+        # can_buy_and_use asks can_use_consumeable alone: Card:check_use (Ankh
+        # with every joker slot taken) stops the use after the purchase (G138).
+        if consumable_block_reason(card, gs, check_use=False) is None:
             actions.append(BuyAndUse(shop_index=i, target_indices=default_use_targets(card, gs)))
 
     actions.extend(_sell_actions(gs))

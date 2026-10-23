@@ -172,7 +172,9 @@ impl Game {
     }
 
     /// Highlight the hand cards a consumable targets (`G.hand.highlighted`), in the given
-    /// order; the forced card (Cerulean Bell) stays highlighted.
+    /// order. Cerulean Bell's card comes first: with nothing highlighted, `CardArea:update`
+    /// highlights the first forced card of the hand (cardarea.lua:252-256), so a Cryptid copy
+    /// of it, forced too, stays unhighlighted.
     fn highlight_targets(&mut self, targets: Option<&[usize]>) -> Result<(), StepError> {
         let hand = self.gs.areas.ids(AreaId::Hand);
         let mut ids: Vec<u32> = self
@@ -180,8 +182,9 @@ impl Game {
             .areas
             .hand
             .iter()
-            .filter(|c| c.ability.forced_selection)
+            .find(|c| c.ability.forced_selection)
             .map(|c| c.sort_id)
+            .into_iter()
             .collect();
         for &i in targets.unwrap_or(&[]) {
             let Some(&id) = hand.get(i) else {
