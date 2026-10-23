@@ -246,12 +246,6 @@ class MyAgent:
 
 If you want to use standard RL libraries like Stable-Baselines3 instead of writing a custom training loop, Jackdaw provides `BalatroGymnasiumEnv` — a `gymnasium.Env` subclass with a flat `Discrete(500)` action space and action masking for [MaskablePPO](https://sb3-contrib.readthedocs.io/en/master/modules/ppo_mask.html).
 
-### Install
-
-```bash
-uv sync --extra train   # installs sb3-contrib, stable-baselines3, torch, tensorboard
-```
-
 ### How It Works
 
 The wrapper sits between SB3 and the factored `BalatroEnvironment`:
@@ -293,7 +287,9 @@ action = int(np.random.choice(legal))
 obs, reward, terminated, truncated, info = env.step(action)
 ```
 
-### Training with MaskablePPO
+### With MaskablePPO
+
+Jackdaw doesn't depend on any RL library. Install [sb3-contrib](https://sb3-contrib.readthedocs.io/) in your own project, then:
 
 ```python
 from sb3_contrib import MaskablePPO
@@ -301,19 +297,10 @@ from jackdaw.env import BalatroGymnasiumEnv, DirectAdapter, ShapedReward
 
 env = BalatroGymnasiumEnv(adapter_factory=DirectAdapter, reward_fn=ShapedReward())
 
-model = MaskablePPO("MultiInputPolicy", env, verbose=1, tensorboard_log="runs/balatro_ppo")
+model = MaskablePPO("MultiInputPolicy", env, verbose=1)
 model.learn(total_timesteps=500_000)
 model.save("balatro_ppo")
 ```
-
-Or use the included training script:
-
-```bash
-python scripts/train_ppo.py --total-timesteps 500000 --seed 42
-tensorboard --logdir runs/balatro_ppo
-```
-
-The training script logs Balatro-specific metrics to tensorboard: `balatro/mean_ante_reached`, `balatro/max_ante_reached`, `balatro/mean_rounds_beaten`, and `balatro/win_rate`.
 
 ### Rewards
 

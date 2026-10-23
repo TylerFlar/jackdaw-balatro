@@ -5,7 +5,6 @@ End-to-end tests that exercise the full stack:
 - Multi-seed stress testing for crash resilience
 - Observation consistency with engine state
 - Action roundtrip fidelity
-- Policy network smoke test (if torch available)
 """
 
 from __future__ import annotations
