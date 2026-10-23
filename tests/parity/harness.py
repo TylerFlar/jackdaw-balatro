@@ -1,10 +1,10 @@
 """Engine-agnostic replay of the recorded engine action tapes.
 
 A :class:`ParitySpec` describes one trajectory declaratively: how to start
-the run, the setup operations applied before play (the same setups the
-golden v1 engine trajectories use), and the recorded action tape.  Any
-engine that implements :class:`Engine` can replay it; ``PyEngine`` drives the
-Python oracle, and the Rust engine gets an adapter with the same methods.
+the run, the setup operations applied before play, and the recorded action
+tape (``tests/fixtures/parity_specs.json``, recorded from the Python engine's
+golden trajectories before it was retired).  Any engine that implements
+:class:`Engine` can replay it; :class:`RustEngine` is the Rust engine's.
 
 Setup operations (all fields are Lua-native names):
 
@@ -23,12 +23,12 @@ Setup operations (all fields are Lua-native names):
 from __future__ import annotations
 
 import json
-import random
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
+from jackdaw.engine.data import load
 from tests.parity import canon
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -124,9 +124,8 @@ def _debuffed_and_saved(snap: dict[str, Any]) -> bool:
 
 
 def _six_destroyed(snap: dict[str, Any]) -> bool:
-    from jackdaw.engine.data.prototypes import SPECTRALS
-
-    return any(c["center"] in SPECTRALS for c in snap["areas"]["consumables"])
+    centers = load("centers")
+    return any(centers[c["center"]]["set"] == "Spectral" for c in snap["areas"]["consumables"])
 
 
 CHECKS: dict[str, Callable[[dict[str, Any]], bool]] = {
@@ -213,135 +212,3 @@ def replay(
         res.checks["scenario"] = CHECKS[spec.check](final)  # type: ignore[index]
     res.push("final", final)
     return res
-
-
-# ---------------------------------------------------------------------------
-# Spec generation from the golden v1 engine trajectories
-# ---------------------------------------------------------------------------
-
-# Scenario setups of tests/golden/trajectories.py, as setup operations.
-# ``last_hand`` is resolved at generation time (it depends on the blind's
-# chip target, which is deterministic for the spec).
-_SCENARIO_OPS: dict[str, list[dict[str, Any]]] = {
-    "copy_retriggers": [
-        *({"op": "add", "key": k} for k in
-          ("j_blueprint", "j_hack", "j_brainstorm", "j_mime", "j_baseball")),
-        {"op": "add", "key": "H_2", "seal": "Red"},
-        {"op": "add", "key": "S_3"},
-        {"op": "add", "key": "D_4"},
-        {"op": "add", "key": "C_5"},
-        {"op": "add", "key": "C_K", "enhancement": "m_steel"},
-        {"op": "add", "key": "H_K", "enhancement": "m_steel", "seal": "Red"},
-    ],
-    "face_retriggers": [
-        *({"op": "add", "key": k} for k in
-          ("j_sock_and_buskin", "j_hanging_chad", "j_blueprint", "j_selzer", "j_dusk")),
-        {"op": "add", "key": "H_K"},
-        {"op": "add", "key": "H_Q", "seal": "Red"},
-        {"op": "add", "key": "H_J"},
-        {"op": "set", "hands_left": 1},
-    ],
-    "bones_save": [
-        {"op": "add", "key": "j_mr_bones"},
-        {"op": "add", "key": "j_joker"},
-        {"op": "add", "key": "S_2"},
-        {"op": "last_hand", "chips_fraction": 0.3},
-    ],
-    "psychic_bones": [
-        *({"op": "add", "key": k} for k in ("j_matador", "j_mr_bones", "j_ice_cream")),
-        {"op": "add", "key": "S_2"},
-        {"op": "last_hand", "chips_fraction": 0.3},
-    ],
-    "sixth_sense": [
-        *({"op": "add", "key": k} for k in ("j_sixth_sense", "j_caino", "j_glass", "j_hiker")),
-        {"op": "add", "key": "H_6"},
-    ],
-    "space_dna": [
-        *({"op": "add", "key": k} for k in
-          ("j_oops", "j_space", "j_dna", "j_obelisk", "j_reserved_parking")),
-        {"op": "add", "key": "S_9"},
-        {"op": "add", "key": "H_K"},
-        {"op": "add", "key": "S_Q"},
-    ],
-    "creation_gates": [
-        {"op": "add", "key": "j_riff_raff"},
-        {"op": "add", "key": "c_judgement"},
-        {"op": "add", "key": "c_wraith"},
-        {"op": "add", "key": "H_7", "enhancement": "m_glass"},
-        {"op": "add", "key": "S_7", "enhancement": "m_steel"},
-        {"op": "add", "key": "D_7", "enhancement": "m_lucky"},
-        {"op": "add", "key": "C_7", "enhancement": "m_gold"},
-        {"op": "set", "dollars": 80},
-    ],
-}  # fmt: skip
-
-_SCENARIO_CHECKS: dict[str, str | None] = {
-    "copy_retriggers": "score_positive",
-    "face_retriggers": None,
-    "bones_save": "bones_saved",
-    "psychic_bones": "debuffed_and_saved",
-    "sixth_sense": "six_destroyed",
-    "space_dna": "score_positive",
-    "creation_gates": "two_jokers",
-}
-
-
-def specs_from_golden_v1() -> list[ParitySpec]:
-    """Parity specs for every golden v1 engine trajectory (resolved setups)."""
-    from jackdaw.engine.data.prototypes import JOKERS
-    from tests.golden.trajectories import SCENARIOS, engine_specs
-
-    tapes = json.loads((FIXTURES / "golden_tapes.json").read_text(encoding="utf-8"))
-    out: list[ParitySpec] = []
-    for es in engine_specs():
-        scenario = SCENARIOS[es.scenario] if es.scenario else None
-        setup: list[dict[str, Any]] = []
-        boss = es.boss or (scenario.boss if scenario else None)
-        if boss:
-            setup.append({"op": "force_boss", "key": boss})
-        if es.jokers or scenario:
-            setup.append({"op": "action", "action": ["SelectBlind"]})
-        if es.jokers:
-            setup_rng = random.Random(es.seed + "/setup")
-            setup += [{"op": "add", "key": k} for k in setup_rng.sample(sorted(JOKERS), es.jokers)]
-        if scenario:
-            setup += [dict(op) for op in _SCENARIO_OPS[es.scenario]]  # type: ignore[index]
-        if es.dollars is not None:
-            setup.append({"op": "set", "dollars": es.dollars})
-        out.append(
-            ParitySpec(
-                name=es.name,
-                start={"back": es.back, "stake": es.stake, "seed": es.seed,
-                       "challenge": es.challenge},
-                setup=setup,
-                tape=tapes[es.name],
-                max_steps=es.max_steps,
-                check=_SCENARIO_CHECKS[es.scenario] if es.scenario else None,
-                check_after=len(scenario.script) if scenario else 0,
-            )
-        )  # fmt: skip
-    return out
-
-
-def resolve_last_hand(specs: list[ParitySpec]) -> list[ParitySpec]:
-    """Replace ``last_hand`` ops with literal ``set`` ops, using the Python oracle."""
-    from tests.parity.pyengine import PyEngine
-
-    for spec in specs:
-        if not any(op["op"] == "last_hand" for op in spec.setup):
-            continue
-        resolved: list[dict[str, Any]] = []
-        eng = PyEngine(spec.start)
-        for op in spec.setup:
-            if op["op"] == "last_hand":
-                chips = int(eng.gs["blind"].chips * op["chips_fraction"])
-                op = {"op": "set", "hands_left": 1, "chips": chips}
-            eng.apply(op)
-            resolved.append(op)
-        spec.setup = resolved
-    return specs
-
-
-def write_specs(specs: list[ParitySpec], path: Path = SPECS_PATH) -> None:
-    data = {"schema": 1, "specs": [s.to_json() for s in specs]}
-    path.write_text(json.dumps(data, separators=(",", ":")) + "\n", encoding="utf-8")

@@ -16,19 +16,18 @@ has no counterpart for (a joker added without BalatroBot's edition poll, an enha
 place, a synthesized booster pack); they call :meth:`Run.oracle`, and the fixture holds the
 difference between the state built natively and the oracle's, applied before the next check.
 
-``JACKDAW_BUILD_CASES=<recording>`` rebuilds the fixture from a recording of the oracle's runs
-(``tests/parity/freeze.py``): each run's native state is compared with the oracle's at every
-check, and a difference is kept only where the test declared an oracle construction.
+``JACKDAW_REFREEZE_CASES=1`` rewrites the fixture's digests from the Rust engine instead of
+checking them, keeping each run's actions and differences (``scripts/refreeze.py cases``).
 """
 
 from __future__ import annotations
 
 import atexit
+import copy
 import json
 import os
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
-from pathlib import Path
 from typing import Any
 
 from jackdaw.core import CardView, Game, IllegalActionError
@@ -36,10 +35,10 @@ from jackdaw.engine.data import load
 from tests.parity import canon, frozen
 
 FIXTURE = "parity_cases.json"
-_BUILD = os.environ.get("JACKDAW_BUILD_CASES")
+_REFREEZE = bool(os.environ.get("JACKDAW_REFREEZE_CASES"))
 
 _frozen: dict[str, list[list[dict[str, Any]]]] | None = None
-_built: dict[str, list[list[dict[str, Any]]]] = {}
+_refrozen: dict[str, list[list[dict[str, Any]]]] = {}
 _runs: dict[str, list[Run]] = {}
 
 
@@ -50,8 +49,7 @@ def _current_test() -> str:
 def _recorded(test: str, index: int) -> list[dict[str, Any]]:
     global _frozen
     if _frozen is None:
-        path = Path(_BUILD) if _BUILD else frozen.FIXTURES / FIXTURE
-        _frozen = json.loads(path.read_text(encoding="utf-8"))
+        _frozen = frozen.load(FIXTURE)
     runs = _frozen.get(test)
     assert runs is not None and index < len(runs), f"{test}: no frozen run #{index}"
     return runs[index]
@@ -62,16 +60,15 @@ def finish_test(test: str) -> list[Run]:
     return _runs.pop(test, [])
 
 
-def _write_built() -> None:
-    """Merge the runs built in this session into the fixture."""
-    path = frozen.FIXTURES / FIXTURE
-    data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-    data.update(_built)
+def _write_refrozen() -> None:
+    """Merge the runs refrozen in this session into the fixture."""
+    data = frozen.load(FIXTURE)
+    data.update(_refrozen)
     frozen.write(FIXTURE, {test: data[test] for test in sorted(data)})
 
 
-if _BUILD:
-    atexit.register(_write_built)
+if _REFREEZE:
+    atexit.register(_write_refrozen)
 
 
 # ---------------------------------------------------------------------------
@@ -79,31 +76,8 @@ if _BUILD:
 # ---------------------------------------------------------------------------
 
 
-def _same(a: Any, b: Any) -> bool:
-    return canon.encode(a) == canon.encode(b)
-
-
-def make_patch(base: Any, target: Any, path: tuple[Any, ...] = ()) -> list[list[Any]]:
-    """The edits that turn snapshot ``base`` into ``target``: ``[path, value]`` sets and
-    ``[path]`` deletions. Lists of the same length are edited item by item, others replaced."""
-    if isinstance(base, dict) and isinstance(target, dict):
-        out: list[list[Any]] = []
-        for key in target:
-            if key in base:
-                out += make_patch(base[key], target[key], (*path, key))
-            else:
-                out.append([[*path, key], target[key]])
-        out += [[[*path, key]] for key in base if key not in target]
-        return out
-    if isinstance(base, list) and isinstance(target, list) and len(base) == len(target):
-        out = []
-        for i, (a, b) in enumerate(zip(base, target, strict=True)):
-            out += make_patch(a, b, (*path, i))
-        return out
-    return [] if _same(base, target) else [[list(path), target]]
-
-
 def apply_patch(snap: dict[str, Any], patch: Sequence[Sequence[Any]]) -> dict[str, Any]:
+    """Apply a frozen difference: ``[path, value]`` sets and ``[path]`` deletions."""
     for edit in patch:
         path = edit[0]
         node: Any = snap
@@ -283,10 +257,11 @@ class Run:
         self.pos = 0
         self.pending: list[str] = []
         self.synced = False
+        # Refreezing: the events with their digests rewritten as the run makes its checks.
         self.out: list[dict[str, Any]] | None = None
-        if _BUILD:
-            self.out = []
-            _built.setdefault(self.test, []).append(self.out)
+        if _REFREEZE:
+            self.out = copy.deepcopy(self.events)
+            _refrozen.setdefault(self.test, []).append(self.out)
         self.game = frozen.new_game(start, setup)
 
     @property
@@ -423,40 +398,31 @@ class Run:
         return event, out
 
     def _out_event(self, pos: int) -> dict[str, Any] | None:
-        if self.out is None:
-            return None
-        while len(self.out) <= pos:
-            event = self.events[len(self.out)]
-            self.out.append(
-                {k: v for k, v in event.items() if k not in ("pre_state", "legal_state")}
-            )
-        return self.out[pos]
+        return None if self.out is None else self.out[pos]
+
+    def _check(self, event: dict[str, Any], out: dict[str, Any] | None, key: str, got: Any) -> bool:
+        """Compare a frozen value with the run's, or rewrite it when refreezing."""
+        if out is not None:
+            out[key] = got
+            return True
+        return got == event[key]
 
     def _resolve(self, event: dict[str, Any], out: dict[str, Any] | None) -> None:
         """Bring the native state to the oracle's at this check."""
         if self.synced:
             self.synced = False
-        elif out is not None:
-            target = canon.from_json_compatible(event.get("pre_state") or event["legal_state"])
-            native = self.snapshot()
-            if canon.digest(native) != canon.digest(target):
-                found = canon.diff(target, native)
-                assert self.pending, (
-                    f"{self.where}: the state differs from the oracle's: {found[:8]}"
-                )
-                patch = make_patch(native, target)
-                out["patch"] = canon.to_json_compatible(patch)
-                out["oracle"] = list(self.pending)
-                self.game = Game.from_dict(apply_patch(native, patch))
         elif "patch" in event:
             self.game = Game.from_dict(apply_patch(self.snapshot(), event["patch"]))
         self.pending = []
-        digest = event.get("pre") or event["state"]
-        assert frozen.short(self.game.state_hash()) == digest, (
-            f"{self.where}: the state differs from the oracle's"
-        )
+        key = "pre" if "pre" in event else "state"
+        got = frozen.short(self.game.state_hash())
+        same = self._check(event, out, key, got)
+        assert same, f"{self.where}: the state differs from the oracle's"
 
-    def _legal(self) -> str:
+    def _legal(self) -> str | None:
+        """The legal actions' digest, ``None`` at game over (as the oracle recorded it)."""
+        if self.game.phase == "game_over":
+            return None
         return frozen.legal_digest(json.loads(self.game._g.legal_actions()))
 
     def step(self, action: Sequence[Any]) -> bool:
@@ -467,25 +433,31 @@ class Run:
         where = f"{self.where} {action}"
         assert event["action"] == action, f"{where}: the oracle's action was {event['action']}"
         self._resolve(event, out)
-        pre_legal, post_legal = event["legal"]
-        if pre_legal is not None:
-            assert self._legal() == pre_legal, f"{where}: the legal actions differ"
+        legal = list(event["legal"])
+        if out is not None:
+            out["legal"] = legal = [self._legal(), None]
+        elif legal[0] is not None:
+            assert self._legal() == legal[0], f"{where}: the legal actions differ"
         rebuilt = frozen.transplant(self.game)
         try:
             self.game.step(action)
         except IllegalActionError:
-            assert event["post"] is None, f"{where}: refused; the oracle took it"
+            assert self._check(event, out, "post", None), f"{where}: refused; the oracle took it"
             try:
                 rebuilt.step(action)
             except IllegalActionError:
                 return False
             raise AssertionError(f"{where}: refused, but taken from the snapshot") from None
-        assert event["post"] is not None, f"{where}: taken; the oracle refused it"
-        assert frozen.short(self.game.state_hash()) == event["post"], f"{where}: the state differs"
+        post = frozen.short(self.game.state_hash())
+        taken = out is not None or event["post"] is not None
+        assert taken, f"{where}: taken; the oracle refused it"
+        assert self._check(event, out, "post", post), f"{where}: the state differs"
         rebuilt.step(action)
-        assert frozen.short(rebuilt.state_hash()) == event["post"], f"{where}: from the snapshot"
-        if post_legal is not None:
-            assert self._legal() == post_legal, f"{where}: the legal actions after it differ"
+        assert frozen.short(rebuilt.state_hash()) == post, f"{where}: from the snapshot"
+        if out is not None:
+            legal[1] = self._legal()
+        elif legal[1] is not None:
+            assert self._legal() == legal[1], f"{where}: the legal actions after it differ"
         return True
 
     def legal(self) -> list[Any]:
@@ -493,7 +465,8 @@ class Run:
         event, out = self._next("state")
         self._resolve(event, out)
         legal = json.loads(self.game._g.legal_actions())
-        assert frozen.legal_digest(legal) == event["legal"], f"{self.where}: legal actions differ"
+        got = frozen.legal_digest(legal)
+        assert self._check(event, out, "legal", got), f"{self.where}: legal actions differ"
         return legal
 
     def bot_legal(self) -> list[Any]:

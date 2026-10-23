@@ -30,7 +30,7 @@ def test_golden_v2(spec) -> None:
     if got.digest != expected["digest"]:
         pytest.fail(
             f"{spec.name}: behaviour changed at {first_divergence(expected, got)}; "
-            "if intended, regenerate with scripts/generate_golden_v2.py"
+            "if intended, refreeze with scripts/refreeze.py golden_v2"
         )
     assert got.records == expected["records"]
     assert got.checks == expected["checks"]

@@ -605,36 +605,6 @@ mod _core {
         Ok(jackdaw_core::snapshot::export(&gs).to_string())
     }
 
-    /// Start a new run in Rust and return its snapshot (JSON text) at the blind-select screen.
-    ///
-    /// ``back`` is a back key (``"b_red"``); a challenge (``"c_omelette_1"``) plays on the
-    /// Challenge Deck. Raises ``ValueError`` for an unknown back, stake or challenge, or a run
-    /// whose setup isn't ported yet.
-    #[pyfunction]
-    #[pyo3(signature = (back, stake, seed, challenge=None))]
-    fn _new_run(back: &str, stake: u8, seed: &str, challenge: Option<&str>) -> PyResult<String> {
-        use jackdaw_core::game::Game;
-        use jackdaw_core::run::RunSpec;
-        use pyo3::exceptions::PyValueError;
-        let back = jackdaw_core::card::center_by_key(back)
-            .ok_or_else(|| PyValueError::new_err(format!("unknown back {back:?}")))?;
-        let challenge = match challenge {
-            Some(id) => Some(
-                jackdaw_core::run::challenge_id(id)
-                    .ok_or_else(|| PyValueError::new_err(format!("unknown challenge {id:?}")))?,
-            ),
-            None => None,
-        };
-        let spec = RunSpec {
-            back,
-            stake,
-            seed: seed.to_owned(),
-            challenge,
-        };
-        let game = Game::new_run(&spec).map_err(PyValueError::new_err)?;
-        Ok(game.snapshot().to_string())
-    }
-
     /// Encode a canonical snapshot (JSON text) with observation encoder v1
     /// (``jackdaw.env.observation.encode_observation``).
     ///
@@ -744,30 +714,6 @@ mod _core {
     #[pyfunction]
     fn _ported_jokers() -> Vec<&'static str> {
         jackdaw_core::joker::ported()
-    }
-
-    /// Import a snapshot, take one action (its tape form, JSON text) and export the result.
-    ///
-    /// Returns ``(status, snapshot)``: ``"ok"`` with the new snapshot, or ``"illegal: ..."`` /
-    /// ``"unported: ..."`` with an empty string. The parity tests use it to step the Rust engine
-    /// from any Python oracle state.
-    #[pyfunction]
-    fn _step_snapshot(text: &str, action: &str) -> PyResult<(String, String)> {
-        use jackdaw_core::action::Action;
-        use jackdaw_core::game::{Game, StepError};
-        use pyo3::exceptions::PyValueError;
-        let value: serde_json::Value = serde_json::from_str(text)
-            .map_err(|e| PyValueError::new_err(format!("snapshot: bad JSON: {e}")))?;
-        let mut game =
-            Game::from_snapshot(&value).map_err(|e| PyValueError::new_err(e.to_string()))?;
-        let action: serde_json::Value = serde_json::from_str(action)
-            .map_err(|e| PyValueError::new_err(format!("action: bad JSON: {e}")))?;
-        let action = Action::from_json(&action).map_err(PyValueError::new_err)?;
-        Ok(match game.step(&action) {
-            Ok(()) => ("ok".to_owned(), game.snapshot().to_string()),
-            Err(StepError::Illegal(m)) => (format!("illegal: {m}"), String::new()),
-            Err(StepError::Unported(m)) => (format!("unported: {m}"), String::new()),
-        })
     }
 }
 
