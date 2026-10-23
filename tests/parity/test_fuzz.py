@@ -19,9 +19,7 @@ from tests.parity.harness import FIXTURES
 _CASES = [random_case(i, random.Random(1000 + i), max_steps=300) for i in range(8)]
 
 
-_REGRESSIONS = json.loads((FIXTURES / "fuzz_regressions.json").read_text(encoding="utf-8"))[
-    "cases"
-]
+_REGRESSIONS = json.loads((FIXTURES / "fuzz_regressions.json").read_text(encoding="utf-8"))["cases"]
 
 
 @pytest.mark.parametrize("case", _CASES, ids=[c.name for c in _CASES])
