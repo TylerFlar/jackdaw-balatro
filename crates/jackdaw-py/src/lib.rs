@@ -54,6 +54,30 @@ mod _core {
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
         Ok(jackdaw_core::snapshot::export(&gs).to_string())
     }
+
+    /// Import a snapshot, take one action (its tape form, JSON text) and export the result.
+    ///
+    /// Returns ``(status, snapshot)``: ``"ok"`` with the new snapshot, or ``"illegal: ..."`` /
+    /// ``"unported: ..."`` with an empty string. The parity tests use it to step the Rust engine
+    /// from any Python oracle state.
+    #[pyfunction]
+    fn _step_snapshot(text: &str, action: &str) -> PyResult<(String, String)> {
+        use jackdaw_core::action::Action;
+        use jackdaw_core::game::{Game, StepError};
+        use pyo3::exceptions::PyValueError;
+        let value: serde_json::Value = serde_json::from_str(text)
+            .map_err(|e| PyValueError::new_err(format!("snapshot: bad JSON: {e}")))?;
+        let mut game =
+            Game::from_snapshot(&value).map_err(|e| PyValueError::new_err(e.to_string()))?;
+        let action: serde_json::Value = serde_json::from_str(action)
+            .map_err(|e| PyValueError::new_err(format!("action: bad JSON: {e}")))?;
+        let action = Action::from_json(&action).map_err(PyValueError::new_err)?;
+        Ok(match game.step(&action) {
+            Ok(()) => ("ok".to_owned(), game.snapshot().to_string()),
+            Err(StepError::Illegal(m)) => (format!("illegal: {m}"), String::new()),
+            Err(StepError::Unported(m)) => (format!("unported: {m}"), String::new()),
+        })
+    }
 }
 
 #[cfg(test)]

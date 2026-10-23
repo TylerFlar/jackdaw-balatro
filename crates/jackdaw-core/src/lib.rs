@@ -12,12 +12,25 @@
 //! and its canonical snapshots.
 #![forbid(unsafe_code)]
 
+pub mod action;
+pub mod area;
+mod blind;
 pub mod card;
+mod cards;
+pub mod event;
+mod flow;
+pub mod game;
 pub mod hand_eval;
+pub mod joker;
 pub mod lua;
+pub mod pools;
 pub mod rng;
+mod round;
+pub mod rules;
+pub mod scoring;
 pub mod snapshot;
 pub mod state;
+mod tags;
 
 /// The generated data tables the engine runs on.
 pub use jackdaw_data as data;

@@ -528,6 +528,14 @@ pub struct Ability {
     // Set during play.
     pub couponed: bool,
     pub played_this_ante: bool,
+    /// The `debuff_played_cards` challenge rule: the card stays debuffed for good
+    /// (`Card:update`, card.lua:4158).
+    pub perma_debuff: bool,
+    /// Discarded this round (state_events.lua:419; cleared at the round's end).
+    pub discarded: bool,
+    /// A Negative joker debuffed out of the deck keeps its slot until it's removed
+    /// (card.lua:686-693, 4733-4739).
+    pub queue_negative_removal: bool,
     // Stickers (`ability.eternal`, `.perishable`, `.perish_tally`, `.rental`).
     pub eternal: bool,
     pub perishable: bool,
@@ -574,8 +582,10 @@ pub struct Card {
     pub lucky_trigger: bool,
     /// Within one scoring pass: Vampire took this card's enhancement.
     pub vampired: bool,
-    /// Within one step: the card is being destroyed (glass shatter / joker destroy).
+    /// Within one step: a Glass Card is shattering.
     pub shattered: bool,
+    /// Within one step: the card is being destroyed (`card.destroyed`, state_events.lua:969).
+    pub destroyed: bool,
     /// Within setting_blind: Ceremonial Dagger or Madness is destroying this joker.
     pub getting_sliced: bool,
 }
@@ -626,6 +636,7 @@ impl Card {
             lucky_trigger: false,
             vampired: false,
             shattered: false,
+            destroyed: false,
             getting_sliced: false,
         };
         card.set_ability(center, hands_played);
@@ -661,6 +672,14 @@ impl Card {
 
     pub fn is_joker(&self) -> bool {
         self.set() == CenterSet::Joker
+    }
+
+    /// `Card:flip()` (card.lua:4113-4124).
+    pub fn flip(&mut self) {
+        self.facing = match self.facing {
+            Facing::Front => Facing::Back,
+            Facing::Back => Facing::Front,
+        };
     }
 
     /// `Card:set_ability(center)` for the per-card state. The caller handles the game-level

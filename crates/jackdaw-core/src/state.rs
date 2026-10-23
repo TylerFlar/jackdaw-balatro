@@ -77,6 +77,32 @@ impl BlindSlot {
     }
 }
 
+/// `G.hand.config.sort`: the order every automatic hand sort uses (cardarea.lua:577-590). The
+/// sort buttons set it (button_callbacks.lua:36-48).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum HandSort {
+    /// By `get_nominal()`, descending (the default).
+    #[default]
+    Desc,
+    /// By `get_nominal('suit')`, descending.
+    SuitDesc,
+}
+
+impl HandSort {
+    pub fn name(self) -> &'static str {
+        match self {
+            HandSort::Desc => "desc",
+            HandSort::SuitDesc => "suit desc",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<HandSort> {
+        [HandSort::Desc, HandSort::SuitDesc]
+            .into_iter()
+            .find(|s| s.name() == name)
+    }
+}
+
 /// A value from a dynamic Lua table (`G.GAME.modifiers`, `G.GAME.pool_flags`).
 #[derive(Clone, Debug, PartialEq)]
 pub enum LuaValue {
@@ -368,7 +394,9 @@ pub struct GameState {
     pub spectral_rate: f64,
     pub playing_card_rate: f64,
     pub probabilities_normal: f64,
+    /// `G.hand.config.real_card_limit` (the hand size before clamping at 0).
     pub hand_size: f64,
+    pub hand_sort: HandSort,
     pub joker_slots: f64,
     pub consumable_slots: f64,
     pub starting_deck_size: f64,

@@ -12,14 +12,15 @@ use jackdaw_data::{
 };
 use serde_json::{Map, Value, json};
 
+use crate::area::AreaId;
 use crate::card::{
     Ability, Base, Card, Edition, EditionKind, Extra, ExtraVal, Facing, LuaStr, Rank, Seal, Suit,
 };
 use crate::hand_eval::HandType;
 use crate::rng::Rng;
 use crate::state::{
-    Areas, BlindSlot, BlindState, ConsumeableUsage, CurrentRound, GameState, HandState, LastScore,
-    LuaValue, PackState, Phase, RoundBonus, RoundResets, Sets, SimState, StartingParams,
+    Areas, BlindSlot, BlindState, ConsumeableUsage, CurrentRound, GameState, HandSort, HandState,
+    LastScore, LuaValue, PackState, Phase, RoundBonus, RoundResets, Sets, SimState, StartingParams,
 };
 
 pub const SCHEMA: &str = "jackdaw.snapshot/1";
@@ -343,6 +344,9 @@ fn ability_json(c: &Card) -> Value {
     if a.played_this_ante {
         m.insert("played_this_ante".to_owned(), json!(true));
     }
+    if a.perma_debuff {
+        m.insert("perma_debuff".to_owned(), json!(true));
+    }
     Value::Object(m)
 }
 
@@ -385,6 +389,10 @@ fn ability_from(v: &Value, center: CenterId, path: &str) -> Result<Ability> {
     a.couponed = o.opt("couponed").and_then(Value::as_bool).unwrap_or(false);
     a.played_this_ante = o
         .opt("played_this_ante")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    a.perma_debuff = o
+        .opt("perma_debuff")
         .and_then(Value::as_bool)
         .unwrap_or(false);
     o.done()?;
@@ -583,6 +591,7 @@ pub fn card_from(v: &Value, path: &str) -> Result<Card> {
         lucky_trigger: false,
         vampired: false,
         shattered: false,
+        destroyed: false,
         getting_sliced: false,
     })
 }
@@ -667,9 +676,18 @@ pub fn export(gs: &GameState) -> Value {
     );
     let sp = &gs.starting_params;
     let areas = Value::Object(
-        Areas::NAMES
+        AreaId::ALL
             .iter()
-            .map(|&n| (n.to_owned(), cards_json(gs.areas.by_name(n).expect("area"))))
+            .map(|&a| {
+                let mut cards = cards_json(gs.areas.get(a));
+                // Deck and discard hold their cards face down; the snapshot writes them face up.
+                if a.face_down() {
+                    for c in cards.as_array_mut().expect("array") {
+                        c["facing"] = json!("front");
+                    }
+                }
+                (a.name().to_owned(), cards)
+            })
             .collect(),
     );
     let pack = gs.pack.as_ref().map_or(Value::Null, |p| {
@@ -1096,10 +1114,15 @@ pub fn import(v: &Value) -> Result<GameState> {
 
     let mut ao = Obj::new(o.field("areas")?, "$.areas")?;
     let mut areas = Areas::default();
-    for name in Areas::NAMES {
-        let p = format!("$.areas.{name}");
-        let cards = cards_from(ao.arr(name)?, &p)?;
-        *areas.by_name_mut(name).expect("area") = cards;
+    for a in AreaId::ALL {
+        let p = format!("$.areas.{}", a.name());
+        let mut cards = cards_from(ao.arr(a.name())?, &p)?;
+        if a.face_down() {
+            for c in &mut cards {
+                c.facing = Facing::Back;
+            }
+        }
+        *areas.get_mut(a) = cards;
     }
     ao.done()?;
 
@@ -1203,6 +1226,7 @@ pub fn import(v: &Value) -> Result<GameState> {
         playing_card_rate: g.num("playing_card_rate")?,
         probabilities_normal: g.num("probabilities_normal")?,
         hand_size: g.num("hand_size")?,
+        hand_sort: HandSort::Desc,
         joker_slots: g.num("joker_slots")?,
         consumable_slots: g.num("consumable_slots")?,
         starting_deck_size: g.num("starting_deck_size")?,
