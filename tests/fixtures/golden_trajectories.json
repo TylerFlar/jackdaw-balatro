@@ -362,9 +362,9 @@
    "checkpoints": [
     "ec1093758a512e84",
     "9218e583fb6a50ba",
-    "832dbab1a5e54f4e"
+    "790c5a3de018a12d"
    ],
-   "digest": "8b5f6337b7907fe74d7dcafcd222e65f9081eb52f437f0beaa71aa58f5d95145",
+   "digest": "ddd2fed1220f2afeeccaf3e1397c9abb063760331076faa0f4050e8d77b63d1f",
    "steps": 88
   },
   "challenge_c_five_card_1": {

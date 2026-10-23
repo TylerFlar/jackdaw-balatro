@@ -72,7 +72,7 @@ Source: `balatro_source/blind.lua` (Balatro 1.0.1o). 94 rows: 25 function, 42 br
 | blind/event/Blind:press_play/the-tooth/immediate:juice_up | blind.lua:500 | event | `Event{}` → :juice_up | `self.name == "The Tooth"` & [event] | unreviewed |  |  |  |  |
 | blind/fn/Blind:modify_hand | blind.lua:510-517 | function | `Blind:modify_hand(cards, poker_hands, text, mult, hand_chips)` |  | unreviewed |  |  |  |  |
 | blind/branch/Blind:modify_hand/the-flint | blind.lua:512-514 | branch | The Flint — `self.name == "The Flint"` |  | unreviewed |  |  |  |  |
-| blind/fn/Blind:debuff_hand | blind.lua:519-570 | function | `Blind:debuff_hand(cards, hand, handname, check)` |  | unreviewed |  |  |  |  |
+| blind/fn/Blind:debuff_hand | blind.lua:519-570 | function | `Blind:debuff_hand(cards, hand, handname, check)` |  | ported | crates/jackdaw-core/src/blind.rs::blind_debuff_hand |  | G81 |  |
 | blind/branch/Blind:debuff_hand/debuff-h_size_ge | blind.lua:527-529 | branch | debuff.h_size_ge — `self.debuff.h_size_ge and #cards < self.debuff.h_size_ge` | `self.debuff` | unreviewed |  |  |  |  |
 | blind/branch/Blind:debuff_hand/the-eye | blind.lua:535-540 | branch | The Eye — `self.name == "The Eye"` | `self.debuff` | unreviewed |  |  |  |  |
 | blind/branch/Blind:debuff_hand/the-mouth | blind.lua:542-547 | branch | The Mouth — `self.name == "The Mouth"` | `self.debuff` | unreviewed |  |  |  |  |
@@ -92,7 +92,7 @@ Source: `balatro_source/blind.lua` (Balatro 1.0.1o). 94 rows: 25 function, 42 br
 | blind/fn/Blind:debuff_card | blind.lua:624-652 | function | `Blind:debuff_card(card, from_blind)` |  | unreviewed |  |  |  |  |
 | blind/branch/Blind:debuff_card/debuff-suit | blind.lua:626-628 | branch | debuff.suit — `self.debuff.suit and card:is_suit(self.debuff.suit, true)` | `self.debuff and not self.disabled and card.area ~= G.jokers` | unreviewed |  |  |  |  |
 | blind/branch/Blind:debuff_card/debuff-is_face | blind.lua:630-632 | branch | debuff.is_face — `self.debuff.is_face == 'face' and card:is_face(true)` | `self.debuff and not self.disabled and card.area ~= G.jokers` | unreviewed |  |  |  |  |
-| blind/branch/Blind:debuff_card/the-pillar | blind.lua:634-636 | branch | The Pillar — `self.name == 'The Pillar' and card.ability.played_this_ante` | `self.debuff and not self.disabled and card.area ~= G.jokers` | unreviewed |  |  |  |  |
+| blind/branch/Blind:debuff_card/the-pillar | blind.lua:634-636 | branch | The Pillar — `self.name == 'The Pillar' and card.ability.played_this_ante` | `self.debuff and not self.disabled and card.area ~= G.jokers` | verified | crates/jackdaw-core/src/blind.rs::debuff_card | tests/parity/test_jokers_batch_c.py::test_g80_pillar_recheck_after_seltzer | G80 |  |
 | blind/branch/Blind:debuff_card/crimson-heart | blind.lua:647-648 | branch | Crimson Heart — `self.name == 'Crimson Heart' and not self.disabled and card.area == G.jokers` |  | gap |  |  | G11 |  |
 | blind/branch/Blind:debuff_card/verdant-leaf | blind.lua:650 | branch | Verdant Leaf — `self.name == 'Verdant Leaf' and not self.disabled and card.area ~= G.jokers` |  | unreviewed |  |  |  |  |
 | blind/fn/Blind:move | blind.lua:654-657 | function | `Blind:move(dt)` |  | n/a-ui |  |  |  | auto: UI/animation function by name; writes no game state |

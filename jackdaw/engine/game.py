@@ -698,6 +698,12 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
     played = [hand[i] for i in sorted(idx_set)]
     held = [c for i, c in enumerate(hand) if i not in idx_set]
     gs["hand"] = held
+    # G.play: the played cards stay in G.playing_cards while they are in
+    # play, so the passes over every playing card see them, e.g. the boss
+    # re-check that a joker or consumable's add_to_deck/remove_from_deck
+    # queues (set_blind(nil, true), blind.lua:207-210; G80).
+    resting_play = gs.get("played_cards_area")
+    gs["played_cards_area"] = played
     # Played cards are revealed (face-down draws from The House / The
     # Wheel / The Mark / The Fish flip up when they leave the hand).
     for c in played:
@@ -847,6 +853,12 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
     # ------------------------------------------------------------------
     discard_pile: list = gs.setdefault("discard_pile", [])
     discard_pile.extend(played)
+    # G.play is empty again; the key keeps its resting form (absent until a
+    # round ends, then an empty list).
+    if resting_play is None:
+        del gs["played_cards_area"]
+    else:
+        gs["played_cards_area"] = resting_play
 
     # ------------------------------------------------------------------
     # 9. Hand-type play counts are recorded INSIDE score_hand (Phase 4),
