@@ -1,0 +1,49 @@
+name: Nightly parity fuzz
+
+# Random runs played by the Rust engine and the Python oracle in lockstep
+# (tests/parity/fuzz.py): random decks, stakes, challenges, forced bosses and
+# joker boards. Every night uses new seeds; a divergence fails the shard and
+# its cases are uploaded as parity specs to replay.
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    steps:
+      - uses: actions/checkout@v7
+
+      # `uv sync` builds the jackdaw._core extension with maturin.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.98.1"
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: astral-sh/setup-uv@v10.3.2
+        with:
+          enable-cache: true
+
+      - run: uv sync --dev
+
+      - name: Lockstep fuzz
+        run: >-
+          uv run python -m tests.parity.fuzz --cases 250
+          --seed $(( ${{ github.run_number }} * 4 + ${{ matrix.shard }} ))
+          --save fuzz-divergences
+
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: fuzz-divergences-${{ matrix.shard }}
+          path: fuzz-divergences/
