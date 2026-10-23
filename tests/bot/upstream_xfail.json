@@ -1,0 +1,8 @@
+{
+  "tests/lua/endpoints/test_gamestate.py::TestGamestateBlinds::test_blinds_structure_extraction": "names only: a blind's tag_effect carries the tag's name, not its localized description (docs/balatrobot.md, Text fields)",
+  "tests/lua/endpoints/test_gamestate.py::TestGamestateCards::TestGamestateCardValue::test_card_value_effect_joker": "names only: value.effect carries the card's name, not its localized description (docs/balatrobot.md, Text fields)",
+  "tests/lua/endpoints/test_gamestate.py::TestGamestateCards::TestGamestateCardValue::test_card_value_effect_planet": "names only: value.effect carries the card's name, not its localized description (docs/balatrobot.md, Text fields)",
+  "tests/lua/endpoints/test_gamestate.py::TestGamestateCards::TestGamestateCardValue::test_card_value_effect_tarot": "names only: value.effect carries the card's name, not its localized description (docs/balatrobot.md, Text fields)",
+  "tests/lua/endpoints/test_screenshot.py::TestScreenshotEndpoint::test_screenshot_from_BLIND_SELECT": "the simulator has no renderer: screenshot always answers INTERNAL_ERROR 'Failed to encode screenshot'",
+  "tests/lua/endpoints/test_screenshot.py::TestScreenshotEndpoint::test_screenshot_from_MENU": "the simulator has no renderer: screenshot always answers INTERNAL_ERROR 'Failed to encode screenshot'"
+}
