@@ -78,6 +78,11 @@ Found while fixing the register; each is covered by a regression test in `tests/
   included (`eligible_strength_jokers` / `eligible_editionless_jokers`, card.lua:4209-4224); the
   oracle skipped debuffed jokers in both the use gate and the pick.
   Test: `tests/engine/audit/test_consumables.py::TestDebuffedJokersAreEligible`.
+- Joker Stencil scores only while a joker slot is empty (card.lua:3966-3972) and counts every
+  Stencil in G.jokers, debuffed ones included (card.lua:4203-4208); Swashbuckler sums the sell
+  value of every other joker, debuffed ones included (card.lua:4240-4248); a round's Chaos the
+  Clown free rerolls come from `find_joker`, which skips a debuffed Chaos (state_events.lua:311).
+  Test: `tests/engine/audit/test_jokers.py::TestPerFrameValues`.
 
 ## Not gameplay, but fix them
 

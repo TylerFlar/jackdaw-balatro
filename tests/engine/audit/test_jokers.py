@@ -349,6 +349,50 @@ class TestSettingBlind:
         assert [j.center_key for j in gs["jokers"]] == ["j_ceremonial"]
 
 
+class TestPerFrameValues:
+    """Values Card:update recomputes every frame (card.lua:4203-4248) count
+    every card in G.jokers, debuffed ones included."""
+
+    def test_stencil_needs_an_empty_slot(self):
+        """Joker Stencil scores only while G.jokers.config.card_limit -
+        #G.jokers.cards > 0 (card.lua:3966-3972), however many Stencils."""
+        gs = select_blind(new_run("AUDIT_STENCIL_FULL"))
+        for key in ("j_stencil", "j_stencil", "j_greedy_joker", "j_lusty_joker", "j_mad"):
+            give_joker(gs, key)
+        play(gs, give_card(gs, "S_2"))
+        assert gs["last_score_result"].total == 5 + 2  # High Card, no Stencil x
+
+    def test_stencil_counts_debuffed_stencils(self):
+        """x_mult = empty slots + every 'Joker Stencil' in G.jokers, debuffed
+        or not (card.lua:4203-4208)."""
+        gs = select_blind(new_run("AUDIT_STENCIL_DEBUFF"))
+        give_joker(gs, "j_stencil")
+        give_joker(gs, "j_stencil").debuff = True
+        give_joker(gs, "j_greedy_joker")
+        play(gs, give_card(gs, "S_2"))
+        # 5 slots - 3 jokers = 2 empty, + 2 Stencils = x4 from the live one
+        assert gs["last_score_result"].total == (5 + 2) * 4
+
+    def test_swashbuckler_counts_debuffed_jokers(self):
+        """Swashbuckler's mult sums the sell value of every other card in
+        G.jokers (card.lua:4240-4248)."""
+        gs = select_blind(new_run("AUDIT_SWASH"))
+        give_joker(gs, "j_swashbuckler")
+        other = give_joker(gs, "j_greedy_joker")
+        other.debuff = True
+        play(gs, give_card(gs, "S_2"))
+        assert gs["last_score_result"].total == (5 + 2) * (1 + other.sell_cost)
+
+    def test_chaos_free_reroll_skips_a_debuffed_chaos(self):
+        """new_round sets free_rerolls = #find_joker('Chaos the Clown')
+        (state_events.lua:311-313), and find_joker skips debuffed jokers."""
+        gs = new_run("AUDIT_CHAOS")
+        chaos = give_joker(gs, "j_chaos")
+        chaos.debuff = True
+        select_blind(gs)
+        assert gs["current_round"]["free_rerolls"] == 0
+
+
 class TestMrBones:
     def test_save_pays_no_blind_reward(self):
         """evaluate_round pays the blind only when G.GAME.chips >=

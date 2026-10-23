@@ -1223,20 +1223,20 @@ def _blackboard(card: Card, ctx: JokerContext) -> JokerResult | None:
 
 @register("j_stencil")
 def _stencil(card: Card, ctx: JokerContext) -> JokerResult | None:
-    """Joker Stencil: xMult = empty joker slots. Source: card.lua:3966.
+    """Joker Stencil: xMult = empty joker slots + Stencils.
 
-    Formula: ``joker_slots - joker_count + stencil_count`` where stencil_count
-    includes this stencil (so stencils don't count against empty slots).
+    Card:update keeps ``x_mult = (card_limit - #G.jokers.cards)`` plus one
+    per 'Joker Stencil' in G.jokers, debuffed ones included
+    (card.lua:4203-4208); calculate_joker returns it only while a slot is
+    empty (card.lua:3966-3972), however many Stencils there are.
     """
     if ctx.joker_main:
-        stencil_count = sum(
-            1
-            for j in (ctx.jokers or [])
-            if getattr(j, "center_key", None) == "j_stencil" and not getattr(j, "debuff", False)
-        )
-        x = ctx.game.joker_slots - ctx.game.joker_count + stencil_count
-        if x > 1:
-            return JokerResult(Xmult_mod=x)
+        empty = ctx.game.joker_slots - ctx.game.joker_count
+        if empty > 0:
+            stencils = sum(
+                1 for j in (ctx.jokers or []) if getattr(j, "center_key", None) == "j_stencil"
+            )
+            return JokerResult(Xmult_mod=empty + stencils)
     return None
 
 
@@ -2130,11 +2130,12 @@ def _baseball(card: Card, ctx: JokerContext) -> JokerResult | None:
 def _swashbuckler(card: Card, ctx: JokerContext) -> JokerResult | None:
     """Swashbuckler: +mult = sum of all other jokers' sell values.
 
-    Source: card.lua:4240 (computed in Card:update, not calculate_joker).
+    Source: card.lua:4240-4248 (computed in Card:update, not
+    calculate_joker): every other card in G.jokers, debuffed ones included.
     We compute it in joker_main since we don't have a game tick loop.
     """
     if ctx.joker_main and ctx.jokers:
-        sell_total = sum(j.sell_cost for j in ctx.jokers if j is not card and not j.debuff)
+        sell_total = sum(j.sell_cost for j in ctx.jokers if j is not card)
         if sell_total > 0:
             return JokerResult(mult_mod=sell_total)
     return None

@@ -585,14 +585,16 @@ class TestSwashbuckler:
         ctx = JokerContext(joker_main=True, jokers=jokers)
         assert calculate_joker(swash, ctx) is None
 
-    def test_excludes_debuffed(self):
+    def test_includes_debuffed(self):
+        """Card:update sums every other card in G.jokers, debuffed or not
+        (card.lua:4240-4248)."""
         swash = _joker("j_swashbuckler")
         j1 = _joker("j_joker", mult=4)
         j1.sell_cost = 5
         j1.debuff = True
         jokers = [swash, j1]
         ctx = JokerContext(joker_main=True, jokers=jokers)
-        assert calculate_joker(swash, ctx) is None
+        assert calculate_joker(swash, ctx).mult_mod == 5
 
     def test_pipeline_with_other_jokers(self):
         """Swashbuckler in pipeline adds sell value sum as mult."""
