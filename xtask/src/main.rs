@@ -123,10 +123,16 @@ fn lua_oracles() -> Result<(), String> {
     if !status.success() {
         return Err("scripts/extract_game_tables.lua failed".to_owned());
     }
-    let oracles = [(
-        "scripts/luajit_rng_oracle.lua",
-        "tests/fixtures/rng_luajit.json",
-    )];
+    let oracles = [
+        (
+            "scripts/luajit_rng_oracle.lua",
+            "tests/fixtures/rng_luajit.json",
+        ),
+        (
+            "scripts/luajit_hand_eval_oracle.lua",
+            "tests/fixtures/hand_eval_luajit.json",
+        ),
+    ];
     for (script, fixture) in oracles {
         let output = process::Command::new("luajit")
             .arg(root.join(script))
