@@ -81,8 +81,9 @@ jackdaw/
     balatro_env.py    BalatroEnvironment — factored action interface
     gymnasium_wrapper.py  BalatroGymnasiumEnv — SB3-compatible flat Discrete + action masking
     observation.py    Entity-based encoding (235-dim global + variable entities)
-    action_space.py   21-type factored action space
-    game_interface.py GameAdapter protocol (DirectAdapter, BridgeAdapter)
+    vector_env.py     BalatroVectorEnv — many envs stepped in parallel in Rust
+    action_space.py   23-type factored action space
+    game_interface.py GameAdapter protocol (DirectAdapter, OracleAdapter, BridgeAdapter)
     agents.py         Agent protocol + RandomAgent baseline
 
   bridge/           Validation bridge to live Balatro via BalatroBot

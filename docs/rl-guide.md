@@ -28,6 +28,8 @@ while not (terminated or truncated):
 
 That's the whole interface. The rest of this page explains what `obs`, `mask`, and `action` actually look like so you can wire them into your model.
 
+`DirectAdapter` runs the game on the Rust engine (`jackdaw.core.Game`), the one to train on. `OracleAdapter` runs the same game on the Python reference engine, roughly ten times slower; it is kept for checking the two engines against each other.
+
 ## Observations
 
 `obs` is a `GameObservation` with two fields:
@@ -71,7 +73,7 @@ This encoding works naturally with transformers, set encoders, or pointer networ
 `mask` is a `GameActionMask` that tells you what's legal right now:
 
 ```python
-mask.type_mask        # np.ndarray, shape (21,) bool — which action types are legal
+mask.type_mask        # np.ndarray, shape (23,) bool — which action types are legal
 mask.card_mask        # np.ndarray, shape (N_hand,) bool — which hand cards can be selected
 mask.entity_masks     # dict[int, np.ndarray] — per action type, which entities are legal targets
 mask.min_card_select  # int — minimum cards to select (for play/discard)
@@ -89,13 +91,13 @@ Actions are `FactoredAction` with three components:
 from jackdaw.env import FactoredAction
 
 action = FactoredAction(
-    action_type=0,                  # int: which action (0-20)
+    action_type=0,                  # int: which action (0-22)
     card_target=(0, 2, 4),          # tuple[int, ...] | None: hand card indices
     entity_target=None,             # int | None: entity index
 )
 ```
 
-### The 21 Action Types
+### The 23 Action Types
 
 | ID | Name | Targets | When |
 |----|------|---------|------|
@@ -120,8 +122,12 @@ action = FactoredAction(
 | 18 | SwapHandRight | entity_target (card index) | Playing phase |
 | 19 | SortHandRank | — | Playing phase |
 | 20 | SortHandSuit | — | Playing phase |
+| 21 | RerollBoss | — | Blind select, with Director's Cut or Retcon ($10) |
+| 22 | BuyAndUse | entity_target (shop index) | Shop: buy a consumable and use it at once |
 
-`UseConsumable` and `PickPackCard` take a `card_target` when the consumable works on hand cards (The Magician, Death, Aura...). Bound it with `get_consumable_target_info(card)`, which returns `(min_cards, max_cards, needs_targets)`. Leave `card_target` as `None` to get the engine's default selection: the lowest-index legal cards.
+Types 21 and 22 were added after the first 21, so ids 0-20 keep their meaning; a policy with one logit per type needs two more outputs.
+
+`UseConsumable` and `PickPackCard` take a `card_target` when the consumable works on hand cards (The Magician, Death, Aura...). Bound it with `get_consumable_target_info(card)`, which returns `(min_cards, max_cards, needs_targets)`; on the Rust engine, `jackdaw.env.rust_env.consumable_target_info(info["game"], "consumables", index)` (or `"pack_cards"`) returns the same. Leave `card_target` as `None` to get the engine's default selection: the lowest-index legal cards.
 
 ## Environment Config
 
@@ -145,10 +151,12 @@ With `end_on_win=True` (the default) a won run ends the episode, as vanilla stop
 ```python
 info["prev_state"]  # GameState snapshot taken before this step
 info["state"]       # GameState snapshot taken after this step
-info["raw_state"]   # the live engine state dict
+info["game"]        # the run itself, a jackdaw.core.Game (DirectAdapter)
 ```
 
-`GameState` is a small frozen snapshot: `phase`, `ante`, `round`, `dollars`, `hands_left`, `discards_left`, `hand_size`, `joker_slots`, `consumable_slots`, `blind_on_deck`, `blind_chips`, `chips`, `won`, `done`. Compare `prev_state` with `state` for before/after deltas. `raw_state` is the engine's own dict, which the next step mutates in place, so read from it immediately and don't hold on to it.
+`GameState` is a small frozen snapshot: `phase`, `ante`, `round`, `dollars`, `hands_left`, `discards_left`, `hand_size`, `joker_slots`, `consumable_slots`, `blind_on_deck`, `blind_chips`, `chips`, `won`, `done`. Compare `prev_state` with `state` for before/after deltas. `info["game"]` is the live run, which the next step moves on, so read from it immediately or keep `info["game"].freeze()`. On the Python engine's adapters (`OracleAdapter`, `BridgeAdapter`) `info["raw_state"]`, the engine's state dict, takes its place.
+
+A step the Rust engine can't take yet leaves the run unchanged and ends the episode as truncated, with the reason in `info["not_ported"]`.
 
 The easiest route is a reward function from `jackdaw.env.rewards` (see [Rewards](#rewards)). Wrap each step in a `Transition`:
 
@@ -250,7 +258,7 @@ If you want to use standard RL libraries like Stable-Baselines3 instead of writi
 
 The wrapper sits between SB3 and the factored `BalatroEnvironment`:
 
-1. **Action flattening**: Each step, it enumerates all legal `FactoredAction` instances from the `ActionMask` into a flat list. The agent picks an index into this list. Card-selecting actions enumerate all legal card combinations up to a budget of 200 per action: PlayHand and Discard, plus each targeting Tarot/Spectral used from the consumable slots or picked from a pack. If the combinatorial space exceeds the budget, subsets are randomly sampled.
+1. **Action flattening**: Each step, it enumerates all legal `FactoredAction` instances from the `ActionMask` into a flat list. The agent picks an index into this list. Card-selecting actions enumerate all legal card combinations up to a budget of 200 per action: PlayHand and Discard, plus each targeting Tarot/Spectral used from the consumable slots or picked from a pack. If the combinatorial space exceeds the budget, subsets are randomly sampled, as is the whole list when it exceeds 500 actions. The sampler is a xoshiro256** generator seeded by `reset(seed=...)`, the same in Python and Rust.
 
 2. **Action masking**: The `action_masks()` method returns a `bool[500]` array — `True` for indices that map to a legal action, `False` for padding. MaskablePPO uses this to zero out logits for illegal actions.
 
@@ -322,7 +330,8 @@ A reward function receives a `Transition`:
 t.prev, t.curr          # GameState snapshots before / after the action
 t.action                # the FactoredAction taken
 t.terminated, t.truncated, t.done
-t.raw_state             # live engine dict after the step (read now, don't keep)
+t.game                  # the run after the step, a jackdaw.core.Game (DirectAdapter)
+t.raw_state             # the Python engine's dict instead (OracleAdapter, BridgeAdapter)
 
 # Derived events
 t.blind_beaten          # this step's hand cleared a blind
@@ -374,9 +383,34 @@ At episode end, the `info` dict returned by `step()` includes:
 info["balatro/ante_reached"]    # int — highest ante reached this episode
 info["balatro/rounds_beaten"]   # int — blinds beaten (skipped blinds don't count)
 info["balatro/won"]             # bool — whether the run was won
+info["balatro/not_ported"]      # str — only when the Rust engine couldn't take the step
 ```
 
 These are tracked the same way whatever reward function is in use, and are useful for custom callbacks or logging.
+
+## Vector Environment
+
+`BalatroVectorEnv` is a `gymnasium.vector.VectorEnv` of `num_envs` Gym environments stepped together in Rust: one `step` runs them all on worker threads with the GIL released and writes the observations and action masks straight into numpy arrays. On a 16-core machine it runs about 350K steps per second on 8 threads, against about 75K for one `BalatroGymnasiumEnv`.
+
+```python
+import numpy as np
+from jackdaw.env import BalatroVectorEnv
+
+envs = BalatroVectorEnv(num_envs=256, num_threads=8, reward_shaping=True)
+obs, info = envs.reset(seed=0)
+masks = info["action_mask"]                    # (256, 500) bool, also envs.action_masks()
+
+for _ in range(1000):
+    actions = np.array([np.random.choice(np.flatnonzero(m)) if m.any() else 0 for m in masks])
+    obs, rewards, terminated, truncated, info = envs.step(actions)
+    masks = info["action_mask"]
+```
+
+- Sub-env `i` plays exactly as `BalatroGymnasiumEnv(DirectAdapter, seed_prefix=f"{seed_prefix}_{i}")` with the same arguments; `reset(seed=s)` gives it seed `s + i`. The results don't depend on the number of threads.
+- Episodes reset on the step after they end (gymnasium's `AutoresetMode.NEXT_STEP`): that step ignores the env's action and returns the new episode's first observation with reward 0. Until then the ended env's mask is all False.
+- The rewards are computed in Rust, so only the built-in ones are available: `sparse_reward` (the default), `blind_progress_reward` and `ShapedReward` with any weights.
+- The episode-end metrics come as arrays with gymnasium's `_key` masks: `info["balatro/won"]` and `info["_balatro/won"]`, and so on.
+- `copy=False` returns views of buffers the next step overwrites, skipping a copy per step.
 
 ## Live Validation Adapter
 
