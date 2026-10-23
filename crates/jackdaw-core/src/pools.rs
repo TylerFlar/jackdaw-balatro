@@ -148,11 +148,14 @@ impl Game {
         legendary: bool,
         append: &str,
     ) -> Pool {
-        let ante = crate::lua::tostring_number(self.gs.round_resets.ante);
+        let ante = self.gs.round_resets.ante;
         let (start, key): (&'static [CenterId], String) = if ty == PoolType::Joker {
             let roll = match rarity {
                 Some(r) => r,
-                None => self.gs.rng.random(&format!("rarity{ante}{append}")),
+                None => self
+                    .gs
+                    .rng
+                    .random(&crate::rng::Key::new("rarity").n(ante).s(append)),
             };
             let r = if legendary {
                 4
@@ -198,12 +201,7 @@ impl Game {
                         .and_then(crate::hand_eval::HandType::from_name);
                     add = !softlock || hand.is_some_and(|h| self.gs.hand(h).played > 0.0);
                 } else if let Some(gate) = v.enhancement_gate {
-                    add = self.playing_card_ids().into_iter().any(|pc| {
-                        self.gs
-                            .areas
-                            .card(pc)
-                            .is_some_and(|c| c.center.key() == gate)
-                    });
+                    add = self.playing_cards().any(|c| c.center.key() == gate);
                 } else {
                     add = true;
                 }
@@ -234,7 +232,7 @@ impl Game {
         let key = if legendary {
             key
         } else {
-            format!("{key}{ante}")
+            crate::rng::Key::new(&key).n(ante).to_string()
         };
         Pool { entries, key }
     }
@@ -256,7 +254,10 @@ impl Game {
         let mut it = 1;
         while pick.is_none() {
             it += 1;
-            let seed = self.gs.rng.seed(&format!("{}_resample{it}", pool.key));
+            let seed = self
+                .gs
+                .rng
+                .seed(&crate::rng::Key::new(&pool.key).s("_resample").i(it));
             pick = pool.entries[crate::rng::element_index(n, seed)];
         }
         pick.expect("resampled")
@@ -387,20 +388,28 @@ impl Game {
             mut forced,
             append,
         } = spec;
-        let ante = crate::lua::tostring_number(self.gs.round_resets.ante);
+        let ante = self.gs.round_resets.ante;
         if forced.is_none() && soulable && !self.gs.sets.banned_keys.contains("c_soul") {
             let showman = self.has_joker("Showman");
             if matches!(
                 ty,
                 PoolType::Tarot | PoolType::Spectral | PoolType::TarotPlanet
             ) && !(self.gs.sets.used_jokers.contains("c_soul") && !showman)
-                && self.gs.rng.random(&format!("soul_{}{ante}", ty.name())) > 0.997
+                && self
+                    .gs
+                    .rng
+                    .random(&crate::rng::Key::new("soul_").s(ty.name()).n(ante))
+                    > 0.997
             {
                 forced = Some(centers::C_SOUL);
             }
             if matches!(ty, PoolType::Planet | PoolType::Spectral)
                 && !(self.gs.sets.used_jokers.contains("c_black_hole") && !showman)
-                && self.gs.rng.random(&format!("soul_{}{ante}", ty.name())) > 0.997
+                && self
+                    .gs
+                    .rng
+                    .random(&crate::rng::Key::new("soul_").s(ty.name()).n(ante))
+                    > 0.997
             {
                 forced = Some(centers::C_BLACK_HOLE);
             }
@@ -422,7 +431,7 @@ impl Game {
             }
         };
         let front = if matches!(ty, PoolType::Base | PoolType::Enhanced) {
-            Some(self.random_front(&format!("front{append}{ante}")))
+            Some(self.random_front(&crate::rng::Key::new("front").s(append).n(ante)))
         } else {
             None
         };
@@ -435,7 +444,7 @@ impl Game {
             if matches!(area, AreaId::ShopJokers | AreaId::PackCards) {
                 let pack = area == AreaId::PackCards;
                 let key = if pack { "packetper" } else { "etperpoll" };
-                let poll = self.gs.rng.random(&format!("{key}{ante}"));
+                let poll = self.gs.rng.random(&crate::rng::Key::new(key).n(ante));
                 if self.gs.modifier("enable_eternals_in_shop").is_some() && poll > 0.7 {
                     card.set_eternal(true);
                 } else if self.gs.modifier("enable_perishables_in_shop").is_some()
@@ -446,12 +455,17 @@ impl Game {
                 }
                 let key = if pack { "packssjr" } else { "ssjr" };
                 if self.gs.modifier("enable_rentals_in_shop").is_some()
-                    && self.gs.rng.random(&format!("{key}{ante}")) > 0.7
+                    && self.gs.rng.random(&crate::rng::Key::new(key).n(ante)) > 0.7
                 {
                     card.set_rental(true, &cost);
                 }
             }
-            let edition = self.poll_edition(&format!("edi{append}{ante}"), 1.0, false, false);
+            let edition = self.poll_edition(
+                &crate::rng::Key::new("edi").s(append).n(ante),
+                1.0,
+                false,
+                false,
+            );
             card.set_edition(edition, &cost);
         }
         card

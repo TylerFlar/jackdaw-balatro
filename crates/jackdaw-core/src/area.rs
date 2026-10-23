@@ -81,6 +81,16 @@ impl AreaId {
 
     /// Areas that hold playing cards between steps (`G.playing_cards` lives in these).
     pub const PLAYING: [AreaId; 4] = [AreaId::Deck, AreaId::Hand, AreaId::Discard, AreaId::Play];
+
+    /// Every other area: the jokers, consumables, shop and pack.
+    pub const NOT_PLAYING: [AreaId; 6] = [
+        AreaId::Jokers,
+        AreaId::Consumables,
+        AreaId::ShopJokers,
+        AreaId::ShopVouchers,
+        AreaId::ShopBooster,
+        AreaId::PackCards,
+    ];
 }
 
 impl Areas {
@@ -114,9 +124,22 @@ impl Areas {
         }
     }
 
-    /// The area and index of the card with this sort id.
+    /// The area and index of the card with this sort id. A card is in one area only, so the
+    /// search order is free: the small areas most lookups are for come first, the deck last.
     pub fn locate(&self, sort_id: u32) -> Option<(AreaId, usize)> {
-        AreaId::ALL.into_iter().find_map(|a| {
+        const ORDER: [AreaId; 10] = [
+            AreaId::Hand,
+            AreaId::Play,
+            AreaId::Jokers,
+            AreaId::Consumables,
+            AreaId::PackCards,
+            AreaId::ShopJokers,
+            AreaId::ShopVouchers,
+            AreaId::ShopBooster,
+            AreaId::Discard,
+            AreaId::Deck,
+        ];
+        ORDER.into_iter().find_map(|a| {
             self.get(a)
                 .iter()
                 .position(|c| c.sort_id == sort_id)

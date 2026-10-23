@@ -124,10 +124,7 @@ impl Game {
     /// `new_round`'s nested event (state_events.lua:340-349).
     pub(crate) fn new_round_shuffle(&mut self) {
         self.set_state(LuaState::DrawToHand, self.rt.state_complete);
-        let key = format!(
-            "nr{}",
-            crate::lua::tostring_number(self.gs.round_resets.ante)
-        );
+        let key = crate::rng::Key::new("nr").n(self.gs.round_resets.ante);
         self.gs.areas.shuffle(AreaId::Deck, &mut self.gs.rng, &key);
         self.rt.state_complete = false;
     }

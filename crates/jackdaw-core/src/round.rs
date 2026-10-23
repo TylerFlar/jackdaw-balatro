@@ -35,7 +35,8 @@ impl Game {
             self.gs.won = true;
         }
         if game_over {
-            self.set_state(LuaState::GameOver, false);
+            // The rent and the self-destructions queued above never run (G265).
+            self.game_over();
             return;
         }
         self.gs.unused_discards += self.gs.current_round.discards_left;
@@ -223,10 +224,12 @@ impl Game {
 
     /// The playing cards a per-round pick draws from: everything but Stone Cards, by sort id.
     fn non_stone_cards(&self) -> Vec<u32> {
-        let mut ids: Vec<u32> = self
-            .playing_card_ids()
+        // Marble's pending stones are Stone Cards: the areas hold every other playing card.
+        let mut ids: Vec<u32> = AreaId::PLAYING
             .into_iter()
-            .filter(|&id| self.gs.areas.card(id).is_some_and(|c| !c.is_stone()))
+            .flat_map(|a| self.gs.areas.get(a).iter())
+            .filter(|c| !c.is_stone())
+            .map(|c| c.sort_id)
             .collect();
         ids.sort_unstable();
         ids
@@ -234,10 +237,7 @@ impl Game {
 
     /// `pseudoseed(key .. ante)`.
     fn ante_seed(&mut self, key: &str) -> f64 {
-        let k = format!(
-            "{key}{}",
-            crate::lua::tostring_number(self.gs.round_resets.ante)
-        );
+        let k = crate::rng::Key::new(key).n(self.gs.round_resets.ante);
         self.gs.rng.seed(&k)
     }
 
@@ -381,9 +381,8 @@ impl Game {
 
     /// Cloud 9's `nine_tally` (per frame, card.lua:4191-4196): playing cards with rank 9.
     pub(crate) fn nine_tally(&self) -> f64 {
-        self.playing_card_ids()
-            .into_iter()
-            .filter(|&id| self.gs.areas.card(id).and_then(|c| c.get_id()) == Some(9))
+        self.playing_cards()
+            .filter(|c| c.get_id() == Some(9))
             .count() as f64
     }
 }

@@ -18,10 +18,12 @@ use crate::state::BlindSlot;
 impl Game {
     /// `G.FUNCS.cash_out`: the round's money, then the shop.
     pub(crate) fn cash_out(&mut self) {
-        let ante = crate::lua::tostring_number(self.gs.round_resets.ante);
-        self.gs
-            .areas
-            .shuffle(AreaId::Deck, &mut self.gs.rng, &format!("cashout{ante}"));
+        let ante = self.gs.round_resets.ante;
+        self.gs.areas.shuffle(
+            AreaId::Deck,
+            &mut self.gs.rng,
+            &crate::rng::Key::new("cashout").n(ante),
+        );
         self.queue(Event::CashOutBody);
         // `ease_dollars(G.GAME.current_round.dollars)`. Lua keeps the amount in
         // `current_round.dollars` until the next round's evaluation; the snapshot's
@@ -108,11 +110,11 @@ impl Game {
             self.apply_tags_store_joker_modify(&card);
             return card;
         }
-        let ante = crate::lua::tostring_number(self.gs.round_resets.ante);
+        let ante = self.gs.round_resets.ante;
         let g = &self.gs;
         let total =
             g.joker_rate + g.tarot_rate + g.planet_rate + g.playing_card_rate + g.spectral_rate;
-        let polled = self.gs.rng.random(&format!("cdt{ante}")) * total;
+        let polled = self.gs.rng.random(&crate::rng::Key::new("cdt").n(ante)) * total;
         let illusion = self.gs.sets.used_vouchers.contains("v_illusion");
         // The table's entries are built before the loop, so Illusion's roll always happens.
         let playing = if illusion && self.gs.rng.random("illusion") > 0.6 {
@@ -171,8 +173,8 @@ impl Game {
             .filter(|&&c| fits(c) && !banned(c))
             .map(|&c| weight(c))
             .sum();
-        let ante = crate::lua::tostring_number(self.gs.round_resets.ante);
-        let poll = self.gs.rng.random(&format!("{key}{ante}")) * cume;
+        let ante = self.gs.round_resets.ante;
+        let poll = self.gs.rng.random(&crate::rng::Key::new(key).n(ante)) * cume;
         let mut it = 0.0;
         for &c in POOL_BOOSTER.iter() {
             if banned(c) {

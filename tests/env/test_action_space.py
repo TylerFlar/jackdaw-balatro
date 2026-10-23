@@ -511,6 +511,44 @@ class TestMaskGameOver:
         assert not mask.type_mask.any()
 
 
+class TestMaskReordering:
+    """G206: a drag reorders the jokers in every phase and the hand whenever it
+    holds cards (cardarea.lua:214-227, 436-465, 509-529)."""
+
+    @pytest.mark.parametrize(
+        "state",
+        [_blind_select_state, _selecting_hand_state, _round_eval_state, _shop_state,
+         _pack_opening_state],
+    )  # fmt: skip
+    def test_jokers_reorder_in_every_phase(self, state):
+        mask = get_action_mask(state(jokers=_make_jokers(3)))
+        assert mask.entity_masks[ActionType.SwapJokersLeft].tolist() == [False, True, True]
+        assert mask.entity_masks[ActionType.SwapJokersRight].tolist() == [True, True, False]
+
+    def test_a_packs_dealt_hand_reorders_but_is_not_sorted(self):
+        mask = get_action_mask(_pack_opening_state(hand=_make_hand(4)))
+        assert mask.entity_masks[ActionType.SwapHandLeft].tolist() == [False, True, True, True]
+        assert mask.entity_masks[ActionType.SwapHandRight].tolist() == [True, True, True, False]
+        assert not mask.type_mask[ActionType.SortHandRank]
+        assert not mask.type_mask[ActionType.SortHandSuit]
+
+    def test_a_pack_without_a_hand_has_no_hand_swap(self):
+        mask = get_action_mask(_pack_opening_state(jokers=_make_jokers(2)))
+        assert mask.type_mask[ActionType.SwapJokersLeft]
+        assert not mask.type_mask[ActionType.SwapHandLeft]
+        assert not mask.type_mask[ActionType.SwapHandRight]
+
+    def test_entity_masks_follow_the_legal_list_order(self):
+        """The swaps come last in these phases, as in the engines' legal lists."""
+        gs = _pack_opening_state(hand=_make_hand(3), jokers=_make_jokers(2))
+        assert list(get_action_mask(gs).entity_masks)[-4:] == [
+            ActionType.SwapHandLeft,
+            ActionType.SwapHandRight,
+            ActionType.SwapJokersLeft,
+            ActionType.SwapJokersRight,
+        ]
+
+
 class TestMaskEmptyEntities:
     def test_empty_jokers_no_sell(self):
         gs = _shop_state(jokers=[])

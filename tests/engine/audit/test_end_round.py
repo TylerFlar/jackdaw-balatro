@@ -3,7 +3,39 @@
 
 from __future__ import annotations
 
-from ._joker_helpers import discard, give_card, give_joker, new_run, select_blind, win_round
+from jackdaw.engine.actions import GamePhase, PlayHand
+from jackdaw.engine.game import step
+
+from ._joker_helpers import (
+    bot_add,
+    discard,
+    give_card,
+    give_joker,
+    new_run,
+    select_blind,
+    win_round,
+)
+
+
+def test_a_lost_round_runs_none_of_end_rounds_events() -> None:
+    """G265: losing, end_round sets GAME_OVER and the game pauses in the same
+    frame (update_game_over, game.lua:2601, after the event pass at 2509): the
+    rent's ease_dollars (card.lua:2271-2276) and Gros Michel's removal event
+    (card.lua:3021-3036) never run. The perishable tick (card.lua:2278-2289)
+    and the extinction flag (card.lua:3037) happen at once."""
+    gs = select_blind(new_run("G265S002"))
+    bot_add(gs, "j_gros_michel")
+    bot_add(gs, "j_chaos", rental=True, perishable=True)
+    gs["jokers"][-1].ability["perish_tally"] = 3
+    gs["current_round"]["hands_left"] = 1
+    low = min(range(len(gs["hand"])), key=lambda i: gs["hand"][i].base.id)
+    dollars = gs["dollars"]
+    step(gs, PlayHand((low,)))
+    assert gs["phase"] == GamePhase.GAME_OVER
+    assert gs["dollars"] == dollars
+    assert [j.center_key for j in gs["jokers"]] == ["j_gros_michel", "j_chaos"]
+    assert gs["jokers"][1].ability["perish_tally"] == 2
+    assert gs["pool_flags"]["gros_michel_extinct"] is True
 
 
 def test_a_perishing_drunkards_discard_counts_as_unused() -> None:

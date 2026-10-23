@@ -127,6 +127,8 @@ pub struct Runtime {
     pub unported: Option<String>,
     /// Card-area settings that only BalatroBot's view reads.
     pub areas: AreaMemo,
+    /// The queue's length when the running event started: what it has queued since is behind.
+    pub event_base: usize,
 }
 
 /// What BalatroBot's gamestate view reads from the `CardArea` objects themselves
@@ -225,6 +227,15 @@ impl Game {
             ..Runtime::default()
         };
         let mut game = Game { gs, rt };
+        // Card:update's perma_debuff line (card.lua:4158), for a snapshot that was edited:
+        // the engine itself never leaves such a card undebuffed (`update_cards`).
+        for a in AreaId::PLAYING {
+            for c in game.gs.areas.get_mut(a) {
+                if c.ability.perma_debuff {
+                    c.debuff = true;
+                }
+            }
+        }
         game.update_cards();
         game
     }
@@ -245,6 +256,20 @@ impl Game {
     /// Queue an event (`G.E_MANAGER:add_event`).
     pub fn queue(&mut self, event: Event) {
         self.rt.queue.push_back(event);
+    }
+
+    /// A losing `end_round`'s event sets `G.STATE = G.STATES.GAME_OVER`. The same frame's
+    /// `update_game_over` pauses the game (`G.SETTINGS.paused = true`, game.lua:2601, after
+    /// the event pass at 2509, in which that blocking event already blocked everything behind
+    /// it), and a paused game never runs an event queued before the pause (`pause_skip`,
+    /// event.lua): what the event queued never happens. A losing end_round charges no rent,
+    /// destroys no joker and changes no hand size (G265). Events queued before it (a joker's
+    /// removal from the last hand and its boss re-debuff) keep their place: in the game their
+    /// timers fire while the hand's cards are still being drawn to the discard pile.
+    pub(crate) fn game_over(&mut self) {
+        let base = self.rt.event_base.min(self.rt.queue.len());
+        self.rt.queue.truncate(base);
+        self.set_state(LuaState::GameOver, false);
     }
 
     /// Set `G.STATE` and `G.STATE_COMPLETE`.
@@ -268,6 +293,7 @@ impl Game {
                 .expect("the event loop did not settle");
             let ran = match self.rt.queue.pop_front() {
                 Some(event) => {
+                    self.rt.event_base = self.rt.queue.len();
                     self.run_event(event);
                     true
                 }
@@ -292,13 +318,17 @@ impl Game {
     /// pile and play area), by sort id. Lua's list is in insertion order, which no game rule
     /// depends on: its users count, test membership, or pick by sort id.
     pub fn playing_card_ids(&self) -> Vec<u32> {
-        let mut cards: Vec<u32> = AreaId::PLAYING
-            .into_iter()
-            .flat_map(|a| self.gs.areas.get(a).iter())
-            .chain(self.gs.sim.pending_deck_bottom.iter())
-            .map(|c| c.sort_id)
-            .collect();
+        let mut cards: Vec<u32> = self.playing_cards().map(|c| c.sort_id).collect();
+        cards.extend(self.gs.sim.pending_deck_bottom.iter().map(|c| c.sort_id));
         cards.sort_unstable();
         cards
+    }
+
+    /// The playing cards in the areas (the deck, hand, discard pile and play), area by area:
+    /// `G.playing_cards` but Marble's pending stones, for passes whose order doesn't matter.
+    pub fn playing_cards(&self) -> impl Iterator<Item = &crate::card::Card> {
+        AreaId::PLAYING
+            .into_iter()
+            .flat_map(|a| self.gs.areas.get(a).iter())
     }
 }

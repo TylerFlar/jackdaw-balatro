@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import random
 import zlib
+from collections import Counter
 from typing import Any
 
 import numpy as np
@@ -297,3 +298,53 @@ def test_balatrobot_masks_narrow_the_vanilla_ones(spec) -> None:
             engine.step(action)
         except Exception:
             break
+
+
+_SWAPS = (
+    ActionType.SwapJokersLeft,
+    ActionType.SwapJokersRight,
+    ActionType.SwapHandLeft,
+    ActionType.SwapHandRight,
+)
+
+
+def test_balatrobot_reorders_only_where_rearrange_works() -> None:
+    """G206: vanilla reorders the jokers in every phase and the hand whenever it
+    holds cards. BalatroBot's ``rearrange`` takes SELECTING_HAND, SHOP and
+    SMODS_BOOSTER_OPENED (rearrange.lua's requires_state), so the BALATROBOT mask
+    drops the swaps at blind select and round eval and keeps vanilla's elsewhere."""
+    seen: Counter[str] = Counter()
+    for spec in _SPECS[::10]:
+        engine = PyEngine(spec.start, spec.setup)
+        for pos, action in enumerate(spec.tape[:120]):
+            snap = engine.snapshot()
+            phase = snap["phase"]
+            if phase == "game_over":
+                break
+            game = _core.Game.from_snapshot(json.dumps(canon.to_json_compatible(snap)))
+            vanilla = action_mask_from_parts(game.action_mask())
+            bot = action_mask_from_parts(game.action_mask("balatrobot"))
+            for t in _SWAPS:
+                where = f"{spec.name}@{pos} {phase} {t.name}"
+                if not vanilla.type_mask[t]:
+                    assert not bot.type_mask[t], where
+                    continue
+                seen[f"{phase}:{t.name}"] += 1
+                if phase in ("blind_select", "round_eval"):
+                    assert not bot.type_mask[t] and t not in bot.entity_masks, where
+                else:
+                    assert bot.type_mask[t], where
+                    assert np.array_equal(bot.entity_masks[t], vanilla.entity_masks[t]), where
+            try:
+                engine.step(action)
+            except Exception:
+                break
+    for phase, kinds in (
+        ("blind_select", ("SwapJokersLeft",)),
+        ("round_eval", ("SwapJokersLeft",)),
+        ("pack_opening", ("SwapJokersLeft", "SwapHandLeft")),
+        ("shop", ("SwapJokersLeft",)),
+        ("selecting_hand", ("SwapJokersLeft", "SwapHandLeft")),
+    ):
+        for kind in kinds:
+            assert seen[f"{phase}:{kind}"], (phase, kind, dict(seen))

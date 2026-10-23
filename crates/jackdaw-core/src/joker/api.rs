@@ -190,15 +190,12 @@ impl Game {
 
     /// `#G.playing_cards`.
     pub fn playing_card_count(&self) -> usize {
-        self.playing_card_ids().len()
+        self.playing_cards().count() + self.gs.sim.pending_deck_bottom.len()
     }
 
     /// Cards of `G.playing_cards` matching `f`.
     pub fn count_playing_cards(&self, f: impl Fn(&Card) -> bool) -> f64 {
-        self.playing_card_ids()
-            .into_iter()
-            .filter(|&id| self.gs.areas.card(id).is_some_and(&f))
-            .count() as f64
+        self.playing_cards().filter(|c| f(c)).count() as f64
     }
 
     /// Steel Joker's `steel_tally` (card.lua:4185-4190).

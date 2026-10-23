@@ -91,7 +91,13 @@ drawn later are still placed by rank, in the live game and in the simulator alik
 - Aura through `use`: its config has no `max_highlighted`, so `use.lua` never highlights a target
   and the card can't be used (`pack` special-cases it, so an Aura pick works);
 - buying, or picking from a pack, a Negative joker at full joker slots (the bot compares the count
-  with the limit and has no Negative exception).
+  with the limit and has no Negative exception);
+- reordering the jokers at blind select and on the cash-out screen: vanilla's drag works at every
+  decision point (`CardArea:align_cards` re-sorts the jokers by position in any state; gaps.md
+  G206), but `rearrange` requires `SELECTING_HAND`, `SHOP` or `SMODS_BOOSTER_OPENED`. Inside a pack
+  the two agree: the jokers, and an Arcana or Spectral pack's dealt hand, can be reordered. The
+  consumables can be dragged too, and `rearrange` takes them, but no rule reads their order, so
+  the engine has no move for it.
 
 **BalatroBot allows, vanilla forbids.** The live endpoints call `G.FUNCS` directly and skip two
 UI gates. The simulator keeps vanilla's rules and refuses, with `NOT_ALLOWED`:
@@ -199,9 +205,31 @@ BalatroBot's names and codes: `INTERNAL_ERROR` -32000, `BAD_REQUEST` -32001, `IN
 
 Besides the policy above:
 
-- **Timing.** The live endpoints answer once the game's events settle; the simulator settles
-  every request at once. A live request can hang where the simulator answers: `skip` with a tag
-  that opens a pack waits for `BLIND_SELECT` live; the simulator returns the open pack.
+- **Timing.** The live endpoints answer once the game reaches the state they wait for; the
+  simulator settles every request at once. A live request can hang where the simulator answers:
+  `skip` with a tag that opens a pack waits for `BLIND_SELECT` live; the simulator returns the
+  open pack. A live answer can also come before the game's queued events have run: `cash_out`
+  answers once the shop has its cards, before a tag's shop effect (the D6 Tag's free reroll, the
+  Voucher Tag's voucher, the edition tags) has run in its animated events, and the lockstep reads
+  `gamestate` again until it settles (`docs/live.md`). The `play` that beats a boss can answer
+  before the round evaluation's `Blind:defeat` has run (from a run's second round, below), and
+  `defeat` lifts the boss's debuffs with `set_blind(nil)` in an event 0.95 × 1.3 s after it
+  (`blind.lua:296-343`). That answer can still show The Manacle's lost hand size, Amber Acorn's
+  face-down jokers, the cards the boss debuffed, and Crimson Heart's joker still debuffed,
+  without its passive (Juggler's hand size, Drunkard's discard, Chaos the Clown's free
+  reroll); the next answer has them undone (BB-BOSS-DEFEAT). The simulator's answer has them
+  undone already. When that boss wins the run, `win_game` pauses the game at the win screen
+  (`G.SETTINGS.paused = true`) before the defeat's events run: until the player goes on in
+  endless mode, the live game keeps showing the boss's debuffs.
+- **`play` can answer before the round's total is set.** `play` waits for the round
+  evaluation's first row and a `cash_out_button`. But `cash_out` leaves the button's UIBox in
+  `G.I.UIBOX` (it is a minor of `G.round_eval`, not a child), so from a run's second round on
+  the old button is found at once, and `play` answers before the last row sets
+  `G.GAME.current_round.dollars` (`common_events.lua:1087`). A `cash_out` sent at once pays
+  the previous round's total. `LiveBackend` leaves `cash_out_wait` (1 s) between the
+  previous answer and a `cash_out`; the lockstep reconciles the money if it happens anyway
+  (BB-CASHOUT-RACE). A player can't cash out before the button is up, and the simulator
+  pays the round's own total.
 - **`screenshot`** always fails with `Failed to encode screenshot` (nothing is drawn).
 - **`add`** (debug) follows the Python oracle, so parity setups stay exact: a joker's
   `'edi'..ante` poll runs even when an edition is given (live skips it, gaps.md B15); a playing

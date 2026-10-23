@@ -8,6 +8,19 @@ use crate::game::Game;
 use crate::hand_eval::{HandType, PokerHands};
 use crate::state::{BlindSlot, BlindState};
 
+/// What `Blind:debuff_card` reads besides the card (blind.lua:624-652): the blind's debuff
+/// table and state, and whether Pareidolia and Smeared Joker are held.
+struct DebuffRule {
+    disabled: bool,
+    name: &'static str,
+    suit: Option<crate::card::Suit>,
+    face: bool,
+    value: Option<&'static str>,
+    nominal: Option<f64>,
+    pareidolia: bool,
+    smeared: bool,
+}
+
 /// The empty blind between rounds (`set_blind(nil)`).
 fn empty_blind() -> BlindState {
     BlindState {
@@ -116,9 +129,7 @@ impl Game {
                 _ => {}
             }
         }
-        for id in self.playing_card_ids() {
-            self.debuff_card(id, false);
-        }
+        self.debuff_playing_cards();
         if !reset {
             for id in self.gs.areas.ids(AreaId::Jokers) {
                 self.debuff_card(id, true);
@@ -145,44 +156,78 @@ impl Game {
             // Cards outside the areas (Marble's pending stones) are debuffed when they land.
             return;
         };
-        let disabled = self.gs.blind.as_ref().is_none_or(|b| b.disabled);
-        let name = self.blind_name();
+        let rule = self.debuff_rule();
+        self.debuff_card_at(area, i, &rule);
+    }
+
+    /// `for _, v in ipairs(G.playing_cards) do self:debuff_card(v) end`. A playing card's
+    /// debuff changes its own flag and nothing else (no joker, so not the rule either): the
+    /// order doesn't matter, and the pass walks the areas. Marble's pending stones are
+    /// debuffed when they land.
+    pub(crate) fn debuff_playing_cards(&mut self) {
+        let rule = self.debuff_rule();
+        for a in AreaId::PLAYING {
+            for i in 0..self.gs.areas.get(a).len() {
+                self.debuff_card_at(a, i, &rule);
+            }
+        }
+    }
+
+    /// What `Blind:debuff_card` reads besides the card.
+    fn debuff_rule(&self) -> DebuffRule {
         let debuff = self.blind_debuff();
         let get = |k: &str| jackdaw_data::lookup(debuff, k);
-        let pareidolia = self.has_joker("Pareidolia");
-        let smeared = self.has_joker("Smeared Joker");
+        DebuffRule {
+            disabled: self.gs.blind.as_ref().is_none_or(|b| b.disabled),
+            name: self.blind_name(),
+            suit: match get("suit") {
+                Some(Value::Str(s)) => Some(crate::card::Suit::from_name(s).expect("boss suit")),
+                _ => None,
+            },
+            face: get("is_face").and_then(Value::as_str) == Some("face"),
+            value: match get("value") {
+                Some(Value::Str(v)) => Some(*v),
+                _ => None,
+            },
+            nominal: get("nominal").and_then(Value::as_num),
+            pareidolia: self.has_joker("Pareidolia"),
+            smeared: self.has_joker("Smeared Joker"),
+        }
+    }
+
+    /// `Blind:debuff_card` (blind.lua:624-652) on the card at `area[i]`.
+    fn debuff_card_at(&mut self, area: AreaId, i: usize, rule: &DebuffRule) {
         let card = &self.gs.areas.get(area)[i];
-        if !disabled && area != AreaId::Jokers {
+        if !rule.disabled && area != AreaId::Jokers {
             let mut hit = false;
-            if let Some(Value::Str(s)) = get("suit") {
-                let suit = crate::card::Suit::from_name(s).expect("boss suit");
-                hit = card.is_suit(suit, true, false, smeared) == Some(true);
+            if let Some(suit) = rule.suit {
+                hit = card.is_suit(suit, true, false, rule.smeared) == Some(true);
             }
-            if !hit && get("is_face").and_then(Value::as_str) == Some("face") {
-                hit = card.is_face(true, pareidolia);
+            if !hit && rule.face {
+                hit = card.is_face(true, rule.pareidolia);
             }
-            if !hit && name == "The Pillar" && card.ability.played_this_ante {
+            if !hit && rule.name == "The Pillar" && card.ability.played_this_ante {
                 hit = true;
             }
-            if !hit && let Some(Value::Str(v)) = get("value") {
-                hit = card.base.is_some_and(|b| b.value.name() == *v);
+            if !hit && let Some(v) = rule.value {
+                hit = card.base.is_some_and(|b| b.value.name() == v);
             }
-            if !hit && let Some(n) = get("nominal").and_then(Value::as_num) {
+            if !hit && let Some(n) = rule.nominal {
                 hit = card.base.is_some_and(|b| b.nominal() == n);
             }
             if hit {
-                self.set_debuff(id, true);
+                self.set_debuff_at(area, i, true);
                 return;
             }
         }
-        if name == "Crimson Heart" && !disabled && area == AreaId::Jokers {
+        if rule.name == "Crimson Heart" && !rule.disabled && area == AreaId::Jokers {
             return;
         }
-        if name == "Verdant Leaf" && !disabled && area != AreaId::Jokers {
-            self.set_debuff(id, true);
+        if rule.name == "Verdant Leaf" && !rule.disabled && area != AreaId::Jokers {
+            self.set_debuff_at(area, i, true);
             return;
         }
-        self.set_debuff(id, false);
+        self.set_debuff_at(area, i, false);
     }
 
     /// `Blind:debuff_hand(cards, hand, handname, check)` (blind.lua:519-570). `cards` is the
@@ -439,9 +484,7 @@ impl Game {
             _ => {}
         }
         self.queue(Event::DisabledBossCheck);
-        for id in self.playing_card_ids() {
-            self.debuff_card(id, false);
-        }
+        self.debuff_playing_cards();
         for id in self.gs.areas.ids(AreaId::Jokers) {
             self.debuff_card(id, false);
         }

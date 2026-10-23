@@ -425,32 +425,26 @@ def _open_tag_pack(gs: dict[str, Any], pack_key: str, force: bool = False) -> No
 def _open_pack(gs: dict[str, Any], pack_key: str) -> None:
     """``Card:open`` (card.lua:1681-1811) for a shop or tag pack, once paid for.
 
-    Card:open queues one event (after 0.4s) that, in order: queues the
-    contents' creation as a non-blocking event 1.3s later (card.lua:1725),
-    runs every joker's ``open_booster`` context (card.lua:1796-1798) and,
-    under Inflation, raises ``G.GAME.inflation`` (card.lua:1800-1807).
-    Hallucination's Tarot is created by a blocking event its context
-    queues (card.lua:2339-2348), which runs on the next frame — long before
-    the contents event — so the Tarot exists, and is in used_jokers, when
-    the pack draws its cards.  An Arcana/Spectral pack then deals the hand
-    its picks target (update_arcana_pack / update_spectral_pack).
+    Card:open queues one event (after 0.4s) that, in order: explodes the
+    booster, queues the contents' creation as a non-blocking event
+    ``explode_time`` later (card.lua:1725), runs every joker's
+    ``open_booster`` context (card.lua:1796-1798) and, under Inflation,
+    raises ``G.GAME.inflation`` (card.lua:1800-1807).  ``explode()`` queues
+    a non-blockable but blocking event that holds the queue for
+    ``1.5 * explode_time`` (card.lua:2002-2012), so the contents arrive
+    first and Hallucination's Tarot, made by the blocking event its context
+    queues (card.lua:2339-2348), after them: the pack's cards are in
+    used_jokers when the Tarot is drawn (G266, which reverses G44).  An
+    Arcana/Spectral pack then deals the hand its picks target
+    (update_arcana_pack / update_spectral_pack).
     """
     from jackdaw.engine.data.prototypes import BOOSTERS
     from jackdaw.engine.packs import generate_pack_cards
 
     # open_booster (Hallucination's 'halu' roll), then the inflation; the
-    # Tarot itself comes from the queued event, after both.
+    # Tarot itself comes from the queued event, after the contents.
     mutations = _fire_shop_joker_context(gs, open_booster=True)
     _inflate(gs)
-    # Hallucination gates its roll on consumable room counting
-    # G.GAME.consumeable_buffer (card.lua:2336-2338, handler side); each hit
-    # reserves a slot and its event makes the Tarot and zeroes the buffer
-    # (card.lua:2339-2347).
-    for mut in mutations:
-        desc = mut.get("create")
-        if desc:
-            _resolve_create_descriptors(gs, [desc])
-    gs["consumeable_buffer"] = 0
 
     rng = gs.get("rng")
     ante = gs.get("round_resets", {}).get("ante", 1)
@@ -466,6 +460,16 @@ def _open_pack(gs: dict[str, Any], pack_key: str) -> None:
         gs["pack_cards"] = []
         gs["pack_choices_remaining"] = 1
         gs["pack_type"] = "Unknown"
+
+    # Hallucination gates its roll on consumable room counting
+    # G.GAME.consumeable_buffer (card.lua:2336-2338, handler side); each hit
+    # reserves a slot and its event makes the Tarot and zeroes the buffer
+    # (card.lua:2339-2347).
+    for mut in mutations:
+        desc = mut.get("create")
+        if desc:
+            _resolve_create_descriptors(gs, [desc])
+    gs["consumeable_buffer"] = 0
 
     # For Arcana/Spectral packs: deal hand from deck for targeting
     if gs["pack_type"] in ("Arcana", "Spectral"):
@@ -894,7 +898,7 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
             # GAME_OVER.  end_round runs out of SELECTING_HAND (vanilla's
             # NEW_ROUND), so a hand-size change there draws nothing.
             gs["phase"] = GamePhase.GAME_OVER
-            _joker_end_of_round_effects(gs)
+            _joker_end_of_round_effects(gs, game_over=True)
             _end_round_win_check(gs)
             # G.GAME.won is never cleared: losing in endless mode after a
             # win keeps it (state_events.lua:111-122).
@@ -2019,9 +2023,11 @@ def _handle_swap_hand(gs: dict[str, Any], idx: int, direction: int) -> dict[str,
     """Swap a hand card with its neighbor.
 
     *direction* is ``-1`` (left) or ``+1`` (right).
-    Free action — no cost, doesn't consume hands or discards.
+    Free action — no cost, doesn't consume hands or discards.  A drag
+    reorders the hand whenever it holds cards (cardarea.lua:214-227,
+    436-465): while choosing a hand and in an Arcana or Spectral pack (G206).
     """
-    _require_phase(gs, GamePhase.SELECTING_HAND)
+    _require_phase(gs, GamePhase.SELECTING_HAND, GamePhase.PACK_OPENING)
 
     hand: list = gs.get("hand", [])
     other = idx + direction
@@ -2035,9 +2041,17 @@ def _handle_swap_hand(gs: dict[str, Any], idx: int, direction: int) -> dict[str,
 def _handle_swap_jokers(gs: dict[str, Any], idx: int, direction: int) -> dict[str, Any]:
     """Swap a joker with its neighbor.
 
-    *direction* is ``-1`` (left) or ``+1`` (right).
+    *direction* is ``-1`` (left) or ``+1`` (right).  A drag reorders the
+    jokers at every decision point (cardarea.lua:214-227, 509-529; G206).
     """
-    _require_phase(gs, GamePhase.SELECTING_HAND, GamePhase.SHOP)
+    _require_phase(
+        gs,
+        GamePhase.BLIND_SELECT,
+        GamePhase.SELECTING_HAND,
+        GamePhase.ROUND_EVAL,
+        GamePhase.SHOP,
+        GamePhase.PACK_OPENING,
+    )
 
     from jackdaw.engine.actions import joker_swap_allowed
 
@@ -2277,7 +2291,7 @@ def _end_round(gs: dict[str, Any]) -> None:
         _dissolve_saver(gs, saver)
         return
     gs["phase"] = GamePhase.GAME_OVER
-    _joker_end_of_round_effects(gs)
+    _joker_end_of_round_effects(gs, game_over=True)
     _end_round_win_check(gs)
     # G.GAME.won is never cleared (state_events.lua:111-122).
 
@@ -2452,14 +2466,23 @@ def _sync_hand_size_to_dollars(gs: dict[str, Any]) -> None:
         gs["hand_last_poll_size"] = poll
 
 
-def _joker_end_of_round_effects(gs: dict[str, Any]) -> dict[str, Any]:
+def _joker_end_of_round_effects(gs: dict[str, Any], *, game_over: bool = False) -> dict[str, Any]:
     """Fire joker end_of_round context + perishable/rental processing.
 
     Vanilla's end_round (state_events.lua:96-110) runs this for EVERY
     round outcome — wins AND losses (game_over is a flag inside the
-    context; Turtle Bean decays, Egg gains, rentals charge as you die).
+    context; Turtle Bean decays, Egg gains, perishables tick as you die).
     Dollars returned here are only ever banked via the cash-out screen,
     which a lost run never reaches.
+
+    ``game_over``: the run is lost.  The game pauses in the same frame
+    (update_game_over, game.lua:2601) and never runs the events end_round
+    queued (G265): the rent (ease_dollars) is never charged, the jokers that
+    destroy themselves stay, and the hand-size and discard changes (Turtle
+    Bean's decay, a perished Juggler or Drunkard: change_size and
+    ease_discard are events, cardarea.lua:94-111, common_events.lua:112-131)
+    never happen.  The synchronous effects remain: the perishable ticks and
+    debuffs, Turtle Bean's own h_size, the extinction flag, Egg, Gift Card.
     """
     from jackdaw.engine.jokers import (
         GameSnapshot,
@@ -2473,6 +2496,8 @@ def _joker_end_of_round_effects(gs: dict[str, Any]) -> dict[str, Any]:
     cr = gs.get("current_round", {})
     jokers = gs.get("jokers", [])
     rng = gs.get("rng")
+    # What only end_round's events change: kept when the run is lost (G265).
+    held = (gs.get("dollars", 0), gs.get("hand_size", 0), cr.get("discards_left", 0))
 
     # Cards have not yet returned to the deck here, so the full owned set
     # spans all four piles (matches vanilla's G.playing_cards).
@@ -2525,6 +2550,8 @@ def _joker_end_of_round_effects(gs: dict[str, Any]) -> dict[str, Any]:
                     mutations.append(result.extra)
         calculate_rental(joker, gs)
         calculate_perishable(joker, gs)
+    if game_over:
+        removed = []
     eor: dict[str, Any] = {"jokers_removed": removed, "mutations": mutations}
 
     for removed_joker in eor.get("jokers_removed", []):
@@ -2559,6 +2586,9 @@ def _joker_end_of_round_effects(gs: dict[str, Any]) -> dict[str, Any]:
                 c.ability["extra_value"] = c.ability.get("extra_value", 0) + bump
                 if hasattr(c, "set_cost"):
                     _reprice(gs, c)
+
+    if game_over:
+        gs["dollars"], gs["hand_size"], cr["discards_left"] = held
 
     # calculate_dollar_bonus runs later, in evaluate_round
     # (state_events.lua:1175-1182): after the perishable ticks — a joker

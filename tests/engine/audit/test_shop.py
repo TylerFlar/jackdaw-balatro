@@ -1,4 +1,4 @@
-"""Audit regressions: packs and the shop (G43, G44, G47)."""
+"""Audit regressions: packs and the shop (G43, G44/G266, G47)."""
 
 from __future__ import annotations
 
@@ -41,19 +41,22 @@ def test_tag_pack_runs_open_booster_and_inflation():
 
 
 # ---------------------------------------------------------------------------
-# G44 — Hallucination's Tarot comes before the pack's contents
+# G266 (reverses G44) — Hallucination's Tarot comes after the pack's contents
 # ---------------------------------------------------------------------------
 
 
-def test_hallucination_tarot_is_made_before_the_pack_contents():
-    """Hallucination's Tarot exists (and is in used_jokers) before the pack draws.
+def test_hallucination_tarot_is_made_after_the_pack_contents():
+    """G266 (reverses G44): the pack's cards exist, and are in used_jokers,
+    when Hallucination's Tarot is drawn.
 
-    card.lua:1721-1798 (Card:open): its event queues the contents' creation
-    as a non-blocking event 1.3s later (card.lua:1725), then runs the
-    jokers' open_booster context; Hallucination queues the Tarot's creation
-    as a blocking event (card.lua:2339-2348) that runs on the next frame.
-    So the Tarot pool ('hal') is drawn first and the pack's Tarot pool
-    already excludes it.  Seed chosen so that the two orders differ.
+    card.lua:1721-1798 (Card:open): its event explodes the booster, whose
+    events block the queue for 1.5 * explode_time (card.lua:2002-2012);
+    queues the contents' creation as a non-blocking event explode_time later
+    (card.lua:1725); then runs the jokers' open_booster context, where
+    Hallucination queues the Tarot's creation as a blocking event
+    (card.lua:2339-2348). The contents come first and the 'hal' draw
+    excludes them. The live game agrees (lockstep seed L8UK7AU8). Seed
+    chosen so that the two orders differ.
     """
     seed = "AUDIT_G44_6"
     gs = _with_hallucination(new_run(seed=seed))
@@ -62,20 +65,22 @@ def test_hallucination_tarot_is_made_before_the_pack_contents():
     # Reference: vanilla order on a copy, with the engine's own primitives.
     ref = copy.deepcopy(gs)
     assert ref["rng"].random("halu1") < 1 / 2  # Hallucination fires
+    pack, _ = generate_pack_cards("p_arcana_mega_1", ref["rng"], 1, ref)
+    want_pack = [c.center_key for c in pack]
     want_hal = create_card(
         "Tarot", ref["rng"], 1, area="", soulable=False, append="hal", game_state=ref
     ).center_key
-    pack, _ = generate_pack_cards("p_arcana_mega_1", ref["rng"], 1, ref)
-    want_pack = [c.center_key for c in pack]
 
-    # Pack-first order gives something else for this seed.
+    # The Tarot-first order gives something else for this seed.
     other = copy.deepcopy(gs)
-    other_pack = generate_pack_cards("p_arcana_mega_1", other["rng"], 1, other)[0]
-    assert want_hal in {c.center_key for c in other_pack}
+    other_hal = create_card(
+        "Tarot", other["rng"], 1, area="", soulable=False, append="hal", game_state=other
+    ).center_key
+    assert other_hal in want_pack
 
     step(gs, SkipBlind())
-    assert gs["consumables"][-1].center_key == want_hal
     assert [c.center_key for c in gs["pack_cards"]] == want_pack
+    assert gs["consumables"][-1].center_key == want_hal
     assert want_hal not in want_pack
 
 

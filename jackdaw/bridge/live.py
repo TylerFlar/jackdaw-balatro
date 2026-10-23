@@ -38,6 +38,8 @@ from typing import TYPE_CHECKING, Any
 from jackdaw import _core
 from jackdaw.bridge.backend import (
     DECK_FROM_BOT,
+    INVALID_STATE,
+    NOT_ALLOWED,
     STAKE_FROM_BOT,
     RPCError,
     to_bot_add_params,
@@ -156,8 +158,16 @@ class LiveAdapter:
     shadow run (``Game.new``; tests set up special runs with it). ``settle``: seconds
     to wait after each live answer before reading ``gamestate`` again and comparing
     that instead (0: compare the answer itself), for a live game whose endpoints
-    answer before all of a step's events have run.
+    answer before all of a step's events have run. ``recheck``: when a live answer
+    differs from the shadow, read ``gamestate`` again for up to this many seconds
+    until the difference is gone, and compare the last reading (BalatroBot answers
+    some requests before the game's queued events have run, ``docs/live.md``).
+    The default is 2 seconds against a live game and 0 against the simulator
+    (``jackdaw serve``, in-process backends), which answers settled.
     """
+
+    #: Seconds between the readings of a recheck.
+    RECHECK_INTERVAL = 0.1
 
     #: The legality the env computes masks with for this adapter.
     legality = Legality.BALATROBOT.value
@@ -171,6 +181,7 @@ class LiveAdapter:
         label: str = "",
         shadow_factory: Callable[[str, int, str, str | None], Game] | None = None,
         settle: float = 0.0,
+        recheck: float | None = None,
     ) -> None:
         self._backend = backend
         self.bundle_dir = None if bundle_dir is None else Path(bundle_dir)
@@ -179,6 +190,9 @@ class LiveAdapter:
         self.label = label
         self._shadow_factory = shadow_factory or Game.new
         self.settle = settle
+        self._recheck = recheck
+        #: This run: answers read again until they agreed (recheck), by method.
+        self.rechecked: Counter[str] = Counter()
         self._shadow: Game | None = None
         self._shadow_view: dict[str, Any] = {}
         self._live_view: dict[str, Any] = {}
@@ -331,13 +345,19 @@ class LiveAdapter:
         }
         self._shadow = self._shadow_factory(back or "b_red", STAKE_FROM_BOT[stake], seed, challenge)
         self._shadow_view = self._shadow.bot_view()
-        self._live_view = live
         self._log = []
         self._ids = IdMap()
         self._memory = RunMemory()
         self._broken = None
         self.steps = 0
-        for counter in (self.explained, self.reconciled, self.vetoed, self.methods, self.actions):
+        for counter in (
+            self.explained,
+            self.reconciled,
+            self.vetoed,
+            self.methods,
+            self.actions,
+            self.rechecked,
+        ):
             counter.clear()
         ctx = StepContext(
             "start" if request is not None else "attach",
@@ -346,6 +366,8 @@ class LiveAdapter:
             post_view=self._shadow_view,
             memory=self._memory,
         )
+        live = self._settled(ctx, live)
+        self._live_view = live
         self._compare(ctx, live, None)
         return live
 
@@ -385,7 +407,9 @@ class LiveAdapter:
         """Compare the live ``gamestate`` with the shadow now. Returns the differences
         the catalog doesn't drop (raising :class:`DivergenceError` for them, unless
         ``raise_on_divergence`` is False). Nothing is reconciled here: every request
-        was compared (and reconciled) as it was made, so any difference left is new."""
+        was compared (and reconciled) as it was made, so any difference left is new.
+        A reading that differs is read again within :attr:`recheck`, as for a request:
+        right after a request the game may still be running its events."""
         self._require_run()
         live = self._backend.handle("gamestate", {})
         ctx = StepContext(
@@ -397,6 +421,7 @@ class LiveAdapter:
             post_view=self._shadow_view,
             memory=self._memory,
         )
+        live = self._settled(ctx, live)
         diff = diff_views(self._shadow_view, live, self._ids)
         cls = classify(diff.diffs, ctx, self._catalog)
         left = cls.unclassified + [d for ds in cls.classified.values() for d in ds]
@@ -512,7 +537,7 @@ class LiveAdapter:
             entry["action"] = encode_action(action)
         # 3. The live game.
         try:
-            live = self._ask_live(method, params)
+            live = self._ask_live_retrying(method, params)
         except RPCError as exc:
             self._diverge(
                 ctx,
@@ -542,12 +567,31 @@ class LiveAdapter:
         self._shadow_view = ctx.post_view
         update_memory(ctx, self._catalog)
         # 5. The comparison.
+        live = self._settled(ctx, live)
         self._compare(ctx, live, entry)
         self._log.append(entry)
         self.steps += 1
         self.methods[method] += 1
         self._live_view = live
         return live
+
+    def _ask_live_retrying(self, method: str, params: dict[str, Any]) -> Any:
+        """:meth:`_ask_live`, asking again for up to :attr:`recheck` seconds when the live
+        game refuses for its state (``INVALID_STATE``, ``NOT_ALLOWED``): it may still be
+        running the last request's events (``use`` while ``G.GAME.STOP_USE`` from a pack pick
+        holds, for instance). The shadow took the request, and a refused one changes nothing."""
+        deadline = time.monotonic() + self.recheck
+        retried = False
+        while True:
+            try:
+                return self._ask_live(method, params)
+            except RPCError as exc:
+                if exc.code not in (INVALID_STATE, NOT_ALLOWED) or time.monotonic() >= deadline:
+                    raise
+                if not retried:
+                    self.rechecked[f"{method} (refused)"] += 1
+                    retried = True
+                time.sleep(self.RECHECK_INTERVAL)
 
     def _ask_live(self, method: str, params: dict[str, Any]) -> Any:
         """The live game's answer to a request; with ``settle``, its ``gamestate`` a
@@ -557,6 +601,40 @@ class LiveAdapter:
             time.sleep(self.settle)
             answer = self._backend.handle("gamestate", {})
         return answer
+
+    @property
+    def recheck(self) -> float:
+        """Seconds a differing answer is read again for (see the class docstring)."""
+        if self._recheck is not None:
+            return self._recheck
+        return 2.0 if getattr(self._backend, "simulator", None) is False else 0.0
+
+    def _settled(self, ctx: StepContext, live: dict[str, Any]) -> dict[str, Any]:
+        """The live view to compare: the answer, or, while it differs from the shadow
+        in ways the catalog doesn't drop, ``gamestate`` read again until it agrees or
+        :attr:`recheck` seconds have passed (the last reading is compared). Differences
+        a reconcile could take are read again too: a late answer can look like one."""
+        if self.recheck <= 0 or not isinstance(live, dict):
+            return live
+        deadline = time.monotonic() + self.recheck
+        read = 0
+        while self._unexplained(ctx, live) and time.monotonic() < deadline:
+            time.sleep(self.RECHECK_INTERVAL)
+            again = self._fetch_live()
+            if again is None:
+                break
+            live, read = again, read + 1
+        if read:
+            self.rechecked[ctx.method or "?"] += 1
+        return live
+
+    def _unexplained(self, ctx: StepContext, live: dict[str, Any]) -> bool:
+        assert ctx.post_view is not None
+        diff = diff_views(ctx.post_view, live, self._ids)
+        if not diff.diffs:
+            return False
+        cls = classify(diff.diffs, ctx, self._catalog)
+        return bool(cls.unclassified or cls.classified or cls.reconcile)
 
     def _fetch_live(self) -> dict[str, Any] | None:
         try:

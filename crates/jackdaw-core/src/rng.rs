@@ -132,19 +132,114 @@ impl Tw223 {
     /// `math.random(m)`: an integer in `[1, m]`.
     #[inline]
     pub fn random_n(&mut self, m: i64) -> i64 {
-        (self.random() * m as f64).floor() as i64 + 1
+        crate::lua::floor(self.random() * m as f64) as i64 + 1
     }
 
     /// `math.random(m, n)`: an integer in `[m, n]`.
     #[inline]
     pub fn random_range(&mut self, m: i64, n: i64) -> i64 {
-        (self.random() * (n - m + 1) as f64).floor() as i64 + m
+        crate::lua::floor(self.random() * (n - m + 1) as f64) as i64 + m
     }
 }
 
 // ---------------------------------------------------------------------------
 // pseudohash / pseudoseed
 // ---------------------------------------------------------------------------
+
+/// A stream key built on the stack, as the game concatenates them for every draw
+/// (`'rarity'..ante..append`, `pool_key..'_resample'..it`): `Key::new("rarity").n(ante)`.
+/// A key longer than the buffer, which the game never builds, moves to the heap.
+#[derive(Clone)]
+pub struct Key {
+    len: usize,
+    buf: [u8; 48],
+    long: Option<String>,
+}
+
+impl Key {
+    pub fn new(s: &str) -> Key {
+        let mut key = Key {
+            len: 0,
+            buf: [0; 48],
+            long: None,
+        };
+        key.push(s);
+        key
+    }
+
+    /// `.. s`.
+    #[must_use]
+    pub fn s(mut self, s: &str) -> Key {
+        self.push(s);
+        self
+    }
+
+    /// `.. tostring(x)`, as [`lua::tostring_number`] writes it.
+    #[must_use]
+    pub fn n(mut self, x: f64) -> Key {
+        if x == 0.0 {
+            self.push(if x.is_sign_negative() { "-0" } else { "0" });
+        } else if x == x.trunc() && x.abs() < 1e14 {
+            if x < 0.0 {
+                self.push("-");
+            }
+            self.digits(x.abs() as u64);
+        } else {
+            self.push(&lua::tostring_number(x));
+        }
+        self
+    }
+
+    /// `.. tostring(i)` for an integer.
+    #[must_use]
+    pub fn i(mut self, i: u64) -> Key {
+        self.digits(i);
+        self
+    }
+
+    fn digits(&mut self, mut v: u64) {
+        let mut out = [0u8; 20];
+        let mut at = out.len();
+        loop {
+            at -= 1;
+            out[at] = b'0' + (v % 10) as u8;
+            v /= 10;
+            if v == 0 {
+                break;
+            }
+        }
+        self.push(std::str::from_utf8(&out[at..]).expect("ascii digits"));
+    }
+
+    fn push(&mut self, s: &str) {
+        if let Some(long) = &mut self.long {
+            long.push_str(s);
+            return;
+        }
+        let end = self.len + s.len();
+        if end <= self.buf.len() {
+            self.buf[self.len..end].copy_from_slice(s.as_bytes());
+            self.len = end;
+        } else {
+            let mut long = String::with_capacity(end);
+            long.push_str(self);
+            long.push_str(s);
+            self.long = Some(long);
+        }
+    }
+}
+
+impl std::ops::Deref for Key {
+    type Target = str;
+
+    fn deref(&self) -> &str {
+        match &self.long {
+            Some(long) => long,
+            // Only whole `&str`s are copied in: always UTF-8.
+            None => std::str::from_utf8(&self.buf[..self.len]).expect("utf-8"),
+        }
+    }
+}
 
 /// `pseudohash(str)` over the bytes of `str` (`misc_functions.lua:279`).
 pub fn pseudohash(s: &[u8]) -> f64 {
@@ -153,16 +248,31 @@ pub fn pseudohash(s: &[u8]) -> f64 {
 
 /// `pseudohash(a .. b)` without building the concatenation.
 pub fn pseudohash_parts(a: &[u8], b: &[u8]) -> f64 {
-    let mut num = 1.0;
-    let len = a.len() + b.len();
-    for i in (1..=len).rev() {
-        let byte = if i > a.len() {
+    let byte_at = |i: usize| {
+        if i > a.len() {
             b[i - a.len() - 1]
         } else {
             a[i - 1]
-        };
+        }
+    };
+    let mut num = 1.0;
+    for i in (1..=a.len() + b.len()).rev() {
+        // While every value is finite no operation can make a NaN, and plain arithmetic (in
+        // Lua's order) gives the NaN-aware helpers' bits; `x % 1` is then `x - floor(x)`.
+        let s = 1.123_928_502_3 / num * f64::from(byte_at(i)) * lua::PI + lua::PI * i as f64;
+        if !s.is_finite() {
+            return pseudohash_rest(&byte_at, i, num);
+        }
+        num = s - lua::floor(s);
+    }
+    num
+}
+
+/// The rest of [`pseudohash_parts`] from byte `from` down, with Lua's NaN semantics.
+fn pseudohash_rest(byte_at: &dyn Fn(usize) -> u8, from: usize, mut num: f64) -> f64 {
+    for i in (1..=from).rev() {
         let t = lua::mul(
-            lua::mul(lua::div(1.123_928_502_3, num), f64::from(byte)),
+            lua::mul(lua::div(1.123_928_502_3, num), f64::from(byte_at(i))),
             lua::PI,
         );
         num = lua::modulo(lua::add(t, lua::mul(lua::PI, i as f64)), 1.0);

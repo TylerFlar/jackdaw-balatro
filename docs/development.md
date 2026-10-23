@@ -26,7 +26,11 @@ workspace in `crates/` builds the native module `jackdaw._core` with [PyO3] and 
     `1.98.1-x86_64-pc-windows-msvc`.
   - **MSVC** is recommended for release builds and performance work; CI builds the Windows
     wheels with it. Install the Visual Studio Build Tools ("Desktop development with C++") and
-    keep rustup's default host at `x86_64-pc-windows-msvc`.
+    keep rustup's default host at `x86_64-pc-windows-msvc`. If the Windows SDK is missing and
+    you can't install it (no admin rights), `cargo install xwin` and
+    `xwin --accept-license splat --output <dir>` put the CRT and SDK in a folder of your own.
+    Point `INCLUDE` and `LIB` at its `crt` and `sdk` subfolders as well as MSVC's own, and set
+    `VCINSTALLDIR` so the `cc` crate uses that environment as it is.
 
 Installing jackdaw from a git URL or an sdist compiles the extension, so it needs Rust as well.
 Prebuilt wheels do not.
@@ -90,6 +94,36 @@ builds the release wheels for Linux, macOS and Windows on `v*` tags.
 `verify-source` also requires the first line of its `version.jkr` to be the release the data
 targets, `BALATRO_VERSION` in `crates/jackdaw-data` (`1.0.1o-FULL`). CI has no copy of the
 source, so these two commands run only locally.
+
+## Profiling
+
+`crates/jackdaw-env/examples/profile.rs` samples the engine's hot paths. It needs no profiler
+and no admin rights, but it runs only on Windows x64 with an MSVC build, whose PDB carries the
+symbols:
+
+```bash
+cargo run --release -p jackdaw-env --example profile -- env 10            # the Gym loop, 10 s
+cargo run --release -p jackdaw-env --example profile -- new_run 5 stacks.folded
+```
+
+The workloads:
+
+- `env`: the Gym loop (observation, mask, a random legal action, the step), with a new run when
+  an episode ends.
+- `new_run`.
+- `play`: a 5-card play on a copy of a dealt round.
+- `shop`: cash out, three rerolls, leave.
+
+A thread suspends the workload every millisecond, reads its registers and unwinds its stack with
+`RtlVirtualUnwind`. The report lists functions by self time and by total time, and source lines
+by self time (inlined code counts at its own line). A third argument writes the stacks in the
+folded format that flame-graph tools (inferno, speedscope) read.
+
+The example uses Rust's default allocator, while the extension uses mimalloc, so allocation
+shows up larger here. On Linux and macOS, use `perf` or `samply` instead.
+
+`cargo test --release -p jackdaw-core --test perf -- --ignored --nocapture` prints rough timings
+of the engine's main operations.
 
 ## Windows: the `.pyd` is locked while Python has it loaded
 

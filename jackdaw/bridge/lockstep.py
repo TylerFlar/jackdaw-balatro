@@ -378,6 +378,8 @@ class GameResult:
     explained: Counter[str] = field(default_factory=Counter)
     reconciled: Counter[str] = field(default_factory=Counter)
     vetoed: Counter[str] = field(default_factory=Counter)
+    #: Live answers read again until they agreed (LiveAdapter.recheck), by method.
+    rechecked: Counter[str] = field(default_factory=Counter)
     #: The divergence, if any: kind, message, bundle path, classified ids.
     divergence: dict[str, Any] | None = None
     error: str = ""
@@ -403,6 +405,7 @@ class GameResult:
             "explained": dict(self.explained),
             "reconciled": dict(self.reconciled),
             "vetoed": dict(self.vetoed),
+            "rechecked": dict(self.rechecked),
             "divergence": self.divergence,
             "error": self.error,
         }
@@ -491,6 +494,7 @@ def play_game(
     result.explained = Counter(adapter.explained)
     result.reconciled = Counter(adapter.reconciled)
     result.vetoed = Counter(adapter.vetoed)
+    result.rechecked = Counter(adapter.rechecked)
     if adapter.started:
         result.ante, result.round = adapter.game.ante, adapter.game.round
     return result
@@ -537,12 +541,14 @@ class Summary:
         explained: Counter[str] = Counter()
         reconciled: Counter[str] = Counter()
         vetoed: Counter[str] = Counter()
+        rechecked: Counter[str] = Counter()
         for r in self.results:
             methods.update(r.methods)
             actions.update(r.actions)
             explained.update(r.explained)
             reconciled.update(r.reconciled)
             vetoed.update(r.vetoed)
+            rechecked.update(r.rechecked)
         return {
             "games": len(self.results),
             "steps": sum(r.steps for r in self.results),
@@ -555,6 +561,7 @@ class Summary:
             "explained": dict(explained),
             "reconciled": dict(reconciled),
             "vetoed": dict(vetoed),
+            "rechecked": dict(rechecked),
             "bundles": [
                 r.divergence["bundle"]
                 for r in self.results
@@ -572,7 +579,7 @@ class Summary:
             "requests: " + ", ".join(f"{k} {v}" for k, v in sorted(t["methods"].items())),
             "actions: " + ", ".join(f"{k} {v}" for k, v in sorted(t["actions"].items())),
         ]
-        for name in ("explained", "reconciled", "vetoed"):
+        for name in ("explained", "reconciled", "vetoed", "rechecked"):
             if t[name]:
                 out.append(f"{name}: " + ", ".join(f"{k} {v}" for k, v in sorted(t[name].items())))
         for b in t["bundles"]:
@@ -591,6 +598,7 @@ def run_lockstep(
     on_result: Callable[[int, GameResult], None] | None = None,
     stop_on_divergence: bool = False,
     settle: float = 0.0,
+    recheck: float | None = None,
 ) -> Summary:
     """Play ``jobs`` on ``backends`` in parallel, one worker thread per backend (a
     BalatroBot instance plays one game at a time)."""
@@ -602,7 +610,9 @@ def run_lockstep(
     stop = threading.Event()
 
     def worker(index: int, backend: Any) -> None:
-        adapter = LiveAdapter(backend, bundle_dir=bundle_dir, label=f"i{index}", settle=settle)
+        adapter = LiveAdapter(
+            backend, bundle_dir=bundle_dir, label=f"i{index}", settle=settle, recheck=recheck
+        )
         chooser = POLICIES[policy]()
         while not stop.is_set():
             try:
