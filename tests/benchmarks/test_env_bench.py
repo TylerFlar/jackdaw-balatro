@@ -13,9 +13,10 @@ import numpy as np
 import pytest
 
 from jackdaw.engine.actions import Discard, PlayHand
-from jackdaw.env.action_space import engine_action_to_factored, get_action_mask
+from jackdaw.env.action_space import ActionType, engine_action_to_factored, get_action_mask
 from jackdaw.env.balatro_env import BalatroEnvironment
-from jackdaw.env.game_interface import OracleAdapter
+from jackdaw.env.game_interface import DirectAdapter, OracleAdapter
+from jackdaw.env.game_spec import FactoredAction
 from jackdaw.env.gymnasium_wrapper import BalatroGymnasiumEnv
 from jackdaw.env.observation import encode_observation
 
@@ -234,3 +235,100 @@ class TestWrapperThroughput:
         sps = n / (time.perf_counter() - t0)
         print(f"\nBalatroEnvironment: {sps:.0f} steps/sec")
         assert sps > 1000, f"Only {sps:.0f} steps/sec (target: >1000)"
+
+
+def _require_release_build() -> None:
+    from jackdaw import _core
+
+    if _core._build_info()["profile"] != "release":
+        pytest.skip("the Rust env targets are for a release build of jackdaw._core")
+
+
+def _random_factored(mask, rng: random.Random) -> FactoredAction:
+    """A random action the factored mask allows, picked with as little Python as possible."""
+    types = np.flatnonzero(mask.type_mask)
+    action_type = int(types[rng.randrange(len(types))])
+    entity = None
+    entities = mask.entity_masks.get(action_type)
+    if entities is not None:
+        legal = np.flatnonzero(entities)
+        entity = int(legal[rng.randrange(len(legal))])
+    cards = None
+    if action_type in (ActionType.PlayHand, ActionType.Discard):
+        hand = len(mask.card_mask)
+        chosen = rng.sample(range(hand), rng.randint(1, min(mask.max_card_select, hand)))
+        forced = mask.forced_card
+        if forced is not None and forced not in chosen:
+            chosen[0] = forced
+        cards = tuple(sorted(chosen))
+    return FactoredAction(action_type=action_type, card_target=cards, entity_target=entity)
+
+
+@pytest.mark.benchmark
+class TestRustEnvThroughput:
+    """The env wrappers on the Rust engine against the plan's targets (release build).
+
+    Each measures the time inside the env (steps and resets), not the policy choosing the
+    actions, and keeps the best of three runs.
+    """
+
+    def test_balatro_environment(self):
+        """BalatroEnvironment >= 50K steps/sec."""
+        _require_release_build()
+        best = 0.0
+        for run in range(3):
+            env = BalatroEnvironment(DirectAdapter, seed_prefix=f"BENCH_RUST_ENV_{run}")
+            rng = random.Random(run)
+            _, mask, _ = env.reset()
+            n, inside = 20_000, 0.0
+            for _ in range(n):
+                action = _random_factored(mask, rng)
+                t0 = time.perf_counter()
+                _, terminated, truncated, mask, _ = env.step(action)
+                if terminated or truncated:
+                    _, mask, _ = env.reset()
+                inside += time.perf_counter() - t0
+            best = max(best, n / inside)
+        print(f"\nBalatroEnvironment (Rust): {best:,.0f} steps/sec")
+        assert best >= 50_000, f"Only {best:,.0f} steps/sec (target: >= 50K)"
+
+    def test_gymnasium_env(self):
+        """BalatroGymnasiumEnv >= 25K steps/sec."""
+        _require_release_build()
+        best = 0.0
+        for run in range(3):
+            env = BalatroGymnasiumEnv(DirectAdapter, seed_prefix=f"BENCH_RUST_GYM_{run}")
+            rng = random.Random(run)
+            _, info = env.reset(seed=run)
+            n, inside = 20_000, 0.0
+            for _ in range(n):
+                action = rng.randrange(int(info["action_mask"].sum()))  # the first slots
+                t0 = time.perf_counter()
+                _, _, terminated, truncated, info = env.step(action)
+                if terminated or truncated:
+                    _, info = env.reset()
+                inside += time.perf_counter() - t0
+            best = max(best, n / inside)
+        print(f"\nBalatroGymnasiumEnv (Rust): {best:,.0f} steps/sec")
+        assert best >= 25_000, f"Only {best:,.0f} steps/sec (target: >= 25K)"
+
+    def test_vector_env(self):
+        """BalatroVectorEnv on 8 threads >= 300K steps/sec (256 envs)."""
+        _require_release_build()
+        from jackdaw.env import BalatroVectorEnv
+
+        n_envs, steps, best = 256, 200, 0.0
+        for run in range(3):
+            env = BalatroVectorEnv(n_envs, num_threads=8, seed_prefix=f"BENCH_RUST_VEC_{run}")
+            policy = np.random.default_rng(run)
+            _, info = env.reset(seed=run)
+            inside = 0.0
+            for _ in range(steps):
+                legal = info["action_mask"].sum(axis=1)  # the first slots of each table
+                actions = (policy.random(n_envs) * np.maximum(legal, 1)).astype(np.int64)
+                t0 = time.perf_counter()
+                _, _, _, _, info = env.step(actions)
+                inside += time.perf_counter() - t0
+            best = max(best, n_envs * steps / inside)
+        print(f"\nBalatroVectorEnv (Rust, 8 threads, 256 envs): {best:,.0f} steps/sec")
+        assert best >= 300_000, f"Only {best:,.0f} steps/sec (target: >= 300K)"
