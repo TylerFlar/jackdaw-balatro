@@ -11,7 +11,7 @@ Source: `balatro_source/functions/state_events.lua` (Balatro 1.0.1o). 103 rows: 
 | state_events/event/win_game/after:card_character | state_events.lua:42-65 | event | `Event{trigger='after', blocking=false}` → :get_UIE_by_ID, Card_Character, :remove, :add_speech_bubble +2 | [event] | unreviewed |  |  |  |  |
 | state_events/event/win_game/immediate:localize | state_events.lua:56-60 | event | `Event{}` → :add_button, localize | [event] & [event] & `G.OVERLAY_MENU and G.OVERLAY_MENU:get_UIE_by_ID('jimbo_spot')` & `G.F_JAN_CTA` | unreviewed |  |  |  |  |
 | state_events/event/win_game/immediate | state_events.lua:76-84 | event | `Event{trigger='immediate'}` |  | unreviewed |  |  |  |  |
-| state_events/fn/end_round | state_events.lua:87-288 | function | `end_round()` |  | gap |  |  | G48, G53, G260, G262 |  |
+| state_events/fn/end_round | state_events.lua:87-288 | function | `end_round()` |  | gap |  |  | G48, G53, G260, G262, G182 |  |
 | state_events/event/end_round/after:card_eval_status_text | state_events.lua:88-287 | event | `Event{trigger='after'}` → :calculate_joker, card_eval_status_text, :calculate_rental, :calculate_perishable +17 |  | unreviewed |  |  |  |  |
 | state_events/ctx/end_round/calculate_joker:end_of_round+game_over | state_events.lua:101 | context_call | `calculate_joker{end_of_round, game_over}` | [event] | verified | crates/jackdaw-core/src/round.rs::end_round_body | tests/parity/test_jokers_batch_d.py::TestMrBones | G101 |  |
 | state_events/event/end_round/immediate:win_game | state_events.lua:158-169 | event | `Event{trigger='immediate', blocking=false, blockable=false}` → win_game | [event] & else(`game_over`) & `game_won and not G.GAME.win_notified` | unreviewed |  |  |  |  |

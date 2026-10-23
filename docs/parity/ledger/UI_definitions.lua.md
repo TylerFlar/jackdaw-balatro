@@ -25,7 +25,7 @@ Source: `balatro_source/functions/UI_definitions.lua` (Balatro 1.0.1o). 27 rows:
 | UI_definitions/event/create_UIBox_blind_select/immediate | UI_definitions.lua:1432-1438 | event | `Event{trigger='immediate'}` |  | n/a-ui |  |  |  | auto: event only animates, plays sound or waits |
 | UI_definitions/fn/create_UIBox_blind_tag | UI_definitions.lua:1461-1483 | function | `create_UIBox_blind_tag(blind_choice, run_info)` |  | unreviewed |  |  |  |  |
 | UI_definitions/fn/create_UIBox_blind_choice | UI_definitions.lua:1485-1610 | function | `create_UIBox_blind_choice(type, run_info)` |  | unreviewed |  |  |  |  |
-| UI_definitions/rng/create_UIBox_blind_choice/pseudorandom_element:orbital | UI_definitions.lua:1515 | rng | `pseudorandom_element(_poker_hands, pseudoseed('orbital'))` | `not G.GAME.orbital_choices[G.GAME.round_resets.ante][type]` | gap |  |  | G40 |  |
+| UI_definitions/rng/create_UIBox_blind_choice/pseudorandom_element:orbital | UI_definitions.lua:1515 | rng | `pseudorandom_element(_poker_hands, pseudoseed('orbital'))` | `not G.GAME.orbital_choices[G.GAME.round_resets.ante][type]` | gap |  |  | G40, G182 |  |
 | UI_definitions/branch/create_UIBox_blind_choice/modifiers-no_blind_reward | UI_definitions.lua:1552 | branch | modifiers.no_blind_reward — `G.GAME.modifiers.no_blind_reward and G.GAME.modifiers.no_blind_reward[type]` |  | unreviewed |  |  |  |  |
 | UI_definitions/fn/create_UIBox_your_collection_decks | UI_definitions.lua:3869-3910 | function | `create_UIBox_your_collection_decks()` |  | unreviewed |  |  |  |  |
 | UI_definitions/rng/create_UIBox_your_collection_decks/pseudorandom_element | UI_definitions.lua:3879 | rng | `pseudorandom_element(G.P_CARDS)` |  | unreviewed |  |  |  |  |

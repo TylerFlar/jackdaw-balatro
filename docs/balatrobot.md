@@ -78,9 +78,9 @@ drawn later are still placed by rank, in the live game and in the simulator alik
 **Sim-only, masked under BALATROBOT legality.** Moves vanilla allows that the live bot can't make:
 
 - `RerollBoss` (Director's Cut, Retcon) and `BuyAndUse` have no endpoint;
-- `use` and `sell` outside `SELECTING_HAND` and `SHOP` (vanilla also allows them at blind
-  select, on the cash-out screen and in an open pack), and `rearrange` outside the states it
-  accepts;
+- `use` and `sell` outside `SELECTING_HAND` and `SHOP`: vanilla also lets a consumable be used
+  at blind select, on the cash-out screen and in an open pack, and a card be sold at blind
+  select and in an open pack;
 - a consumable that takes cards (`max_highlighted`), used in the shop;
 - Aura through `use`: its config has no `max_highlighted`, so `use.lua` never highlights a target
   and the card can't be used (`pack` special-cases it, so an Aura pick works);
