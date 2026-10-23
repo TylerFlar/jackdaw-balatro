@@ -733,8 +733,7 @@ pub fn export(gs: &GameState) -> Value {
     let streams: Map<String, Value> = gs
         .rng
         .streams()
-        .iter()
-        .map(|(k, v)| (k.clone(), num(*v)))
+        .map(|(k, v)| (k.to_owned(), num(v)))
         .collect();
     let last_score = gs.sim.last_score.map_or(Value::Null, |s| {
         json!({
