@@ -457,21 +457,30 @@ class BalatroGymnasiumEnv(gymnasium.Env):
             elif t in _TARGETED_ENTITY_SOURCES:
                 if t in mask.entity_masks:
                     legal_entities = np.nonzero(mask.entity_masks[t])[0].tolist()
-                    source = info.get("raw_state", {}).get(_TARGETED_ENTITY_SOURCES[t], [])
+                    area = _TARGETED_ENTITY_SOURCES[t]
+                    game = info.get("game")  # a Rust run (LiveAdapter's shadow)
+                    source = info.get("raw_state", {}).get(area, [])
                     for e_idx in legal_entities:
-                        if e_idx < len(source):
-                            card = source[e_idx]
-                            min_cards, max_cards, needs = get_consumable_target_info(card)
-                            if needs:
-                                if legal_cards is None:
-                                    legal_cards = tuple(np.nonzero(mask.card_mask)[0].tolist())
-                                actions.extend(
-                                    _card_actions(
-                                        t, e_idx, legal_cards, min_cards, max_cards, self._rng
-                                    )
+                        if game is not None:
+                            try:
+                                target_info = game._g.consumable_target_info(area, e_idx)
+                            except ValueError:  # past the end of the area
+                                continue
+                        elif e_idx < len(source):
+                            target_info = get_consumable_target_info(source[e_idx])
+                        else:
+                            continue
+                        min_cards, max_cards, needs = target_info
+                        if needs:
+                            if legal_cards is None:
+                                legal_cards = tuple(np.nonzero(mask.card_mask)[0].tolist())
+                            actions.extend(
+                                _card_actions(
+                                    t, e_idx, legal_cards, min_cards, max_cards, self._rng
                                 )
-                            else:
-                                actions.append(_target_action(t, e_idx))
+                            )
+                        else:
+                            actions.append(_target_action(t, e_idx))
 
         # Subsample to budget if needed
         if len(actions) > MAX_ACTIONS:

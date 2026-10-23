@@ -11,6 +11,7 @@ import random
 from collections.abc import Callable
 from typing import Any
 
+from jackdaw.bridge.live import VetoedActionError
 from jackdaw.core.game import NotPortedError
 from jackdaw.env.action_space import (
     ActionMask,
@@ -77,6 +78,12 @@ class BalatroEnvironment:
     A step the Rust engine can't take yet (``NotPortedError``) leaves the run
     unchanged and ends the episode as truncated, with the reason in
     ``info["not_ported"]``.
+
+    With :class:`~jackdaw.bridge.live.LiveAdapter` (the live game through
+    BalatroBot) ``info["game"]`` is the adapter's shadow run and masks follow
+    BALATROBOT legality (the adapter's ``legality``); a move the deviation
+    catalog vetoes ends the episode as truncated, with the reason in
+    ``info["vetoed"]``.
 
     Parameters
     ----------
@@ -149,7 +156,7 @@ class BalatroEnvironment:
 
         game = getattr(self._adapter, "game", None)
         if game is not None:
-            obs, mask, state, splits = _rust_view(game._g.env_view())
+            obs, mask, state, splits = _rust_view(game._g.env_view(self._legality()))
             self._state = state
             info: dict[str, object] = {
                 "game": game,
@@ -223,25 +230,34 @@ class BalatroEnvironment:
         call into ``jackdaw._core`` (or through a custom adapter's ``step``)."""
         adapter = self._adapter
         game = adapter.game  # type: ignore[attr-defined]
-        g = game._g
+        legality = self._legality()
         prev_state = self._state
         not_ported: str | None = None
+        vetoed: str | None = None
         try:
             if type(adapter) is DirectAdapter:
-                parts = g.env_step(action.action_type, action.entity_target, action.card_target)
+                parts = game._g.env_step(
+                    action.action_type, action.entity_target, action.card_target, legality
+                )
             else:
                 adapter.step(rust_factored_to_engine(action, game))
-                parts = g.env_view()
+                # Read the run again: an adapter may move its game to a new state object.
+                parts = game._g.env_view(legality)
         except NotPortedError as exc:
             not_ported = str(exc)
-            parts = g.env_view()
+            parts = game._g.env_view(legality)
+        except VetoedActionError as exc:
+            vetoed = str(exc)
+            parts = game._g.env_view(legality)
         obs, mask, state, splits = _rust_view(parts)
         self._state = state
         self.episode_length += 1
         self._step_count += 1
 
         terminated = state.done or (self._end_on_win and state.won)
-        truncated = self._step_count >= self._max_steps or not_ported is not None
+        truncated = (
+            self._step_count >= self._max_steps or not_ported is not None or vetoed is not None
+        )
         self.episode_ante = state.ante
         self.episode_won = state.won
 
@@ -255,7 +271,14 @@ class BalatroEnvironment:
         }
         if not_ported is not None:
             info["not_ported"] = not_ported
+        if vetoed is not None:
+            info["vetoed"] = vetoed
         return obs.to_game_observation(), terminated, truncated, _action_mask_to_game(mask), info
+
+    def _legality(self) -> str:
+        """The legality the adapter's moves follow: ``balatrobot`` for an adapter that
+        plays through BalatroBot (:class:`~jackdaw.bridge.live.LiveAdapter`)."""
+        return str(getattr(self._adapter, "legality", "vanilla"))
 
     def _reuse_snapshot(self, returned: GameState, gs: dict[str, Any]) -> GameState:
         """The post-step snapshot of *gs*.

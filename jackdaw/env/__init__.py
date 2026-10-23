@@ -13,6 +13,7 @@ Canonical usage::
 ``BalatroVectorEnv`` steps many environments in parallel in Rust.
 """
 
+from jackdaw.bridge.live import LiveAdapter
 from jackdaw.env.action_space import (
     NUM_ACTION_TYPES,
     ActionMask,
@@ -87,6 +88,7 @@ __all__ = [
     "GameSpec",
     "GameState",
     "Legality",
+    "LiveAdapter",
     "NUM_ACTION_TYPES",
     "NUM_CENTER_KEYS",
     "Observation",

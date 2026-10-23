@@ -220,10 +220,29 @@ class SimBackend:
 
 
 class LiveBackend:
-    """Backend that proxies requests to a real balatrobot instance."""
+    """Backend that sends requests to a BalatroBot server over HTTP (JSON-RPC 2.0).
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 12346) -> None:
-        self._url = f"http://{host}:{port}"
+    ``LiveBackend()`` talks to BalatroBot's default ``http://127.0.0.1:12346``;
+    ``LiveBackend(url="http://127.0.0.1:12347")`` (or ``host``/``port``) to
+    another instance or to ``jackdaw serve``. ``timeout`` is per request, in
+    seconds: the live endpoints answer once the game's animations settle.
+    """
+
+    def __init__(
+        self,
+        host: str = "127.0.0.1",
+        port: int = 12346,
+        *,
+        url: str | None = None,
+        timeout: float = 30.0,
+    ) -> None:
+        self.url = url.rstrip("/") if url else f"http://{host}:{port}"
+        self.timeout = timeout
+        self._next_id = 0
+        self._client: Any = None
+
+    def __repr__(self) -> str:
+        return f"LiveBackend({self.url!r})"
 
     def handle(self, method: str, params: dict[str, Any] | None) -> dict[str, Any]:
         import httpx
@@ -232,13 +251,16 @@ class LiveBackend:
         if method == "add" and rpc_params:
             rpc_params = to_bot_add_params(rpc_params)
 
+        self._next_id += 1
         payload: dict[str, Any] = {
             "jsonrpc": "2.0",
             "method": method,
             "params": rpc_params,
-            "id": 1,
+            "id": self._next_id,
         }
-        resp = httpx.post(self._url, json=payload, timeout=10.0)
+        if self._client is None:
+            self._client = httpx.Client(timeout=self.timeout)
+        resp = self._client.post(self.url, json=payload)
         data = resp.json()
 
         if "error" in data:
@@ -250,3 +272,8 @@ class LiveBackend:
             )
 
         return data.get("result", {})
+
+    def close(self) -> None:
+        if self._client is not None:
+            self._client.close()
+            self._client = None
