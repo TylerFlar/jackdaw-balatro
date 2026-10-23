@@ -67,9 +67,21 @@ class GameSnapshot:
     ante: int = 1
     consumable_count: int = 0
     consumable_slots: int = 2
+    # distinct Planet keys in G.GAME.consumeable_usage (Satellite,
+    # card.lua:1667-1674)
+    planets_used: int = 0
 
 
 _DEFAULT_GAME = GameSnapshot()
+
+
+def count_planets_used(game_state: dict[str, Any]) -> int:
+    """Distinct Planet center keys used this run: Satellite's count over
+    ``G.GAME.consumeable_usage`` entries whose ``set`` is ``'Planet'``
+    (card.lua:1668-1671; usage is recorded by set_consumeable_usage,
+    misc_functions.lua:1191-1195)."""
+    usage = game_state.get("consumable_usage") or {}
+    return sum(1 for entry in usage.values() if entry.get("set") == "Planet")
 
 
 # ---------------------------------------------------------------------------
@@ -2375,10 +2387,13 @@ def _rocket_dollars(card: Card, game: GameSnapshot) -> int:
 
 @register_dollars("j_satellite")
 def _satellite_dollars(card: Card, game: GameSnapshot) -> int:
-    """Satellite: +$1 per unique Planet type used. Source: card.lua:1669."""
-    planet_types = card.ability.get("planet_types_used", 0)
-    if planet_types > 0:
-        return card.ability.get("extra", 1) * planet_types
+    """Satellite: +$extra per distinct Planet card used this run.
+
+    Source: card.lua:1667-1674 — counts the G.GAME.consumeable_usage
+    entries with set 'Planet' (see :func:`count_planets_used`).
+    """
+    if game.planets_used > 0:
+        return card.ability.get("extra", 1) * game.planets_used
     return 0
 
 

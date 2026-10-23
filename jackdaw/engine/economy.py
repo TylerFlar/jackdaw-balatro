@@ -39,7 +39,7 @@ if TYPE_CHECKING:
     from jackdaw.engine.card import Card
     from jackdaw.engine.rng import PseudoRandom
 
-from jackdaw.engine.jokers import GameSnapshot, on_end_of_round
+from jackdaw.engine.jokers import GameSnapshot, count_planets_used, on_end_of_round
 
 # ---------------------------------------------------------------------------
 # RoundEarnings — per-round cash-out descriptor
@@ -261,6 +261,7 @@ def calculate_round_earnings(
             nine_tally=sum(1 for c in _all_owned if c.get_id() == 9),
             joker_count=len(jokers),
             probabilities_normal=game_state.get("probabilities", {}).get("normal", 1),
+            planets_used=count_planets_used(game_state),
         )
         end_result = on_end_of_round(
             jokers, game_snap, rng, hand_levels=game_state.get("hand_levels")

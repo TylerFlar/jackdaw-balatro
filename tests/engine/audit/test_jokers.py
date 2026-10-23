@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from jackdaw.engine.actions import GamePhase
+from jackdaw.engine.actions import GamePhase, UseConsumable
+from jackdaw.engine.game import step
 
-from ._helpers import give_card, give_joker, new_run, play, select_blind
+from ._helpers import give_card, give_consumable, give_joker, new_run, play, select_blind
 
 
 class TestMrBones:
@@ -35,3 +36,17 @@ class TestMrBones:
         gs["blind"].chips = 1
         play(gs, gs["hand"][0])
         assert gs["round_earnings"].blind_reward == gs["blind"].dollars > 0
+
+
+class TestSatellite:
+    def test_pays_per_distinct_planet_used(self):
+        """calculate_dollar_bonus pays extra x the number of distinct Planet
+        keys in G.GAME.consumeable_usage (card.lua:1667-1674)."""
+        gs = select_blind(new_run("AUDIT_SATELLITE"))
+        give_joker(gs, "j_satellite")
+        for key in ("c_pluto", "c_mercury", "c_pluto"):
+            give_consumable(gs, key)
+            step(gs, UseConsumable(card_index=0))
+        gs["blind"].chips = 1
+        play(gs, gs["hand"][0])
+        assert gs["round_earnings"].joker_dollars == 2

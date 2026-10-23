@@ -34,7 +34,7 @@ oracle with its regression test; Rust pending), `fixed` (both engines, test land
 | G14 | blinds | `first_hand_drawn` (Certificate) must run before `drawn_to_hand` (Cerulean Bell). | game.lua:3226 |  |  |  | open |
 | G15 | debuffs | `set_debuff` must call `remove_from_deck`/`add_to_deck`, and expired perishables must stay debuffed and lose their passives. The end-of-round order must be perishable tick, then dollar bonus. | card.lua:526-538, 2283; state_events.lua:99-110 |  |  |  | open |
 | G16 | jokers | Blueprint/Brainstorm guards are wrong: Hiker, DNA, Perkeo and Burnt Joker should be copyable; Trading Card should not be. | card.lua:3067/3501/2413/2748/2802 |  |  |  | open |
-| G17 | jokers | Satellite never pays; `planet_types_used` is never written. | card.lua:1667 |  |  |  | open |
+| G17 | jokers | Satellite never pays; `planet_types_used` is never written. | card.lua:1667 | GameSnapshot.planets_used (jokers.count_planets_used over gs['consumable_usage'] entries with set Planet) feeds Satellite's dollar bonus. | | tests/engine/audit/test_jokers.py::TestSatellite | python-fixed |
 | G18 | jokers | Bull and Bootstraps must see `dollar_buffer` (money earned earlier in the same hand). To Do List pays in `before`. | card.lua:3936/4046/3491 |  |  |  | open |
 | G19 | jokers | Hologram (`playing_card_added`) is missing for Certificate, Marble Joker, DNA, Cryptid and Familiar/Grim/Incantation. | card.lua:1217/1338/2481/2600; common_events.lua:923 |  |  |  | open |
 | G20 | jokers | Mime retriggers only held cards that have an effect during scoring; Mime and Red Seal retrigger Gold-card $ and Blue Seal at round end. | state_events.lua:171-233, 813-829 |  |  |  | open |

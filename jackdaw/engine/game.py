@@ -1969,7 +1969,7 @@ def _joker_end_of_round_effects(gs: dict[str, Any]) -> dict[str, Any]:
     Dollars returned here are only ever banked via the cash-out screen,
     which a lost run never reaches.
     """
-    from jackdaw.engine.jokers import GameSnapshot, on_end_of_round
+    from jackdaw.engine.jokers import GameSnapshot, count_planets_used, on_end_of_round
     from jackdaw.engine.round_lifecycle import process_round_end_cards
 
     cr = gs.get("current_round", {})
@@ -1998,6 +1998,7 @@ def _joker_end_of_round_effects(gs: dict[str, Any]) -> dict[str, Any]:
         # Gros Michel / Cavendish roll against G.GAME.probabilities.normal
         # (card.lua:3020), which Oops! All 6s doubles.
         probabilities_normal=gs.get("probabilities", {}).get("normal", 1),
+        planets_used=count_planets_used(gs),
     )
     eor = on_end_of_round(
         jokers,
