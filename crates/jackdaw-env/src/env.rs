@@ -190,7 +190,9 @@ impl GymEnv {
     pub fn step(&mut self, index: usize) -> Result<StepResult, StepError> {
         let action = *self.table.get(index).ok_or(StepError::BadIndex(index))?;
         let engine_action = to_engine(&action, &self.game).map_err(|e| StepError::Convert(e.0))?;
-        let not_ported = match self.game.step(&engine_action) {
+        // No rollback copy: an illegal action changes nothing, and a NotPorted refusal ends the
+        // episode.
+        let not_ported = match self.game.step_in_place(&engine_action) {
             Ok(()) => None,
             Err(CoreStepError::Illegal(m)) => return Err(StepError::Illegal(m)),
             Err(CoreStepError::Unported(m)) => Some(m),

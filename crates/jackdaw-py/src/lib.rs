@@ -227,6 +227,16 @@ impl Game {
         Some((text.name().to_owned(), scoring))
     }
 
+    /// One section of the snapshot (JSON text) without exporting the rest: an area (`"hand"`,
+    /// `"jokers"`, `"consumables"`, `"deck"`, `"discard"`, `"play"`, `"shop_jokers"`,
+    /// `"shop_vouchers"`, `"shop_booster"`, `"pack_cards"`), `"blind"`, `"hands"`, `"pack"`,
+    /// `"tags"` or `"last_score"`.
+    fn view(&self, name: &str) -> PyResult<String> {
+        jackdaw_core::snapshot::view(&self.inner.gs, name)
+            .map(|v| v.to_string())
+            .ok_or_else(|| value_error(format!("unknown view {name:?}")))
+    }
+
     /// The observation (encoder v1, `jackdaw.env.observation`) of the current state.
     ///
     /// Returns ``(data, rows)``: ``data`` is a ``bytearray`` of native-endian float32 values,
@@ -352,7 +362,9 @@ impl Game {
     ) -> PyResult<EnvView<'py>> {
         let fa = env::factored_from_py(action_type, entity_target, card_target)?;
         let action = jackdaw_env::action::to_engine(&fa, &self.inner).map_err(value_error)?;
-        self.inner.step(&action).map_err(step_error)?;
+        // No rollback copy: an illegal action changes nothing, and BalatroEnvironment ends the
+        // episode on a NotPorted refusal.
+        self.inner.step_in_place(&action).map_err(step_error)?;
         self.env_view(py, legality)
     }
 
