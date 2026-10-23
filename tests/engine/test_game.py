@@ -2388,7 +2388,7 @@ class TestEndlessOverflow:
 
     def test_ante_39_round_plays(self):
         gs = self._round_at_ante(39)
-        assert gs["blind"].chips == math.inf
+        assert math.isnan(gs["blind"].chips)
         step(gs, PlayHand(card_indices=(0, 1, 2, 3, 4)))
         assert gs["phase"] == GamePhase.SELECTING_HAND
 
@@ -2411,4 +2411,4 @@ class TestEndlessOverflow:
     def test_disabling_an_overflowed_wall(self):
         wall = Blind.create("bl_wall", 39)
         wall.disable()
-        assert wall.chips == math.inf
+        assert math.isnan(wall.chips)

@@ -18,7 +18,7 @@ from jackdaw.engine.data.prototypes import BLINDS
 
 
 def _truncate_chips(chips: float) -> int | float:
-    """``int()`` for a chip target, passing an overflowed (inf) one through."""
+    """``int()`` for a chip target, passing an overflowed (NaN) one through."""
     return int(chips) if math.isfinite(chips) else chips
 
 
@@ -37,8 +37,8 @@ class Blind:
     """Display name (e.g. ``"Small Blind"``, ``"The Hook"``)."""
 
     chips: int | float
-    """Chip target to beat this blind (``math.inf`` from ante 39 in endless
-    mode, where the target overflows a double)."""
+    """Chip target to beat this blind (NaN from ante 39 in endless mode,
+    where vanilla's get_blind_amount overflows, see blind_scaling)."""
 
     mult: float
     """Blind multiplier (Small=1, Big=1.5, Boss=2+)."""
@@ -500,13 +500,12 @@ class Blind:
 
     def beaten_by(self, chips: float) -> bool:
         """Vanilla's win check, ``G.GAME.chips - G.GAME.blind.chips >= 0``
-        (state_events.lua:96, game.lua:3196).
+        (state_events.lua:96, game.lua:3196), as the same subtraction.
 
-        Written as a subtraction, an overflowed target can never be met:
-        ``inf - inf`` is NaN, so even an infinite score fails.  A plain
-        ``chips >= self.chips`` would let an inf score beat an inf blind.
+        An overflowed (NaN) target can never be met: the difference is NaN
+        and every comparison with NaN is false, an infinite score included.
         """
-        return math.isfinite(self.chips) and chips >= self.chips
+        return chips - self.chips >= 0
 
     def __repr__(self) -> str:
         return (

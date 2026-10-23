@@ -995,8 +995,8 @@ def score_hand(
     # >= 25% ratio (card.lua:3047-48: G.GAME.chips/G.GAME.blind.chips,
     # both cumulative — live-verified: LSWPWW38 died at <25% with
     # Bones on board while the old unconditional save advanced).
-    # An overflowed (inf) target is skipped: vanilla's ratio is 0 or NaN
-    # there, never >= 0.25, and a huge int / inf would raise here.
+    # An overflowed (NaN) target is skipped: vanilla's ratio is NaN there,
+    # never >= 0.25 (and every comparison below is false for NaN anyway).
     saved = False
     _round_chips_after = gs.get("chips", 0) + total
     if (

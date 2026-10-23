@@ -42,7 +42,7 @@ def get_blind_amount(ante: int, scaling: int = 1) -> int | float:
 
     Returns:
         Base chip amount (before blind_mult and ante_scaling multipliers),
-        or ``math.inf`` once the amount overflows a double (ante 39+).
+        or NaN once the amount overflows a double (ante 39+).
     """
     if ante < 1:
         return 100
@@ -67,12 +67,12 @@ def get_blind_amount(ante: int, scaling: int = 1) -> int | float:
         amount = math.inf
 
     # From ante 39 the double overflows — the "naneinf" blind.  Vanilla's
-    # rounding below then computes inf % inf = NaN, and since its win check
-    # is chips - blind.chips >= 0, that blind can never be beaten.  inf keeps
-    # that outcome under the same check (inf - inf is NaN too) without
-    # NaN's habit of failing every comparison.
+    # rounding below then runs on inf: log10(inf) = inf, 10^inf = inf, and
+    # Lua's inf % inf is inf - floor(inf/inf)*inf = NaN, so the amount comes
+    # back NaN (misc_functions.lua:929).  Its win check, chips - blind.chips
+    # >= 0, is then false for every score.
     if not math.isfinite(amount):
-        return math.inf
+        return math.nan
 
     # Significant-figure rounding (misc_functions.lua:929):
     #   amount = amount - amount % (10 ^ floor(log10(amount) - 1))
@@ -101,7 +101,7 @@ def get_blind_target(
 
     Returns:
         Chip target the player must reach to beat this blind
-        (``math.inf`` from ante 39, see :func:`get_blind_amount`).
+        (NaN from ante 39, see :func:`get_blind_amount`).
     """
     base = get_blind_amount(ante, scaling)
     mult = BLIND_MULT.get(blind_type, 2.0)

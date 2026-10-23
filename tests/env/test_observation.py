@@ -665,7 +665,7 @@ class TestEndlessOverflowEncoding:
         gs = adapter.raw_state
         gs["round_resets"]["ante"] = 39
         _step_to_hand(adapter)
-        assert gs["blind"].chips == math.inf
+        assert math.isnan(gs["blind"].chips)
         for chips in (0, 10**300, math.inf, math.nan):
             gs["chips"] = chips
             obs = encode_observation(gs)
