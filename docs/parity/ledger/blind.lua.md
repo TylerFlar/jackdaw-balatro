@@ -72,7 +72,7 @@ Source: `balatro_source/blind.lua` (Balatro 1.0.1o). 94 rows: 25 function, 42 br
 | blind/event/Blind:press_play/the-tooth/immediate:juice_up | blind.lua:500 | event | `Event{}` → :juice_up | `self.name == "The Tooth"` & [event] | unreviewed |  |  |  |  |
 | blind/fn/Blind:modify_hand | blind.lua:510-517 | function | `Blind:modify_hand(cards, poker_hands, text, mult, hand_chips)` |  | unreviewed |  |  |  |  |
 | blind/branch/Blind:modify_hand/the-flint | blind.lua:512-514 | branch | The Flint — `self.name == "The Flint"` |  | unreviewed |  |  |  |  |
-| blind/fn/Blind:debuff_hand | blind.lua:519-570 | function | `Blind:debuff_hand(cards, hand, handname, check)` |  | unreviewed |  |  |  |  |
+| blind/fn/Blind:debuff_hand | blind.lua:519-570 | function | `Blind:debuff_hand(cards, hand, handname, check)` |  | ported | crates/jackdaw-core/src/blind.rs::blind_debuff_hand |  | G81 |  |
 | blind/branch/Blind:debuff_hand/debuff-h_size_ge | blind.lua:527-529 | branch | debuff.h_size_ge — `self.debuff.h_size_ge and #cards < self.debuff.h_size_ge` | `self.debuff` | unreviewed |  |  |  |  |
 | blind/branch/Blind:debuff_hand/the-eye | blind.lua:535-540 | branch | The Eye — `self.name == "The Eye"` | `self.debuff` | unreviewed |  |  |  |  |
 | blind/branch/Blind:debuff_hand/the-mouth | blind.lua:542-547 | branch | The Mouth — `self.name == "The Mouth"` | `self.debuff` | unreviewed |  |  |  |  |
