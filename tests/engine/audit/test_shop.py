@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import copy
 
-from jackdaw.engine import GamePhase, SkipBlind, step
-from jackdaw.engine.card_factory import create_card, create_joker
+from jackdaw.engine import GamePhase, RedeemVoucher, SkipBlind, step
+from jackdaw.engine.card_factory import create_card, create_joker, create_voucher
+from jackdaw.engine.data.prototypes import JOKERS
 from jackdaw.engine.packs import generate_pack_cards
-from tests.engine.audit._helpers import new_run
+from tests.engine.audit._helpers import new_run, play_round
 
 
 def _with_hallucination(gs: dict) -> dict:
@@ -76,3 +77,53 @@ def test_hallucination_tarot_is_made_before_the_pack_contents():
     assert gs["consumables"][-1].center_key == want_hal
     assert [c.center_key for c in gs["pack_cards"]] == want_pack
     assert want_hal not in want_pack
+
+
+# ---------------------------------------------------------------------------
+# G47 — Overstock's refill is a normal create_card_for_shop
+# ---------------------------------------------------------------------------
+
+
+def _shop_offering_overstock(seed: str) -> dict:
+    gs = new_run(seed=seed)
+    play_round(gs)
+    voucher = create_voucher("v_overstock_norm")
+    voucher.set_cost()
+    gs["shop_vouchers"] = [voucher]
+    gs["dollars"] = 50
+    return gs
+
+
+def test_overstock_refill_rolls_illusion():
+    """With Illusion, the new slot's type roll includes Illusion's pull.
+
+    card.lua:1885-1889 (Card:apply_to_run, Overstock) queues
+    change_shop_size(1) (common_events.lua:1097-1118), which fills the new
+    slot with create_card_for_shop (UI_definitions.lua:742-800): the rate
+    table evaluates ``pseudorandom(pseudoseed('illusion')) > 0.6`` for the
+    playing-card slot on every call (:772).
+    """
+    gs = _shop_offering_overstock("AUDIT_G47_ILL")
+    gs["used_vouchers"]["v_illusion"] = True
+    gs["playing_card_rate"] = 4
+    before = gs["rng"].state.get("illusion")
+    step(gs, RedeemVoucher(card_index=0))
+    assert len(gs["shop_cards"]) == 3
+    assert gs["rng"].state.get("illusion") != before
+
+
+def test_overstock_refill_honours_a_pending_store_joker_create_tag():
+    """create_card_for_shop gives the slot to a pending Uncommon/Rare Tag first.
+
+    UI_definitions.lua:753-763: a pending ``store_joker_create`` tag makes the
+    slot's card (forced rarity, its own 'uta'/'rta' stream, couponed).
+    """
+    from jackdaw.engine.game import _award_tag
+
+    gs = _shop_offering_overstock("AUDIT_G47_TAG")
+    _award_tag(gs, "tag_uncommon", source="test")
+    step(gs, RedeemVoucher(card_index=0))
+    new = gs["shop_cards"][-1]
+    assert new.ability["set"] == "Joker" and new.cost == 0
+    assert JOKERS[new.center_key].rarity == 2
+    assert "Joker2uta1" in gs["rng"].state

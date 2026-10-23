@@ -1672,12 +1672,16 @@ def _handle_redeem_voucher(gs: dict[str, Any], idx: int) -> dict[str, Any]:
     # Overstock / Overstock Plus trigger a FULL shop refill to the new
     # limit (purchase-emptied slots refill too — live rolled two cards
     # when one slot was empty); non-slot vouchers refill nothing.
-    # All three behaviors lockstep-confirmed on live.
+    # All three behaviors lockstep-confirmed on live.  Each new slot is a
+    # create_card_for_shop (change_shop_size, common_events.lua:1112-1115):
+    # store_joker_create tags, Illusion, then the edition tags.
     _new_max = gs.get("shop", {}).get("joker_max", 2)
     if _new_max > _slots_before:
         from jackdaw.engine.shop import fill_shop_slots
 
+        _sync_played_hand_types(gs)
         fill_shop_slots(gs, _new_max - len(gs.get("shop_cards", [])))
+        _fire_shop_tags(gs, rerolled=True)
 
     # Clear the voucher slot so the next shop doesn't re-offer it.
     # Matches card.lua:1850: G.GAME.current_round.voucher = nil
@@ -3148,12 +3152,7 @@ def _reroll_shop_cards(gs: dict[str, Any]) -> None:
     Matches the repopulate step of ``reroll_shop``
     (``button_callbacks.lua:2855``).
     """
-    from jackdaw.engine.card_factory import create_card
-    from jackdaw.engine.shop import (
-        apply_illusion_shop_edition,
-        apply_store_joker_create_tag,
-        select_shop_card_type,
-    )
+    from jackdaw.engine.shop import create_card_for_shop
 
     rng = gs.get("rng")
     if rng is None:
@@ -3166,45 +3165,10 @@ def _reroll_shop_cards(gs: dict[str, Any]) -> None:
 
     ante = gs.get("round_resets", {}).get("ante", 1)
     shop_joker_max: int = gs.get("shop", {}).get("joker_max", 2)
-    has_illusion = bool((gs.get("used_vouchers") or {}).get("v_illusion"))
-
-    new_cards = []
-    for _ in range(shop_joker_max):
-        tag_card = apply_store_joker_create_tag(gs, rng, ante)
-        if tag_card is not None:
-            new_cards.append(tag_card)
-            continue
-        card_type = select_shop_card_type(
-            rng,
-            ante,
-            joker_rate=gs.get("joker_rate", 20.0),
-            tarot_rate=gs.get("tarot_rate", 4.0),
-            planet_rate=gs.get("planet_rate", 4.0),
-            spectral_rate=gs.get("spectral_rate", 0.0),
-            playing_card_rate=gs.get("playing_card_rate", 0.0),
-            has_illusion=has_illusion,
-        )
-        card = create_card(
-            card_type,
-            rng,
-            ante,
-            area="shop",
-            # Shop cards are never soulable (UI_definitions.lua:776
-            # passes nil): The Soul / Black Hole cannot appear in a
-            # shop and no 'soul_*' roll is consumed.  This reroll loop
-            # missed the populate_shop fix and left the True default —
-            # every reroll slot burned a phantom soul roll, and
-            # LSMORS4J's hit 0.99963 > 0.997, forcing a c_black_hole
-            # into the rerolled shop (live: c_venus).
-            soulable=False,
-            append="sho",
-            game_state=gs,
-        )
-        if card_type in ("Base", "Enhanced") and has_illusion:
-            apply_illusion_shop_edition(rng, card)
-        new_cards.append(card)
-
-    gs["shop_cards"] = new_cards
+    # Shop cards are never soulable (UI_definitions.lua:776 passes nil);
+    # this loop once missed that and burned a phantom soul roll per slot
+    # (LSMORS4J: a c_black_hole where live showed c_venus).
+    gs["shop_cards"] = [create_card_for_shop(gs, rng, ante) for _ in range(shop_joker_max)]
     # Pending edition tags also claim rerolled jokers (vanilla behavior).
     _fire_shop_tags(gs, rerolled=True)
 
