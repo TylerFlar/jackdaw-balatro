@@ -57,7 +57,7 @@ Severities:
 
 | id | area | what differs in the live game | severity | Python follows |
 |---|---|---|---|---|
-| [S01](#s01) | blinds, deck | Marble Joker's Stone card joins the deck after the round's `'nr'` shuffle, at the bottom | state-difference | **SMODS** |
+| [S01](#s01) | blinds, deck | Marble Joker's Stone card joins the deck after the round's `'nr'` shuffle, at the bottom | state-difference | vanilla (G55) |
 | [S02](#s02) | round start | `first_hand_drawn` (Certificate) runs after `Blind:drawn_to_hand` (Cerulean Bell), once per round | state-difference | vanilla |
 | [S03](#s03) | jokers | Certificate's seal roll also draws once from `'stdseal'..ante` | RNG-desync | vanilla |
 | [S04](#s04) | hand size | hand-size changes apply at once and the hand refills to the limit; The Manacle's disable draws 1 card, not 2 | state-difference | vanilla (engine); SMODS (SimBackend `add`) |
@@ -128,15 +128,12 @@ Changes that were examined and turned out to keep vanilla outcomes are listed un
   that round differs. The Stone is never drawn before the last card. From the next round on, the
   Stone is shuffled normally.
 - **Severity:** state-difference: the deck order of every round in which Marble fires.
-- **Python: follows SMODS.**
-  - `jackdaw/engine/game.py:2859-2866` parks the Stone in `pending_deck_bottom` ("live-verified:
-    LS86UJ9R").
-  - `game.py:263-268` puts it at deck index 0 after the `'nr'` shuffle.
-  - Rust (vanilla) shuffles the Stone into the deck, so Rust and Python disagree on every such round.
-  - With two Stones in one blind, Steamodded moves them out of `G.play` in creation order
-    (`CardArea:remove_card` takes a play area's first card, `cardarea.lua:76-80`), and each insert
-    goes to index 1. The second Stone ends at the very bottom. Python's `deck[:0] = pending` puts
-    the first one there instead.
+- **Python: vanilla** since gap G55 was fixed.
+  - It used to follow Steamodded: the Stone waited in `pending_deck_bottom` ("live-verified:
+    LS86UJ9R") and joined the deck at index 0 after the `'nr'` shuffle.
+  - `jackdaw/engine/game.py` (`_apply_setting_blind_mutations`) now puts the Stone in the deck
+    before the shuffle, as Rust does. The snapshot keeps `sim.pending_deck_bottom`, always empty.
+  - A live capture of a round in which Marble fires therefore differs from both engines.
 
 <a id="s02"></a>
 ### S02: `first_hand_drawn` fires after the blind's `drawn_to_hand`
@@ -674,10 +671,8 @@ The live-tuned Python code was found by searching for "live", "lockstep", "verif
 "balatrobot", "smods" and seed-like tokens (`[A-Z0-9]{8}`). That turns up 74 places that cite 41
 seeds. Checked against the current code, only these follow Steamodded rather than vanilla:
 
-1. **Marble Joker's Stone placement (S01).** `jackdaw/engine/game.py:2859-2866` and `:263-268`
-   (`pending_deck_bottom`, LS86UJ9R). The Rust port, which follows vanilla, shuffles the Stone into
-   the deck and will differ on every round in which Marble fires. With two Stones in one blind,
-   Python's bottom order is also the reverse of Steamodded's.
+1. **Marble Joker's Stone placement (S01).** Fixed by gap G55: the oracle now shuffles the Stone
+   in, as vanilla and the Rust port do (it used `pending_deck_bottom`, LS86UJ9R).
 2. **SimBackend `add` refills the hand to the new limit (S04, B03).**
    `jackdaw/bridge/backend.py:273-280`. This is the bridge only: the engine draws exactly the
    increase, as vanilla does.

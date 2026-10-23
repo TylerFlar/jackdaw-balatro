@@ -1274,13 +1274,16 @@ class TestPillarPlayedThisAnte:
 
 
 class TestMarbleStoneShuffleTiming:
-    """Bug #33: Marble Joker's stone joined the deck BEFORE the per-round
-    'nr' shuffle, changing the whole permutation. Vanilla emplaces it via
-    a queued event AFTER the shuffle; it lands at the pile bottom
-    (live-verified: LS86UJ9R — dealt hand matches a stone-less 52-card
-    shuffle, stone at serialized deck index 0)."""
+    """G55: vanilla queues Marble Joker's events (make the Stone in G.play,
+    then draw_card it to G.deck) during the setting_blind loop, ahead of
+    new_round's 'nr' shuffle event (card.lua:2580-2601,
+    state_events.lua:335-349), so the Stone is shuffled in with the deck.
+    The live game runs Steamodded, which queues the draw inside the creation
+    event, after the shuffle: there the deal matches a stone-less 52-card
+    shuffle and the Stone sits at the bottom (LS86UJ9R; smods-diffs.md S01).
+    The engine follows vanilla."""
 
-    def test_stone_added_after_shuffle_at_bottom(self):
+    def test_stone_is_shuffled_into_the_deck(self):
         from jackdaw.engine.card_factory import create_joker
         from jackdaw.engine.rng import PseudoRandom
 
@@ -1288,20 +1291,20 @@ class TestMarbleStoneShuffleTiming:
         j = create_joker("j_marble")
         gs["jokers"] = [j]
         j.add_to_deck(gs)
-
-        # Expected deal: shuffle a stone-less copy with the same stream.
-        ref = list(gs["deck"])
-        ref_rng = PseudoRandom("MARBLE1")
-        ref_rng.shuffle(ref, ref_rng.seed("nr1"))
-        expected_hand = sorted(c.card_key for c in ref[-8:])
+        before = list(gs["deck"])
 
         step(gs, SelectBlind())
-        dealt = sorted(c.card_key for c in gs["hand"])
-        assert dealt == expected_hand
+        owned = gs["deck"] + gs["hand"]
+        stones = [c for c in owned if c.ability.get("effect") == "Stone Card"]
+        assert len(stones) == 1
 
-        deck = gs["deck"]
-        stones = [i for i, c in enumerate(deck) if c.ability.get("effect") == "Stone Card"]
-        assert stones == [0]  # pile bottom, drawn last
+        # Expected order: the 53 cards shuffled with the round's stream
+        # (pseudoshuffle sorts by sort_id first).
+        ref = before + stones
+        ref_rng = PseudoRandom("MARBLE1")
+        ref_rng.shuffle(ref, ref_rng.seed("nr1"))
+        assert [id(c) for c in gs["deck"]] == [id(c) for c in ref[:-8]]
+        assert sorted(id(c) for c in gs["hand"]) == sorted(id(c) for c in ref[-8:])
 
 
 class TestDiscountRepricesOwnedCards:
