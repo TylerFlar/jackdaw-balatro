@@ -391,10 +391,9 @@ def _open_tag_pack(gs: dict[str, Any], pack_key: str, force: bool = False) -> No
     ``G.FUNCS.use_card`` (tag.lua:209-282), i.e. the same ``Card:open`` as
     a shop pack: see :func:`_open_pack`.
     """
-    # A pack is already open (e.g. Double Tag duplicated a pack tag):
-    # queue this one.  Vanilla stacks pack opens — the next pack opens
-    # when the current one closes, and its contents roll AT THAT TIME
-    # (deferred generation keeps the streams in vanilla order).
+    # A pack is already open: queue this one, to open (and roll its
+    # contents) when the current one closes.  The tag passes never get here
+    # since G160: a second pack tag stays held until end_consumeable's pass.
     if not force and (gs.get("phase") == GamePhase.PACK_OPENING or gs.get("pack_cards")):
         gs.setdefault("pending_tag_packs", []).append(pack_key)
         return
