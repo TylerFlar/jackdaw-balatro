@@ -190,4 +190,5 @@ def _action_mask_to_game(mask: ActionMask) -> GameActionMask:
         entity_masks=mask.entity_masks,
         min_card_select=mask.min_card_select,
         max_card_select=mask.max_card_select,
+        forced_card=mask.forced_card,
     )

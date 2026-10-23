@@ -110,6 +110,7 @@ from jackdaw.engine.consumables import (
     pack_pick_block_reason,
 )
 from jackdaw.engine.economy import can_afford, spendable_dollars
+from jackdaw.engine.game import forced_card_index
 from jackdaw.env.game_spec import FactoredAction  # noqa: F401 — re-export
 
 # ---------------------------------------------------------------------------
@@ -170,6 +171,10 @@ class ActionMask:
     min_card_select:
         Minimum cards required (1 for play/discard, varies for
         consumable targeting).
+    forced_card:
+        Hand index of Cerulean Bell's forced card, which every PlayHand
+        and Discard selection must include (vanilla keeps it highlighted),
+        or ``None``.
     """
 
     type_mask: np.ndarray
@@ -177,6 +182,7 @@ class ActionMask:
     entity_masks: dict[int, np.ndarray]
     max_card_select: int
     min_card_select: int
+    forced_card: int | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -216,6 +222,7 @@ def get_action_mask(game_state: dict[str, Any]) -> ActionMask:
     # Default card selection limits (play/discard)
     max_card_select = 5
     min_card_select = 1
+    forced_card: int | None = None
 
     if phase is None or phase == GamePhase.GAME_OVER:
         return ActionMask(type_mask, card_mask, entity_masks, max_card_select, min_card_select)
@@ -241,6 +248,8 @@ def get_action_mask(game_state: dict[str, Any]) -> ActionMask:
             type_mask[ActionType.PlayHand] = True
         if hand and cr.get("discards_left", 0) > 0:
             type_mask[ActionType.Discard] = True
+        # The same check the play/discard executors raise on.
+        forced_card = forced_card_index(hand)
         if len(hand) > 1:
             type_mask[ActionType.SortHandRank] = True
             type_mask[ActionType.SortHandSuit] = True
@@ -310,7 +319,9 @@ def get_action_mask(game_state: dict[str, Any]) -> ActionMask:
         # restores the pack).
         _mask_consumables(type_mask, entity_masks, game_state)
 
-    return ActionMask(type_mask, card_mask, entity_masks, max_card_select, min_card_select)
+    return ActionMask(
+        type_mask, card_mask, entity_masks, max_card_select, min_card_select, forced_card
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -33,7 +33,7 @@ from jackdaw.engine.actions import (
     SwapJokersRight,
     get_legal_actions,
 )
-from jackdaw.engine.game import IllegalActionError, step
+from jackdaw.engine.game import IllegalActionError, forced_card_index, step
 from jackdaw.engine.run_init import initialize_run
 
 
@@ -141,18 +141,23 @@ def random_agent(
 
     # Resolve marker actions with random card indices
     if isinstance(action, PlayHand) and not action.card_indices and hand:
-        n = min(5, len(hand))
-        count = _random.randint(1, n)
-        indices = tuple(sorted(_random.sample(range(len(hand)), count)))
-        return PlayHand(card_indices=indices)
+        return PlayHand(card_indices=_random_selection(hand))
 
     if isinstance(action, Discard) and not action.card_indices and hand:
-        n = min(5, len(hand))
-        count = _random.randint(1, n)
-        indices = tuple(sorted(_random.sample(range(len(hand)), count)))
-        return Discard(card_indices=indices)
+        return Discard(card_indices=_random_selection(hand))
 
     return action
+
+
+def _random_selection(hand: list) -> tuple[int, ...]:
+    """1-5 random hand indices, always including Cerulean Bell's forced card."""
+    n = min(5, len(hand))
+    count = _random.randint(1, n)
+    forced = forced_card_index(hand)
+    if forced is None:
+        return tuple(sorted(_random.sample(range(len(hand)), count)))
+    others = [i for i in range(len(hand)) if i != forced]
+    return tuple(sorted([forced, *_random.sample(others, count - 1)]))
 
 
 # ---------------------------------------------------------------------------
@@ -164,8 +169,9 @@ def greedy_play_agent(
     game_state: dict[str, Any],
     legal_actions: list[Action],
 ) -> Action:
-    """Deterministic agent: always plays first 5 cards, selects blinds,
-    cashes out, and advances.  Never discards, never buys, never rerolls.
+    """Deterministic agent: always plays first 5 cards (with Cerulean
+    Bell's forced card swapped in), selects blinds, cashes out, and
+    advances.  Never discards, never buys, never rerolls.
     """
     hand: list = game_state.get("hand", [])
 
@@ -183,7 +189,11 @@ def greedy_play_agent(
     for a in legal_actions:
         if isinstance(a, PlayHand) and hand:
             n = min(5, len(hand))
-            return PlayHand(card_indices=tuple(range(n)))
+            indices = list(range(n))
+            forced = forced_card_index(hand)
+            if forced is not None and forced >= n:
+                indices[-1] = forced
+            return PlayHand(card_indices=tuple(indices))
 
     # Fallback
     return legal_actions[0]

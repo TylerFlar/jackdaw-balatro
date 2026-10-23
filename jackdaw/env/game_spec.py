@@ -168,6 +168,9 @@ class GameActionMask:
         Minimum cards required for card-selecting actions.
     max_card_select:
         Maximum cards allowed for card-selecting actions.
+    forced_card:
+        Index of a card that every selection bounded by ``min_card_select``
+        and ``max_card_select`` must include, or ``None``.
     """
 
     type_mask: np.ndarray  # (num_action_types,) bool
@@ -175,6 +178,7 @@ class GameActionMask:
     entity_masks: dict[int, np.ndarray]  # action_type -> (N_entity,) bool
     min_card_select: int = 0
     max_card_select: int = 5
+    forced_card: int | None = None
 
 
 # ---------------------------------------------------------------------------
