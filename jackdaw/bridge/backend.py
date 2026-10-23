@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
@@ -226,6 +227,12 @@ class LiveBackend:
     ``LiveBackend(url="http://127.0.0.1:12347")`` (or ``host``/``port``) to
     another instance or to ``jackdaw serve``. ``timeout`` is per request, in
     seconds: the live endpoints answer once the game's animations settle.
+
+    ``cash_out_wait``: seconds to leave between the previous answer and a
+    ``cash_out``. The live ``play`` that ends a round can answer before the
+    round's total is set, and a ``cash_out`` sent at once pays the previous
+    round's (``docs/balatrobot.md``, BB-CASHOUT-RACE). ``jackdaw serve``
+    settles every request at once: no wait there (it sends ``Server: jackdaw``).
     """
 
     def __init__(
@@ -235,11 +242,16 @@ class LiveBackend:
         *,
         url: str | None = None,
         timeout: float = 30.0,
+        cash_out_wait: float = 1.0,
     ) -> None:
         self.url = url.rstrip("/") if url else f"http://{host}:{port}"
         self.timeout = timeout
+        self.cash_out_wait = cash_out_wait
+        #: The server is ``jackdaw serve`` (None: no answer yet).
+        self.simulator: bool | None = None
         self._next_id = 0
         self._client: Any = None
+        self._answered = 0.0
 
     def __repr__(self) -> str:
         return f"LiveBackend({self.url!r})"
@@ -260,7 +272,14 @@ class LiveBackend:
         }
         if self._client is None:
             self._client = httpx.Client(timeout=self.timeout)
+        if method == "cash_out" and not self.simulator:
+            left = self.cash_out_wait - (time.monotonic() - self._answered)
+            if left > 0:
+                time.sleep(left)
         resp = self._client.post(self.url, json=payload)
+        self._answered = time.monotonic()
+        if self.simulator is None:
+            self.simulator = resp.headers.get("server", "").startswith("jackdaw")
         data = resp.json()
 
         if "error" in data:

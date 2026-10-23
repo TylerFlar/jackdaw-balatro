@@ -70,6 +70,7 @@ Severities:
 | [S11](#s11) | RNG | `Card:init` no longer draws 3 unseeded `math.random()` | cosmetic-in-practice | n/a |
 | [S12](#s12) | RNG | `pseudoseed` returns unseeded `math.random()` while the game is paused (except `'to_do'`) | cosmetic-in-practice | n/a |
 | [S13](#s13) | blinds | Crimson Heart with no joker left to pick: SMODS re-picks, vanilla errors | cosmetic-in-practice | neither |
+| [S14](#s14) | deck | `G.deck.config.card_limit` follows `#G.playing_cards` every frame, up as well as down | cosmetic-in-practice | n/a |
 | [B01](#b01) | BalatroBot `pack` | pack picks skip `can_use_consumeable`/`can_select_card` | state-difference | vanilla |
 | [B02](#b02) | BalatroBot `play`/`discard` | with Cerulean Bell, the forced card is added and the last requested card is dropped | state-difference | vanilla |
 | [B03](#b03) | BalatroBot `add` (debug) | no edition poll when an edition is given; the hand refills to the new limit | RNG-desync | neither / SMODS |
@@ -250,10 +251,19 @@ Changes that were examined and turned out to keep vanilla outcomes are listed un
     discard differ.
   - No difference when Chicot disables The Manacle at `setting_blind`, before the deal: both deal to
     a full hand.
+  - **Setting the blind shrinks the hand.** Madness destroys Turtle Bean (or a Juggler) at
+    `setting_blind`. The card leaves after its dissolve, about a second later, and only then
+    queues `change_size`: vanilla has dealt to the old limit by then (12 cards, limit 8).
+    Steamodded's draw checks the limit while it deals and stops at the new one (8 cards). The
+    lockstep's S04 also covers `select`.
 - **No observable effect with vanilla content:** the card preselection, the `SMODS.cards_to_draw`
   bookkeeping (nothing reorders the deck between the call and the draw events), the `DRAW_TO_HAND`
   top-up, and The Serpent's restriction. Outside `DRAW_TO_HAND`, vanilla calls
   `draw_from_deck_to_hand` only for packs (no Serpent there) and for The Manacle.
+- **A lost round.** The end of a lost round queues its hand-size changes (Turtle Bean's decay, a
+  perishing Juggler's `remove_from_deck`) and then sets `GAME_OVER`; the game pauses in the same
+  frame and never runs them (gaps.md G265). Steamodded has already applied them: the live view
+  at the game over shows the smaller hand. The lockstep drops `hand.limit` there (S04-GAME-OVER).
 - **Severity:** state-difference.
 - **Python:**
   - **Engine: vanilla.** `game.py:2206-2226` (`change_hand_size`) draws exactly `delta`.
@@ -526,6 +536,22 @@ Changes that were examined and turned out to keep vanilla outcomes are listed un
 BalatroBot drives the game through `G.FUNCS` callbacks. The entries below cover the places where it
 does more than press a button a player could press. File references are to
 `third_party/balatrobot/v1.5.2/src/lua/`; the installed copies of these files are identical.
+
+<a id="s14"></a>
+### S14: the deck's card limit follows the playing cards
+
+- **SMODS:** `lovely/card_limit.toml` #5, "CardArea:update()". Target `cardarea.lua`, pattern
+  `if self == G.deck and self.config.card_limit > #G.playing_cards then self.config.card_limit = #G.playing_cards end`;
+  the payload sets `card_limit` (and `card_limits.total_slots`) to `#G.playing_cards` whenever they
+  differ.
+- **Vanilla:** `cardarea.lua:265` only lowers the limit to `#G.playing_cards`. It goes up when an
+  `emplace` overfills the deck (`cardarea.lua:47-51`) and by one for Cryptid, Marble Joker and DNA
+  (`card.lua:1210, 2595, 3506`).
+- **Difference:** a playing card that joins the run outside the deck (Certificate's card, a
+  Standard pack pick, Familiar, Grim, Incantation) raises the live deck limit and leaves vanilla's.
+  Only BalatroBot's view reads it (`cards.limit`): no rule does.
+- **Severity:** cosmetic-in-practice.
+- **Lockstep:** S14 drops `cards.limit` when the live value is the shadow's playing card count.
 
 <a id="b01"></a>
 ### B01: the `pack` endpoint skips the UI's pick gates

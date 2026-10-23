@@ -69,8 +69,9 @@ BalatroBot):
 | `BALATROBOT_HEADLESS` | `0` | `1`: no window |
 | `BALATROBOT_GAMESPEED` | `4` | the game speed |
 
-Fast mode only changes timing: the endpoints answer once the game's events have settled, whatever
-the speed (smods-diffs.md B04).
+Fast mode only changes timing (smods-diffs.md B04). Whatever the speed, an endpoint answers once
+the game reaches the state it waits for, which can come before the game's queued events have
+all run; the lockstep allows for that (see [timing](#timing)).
 
 Check that it answers:
 
@@ -109,6 +110,7 @@ jackdaw lockstep --instances 4 --seeds 200 --decks RED,BLUE --stakes WHITE,GOLD 
 | `--out` | `lockstep-out/<time>` | where the bundles and `summary.json` go |
 | `--timeout` | `30` | seconds to wait for each live answer |
 | `--settle` | `0` | seconds to wait after each live answer, then compare a fresh `gamestate` instead of the answer (see [timing](#timing)) |
+| `--recheck` | `2` live, `0` on the simulator | while a live answer differs from the shadow, read `gamestate` again for up to this many seconds and compare the last reading (see [timing](#timing)) |
 | `--endless` | off | keep playing after a win |
 | `--fail-fast` | off | stop at the first unclassified divergence |
 | `--json` | off | print the summary as JSON |
@@ -193,12 +195,29 @@ To triage:
 
 BalatroBot answers a request once the game reaches the state it waits for: `play` answers when
 the game is back in `SELECTING_HAND` (or at the round's evaluation, or at game over), `select`
-once the hand is dealt. Work the game queues behind that point (Steamodded runs some contexts in
-trailing events, smods-diffs.md S02) can still be pending when the answer is built. A divergence
-that is only such a race looks like a step's effect arriving one answer late: the next step's
-view has it. To tell, run the seed again with `--settle 0.5`: the lockstep then waits half a
-second after each answer and compares a fresh `gamestate`. If the divergence goes away, it was
-timing, not the simulator.
+once the hand is dealt, `cash_out` once the shop has its cards. Work the game queues behind that
+point can still be pending when the answer is built: Steamodded runs some contexts in trailing
+events (smods-diffs.md S02), the boss's debuffs outlast the `play` that beats it
+(BB-BOSS-DEFEAT), and a tag's shop effect (the D6 Tag's free reroll, the Voucher Tag's voucher,
+the edition tags) runs in its own animated events after `cash_out` answers.
+
+So when a live answer differs from the shadow in a way the catalog doesn't explain, the lockstep
+reads `gamestate` again, every 0.1 s for up to `--recheck` seconds (2 by default against a live
+game), and compares the last reading: what the game settles to without another request is what
+the simulator models. A difference that lasts is reported as usual. The summary counts the
+rechecked answers by request (`rechecked: cash_out 12`).
+
+One race changes the game rather than the answer: a `cash_out` sent as soon as `play` answers can
+pay the previous round's total (BB-CASHOUT-RACE). `LiveBackend` leaves a second before a
+`cash_out` so it doesn't happen, and the shadow takes the live money if it does.
+
+A refusal can be the same race: right after a pack pick, `use` is refused while the pick's
+`G.GAME.STOP_USE` holds. The shadow took the request and a refused request changes nothing, so a
+refusal for the game's state (`INVALID_STATE`, `NOT_ALLOWED`) is asked again within the same
+`--recheck` window before it counts as a divergence (`rechecked: use (refused) 3`).
+
+`--settle 0.5` is the blunt form: the lockstep waits half a second after every answer and
+compares a fresh `gamestate`.
 
 ## The deviation catalog
 
@@ -223,6 +242,7 @@ repair is a *classified* divergence.
 | [S02](parity/smods-diffs#s02) | reconcile | Certificate's card comes after Cerulean Bell's pick: the shadow takes the live hand and forced card |
 | [S03](parity/smods-diffs#s03) | reconcile | Certificate draws from `'stdseal'..ante`: a Standard pack opened in that ante takes the live seals |
 | [S04](parity/smods-diffs#s04) | reconcile | hand-size changes refill the hand; The Manacle's disable draws 1: the shadow takes the live hand/deck split |
+| [S04-GAME-OVER](parity/smods-diffs#s04) | ignore | a lost round's hand-size changes: Steamodded applies them, vanilla's never run (the game pauses at GAME_OVER) |
 | [S05](parity/smods-diffs#s05) | reconcile | Invisible Joker's and Ankh's copies: their prices and a stripped Negative's slot take the live values (for the rest of the run) |
 | [S06](parity/smods-diffs#s06) | reconcile | Seeing Double with one Wild Card: the live chips |
 | [S07](parity/smods-diffs#s07) | veto | Four Fingers with three or more Wild Cards: plays not taken |
@@ -232,6 +252,7 @@ repair is a *classified* divergence.
 | [S11](parity/smods-diffs#s11) | ignore | the unseeded `_1`/`_2` variant of the first shop's Buffoon pack and the Charm/Meteor packs |
 | [S12](parity/smods-diffs#s12) | ignore | `pseudoseed` while paused (BalatroBot never pauses) |
 | [S13](parity/smods-diffs#s13) | veto | Crimson Heart with every joker debuffed: plays and discards not taken |
+| [S14](parity/smods-diffs#s14) | ignore | the deck's card limit (`cards.limit`) follows the playing cards live |
 | [B01](parity/smods-diffs#b01) | veto | pack picks vanilla greys out (refused by the simulator's `pack` endpoint) |
 | [B02](parity/smods-diffs#b02) | veto | play/discard/use leaving out Cerulean Bell's forced card |
 | [B03](parity/smods-diffs#b03) | reconcile | debug `add` of an enhanced card: the live debuff |
@@ -243,6 +264,8 @@ repair is a *classified* divergence.
 | BB-NONFINITE | veto | a step whose view would hold NaN or infinity: the live server sends nothing |
 | BB-TEXT | ignore | text fields (never compared) |
 | BB-SHOP-AREAS | ignore | the shop's areas after leaving the shop (gaps.md B21, read from the code; the count settles it) |
+| BB-BOSS-DEFEAT | ignore | the `play` that beats a boss answers before `Blind:defeat` has undone the boss ([timing](balatrobot#differences-from-the-live-game)): the cards it debuffed, Crimson Heart's joker and its passive, The Manacle's hand size, Amber Acorn's face-down jokers |
+| BB-CASHOUT-RACE | reconcile | a `cash_out` sent as soon as `play` answers can pay the previous round's total ([timing](balatrobot#differences-from-the-live-game)); `LiveBackend` waits before `cash_out` so it doesn't, and the shadow takes the live money if it does |
 | BB-REARRANGE-ORDER | ignore | `rearrange` writes `ability.order` (not in the view) |
 | BB-SORT-MODE | ignore | `SortHand` goes out as a permutation; the shadow takes the same move |
 

@@ -127,6 +127,8 @@ pub struct Runtime {
     pub unported: Option<String>,
     /// Card-area settings that only BalatroBot's view reads.
     pub areas: AreaMemo,
+    /// The queue's length when the running event started: what it has queued since is behind.
+    pub event_base: usize,
 }
 
 /// What BalatroBot's gamestate view reads from the `CardArea` objects themselves
@@ -247,6 +249,20 @@ impl Game {
         self.rt.queue.push_back(event);
     }
 
+    /// A losing `end_round`'s event sets `G.STATE = G.STATES.GAME_OVER`. The same frame's
+    /// `update_game_over` pauses the game (`G.SETTINGS.paused = true`, game.lua:2601, after
+    /// the event pass at 2509, in which that blocking event already blocked everything behind
+    /// it), and a paused game never runs an event queued before the pause (`pause_skip`,
+    /// event.lua): what the event queued never happens. A losing end_round charges no rent,
+    /// destroys no joker and changes no hand size (G265). Events queued before it (a joker's
+    /// removal from the last hand and its boss re-debuff) keep their place: in the game their
+    /// timers fire while the hand's cards are still being drawn to the discard pile.
+    pub(crate) fn game_over(&mut self) {
+        let base = self.rt.event_base.min(self.rt.queue.len());
+        self.rt.queue.truncate(base);
+        self.set_state(LuaState::GameOver, false);
+    }
+
     /// Set `G.STATE` and `G.STATE_COMPLETE`.
     pub fn set_state(&mut self, state: LuaState, complete: bool) {
         if state != self.rt.state {
@@ -268,6 +284,7 @@ impl Game {
                 .expect("the event loop did not settle");
             let ran = match self.rt.queue.pop_front() {
                 Some(event) => {
+                    self.rt.event_base = self.rt.queue.len();
                     self.run_event(event);
                     true
                 }

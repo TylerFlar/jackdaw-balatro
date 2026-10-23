@@ -72,6 +72,13 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="Seconds to wait after each live answer and compare a fresh gamestate "
         "instead (for answers sent before the step's events have all run)",
     )
+    parser.add_argument(
+        "--recheck",
+        type=float,
+        default=None,
+        help="Seconds to keep reading the gamestate again while a live answer differs from "
+        "the shadow (default: 2 against a live game, 0 against jackdaw serve)",
+    )
     parser.add_argument("--endless", action="store_true", help="Keep playing after a win")
     parser.add_argument(
         "--fail-fast", action="store_true", help="Stop at the first unclassified divergence"
@@ -161,6 +168,7 @@ def run(args: argparse.Namespace) -> int:
         on_result=on_result,
         stop_on_divergence=args.fail_fast,
         settle=args.settle,
+        recheck=args.recheck,
     )
     totals = summary.totals()
     report = {

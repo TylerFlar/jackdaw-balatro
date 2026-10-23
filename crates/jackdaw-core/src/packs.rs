@@ -3,9 +3,10 @@
 //! (`G.FUNCS.use_card` in a pack, button_callbacks.lua:2155-2316), skipping
 //! (`G.FUNCS.skip_booster`, 2558-2563) and closing (`G.FUNCS.end_consumeable`, 2565-2637).
 //!
-//! `Card:open` creates the contents in a timed event that doesn't block the queue, so the jokers'
-//! `open_booster` effects (Hallucination's Tarot) and the Inflation pass, queued after it, run
-//! first in the real game (G44). The port queues the contents after them.
+//! `Card:open` creates the contents in a timed event that doesn't block the queue, but the
+//! booster's `explode()` queues events that do, for longer: the jokers' `open_booster` effects
+//! (Hallucination's Tarot) and the Inflation pass, queued after the contents, run after them in
+//! the real game too (G266, which reverses G44). The port queues the contents first.
 
 use jackdaw_data::{CenterId, CenterSet, POOL_PLANET};
 
@@ -53,9 +54,16 @@ impl Game {
         self.queue(Event::OpenBooster(id));
     }
 
-    /// `Card:open`'s event (card.lua:1724-1803): the jokers see the pack, Inflation raises
-    /// prices, then the contents arrive and the booster is gone.
+    /// `Card:open`'s event (card.lua:1721-1809): the contents, the jokers see the pack, and
+    /// Inflation raises prices; then the booster is gone.
+    ///
+    /// The contents come first. `self:explode()` queues events that block the queue for
+    /// `1.5 * explode_time` (its juice event, card.lua:2002-2012, non-blockable but blocking),
+    /// and the contents arrive in a non-blockable event after `explode_time` (card.lua:1725):
+    /// the events the open_booster context queues (Hallucination's Tarot) and Inflation's
+    /// set_cost pass run after them (G266). The jokers' rolls and the inflation are immediate.
     pub(crate) fn open_booster_body(&mut self, id: u32) {
+        self.queue(Event::PackContents(id));
         for j in self.joker_ids() {
             let mut ctx = Ctx::new(Kind::OpenBooster);
             ctx.card = Some(id);
@@ -65,7 +73,6 @@ impl Game {
             self.gs.inflation += 1.0;
             self.queue(Event::SetCostAll);
         }
-        self.queue(Event::PackContents(id));
         self.queue(Event::RemoveCard(id));
     }
 

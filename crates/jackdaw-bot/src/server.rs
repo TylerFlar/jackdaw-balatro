@@ -16,6 +16,8 @@
 //!   `Failed to encode response: <encoder error>`.
 //!
 //! The server needs no HTTP library: requests are parsed exactly as `try_parse_http` does.
+//! Its one addition is a `Server: jackdaw` header, so a client can tell the simulator from the
+//! live game (`LiveBackend` waits before a live `cash_out`, `docs/balatrobot.md`).
 
 use std::io::{Read, Write};
 use std::net::{IpAddr, TcpListener, TcpStream, ToSocketAddrs};
@@ -161,7 +163,7 @@ fn http_response(status: u16, body: &str) -> Vec<u8> {
         _ => "Error",
     };
     format!(
-        "HTTP/1.1 {status} {text}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        "HTTP/1.1 {status} {text}\r\nServer: jackdaw\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     )
     .into_bytes()

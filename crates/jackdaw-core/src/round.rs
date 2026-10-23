@@ -35,7 +35,8 @@ impl Game {
             self.gs.won = true;
         }
         if game_over {
-            self.set_state(LuaState::GameOver, false);
+            // The rent and the self-destructions queued above never run (G265).
+            self.game_over();
             return;
         }
         self.gs.unused_discards += self.gs.current_round.discards_left;

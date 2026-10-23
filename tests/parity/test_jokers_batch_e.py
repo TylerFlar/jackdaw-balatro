@@ -606,12 +606,12 @@ def test_a_sold_blueprint_copying_invisible_joker_copies_nothing() -> None:
 
 def test_hallucination_makes_a_tarot_when_a_pack_opens() -> None:
     """Hallucination: a 1 in 2 Tarot when a pack opens (card.lua:2335-2351), two Oops! All 6s
-    make it certain; the Tarot comes before the pack's cards (G44)."""
+    make it certain; the Tarot comes after the pack's cards (G266)."""
     b = Board("BE_HALLUCINATION", "j_oops", "j_hallucination")
     b.to_shop()
     b.open_booster("p_buffoon_normal_1")
     assert [c.ability["set"] for c in b.gs["consumables"]] == ["Tarot"]
-    assert b.gs["consumables"][0].sort_id < min(c.sort_id for c in b.gs["pack_cards"])
+    assert b.gs["consumables"][0].sort_id > max(c.sort_id for c in b.gs["pack_cards"])
 
 
 def test_hallucination_rolls_for_each_copy() -> None:
@@ -624,7 +624,8 @@ def test_hallucination_rolls_for_each_copy() -> None:
 
 def test_hallucination_under_inflation() -> None:
     """Inflation: Card:open raises G.GAME.inflation after the open_booster contexts and queues
-    a repricing (card.lua:1796-1807); the Tarot's event runs first, with the raised value."""
+    a repricing (card.lua:1796-1807); the Tarot's event runs after the contents, with the
+    raised value."""
     b = Board("BE_HALLUCINATION_INFLATION", "j_oops", "j_hallucination", challenge="c_inflation_1")
     b.to_shop()
     inflation = b.gs["inflation"]

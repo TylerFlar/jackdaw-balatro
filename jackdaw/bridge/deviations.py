@@ -46,7 +46,7 @@ from jackdaw.bridge.reconcile import (
     arrange_playing_cards,
     table,
 )
-from jackdaw.bridge.viewdiff import TEXT_FIELDS, FieldDiff, matches_any, path_pattern
+from jackdaw.bridge.viewdiff import ABSENT, TEXT_FIELDS, FieldDiff, matches_any, path_pattern
 
 if TYPE_CHECKING:
     from jackdaw.bridge.backend import RPCError
@@ -76,12 +76,15 @@ class RunMemory:
     certificate_antes: set[int] = field(default_factory=set)
     #: Sim ids of jokers Invisible Joker or Ankh copied (S05).
     copies: set[int] = field(default_factory=set)
+    #: What each cash_out paid in the shadow, in order (BB-CASHOUT-RACE).
+    payouts: list[float] = field(default_factory=list)
 
     def to_json(self) -> dict[str, Any]:
         return {
             "sticky": sorted(self.sticky),
             "certificate_antes": sorted(self.certificate_antes),
             "copies": sorted(self.copies),
+            "payouts": list(self.payouts),
         }
 
     @classmethod
@@ -90,6 +93,7 @@ class RunMemory:
             set(data.get("sticky", ())),
             set(data.get("certificate_antes", ())),
             set(data.get("copies", ())),
+            list(data.get("payouts", ())),
         )
 
 
@@ -328,7 +332,9 @@ def _s03_reconcile(rctx: ReconcileContext, ctx: StepContext) -> list[dict[str, A
 
 
 def _s04_trigger(ctx: StepContext) -> bool:
-    if ctx.post is None or _state(ctx.pre_view) != "SELECTING_HAND":
+    # In a round; or the deal, when setting the blind changes the hand size (Madness destroys
+    # a Juggler, Turtle Bean...: vanilla deals to the old limit, Steamodded stops at the new).
+    if ctx.post is None or _state(ctx.pre_view) not in ("SELECTING_HAND", "BLIND_SELECT"):
         return False
     if _limit(ctx.pre_view, "hand") != _limit(ctx.post_view, "hand"):
         return True
@@ -490,6 +496,23 @@ def _s11_accepts(diff: FieldDiff, ctx: StepContext) -> bool:
     return bool(ma and mb and ma.group(1) == mb.group(1))
 
 
+def _lost_round(ctx: StepContext) -> bool:
+    """The step lost the run at the end of a round."""
+    return (
+        ctx.post is not None
+        and _state(ctx.pre_view) == "SELECTING_HAND"
+        and _state(ctx.post_view) == "GAME_OVER"
+    )
+
+
+def _s14_accepts(diff: FieldDiff, ctx: StepContext) -> bool:
+    """The live deck limit is the run's playing card count."""
+    snap = ctx.post_snapshot if ctx.post is not None else ctx.pre_snapshot
+    areas = snap["areas"]
+    playing = sum(len(areas[a]) for a in ("deck", "hand", "discard", "play"))
+    return diff.live == playing
+
+
 def _s13_veto(ctx: StepContext) -> str | None:
     if ctx.method not in ("play", "discard") or ctx.pre is None:
         return None
@@ -628,6 +651,77 @@ def _outside_shop(ctx: StepContext) -> bool:
     return True
 
 
+def _boss_beaten(ctx: StepContext) -> bool:
+    """The play that beat a boss blind: the round is being evaluated."""
+    return (
+        ctx.method == "play"
+        and ctx.post is not None
+        and _state(ctx.post_view) == "ROUND_EVAL"
+        and bool((ctx.pre_snapshot.get("blind") or {}).get("boss"))
+    )
+
+
+#: The view fields a joker's passive changes when Card:add_to_deck gives it back
+#: (card.lua:586-604), by the jokers that have one.
+_PASSIVES: dict[str, frozenset[str]] = {
+    "hand.limit": frozenset(
+        {"j_juggler", "j_troubadour", "j_merry_andy", "j_stuntman", "j_turtle_bean"}
+    ),
+    "round.discards_left": frozenset({"j_drunkard", "j_merry_andy"}),
+    "round.reroll_cost": frozenset({"j_chaos"}),
+}
+
+_CARD_STATE = re.compile(r"(cards|jokers)\.cards\[(\d+)\]\.state\.(debuff|hidden)")
+
+
+def _boss_defeat_accepts(diff: FieldDiff, ctx: StepContext) -> bool:
+    """What Blind:defeat hasn't undone yet: a card the boss had debuffed before the
+    play, in any area (the view leaves out the discard pile), or a joker it had turned
+    face down (Amber Acorn); The Manacle's lost hand size; under Crimson Heart, the
+    passive its debuffed joker hasn't got back."""
+    areas = ctx.pre_snapshot["areas"].values()
+    debuffed = {c["sort_id"]: c["center"] for cards in areas for c in cards if c.get("debuff")}
+    match = _CARD_STATE.fullmatch(diff.path)
+    if match is not None:
+        cards = _cards(ctx.post_view, match.group(1))
+        i = int(match.group(2))
+        if diff.live is not True or diff.sim is not ABSENT or i >= len(cards):
+            return False
+        if match.group(3) == "debuff":
+            return cards[i].get("id") in debuffed
+        jokers = ctx.pre_snapshot["areas"]["jokers"]
+        face_down = {c["sort_id"] for c in jokers if c["facing"] == "back"}
+        return match.group(1) == "jokers" and cards[i].get("id") in face_down
+    if diff.path == "hand.limit" and _boss_active(ctx.pre_snapshot, "bl_manacle"):
+        return diff.sim == diff.live + 1
+    if not _boss_active(ctx.pre_snapshot, "bl_final_heart"):
+        return False
+    keys = _PASSIVES.get(diff.path, frozenset())
+    return any(center in keys for center in debuffed.values())
+
+
+def _payout_observe(ctx: StepContext) -> None:
+    if ctx.method == "cash_out" and ctx.pre_view and ctx.post_view:
+        ctx.memory.payouts.append(ctx.post_view["money"] - ctx.pre_view["money"])
+
+
+def _cashout_race_accepts(diff: FieldDiff, ctx: StepContext) -> bool:
+    """The live game paid the previous round's total instead of this round's."""
+    payouts = ctx.memory.payouts  # this cash_out's is the last one
+    if len(payouts) < 2 or not ctx.pre_view:
+        return False
+    try:
+        paid = diff.live - ctx.pre_view["money"]
+    except TypeError:
+        return False
+    return paid == payouts[-2] != payouts[-1]
+
+
+def _set_money(rctx: ReconcileContext, ctx: StepContext) -> list[dict[str, Any]]:
+    (diff,) = rctx.diffs
+    return [{"op": "set", "path": ["game", "dollars"], "value": diff.live}]
+
+
 # ---------------------------------------------------------------------------
 # The catalog
 # ---------------------------------------------------------------------------
@@ -678,6 +772,17 @@ CATALOG: tuple[Deviation, ...] = (
         reconcile=_arrange(),
         note="The same cards, drawn from the same deck order: the shadow's hand and deck take "
         "the live split.",
+    ),
+    Deviation(
+        "S04-GAME-OVER",
+        "A lost round's hand-size changes: Steamodded applies them, vanilla's never run",
+        f"{_SMODS}#s04",
+        Mode.IGNORE,
+        paths=("hand.limit",),
+        trigger=_lost_round,
+        note="end_round queues them (Turtle Bean's decay, a perishing Juggler) and the game pauses "
+        "at GAME_OVER before they run (gaps.md G265); Steamodded's change_size has already "
+        "changed the limit. The run is over: the difference is dropped.",
     ),
     Deviation(
         "S05",
@@ -773,6 +878,16 @@ CATALOG: tuple[Deviation, ...] = (
         Mode.VETO,
         veto=_s13_veto,
         note="Plays and discards with Crimson Heart and every joker debuffed are not taken.",
+    ),
+    Deviation(
+        "S14",
+        "The deck's card limit follows the playing cards every frame",
+        f"{_SMODS}#s14",
+        Mode.IGNORE,
+        paths=("cards.limit",),
+        accepts=_s14_accepts,
+        note="Vanilla only lowers G.deck.config.card_limit to #G.playing_cards: a card that joins "
+        "outside the deck (Certificate, a Standard pick) leaves it. Only the view reads it.",
     ),
     Deviation(
         "B01",
@@ -887,6 +1002,41 @@ CATALOG: tuple[Deviation, ...] = (
         note="gaps.md B21: the simulator reports the removed areas (no cards, the last count) "
         "from a reading of the code. Outside the shop they carry nothing; a difference is "
         "counted, which settles B21.",
+    ),
+    Deviation(
+        "BB-BOSS-DEFEAT",
+        "The play that beats a boss answers before Blind:defeat has undone the boss",
+        "docs/balatrobot.md#differences-from-the-live-game",
+        Mode.IGNORE,
+        paths=(
+            "cards.cards[*].state.debuff",
+            "jokers.cards[*].state.debuff",
+            "jokers.cards[*].state.hidden",
+            *_PASSIVES,
+        ),
+        trigger=_boss_beaten,
+        accepts=_boss_defeat_accepts,
+        note="play can answer before evaluate_round's Blind:defeat runs (from a run's second "
+        "round, see BB-CASHOUT-RACE): The Manacle's hand size and Amber Acorn's face-down "
+        "jokers are still there. Its set_blind(nil), which lifts the debuffs (and gives "
+        "Crimson Heart's joker its passive back), runs in a non-blockable event 0.95 x 1.3 s "
+        "after it (blind.lua:296-343). The next answer has them: only what the boss did is "
+        "dropped.",
+    ),
+    Deviation(
+        "BB-CASHOUT-RACE",
+        "A cash_out sent as soon as play answers can pay the previous round's total",
+        "docs/balatrobot.md#differences-from-the-live-game",
+        Mode.RECONCILE,
+        paths=("money",),
+        trigger=lambda ctx: ctx.method == "cash_out",
+        accepts=_cashout_race_accepts,
+        observe=_payout_observe,
+        reconcile=_set_money,
+        note="From a run's second round on, play finds the last round's cash-out button and "
+        "answers before the round's total is set (common_events.lua:1087); cash_out then pays "
+        "the last total. LiveBackend waits before cash_out so it doesn't happen; when it does, "
+        "the shadow takes the live money.",
     ),
     Deviation(
         "BB-REARRANGE-ORDER",

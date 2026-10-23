@@ -236,6 +236,86 @@ def test_settle_compares_a_fresh_gamestate() -> None:
         adapter.start("RED", "WHITE", "SETTLE")
 
 
+def test_recheck_reads_a_differing_answer_again() -> None:
+    """An answer sent before the game's events have run (here: the reroll cost a tag
+    hasn't lowered yet) is read again until it agrees; a lasting difference is still
+    a divergence, with the last reading in the bundle."""
+
+    def early(method: str, params: dict, view: dict) -> dict:
+        if method == "cash_out":
+            view["round"]["reroll_cost"] += 1
+        return view
+
+    adapter = LiveAdapter(FakeLive(perturb=early), recheck=0.5)
+    adapter.start("RED", "WHITE", "RECHECK")
+    _beat_small_blind(adapter)
+    assert adapter.rechecked == Counter({"cash_out": 1})
+    assert LiveAdapter(FakeLive()).recheck == 0  # the simulator answers settled
+
+    def lasting(method: str, params: dict, view: dict) -> dict:
+        view["round"]["reroll_cost"] += method != "start" and view["state"] == "SHOP"
+        return view
+
+    adapter = LiveAdapter(FakeLive(perturb=lasting), recheck=0.3)
+    adapter.start("RED", "WHITE", "RECHECK")
+    with pytest.raises(DivergenceError) as info:
+        _beat_small_blind(adapter)
+    assert [d.path for d in info.value.diffs] == ["round.reroll_cost"]
+
+
+def test_a_refusal_for_the_games_state_is_asked_again() -> None:
+    """A live refusal while the game catches up (``use`` under a pack pick's STOP_USE) is
+    retried within the recheck window; one that lasts is still a divergence."""
+    refusals = {"left": 2}
+
+    def busy(method: str, params: dict) -> Exception | None:
+        if method == "select" and refusals["left"] > 0:
+            refusals["left"] -= 1
+            return RPCError(-32003, "Consumable 'X' cannot be used at this time")
+        return None
+
+    adapter = LiveAdapter(FakeLive(fail=busy), recheck=0.5)
+    adapter.start("RED", "WHITE", "RETRY")
+    adapter.step(SelectBlind())
+    assert adapter.rechecked == Counter({"select (refused)": 1})
+    refusals["left"] = 100
+    adapter = LiveAdapter(FakeLive(fail=busy), recheck=0.2)
+    adapter.start("RED", "WHITE", "RETRY")
+    with pytest.raises(DivergenceError) as info:
+        adapter.step(SelectBlind())
+    assert info.value.kind == "live-refused"
+
+
+def test_s14_the_live_deck_limit_follows_the_playing_cards() -> None:
+    def follows(method: str, params: dict, view: dict) -> dict:
+        if method == "add":
+            view["cards"]["limit"] = len(view["cards"]["cards"]) + len(view["hand"]["cards"])
+        return view
+
+    adapter = LiveAdapter(FakeLive(perturb=follows))
+    adapter.start("RED", "WHITE", "S14TEST")
+    adapter.step(SelectBlind())
+    adapter.request("add", {"key": "H_A"})  # into the hand: 53 playing cards
+    assert adapter.view["cards"]["limit"] == 53
+    assert adapter.explained["S14"] == 1
+
+
+def test_s04_a_lost_rounds_hand_size_is_dropped() -> None:
+    def applied(method: str, params: dict, view: dict) -> dict:
+        if view.get("state") == "GAME_OVER":
+            view["hand"]["limit"] -= 1  # Turtle Bean's decay, applied at once live
+        return view
+
+    adapter = LiveAdapter(FakeLive(perturb=applied))
+    adapter.start("RED", "WHITE", "S04LOST")
+    adapter.step(SelectBlind())
+    adapter.request("add", {"key": "j_turtle_bean"})
+    adapter.request("set", {"hands": 1})
+    adapter.request("play", {"cards": [0]})
+    assert adapter.view["state"] == "GAME_OVER"
+    assert adapter.explained["S04-GAME-OVER"] == 1
+
+
 def test_a_refusal_by_the_shadow_never_reaches_the_live_game() -> None:
     live = FakeLive()
     adapter = LiveAdapter(live)
@@ -444,6 +524,173 @@ def test_b03_takes_the_live_debuff_of_an_added_card() -> None:
     adapter.request("add", {"key": "C_A", "enhancement": "BONUS"})
     assert adapter.reconciled == Counter({"B03": 1})
     assert adapter.shadow_view["hand"]["cards"][-1]["state"] == {"debuff": True}
+
+
+# ---------------------------------------------------------------------------
+# Timing
+# ---------------------------------------------------------------------------
+
+
+def _forced_boss(boss: str):
+    def make(back: str, stake: int, seed: str, challenge: str | None) -> Game:
+        g = Game.new(back, stake, seed, challenge)
+        g.apply_setup({"op": "force_boss", "key": boss})
+        return g
+
+    return make
+
+
+def _defeat_answers_early(extra_suit: str | None = None):
+    """BB-BOSS-DEFEAT: the play that beats a boss answers before Blind:defeat's
+    set_blind(nil): what was debuffed is still debuffed, the hand size as it was.
+    ``extra_suit``: also debuff the deck's cards of that suit (not the boss's doing)."""
+    last: dict[str, dict] = {}
+
+    def perturb(method: str, params: dict, view: dict) -> dict:
+        before = last.get("view")
+        if method == "play" and view["state"] == "ROUND_EVAL" and before is not None:
+            debuffed = {
+                c["id"]
+                for area in ("hand", "cards", "jokers")
+                for c in before[area]["cards"]
+                if (c["state"] or {}).get("debuff")
+            }
+            for area in ("cards", "jokers"):
+                for c in view[area]["cards"]:
+                    suit = (c["value"] or {}).get("suit")
+                    if c["id"] in debuffed or (extra_suit and suit == extra_suit):
+                        c["state"] = {**(c["state"] or {}), "debuff": True}
+            view["hand"]["limit"] = before["hand"]["limit"]
+        last["view"] = view
+        return view
+
+    return perturb
+
+
+def test_the_boss_debuffs_outlasting_the_winning_play_are_dropped() -> None:
+    make = _forced_boss("bl_club")
+    live = FakeLive(game=make("b_red", 1, "DEFEAT1", None), perturb=_defeat_answers_early())
+    adapter = LiveAdapter(live, shadow_factory=make)
+    adapter.attach()
+    adapter.step(SelectBlind())
+    adapter.request("set", {"chips": 10**6})
+    adapter.request("play", {"cards": [0]})
+    assert adapter.explained["BB-BOSS-DEFEAT"] == 13  # every Club
+    adapter.request("cash_out")  # the next answer has the debuffs lifted
+
+
+def test_the_manacles_hand_size_outlasts_the_winning_play() -> None:
+    make = _forced_boss("bl_manacle")
+    live = FakeLive(game=make("b_red", 1, "DEFEAT4", None), perturb=_defeat_answers_early())
+    adapter = LiveAdapter(live, shadow_factory=make)
+    adapter.attach()
+    adapter.step(SelectBlind())
+    assert adapter.view["hand"]["limit"] == 7
+    adapter.request("set", {"chips": 10**6})
+    adapter.request("play", {"cards": [0]})
+    assert adapter.explained["BB-BOSS-DEFEAT"] == 1  # hand.limit: 7 live, 8 in the shadow
+    adapter.request("cash_out")
+
+
+def test_crimson_hearts_joker_and_its_passive_outlast_the_winning_play() -> None:
+    make = _forced_boss("bl_final_heart")
+    live = FakeLive(game=make("b_red", 1, "DEFEAT2", None), perturb=_defeat_answers_early())
+    adapter = LiveAdapter(live, shadow_factory=make)
+    adapter.attach()
+    adapter.step(SelectBlind())
+    adapter.request("add", {"key": "j_juggler"})
+    adapter.request("play", {"cards": [0]})  # the next draw debuffs Juggler: one card fewer
+    assert adapter.view["jokers"]["cards"][0]["state"] == {"debuff": True}
+    adapter.request("set", {"chips": 10**6})
+    adapter.request("play", {"cards": [0]})
+    assert adapter.explained["BB-BOSS-DEFEAT"] == 2  # Juggler's debuff and the hand size
+    adapter.request("cash_out")
+
+
+def _stale_cash_out(at: int, extra: int = 0):
+    """BB-CASHOUT-RACE: the ``at``-th cash_out pays the previous round's total
+    (plus ``extra``: then it isn't the race)."""
+    seen = {"n": 0, "last": None}
+
+    def after(method: str, params: dict, game: Game, before: dict) -> bool:
+        if method != "cash_out":
+            return False
+        seen["n"] += 1
+        paid = game.dollars - before["money"]
+        last, seen["last"] = seen["last"], paid
+        if seen["n"] != at or last is None:
+            return False
+        game.debug_set(money=before["money"] + last + extra)
+        return True
+
+    return after
+
+
+def _two_rounds(adapter: LiveAdapter) -> None:
+    for n in range(2):
+        if n:
+            adapter.request("next_round")
+        adapter.step(SelectBlind())
+        adapter.request("set", {"chips": 10**6})
+        adapter.request("play", {"cards": [0]})
+        adapter.request("cash_out")
+
+
+def test_a_cash_out_paying_the_last_rounds_total_is_reconciled() -> None:
+    adapter = LiveAdapter(FakeLive(after=_stale_cash_out(2)))
+    adapter.start("RED", "WHITE", "RACE1")
+    _two_rounds(adapter)
+    assert adapter.reconciled == Counter({"BB-CASHOUT-RACE": 1})
+    assert adapter.game.dollars == adapter.view["money"]
+    assert adapter.shadow_view["money"] == adapter.view["money"]
+    _play(adapter, 20)  # and the run goes on in step
+
+
+def test_another_wrong_payout_is_unclassified() -> None:
+    adapter = LiveAdapter(FakeLive(after=_stale_cash_out(2, extra=1)))
+    adapter.start("RED", "WHITE", "RACE2")
+    with pytest.raises(DivergenceError) as info:
+        _two_rounds(adapter)
+    assert [d.path for d in info.value.diffs] == ["money"]
+
+
+def test_live_backend_waits_before_cash_out_unless_it_is_the_simulator(monkeypatch) -> None:
+    import jackdaw.bridge.backend as backend_mod
+
+    class Response:
+        def __init__(self, server: str) -> None:
+            self.headers = {"server": server} if server else {}
+
+        def json(self) -> dict:
+            return {"jsonrpc": "2.0", "result": {}, "id": 1}
+
+    for server, waits in (("", True), ("jackdaw", False)):
+        slept: list[float] = []
+        monkeypatch.setattr(backend_mod.time, "sleep", slept.append)
+        backend = LiveBackend(cash_out_wait=0.5)
+
+        class Client:
+            def post(self, url: str, json: dict) -> Response:  # noqa: A002 - httpx's name
+                return Response(server)
+
+        backend._client = Client()
+        backend.handle("play", {"cards": [0]})
+        backend.handle("cash_out", {})
+        backend.handle("gamestate", {})
+        assert bool(slept) is waits and all(0 < s <= 0.5 for s in slept)
+
+
+def test_a_debuff_the_boss_did_not_cause_is_unclassified() -> None:
+    make = _forced_boss("bl_club")
+    live = FakeLive(game=make("b_red", 1, "DEFEAT3", None), perturb=_defeat_answers_early("H"))
+    adapter = LiveAdapter(live, shadow_factory=make)
+    adapter.attach()
+    adapter.step(SelectBlind())
+    adapter.request("set", {"chips": 10**6})
+    with pytest.raises(DivergenceError) as info:
+        adapter.request("play", {"cards": [0]})
+    assert len(info.value.diffs) == 13  # the Hearts
+    assert all(d.path.endswith(".state.debuff") and d.live is True for d in info.value.diffs)
 
 
 # ---------------------------------------------------------------------------
