@@ -178,3 +178,42 @@ class TestEmptyConfigConsumables:
         assert BuyAndUse(shop_index=0) in get_legal_actions(gs)
         step(gs, BuyAndUse(shop_index=0))
         assert len(gs["jokers"]) == 1
+
+
+class TestNegativeBuySpace:
+    """G264: check_for_buy_space (button_callbacks.lua:2390-2401) raises the
+    area's limit by one for a Negative card; it doesn't waive it."""
+
+    def _shop_with_negative(self, seed: str, n_jokers: int):
+        from jackdaw.engine.card_factory import create_joker
+
+        gs = to_shop(new_run(seed))
+        keys = ("j_joker", "j_jolly", "j_zany", "j_mad", "j_crazy", "j_droll")
+        for key in keys[:n_jokers]:
+            give_joker(gs, key)
+        negative = create_joker("j_crafty", edition={"negative": True})
+        negative.set_cost(inflation=0, discount_percent=0)
+        gs["shop_cards"] = [negative]
+        gs["dollars"] = 50
+        return gs
+
+    def test_a_full_board_takes_a_negative_joker(self):
+        from jackdaw.engine.actions import get_legal_actions
+
+        gs = self._shop_with_negative("AUDIT_NEG_FULL", 5)
+        assert len(gs["jokers"]) == gs["joker_slots"]
+        assert BuyCard(shop_index=0) in get_legal_actions(gs)
+        step(gs, BuyCard(shop_index=0))
+        assert len(gs["jokers"]) == 6
+
+    def test_an_over_full_board_takes_none(self):
+        import pytest
+
+        from jackdaw.engine.actions import get_legal_actions
+        from jackdaw.engine.game import IllegalActionError
+
+        gs = self._shop_with_negative("AUDIT_NEG_OVER", 6)
+        assert len(gs["jokers"]) == gs["joker_slots"] + 1
+        assert BuyCard(shop_index=0) not in get_legal_actions(gs)
+        with pytest.raises(IllegalActionError):
+            step(gs, BuyCard(shop_index=0))

@@ -178,7 +178,7 @@ Source: `balatro_source/functions/button_callbacks.lua` (Balatro 1.0.1o). 249 ro
 | button_callbacks/fn/G.FUNCS.change_contest_name | button_callbacks.lua:2347-2352 | function | `G.FUNCS.change_contest_name(e)` |  | unreviewed |  |  |  |  |
 | button_callbacks/fn/G.FUNCS.skip_tutorial_section | button_callbacks.lua:2354-2380 | function | `G.FUNCS.skip_tutorial_section(e)` |  | unreviewed |  |  |  |  |
 | button_callbacks/fn/G.FUNCS.shop_voucher_empty | button_callbacks.lua:2382-2390 | function | `G.FUNCS.shop_voucher_empty(e)` |  | unreviewed |  |  |  |  |
-| button_callbacks/fn/G.FUNCS.check_for_buy_space | button_callbacks.lua:2392-2402 | function | `G.FUNCS.check_for_buy_space(card)` |  | unreviewed |  |  |  |  |
+| button_callbacks/fn/G.FUNCS.check_for_buy_space | button_callbacks.lua:2392-2402 | function | `G.FUNCS.check_for_buy_space(card)` |  | gap | crates/jackdaw-core/src/shop.rs::check_for_buy_space | tests/engine/audit/test_shop_flow.py::TestNegativeBuySpace | G264 |  |
 | button_callbacks/branch/G.FUNCS.check_for_buy_space/edition-negative | button_callbacks.lua:2393-2399 | branch | edition.negative — `card.ability.set ~= 'Voucher' and card.ability.set ~= 'Enhanced' and card.ability.set ~= 'Default'…` |  | unreviewed |  |  |  |  |
 | button_callbacks/fn/G.FUNCS.buy_from_shop | button_callbacks.lua:2404-2479 | function | `G.FUNCS.buy_from_shop(e)` |  | gap | crates/jackdaw-core/src/shop.rs::buy_from_shop | tests/parity/test_rust_step.py | G46, G54, G123 |  |
 | button_callbacks/event/G.FUNCS.buy_from_shop/after:remove_nils | button_callbacks.lua:2413-2477 | event | `Event{trigger='after'}` → :remove_card, :add_to_deck, :remove, remove_nils +11 | `c1 and c1:is(Card)` | unreviewed |  |  |  |  |

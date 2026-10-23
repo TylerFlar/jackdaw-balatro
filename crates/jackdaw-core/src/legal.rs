@@ -112,6 +112,8 @@ impl Game {
         out
     }
 
+    /// A pack's joker can be taken (`G.FUNCS.can_select_card`, button_callbacks.lua:2112):
+    /// a Negative one always, any other with a free slot.
     fn joker_fits(&self, card: &crate::card::Card) -> bool {
         let negative = card
             .edition
@@ -129,14 +131,10 @@ impl Game {
             if !self.spend_ok(card.cost) {
                 continue;
             }
-            match card.set() {
-                CenterSet::Joker if !self.joker_fits(card) => continue,
-                CenterSet::Tarot | CenterSet::Planet | CenterSet::Spectral
-                    if (self.gs.areas.consumables.len() as f64) >= self.gs.consumable_slots =>
-                {
-                    continue;
-                }
-                _ => {}
+            // The same check the purchase makes: a Negative card raises the limit by one
+            // (G264).
+            if !self.check_for_buy_space(card) {
+                continue;
             }
             out.push(Action::BuyCard(i));
         }

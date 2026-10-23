@@ -505,14 +505,15 @@ def _legal_shop(gs: dict[str, Any]) -> list[Action]:
     for i, card in enumerate(shop_cards):
         if not can_afford(gs, card.cost):
             continue
-        # Check slot availability
+        # check_for_buy_space (button_callbacks.lua:2390-2401): a Negative card
+        # raises the area's limit by one, on an over-full board too (G264).
         card_set = card.ability.get("set", "") if isinstance(card.ability, dict) else ""
+        bonus = 1 if isinstance(card.edition, dict) and card.edition.get("negative") else 0
         if card_set == "Joker":
-            is_negative = isinstance(card.edition, dict) and card.edition.get("negative")
-            if len(jokers) >= joker_slots and not is_negative:
+            if len(jokers) >= joker_slots + bonus:
                 continue
         elif card_set in ("Tarot", "Planet", "Spectral"):
-            if len(consumables) >= consumable_slots:
+            if len(consumables) >= consumable_slots + bonus:
                 continue  # No room — agent must use/sell a consumable first
         actions.append(BuyCard(shop_index=i))
 

@@ -1283,14 +1283,15 @@ def _handle_buy_card(gs: dict[str, Any], idx: int) -> dict[str, Any]:
     if not can_afford(gs, card.cost):
         raise IllegalActionError("Cannot afford card")
 
-    # Space check — mirrors shop.py:buy_card; Negative cards need no room.
+    # check_for_buy_space (button_callbacks.lua:2390-2401): a Negative card
+    # raises the area's limit by one, so an over-full board takes none (G264).
     card_set = _get_card_set(card)
-    negative = bool(card.edition and card.edition.get("negative"))
-    if card_set == "Joker" and not negative:
-        if len(gs.get("jokers", [])) >= gs.get("joker_slots", 5):
+    bonus = 1 if card.edition and card.edition.get("negative") else 0
+    if card_set == "Joker":
+        if len(gs.get("jokers", [])) >= gs.get("joker_slots", 5) + bonus:
             raise IllegalActionError("No room for joker")
-    elif card_set in ("Tarot", "Planet", "Spectral") and not negative:
-        if len(gs.get("consumables", [])) >= gs.get("consumable_slots", 2):
+    elif card_set in ("Tarot", "Planet", "Spectral"):
+        if len(gs.get("consumables", [])) >= gs.get("consumable_slots", 2) + bonus:
             raise IllegalActionError("No room for consumable")
 
     gs["dollars"] -= card.cost
