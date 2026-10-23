@@ -195,6 +195,22 @@ impl Game {
 
     /// Apply an action and run the game until it waits for input again. On an error the
     /// game is unchanged.
+    /// [`Game::step`] without its copy: an illegal action is still turned down before anything
+    /// changes (`apply` checks before it acts), but a `NotPorted` refusal, which only a bug can
+    /// raise now that every rule is ported, leaves the run mid-step, and so does a panic. For
+    /// callers that drop the run then, like the envs' hot paths.
+    pub fn step_in_place(&mut self, action: &Action) -> Result<(), StepError> {
+        self.apply(action)?;
+        self.settle();
+        if self.poll_hand_size() {
+            self.settle();
+        }
+        if let Some(what) = self.rt.unported.take() {
+            return unported(what);
+        }
+        Ok(())
+    }
+
     pub fn step(&mut self, action: &Action) -> Result<(), StepError> {
         let mut next = self.clone();
         next.apply(action)?;
@@ -224,10 +240,11 @@ impl Game {
     /// Highlight the hand cards a consumable targets (`G.hand.highlighted`), in the given
     /// order. Cerulean Bell's card comes first: with nothing highlighted, `CardArea:update`
     /// highlights the first forced card of the hand (cardarea.lua:252-256), so a Cryptid copy
-    /// of it, forced too, stays unhighlighted.
-    fn highlight_targets(&mut self, targets: Option<&[usize]>) -> Result<(), StepError> {
-        self.rt.highlighted = self.consumable_highlight(targets.unwrap_or(&[]))?;
-        Ok(())
+    /// of it, forced too, stays unhighlighted. Returns the previous highlight, for a caller
+    /// that turns the action down afterwards.
+    fn highlight_targets(&mut self, targets: Option<&[usize]>) -> Result<Vec<u32>, StepError> {
+        let highlighted = self.consumable_highlight(targets.unwrap_or(&[]))?;
+        Ok(std::mem::replace(&mut self.rt.highlighted, highlighted))
     }
 
     /// `G.hand.highlighted` for a consumable used on these hand indices: the first forced card,
@@ -452,8 +469,9 @@ impl Game {
                 }
                 // G.FUNCS.can_buy_and_use (button_callbacks.lua:77-89).
                 let cost = card.cost;
-                self.highlight_targets(targets.as_deref())?;
+                let prev = self.highlight_targets(targets.as_deref())?;
                 if (cost > self.spendable() && cost > 0.0) || !self.can_use_consumeable(id) {
+                    self.rt.highlighted = prev;
                     return illegal("the card can't be bought and used now");
                 }
                 self.queue(Event::BuyAndUse(id));
@@ -483,8 +501,9 @@ impl Game {
                 let card = self.shop_card(AreaId::PackCards, *index)?;
                 let id = card.sort_id;
                 if card.center().consumeable {
-                    self.highlight_targets(targets.as_deref())?;
+                    let prev = self.highlight_targets(targets.as_deref())?;
                     if !self.can_use_consumeable(id) || self.check_use(id) {
+                        self.rt.highlighted = prev;
                         return illegal("the card can't be used now");
                     }
                 } else if card.set() == jackdaw_data::CenterSet::Joker {
@@ -511,8 +530,9 @@ impl Game {
                     None => return illegal(format!("consumable index {index} out of range")),
                 };
                 let id = card.sort_id;
-                self.highlight_targets(targets.as_deref())?;
+                let prev = self.highlight_targets(targets.as_deref())?;
                 if !self.can_use_consumeable(id) || self.check_use(id) {
+                    self.rt.highlighted = prev;
                     return illegal("the consumable can't be used now");
                 }
                 self.use_consumable_card(id, AreaId::Consumables);

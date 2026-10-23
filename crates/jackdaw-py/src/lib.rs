@@ -270,7 +270,9 @@ impl Game {
     ) -> PyResult<EnvView<'py>> {
         let fa = env::factored_from_py(action_type, entity_target, card_target)?;
         let action = jackdaw_env::action::to_engine(&fa, &self.inner).map_err(value_error)?;
-        self.inner.step(&action).map_err(step_error)?;
+        // No rollback copy: an illegal action changes nothing, and BalatroEnvironment ends the
+        // episode on a NotPorted refusal.
+        self.inner.step_in_place(&action).map_err(step_error)?;
         self.env_view(py, legality)
     }
 

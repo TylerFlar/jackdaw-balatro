@@ -44,6 +44,12 @@ fn timings() {
         g.step(&Action::PlayHand(vec![0, 1, 2, 3, 4])).unwrap();
         g
     });
+    time("play 5 cards (clone + step_in_place)", 5_000, || {
+        let mut g = in_round.clone();
+        g.step_in_place(&Action::PlayHand(vec![0, 1, 2, 3, 4]))
+            .unwrap();
+        g
+    });
     time("discard 5 cards (clone + step)", 5_000, || {
         let mut g = in_round.clone();
         g.step(&Action::Discard(vec![0, 1, 2, 3, 4])).unwrap();
