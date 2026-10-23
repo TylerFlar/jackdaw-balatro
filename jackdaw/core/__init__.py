@@ -11,6 +11,7 @@ it as ``jackdaw.engine`` once the Rust engine covers the whole game.
 
 from __future__ import annotations
 
+from jackdaw.core.builder import GameBuilder
 from jackdaw.core.game import (
     Game,
     IllegalActionError,
@@ -26,6 +27,7 @@ __all__ = [
     "BlindView",
     "CardView",
     "Game",
+    "GameBuilder",
     "HandLevel",
     "Score",
     "IllegalActionError",

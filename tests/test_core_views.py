@@ -54,3 +54,27 @@ def test_preview_play_is_the_real_play(game: Game) -> None:
     assert game.last_score == preview
     with pytest.raises(IllegalActionError):
         game.clone().preview_play(())
+
+
+def test_game_builder() -> None:
+    from jackdaw.core import GameBuilder
+
+    builder = (
+        GameBuilder("b_red", stake=2, seed="DEMO0001")
+        .boss("bl_hook")
+        .select_blind()
+        .joker("j_blueprint")
+        .joker("j_joker", edition="polychrome")
+        .card("H_A", enhancement="m_glass", seal="Red")
+        .money(50)
+    )
+    game = builder.build()
+    assert game.blind is not None and game.blind.key == "bl_hook"
+    assert [j.key for j in game.jokers] == ["j_blueprint", "j_joker"]
+    assert game.jokers[1].edition == "polychrome"
+    ace = game.hand[-1]
+    assert (ace.front, ace.key, ace.seal) == ("H_A", "m_glass", "Red")
+    assert game.dollars == 50
+    # build() hands out a copy: the builder's run goes on separately.
+    builder.money(7)
+    assert game.dollars == 50
