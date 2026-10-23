@@ -52,7 +52,9 @@ def test_initialized_stakes_enable_stickers(
     assert card.eternal is (stake >= 4 and ep_roll > 0.7)
     assert card.perishable is (stake >= 7 and 0.4 < ep_roll <= 0.7)
     assert card.rental is (stake >= 8 and rental_roll > 0.7)
-    assert calls == [ep_key, rental_key, "edi1"]
+    # `enable_rentals_in_shop and pseudorandom(...)` short-circuits: the rental
+    # stream is only drawn once rentals are on (common_events.lua:2144).
+    assert calls == [ep_key, *([rental_key] if stake >= 8 else []), "edi1"]
 
     # Compare the next draw on every touched stream to an unmodified reference.
     reference = initialize_run("b_red", stake, "STAKEWIRING")["rng"]

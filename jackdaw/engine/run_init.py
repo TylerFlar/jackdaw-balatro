@@ -463,12 +463,13 @@ def start_round(game_state: dict[str, Any]) -> None:
     cr["used_packs"] = []
     cr["jokers_purchased"] = 0
 
-    # Free rerolls (Chaos the Clown gives free rerolls; default 0)
+    # Free rerolls: #find_joker('Chaos the Clown') (state_events.lua:311-313);
+    # find_joker skips debuffed jokers (misc_functions.lua:903-917).
     jokers = game_state.get("jokers", [])
     chaos_count = sum(
         1
         for j in jokers
-        if getattr(j, "center_key", None) == "j_chaos"
+        if (getattr(j, "center_key", None) == "j_chaos" and not getattr(j, "debuff", False))
         or (isinstance(j, dict) and j.get("key") == "j_chaos")
     )
     cr["free_rerolls"] = chaos_count

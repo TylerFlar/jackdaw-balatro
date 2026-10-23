@@ -452,13 +452,16 @@ def can_use_consumable(
             return True
         return False
 
-    # Need eligible joker (editionless)
+    # Need an eligible joker: next(eligible_*_jokers) (card.lua:1533-1549),
+    # editionless jokers, debuffed ones included (card.lua:4209-4224)
     if key in _NEED_ELIGIBLE_JOKER:
-        return any(not j.edition and not j.debuff for j in jokers)
+        return bool(_eligible_editionless_jokers(jokers))
 
-    # Ankh: need joker + room to duplicate
+    # Ankh: can_use needs a joker and a joker limit above 1 (card.lua:1536);
+    # use_card then aborts while Card:check_use is true — every joker slot
+    # taken (card.lua:1581-1588, button_callbacks.lua:2163-2169).
     if key == "c_ankh":
-        return len(jokers) > 0 and joker_limit > 1
+        return len(jokers) > 0 and joker_limit > 1 and len(jokers) < joker_limit
 
     # Aura: need 1 highlighted card with no edition
     if key == "c_aura":
@@ -734,7 +737,8 @@ def _wheel_of_fortune(card: Card, ctx: ConsumableContext) -> ConsumableResult:
         return ConsumableResult()
 
     gs = ctx.game_state or {}
-    prob = gs.get("probabilities_normal", 1)
+    # G.GAME.probabilities.normal (Oops! All 6s doubles it, card.lua:608-611)
+    prob = gs.get("probabilities", {}).get("normal", 1)
     extra = card.ability.get("extra", 4)
 
     # Step 1: probability check (card.lua:1474)
@@ -742,8 +746,8 @@ def _wheel_of_fortune(card: Card, ctx: ConsumableContext) -> ConsumableResult:
     if roll >= prob / extra:
         return ConsumableResult()  # failure — "Nope!"
 
-    # Step 2: pick a random editionless joker (card.lua:1477)
-    editionless = [j for j in (ctx.jokers or []) if not j.edition and not j.debuff]
+    # Step 2: pick a random editionless joker (card.lua:1473-1477)
+    editionless = _eligible_editionless_jokers(ctx.jokers)
     if not editionless:
         return ConsumableResult()
     seed_val = ctx.rng.seed("wheel_of_fortune")
@@ -1118,22 +1122,33 @@ def _aura(_card: Card, ctx: ConsumableContext) -> ConsumableResult:
     return ConsumableResult(add_edition={"target": target, "edition": edition})
 
 
+def _eligible_editionless_jokers(jokers: list[Card] | None) -> list[Card]:
+    """``eligible_strength_jokers`` / ``eligible_editionless_jokers``
+    (Card:update, card.lua:4209-4224): every Joker without an edition,
+    debuffed ones included."""
+    return [j for j in (jokers or []) if j.ability.get("set") == "Joker" and not j.edition]
+
+
 @register_consumable("c_ectoplasm")
 def _ectoplasm(_card: Card, ctx: ConsumableContext) -> ConsumableResult:
-    """Ectoplasm: add Negative edition to a random editionless joker, -1 hand size.
+    """Ectoplasm: add Negative edition to a random editionless joker, lose hand size.
 
-    Source: card.lua:1270.  Seed: 'ectoplasm'.
-    hand_size_mod=-1 is cumulative (each use subtracts 1 permanently).
+    Source: card.lua:1467-1498.  Seed: 'ectoplasm'.  The hand-size cost is
+    G.GAME.ecto_minus (1 at run start, game.lua:1896), which then grows by
+    one, so the n-th Ectoplasm costs n hand size (card.lua:1494-1498).
     """
     if ctx.rng is None:
         return ConsumableResult()
-    editionless = [j for j in (ctx.jokers or []) if not j.edition and not j.debuff]
+    editionless = _eligible_editionless_jokers(ctx.jokers)
     if not editionless:
         return ConsumableResult()
     target, _ = ctx.rng.element(editionless, ctx.rng.seed("ectoplasm"))
+    gs = ctx.game_state if ctx.game_state is not None else {}
+    ecto_minus = gs.get("ecto_minus") or 1
+    gs["ecto_minus"] = ecto_minus + 1
     return ConsumableResult(
         add_edition={"target": target, "edition": {"negative": True}},
-        hand_size_mod=-1,
+        hand_size_mod=-ecto_minus,
     )
 
 
@@ -1141,11 +1156,11 @@ def _ectoplasm(_card: Card, ctx: ConsumableContext) -> ConsumableResult:
 def _hex(_card: Card, ctx: ConsumableContext) -> ConsumableResult:
     """Hex: add Polychrome to a random editionless joker, destroy all other non-eternal jokers.
 
-    Source: card.lua:1278.  Seed: 'hex'.
+    Source: card.lua:1467-1493.  Seed: 'hex'.
     """
     if ctx.rng is None:
         return ConsumableResult()
-    editionless = [j for j in (ctx.jokers or []) if not j.edition and not j.debuff]
+    editionless = _eligible_editionless_jokers(ctx.jokers)
     if not editionless:
         return ConsumableResult()
     target, _ = ctx.rng.element(editionless, ctx.rng.seed("hex"))
@@ -1183,9 +1198,12 @@ def _ankh(_card: Card, ctx: ConsumableContext) -> ConsumableResult:
         return ConsumableResult()
     chosen, _ = ctx.rng.element(list(ctx.jokers), ctx.rng.seed("ankh_choice"))
     others = [j for j in ctx.jokers if j is not chosen and not j.eternal]
+    # copy_card(chosen, nil, nil, nil, chosen.edition and chosen.edition.negative)
+    # (card.lua:1445): a Negative joker's copy loses the edition.
+    strip = bool(chosen.edition and chosen.edition.get("negative"))
     return ConsumableResult(
         destroy_jokers=others if others else None,
-        create=[{"type": "Joker", "copy_of": chosen}],
+        create=[{"type": "Joker", "copy_of": chosen, "strip_edition": strip}],
     )
 
 
@@ -1193,8 +1211,10 @@ def _ankh(_card: Card, ctx: ConsumableContext) -> ConsumableResult:
 def _soul(_card: Card, ctx: ConsumableContext) -> ConsumableResult:
     """Soul: create 1 Legendary joker.
 
-    Source: card.lua:1455.  Rarity 4 = Legendary.  Seed: 'soul'.
+    Source: card.lua:1415-1423 — create_card('Joker', G.jokers, true, ...,
+    'sou').  The legendary pool key ignores the append; the edition poll is
+    'edi'..'sou'..ante (common_events.lua:2149).
     """
     return ConsumableResult(
-        create=[{"type": "Joker", "count": 1, "seed": "soul", "rarity": 4}],
+        create=[{"type": "Joker", "count": 1, "seed": "sou", "rarity": 4}],
     )

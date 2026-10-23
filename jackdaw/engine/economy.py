@@ -39,7 +39,7 @@ if TYPE_CHECKING:
     from jackdaw.engine.card import Card
     from jackdaw.engine.rng import PseudoRandom
 
-from jackdaw.engine.jokers import GameSnapshot, on_end_of_round
+from jackdaw.engine.jokers import GameSnapshot, count_planets_used, on_end_of_round
 
 # ---------------------------------------------------------------------------
 # RoundEarnings — per-round cash-out descriptor
@@ -211,9 +211,13 @@ def calculate_round_earnings(
     effective_money = money - rental_cost
 
     # ------------------------------------------------------------------
-    # Step 2 — Blind reward (state_events.lua:1139)
+    # Step 2 — Blind reward (state_events.lua:1139-1146): paid only when
+    # G.GAME.chips - G.GAME.blind.chips >= 0.  A round that ends because
+    # Mr. Bones saved it shows the blind row with $0.  Direct callers that
+    # pass no round chips get the beaten-blind case this function is for.
     # ------------------------------------------------------------------
-    blind_reward = blind.dollars
+    round_chips = game_state.get("chips", blind.chips)
+    blind_reward = blind.dollars if round_chips - blind.chips >= 0 else 0
 
     # ------------------------------------------------------------------
     # Step 3 — Unused hands bonus (state_events.lua:1165)
@@ -256,6 +260,8 @@ def calculate_round_earnings(
             # Cloud 9: $ per 9 in the full deck (card.lua:4192 tally).
             nine_tally=sum(1 for c in _all_owned if c.get_id() == 9),
             joker_count=len(jokers),
+            probabilities_normal=game_state.get("probabilities", {}).get("normal", 1),
+            planets_used=count_planets_used(game_state),
         )
         end_result = on_end_of_round(
             jokers, game_snap, rng, hand_levels=game_state.get("hand_levels")

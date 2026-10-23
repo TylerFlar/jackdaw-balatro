@@ -170,7 +170,9 @@ class TestDna:
         ctx = JokerContext(before=True, full_hand=played, hands_played=1)
         assert calculate_joker(j, ctx) is None
 
-    def test_blueprint_does_not_copy(self):
+    def test_blueprint_copies(self):
+        """DNA's before branch has no `not context.blueprint` guard
+        (card.lua:3501), so a Blueprint copy makes another copy."""
         j = _joker("j_dna")
         played = [_card("Hearts", "Ace")]
         ctx = JokerContext(
@@ -179,7 +181,9 @@ class TestDna:
             hands_played=0,
             blueprint=1,
         )
-        assert calculate_joker(j, ctx) is None
+        result = calculate_joker(j, ctx)
+        assert result is not None
+        assert result.extra["create"]["type"] == "playing_card_copy"
 
 
 class TestRiffRaff:
@@ -581,14 +585,16 @@ class TestSwashbuckler:
         ctx = JokerContext(joker_main=True, jokers=jokers)
         assert calculate_joker(swash, ctx) is None
 
-    def test_excludes_debuffed(self):
+    def test_includes_debuffed(self):
+        """Card:update sums every other card in G.jokers, debuffed or not
+        (card.lua:4240-4248)."""
         swash = _joker("j_swashbuckler")
         j1 = _joker("j_joker", mult=4)
         j1.sell_cost = 5
         j1.debuff = True
         jokers = [swash, j1]
         ctx = JokerContext(joker_main=True, jokers=jokers)
-        assert calculate_joker(swash, ctx) is None
+        assert calculate_joker(swash, ctx).mult_mod == 5
 
     def test_pipeline_with_other_jokers(self):
         """Swashbuckler in pipeline adds sell value sum as mult."""
@@ -893,7 +899,9 @@ class TestHiker:
         assert r2.chips == 42.0
         assert played[0].ability["perma_bonus"] == 10
 
-    def test_blueprint_does_not_mutate(self):
+    def test_blueprint_copy_adds_bonus(self):
+        """Hiker's branch has no `not context.blueprint` guard
+        (card.lua:3067), so a Blueprint copy adds its own +5."""
         j = _joker("j_hiker", extra=5)
         ace = _card("Hearts", "Ace")
         ctx = JokerContext(
@@ -903,7 +911,7 @@ class TestHiker:
             blueprint=1,
         )
         calculate_joker(j, ctx)
-        assert ace.ability.get("perma_bonus", 0) == 0
+        assert ace.ability.get("perma_bonus", 0) == 5
 
 
 # ============================================================================
@@ -1800,13 +1808,19 @@ class TestMadness:
         return _joker("j_madness", x_mult=1, extra=0.5)
 
     def test_non_boss_increments(self):
+        """Madness grows and, at calc time, draws its victim ('madness') and
+        marks it getting_sliced (card.lua:2503-2521)."""
         j = self._make()
+        other = _joker("j_joker")
         small = Blind.create("bl_small", ante=1)
-        ctx = JokerContext(setting_blind=True, blind=small)
+        ctx = JokerContext(
+            setting_blind=True, blind=small, jokers=[j, other], rng=PseudoRandom("MADNESS")
+        )
         result = calculate_joker(j, ctx)
         assert j.ability["x_mult"] == pytest.approx(1.5)
         assert result is not None
-        assert result.extra == {"destroy_random_joker": True}
+        assert result.extra == {"destroy_joker": other}
+        assert other.getting_sliced
 
     def test_boss_no_effect(self):
         j = self._make()

@@ -1078,7 +1078,8 @@ class TestTrading:
 
 
 class TestToDoList:
-    """j_todo_list: +$4 if hand matches to_do_poker_hand."""
+    """j_todo_list: +$4 if hand matches to_do_poker_hand (paid in `before`,
+    card.lua:3491)."""
 
     def test_matching_hand(self):
         joker = _joker_card(
@@ -1086,7 +1087,7 @@ class TestToDoList:
             extra={"dollars": 4, "poker_hand": "High Card"},
             to_do_poker_hand="Pair",
         )
-        ctx = JokerContext(joker_main=True, scoring_name="Pair")
+        ctx = JokerContext(before=True, scoring_name="Pair")
         result = calculate_joker(joker, ctx)
         assert result is not None
         assert result.dollars == 4
@@ -1097,7 +1098,7 @@ class TestToDoList:
             extra={"dollars": 4, "poker_hand": "High Card"},
             to_do_poker_hand="Pair",
         )
-        ctx = JokerContext(joker_main=True, scoring_name="Flush")
+        ctx = JokerContext(before=True, scoring_name="Flush")
         assert calculate_joker(joker, ctx) is None
 
     def test_no_target_no_effect(self):
@@ -1105,7 +1106,7 @@ class TestToDoList:
             "j_todo_list",
             extra={"dollars": 4, "poker_hand": "High Card"},
         )
-        ctx = JokerContext(joker_main=True, scoring_name="Pair")
+        ctx = JokerContext(before=True, scoring_name="Pair")
         assert calculate_joker(joker, ctx) is None
 
 

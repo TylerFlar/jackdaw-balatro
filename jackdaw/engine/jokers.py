@@ -67,9 +67,41 @@ class GameSnapshot:
     ante: int = 1
     consumable_count: int = 0
     consumable_slots: int = 2
+    # distinct Planet keys in G.GAME.consumeable_usage (Satellite,
+    # card.lua:1667-1674)
+    planets_used: int = 0
 
 
 _DEFAULT_GAME = GameSnapshot()
+
+
+def effect_flags(jokers: list[Card] | None) -> dict[str, bool]:
+    """``smeared`` / ``pareidolia`` context flags.
+
+    Card:is_suit and Card:is_face test ``next(find_joker('Smeared Joker'))``
+    and ``next(find_joker('Pareidolia'))`` themselves (card.lua:964-970,
+    4064-4089); find_joker skips debuffed jokers (misc_functions.lua:903-917).
+    Every JokerContext whose handlers call is_face/is_suit must carry these.
+    """
+    smeared = pareidolia = False
+    for j in jokers or ():
+        if j.debuff:
+            continue
+        name = j.ability.get("name")
+        if name == "Smeared Joker":
+            smeared = True
+        elif name == "Pareidolia":
+            pareidolia = True
+    return {"smeared": smeared, "pareidolia": pareidolia}
+
+
+def count_planets_used(game_state: dict[str, Any]) -> int:
+    """Distinct Planet center keys used this run: Satellite's count over
+    ``G.GAME.consumeable_usage`` entries whose ``set`` is ``'Planet'``
+    (card.lua:1668-1671; usage is recorded by set_consumeable_usage,
+    misc_functions.lua:1191-1195)."""
+    usage = game_state.get("consumable_usage") or {}
+    return sum(1 for entry in usage.values() if entry.get("set") == "Planet")
 
 
 # ---------------------------------------------------------------------------
@@ -141,6 +173,9 @@ class JokerContext:
     highlighted: list[Card] | None = None
     """Hand cards the consumable was used on (``G.hand.highlighted``)."""
     cards: list[Card] | None = None
+    card_effects: list[dict[str, Any]] | None = None
+    """A held card's first-pass effects (``context.card_effects``): the
+    card's own eval first, then one entry per joker that returned anything."""
 
     # Blueprint
     blueprint: int = 0
@@ -149,6 +184,16 @@ class JokerContext:
     # Meta joker flags
     smeared: bool = False
     pareidolia: bool = False
+
+    # G.GAME.dollar_buffer: money already earned in the hand being evaluated
+    # but not yet eased into G.GAME.dollars (Bull / Bootstraps read
+    # dollars + dollar_buffer, card.lua:3936, 4046).  Set by score_hand.
+    dollar_buffer: int = 0
+
+    # The live run state, for the shared buffers vanilla keeps on G.GAME
+    # (consumeable_buffer / joker_buffer) that change between jokers within
+    # one pass.  None for direct handler calls (they fall back to `game`).
+    game_state: dict[str, Any] | None = None
 
     # Shared game snapshot (built once per score_hand call)
     game: GameSnapshot = field(default_factory=lambda: _DEFAULT_GAME)
@@ -331,6 +376,27 @@ def calculate_joker(card: Card, context: JokerContext) -> JokerResult | None:
     return handler(card, context)
 
 
+def playing_card_joker_effects(
+    jokers: list[Card], cards: list[Any], *, game: GameSnapshot | None = None
+) -> None:
+    """``playing_card_joker_effects`` (misc_functions.lua:1580-1584): every
+    joker's calculate_joker({playing_card_added = true, cards = cards}).
+
+    Called wherever playing cards join the deck: Certificate, Marble Joker,
+    DNA, Cryptid, Familiar/Grim/Incantation, Standard-pack picks and shop
+    buys.  *cards* may hold placeholders: vanilla passes ``{true}`` when the
+    card is made later in an event.  Hologram is the only responder.
+    """
+    for joker in list(jokers):
+        ctx = JokerContext(
+            playing_card_added=True,
+            cards=list(cards),
+            jokers=jokers,
+            game=game if game is not None else _DEFAULT_GAME,
+        )
+        calculate_joker(joker, ctx)
+
+
 def registered_jokers() -> list[str]:
     """Return sorted list of all registered joker center keys."""
     return sorted(_REGISTRY)
@@ -463,6 +529,37 @@ def _stuntman(card: Card, ctx: JokerContext) -> JokerResult | None:
         extra = card.ability.get("extra", {})
         return JokerResult(chip_mod=extra.get("chip_mod", 250))
     return None
+
+
+# ---------------------------------------------------------------------------
+# Helper: consumable room (G.GAME.consumeable_buffer)
+# ---------------------------------------------------------------------------
+
+
+def _consumable_room(ctx: JokerContext) -> bool:
+    """``#G.consumeables.cards + G.GAME.consumeable_buffer <
+    G.consumeables.config.card_limit`` — the gate every consumable creator
+    checks *before* deciding (and before any roll)."""
+    gs = ctx.game_state
+    if gs is None:
+        return ctx.game.consumable_count < ctx.game.consumable_slots
+    return len(gs.get("consumables", [])) + gs.get("consumeable_buffer", 0) < gs.get(
+        "consumable_slots", 2
+    )
+
+
+def _sliced(card: Card | None) -> bool:
+    """``card.getting_sliced``: Madness or Ceremonial Dagger has already
+    claimed it this setting_blind (card.lua:2512, 2568)."""
+    return bool(getattr(card, "getting_sliced", False))
+
+
+def _reserve_consumable(ctx: JokerContext) -> None:
+    """``G.GAME.consumeable_buffer += 1``: the slot is spoken for until the
+    creation event runs (and zeroes the buffer)."""
+    gs = ctx.game_state
+    if gs is not None:
+        gs["consumeable_buffer"] = gs.get("consumeable_buffer", 0) + 1
 
 
 # ---------------------------------------------------------------------------
@@ -970,10 +1067,20 @@ def _seltzer(card: Card, ctx: JokerContext) -> JokerResult | None:
     return None
 
 
+def has_card_effects(effects: list[dict[str, Any]] | None) -> bool:
+    """``next(effects[1]) or #effects > 1``: the held card's own eval
+    returned something, or some joker did (state_events.lua:193, 814)."""
+    return bool(effects) and (bool(effects[0]) or len(effects) > 1)
+
+
 @register("j_mime")
 def _mime(card: Card, ctx: JokerContext) -> JokerResult | None:
-    """Mime: +1 retrigger for held cards. Source: card.lua:3387."""
-    if ctx.repetition and ctx.cardarea == "hand":
+    """Mime: retrigger held cards that had an effect.
+
+    Source: card.lua:3386-3394 (scoring) and 2877-2886 (end of round): only
+    when ``next(context.card_effects[1]) or #context.card_effects > 1``.
+    """
+    if ctx.repetition and ctx.cardarea == "hand" and has_card_effects(ctx.card_effects):
         return JokerResult(repetitions=card.ability.get("extra", 1))
     return None
 
@@ -1075,11 +1182,13 @@ def _steel_joker(card: Card, ctx: JokerContext) -> JokerResult | None:
 
 @register("j_bull")
 def _bull(card: Card, ctx: JokerContext) -> JokerResult | None:
-    """Bull: +2 chips per $1 held. Source: card.lua:3936."""
-    if ctx.joker_main and ctx.game.money > 0:
-        return JokerResult(
-            chip_mod=card.ability.get("extra", 2) * max(0, ctx.game.money),
-        )
+    """Bull: +2 chips per $1 held, counting money already earned this hand.
+
+    Source: card.lua:3936-3942 — reads G.GAME.dollars + G.GAME.dollar_buffer.
+    """
+    money = ctx.game.money + ctx.dollar_buffer
+    if ctx.joker_main and money > 0:
+        return JokerResult(chip_mod=card.ability.get("extra", 2) * max(0, money))
     return None
 
 
@@ -1103,7 +1212,10 @@ def _blackboard(card: Card, ctx: JokerContext) -> JokerResult | None:
         # the classic all-in Blackboard play.  Found by lockstep: The Hook
         # emptied the held hand, live scored x3, sim skipped it.
         for c in ctx.held_cards:
-            if not (c.is_suit("Clubs", flush_calc=True) or c.is_suit("Spades", flush_calc=True)):
+            if not (
+                c.is_suit("Clubs", flush_calc=True, smeared=ctx.smeared)
+                or c.is_suit("Spades", flush_calc=True, smeared=ctx.smeared)
+            ):
                 return None
         return JokerResult(Xmult_mod=card.ability.get("extra", 3))
     return None
@@ -1111,20 +1223,20 @@ def _blackboard(card: Card, ctx: JokerContext) -> JokerResult | None:
 
 @register("j_stencil")
 def _stencil(card: Card, ctx: JokerContext) -> JokerResult | None:
-    """Joker Stencil: xMult = empty joker slots. Source: card.lua:3966.
+    """Joker Stencil: xMult = empty joker slots + Stencils.
 
-    Formula: ``joker_slots - joker_count + stencil_count`` where stencil_count
-    includes this stencil (so stencils don't count against empty slots).
+    Card:update keeps ``x_mult = (card_limit - #G.jokers.cards)`` plus one
+    per 'Joker Stencil' in G.jokers, debuffed ones included
+    (card.lua:4203-4208); calculate_joker returns it only while a slot is
+    empty (card.lua:3966-3972), however many Stencils there are.
     """
     if ctx.joker_main:
-        stencil_count = sum(
-            1
-            for j in (ctx.jokers or [])
-            if getattr(j, "center_key", None) == "j_stencil" and not getattr(j, "debuff", False)
-        )
-        x = ctx.game.joker_slots - ctx.game.joker_count + stencil_count
-        if x > 1:
-            return JokerResult(Xmult_mod=x)
+        empty = ctx.game.joker_slots - ctx.game.joker_count
+        if empty > 0:
+            stencils = sum(
+                1 for j in (ctx.jokers or []) if getattr(j, "center_key", None) == "j_stencil"
+            )
+            return JokerResult(Xmult_mod=empty + stencils)
     return None
 
 
@@ -1139,13 +1251,13 @@ def _flower_pot(card: Card, ctx: JokerContext) -> JokerResult | None:
         for c in ctx.scoring_hand:
             if c.ability.get("name") != "Wild Card":
                 for s in suits:
-                    if suits[s] == 0 and c.is_suit(s, bypass_debuff=True):
+                    if suits[s] == 0 and c.is_suit(s, bypass_debuff=True, smeared=ctx.smeared):
                         suits[s] += 1
                         break
         for c in ctx.scoring_hand:
             if c.ability.get("name") == "Wild Card":
                 for s in suits:
-                    if suits[s] == 0 and c.is_suit(s):
+                    if suits[s] == 0 and c.is_suit(s, smeared=ctx.smeared):
                         suits[s] += 1
                         break
         if all(v > 0 for v in suits.values()):
@@ -1164,17 +1276,17 @@ def _seeing_double(card: Card, ctx: JokerContext) -> JokerResult | None:
         for c in ctx.scoring_hand:
             if c.ability.get("name") != "Wild Card":
                 for s in suits:
-                    if c.is_suit(s):
+                    if c.is_suit(s, smeared=ctx.smeared):
                         suits[s] += 1
         for c in ctx.scoring_hand:
             if c.ability.get("name") == "Wild Card":
-                if suits["Clubs"] == 0 and c.is_suit("Clubs"):
+                if suits["Clubs"] == 0 and c.is_suit("Clubs", smeared=ctx.smeared):
                     suits["Clubs"] += 1
-                elif suits["Diamonds"] == 0 and c.is_suit("Diamonds"):
+                elif suits["Diamonds"] == 0 and c.is_suit("Diamonds", smeared=ctx.smeared):
                     suits["Diamonds"] += 1
-                elif suits["Spades"] == 0 and c.is_suit("Spades"):
+                elif suits["Spades"] == 0 and c.is_suit("Spades", smeared=ctx.smeared):
                     suits["Spades"] += 1
-                elif suits["Hearts"] == 0 and c.is_suit("Hearts"):
+                elif suits["Hearts"] == 0 and c.is_suit("Hearts", smeared=ctx.smeared):
                     suits["Hearts"] += 1
         has_club = suits["Clubs"] > 0
         has_other = suits["Hearts"] > 0 or suits["Diamonds"] > 0 or suits["Spades"] > 0
@@ -1185,11 +1297,15 @@ def _seeing_double(card: Card, ctx: JokerContext) -> JokerResult | None:
 
 @register("j_bootstraps")
 def _bootstraps(card: Card, ctx: JokerContext) -> JokerResult | None:
-    """Bootstraps: +2 mult per $5 held. Source: card.lua:4046."""
+    """Bootstraps: +2 mult per $5 held, counting money already earned this hand.
+
+    Source: card.lua:4046-4051 — floor((G.GAME.dollars +
+    G.GAME.dollar_buffer) / extra.dollars).
+    """
     if ctx.joker_main:
         extra = card.ability.get("extra", {})
         per = extra.get("dollars", 5)
-        buckets = ctx.game.money // per if per > 0 else 0
+        buckets = (ctx.game.money + ctx.dollar_buffer) // per if per > 0 else 0
         if buckets >= 1:
             return JokerResult(mult_mod=extra.get("mult", 2) * buckets)
     return None
@@ -1364,9 +1480,10 @@ def _mail(card: Card, ctx: JokerContext) -> JokerResult | None:
 def _trading(card: Card, ctx: JokerContext) -> JokerResult | None:
     """Trading Card: first discard of round, single card → +$3, destroy card.
 
-    Source: card.lua:2802. Returns extra={'destroy': True} to signal destruction.
+    Source: card.lua:2802-2812 (``not context.blueprint``: copies do
+    nothing). Returns extra={'destroy': True} to signal destruction.
     """
-    if ctx.discard and ctx.full_hand is not None:
+    if ctx.discard and not ctx.blueprint and ctx.full_hand is not None:
         if ctx.game.discards_used <= 0 and len(ctx.full_hand) == 1:
             return JokerResult(
                 dollars=card.ability.get("extra", 3),
@@ -1383,13 +1500,14 @@ def _trading(card: Card, ctx: JokerContext) -> JokerResult | None:
 
 @register("j_todo_list")
 def _to_do_list(card: Card, ctx: JokerContext) -> JokerResult | None:
-    """To Do List: +$4 if hand matches to_do_poker_hand. Source: card.lua:3491.
+    """To Do List: +$4 if the scored hand is to_do_poker_hand.
 
-    The target rolls at creation (card.lua:311, wired in create_card) and
-    re-rolls at end of round from a pool excluding the current hand
-    (card.lua:2975).  Found dead by lockstep: nothing ever wrote the field.
+    Pays in the ``before`` pass (card.lua:3491-3499: ease_dollars plus
+    dollar_buffer), ahead of every joker_main read.  The target rolls at
+    creation (card.lua:311, wired in create_card) and re-rolls at end of
+    round from a pool excluding the current hand (card.lua:2975).
     """
-    if ctx.joker_main and ctx.scoring_name:
+    if ctx.before and ctx.scoring_name:
         target = card.ability.get("to_do_poker_hand")
         if target and ctx.scoring_name == target:
             extra = card.ability.get("extra", {})
@@ -1531,7 +1649,7 @@ def _ride_the_bus(card: Card, ctx: JokerContext) -> JokerResult | None:
     Source: card.lua:3525. Resets to 0 when a face card IS scored.
     """
     if ctx.before and not ctx.blueprint and ctx.scoring_hand is not None:
-        has_face = any(c.is_face() for c in ctx.scoring_hand)
+        has_face = any(c.is_face(pareidolia=ctx.pareidolia) for c in ctx.scoring_hand)
         if has_face:
             card.ability["mult"] = 0
         else:
@@ -1705,8 +1823,17 @@ def _campfire(card: Card, ctx: JokerContext) -> JokerResult | None:
 
 @register("j_hologram")
 def _hologram(card: Card, ctx: JokerContext) -> JokerResult | None:
-    """Hologram: +0.25 xMult per card added to deck. Source: card.lua:2457."""
-    if ctx.playing_card_added and not ctx.blueprint and ctx.cards:
+    """Hologram: +0.25 xMult per card added to deck.
+
+    Source: card.lua:2456-2461 (``playing_card_added and not
+    self.getting_sliced``, ``not context.blueprint``).
+    """
+    if (
+        ctx.playing_card_added
+        and not getattr(card, "getting_sliced", False)
+        and not ctx.blueprint
+        and ctx.cards
+    ):
         card.ability["x_mult"] = card.ability.get("x_mult", 1) + len(ctx.cards) * card.ability.get(
             "extra", 0.25
         )
@@ -1780,7 +1907,7 @@ def _caino(card: Card, ctx: JokerContext) -> JokerResult | None:
     Uses ``ability.caino_xmult`` (separate from x_mult).
     """
     if ctx.cards_destroyed and not ctx.blueprint:
-        face_count = sum(1 for c in ctx.cards_destroyed if c.is_face())
+        face_count = sum(1 for c in ctx.cards_destroyed if c.is_face(pareidolia=ctx.pareidolia))
         if face_count > 0:
             card.ability["caino_xmult"] = (
                 card.ability.get("caino_xmult", 1) + card.ability.get("extra", 1) * face_count
@@ -1861,12 +1988,25 @@ def _obelisk(card: Card, ctx: JokerContext) -> JokerResult | None:
 def _madness(card: Card, ctx: JokerContext) -> JokerResult | None:
     """Madness: +0.5 xMult per non-boss blind. Destroys random joker.
 
-    Source: card.lua:2503. Side effect returned as extra.
+    Source: card.lua:2503-2521, all at calc time: the x_mult grows, the
+    victim is drawn ('madness') from the other non-eternal jokers not
+    already being sliced, and marked getting_sliced at once (later jokers
+    in the loop skip it).  The destruction itself is an event (the extra).
     """
-    if ctx.setting_blind and not ctx.blueprint:
+    if ctx.setting_blind and not _sliced(card) and not ctx.blueprint:
         if ctx.blind and not getattr(ctx.blind, "boss", False):
             card.ability["x_mult"] = card.ability.get("x_mult", 1) + card.ability.get("extra", 0.5)
-            return JokerResult(extra={"destroy_random_joker": True})
+            pool = [
+                j
+                for j in (ctx.jokers or [])
+                if j is not card and not getattr(j, "eternal", False) and not _sliced(j)
+            ]
+            if pool and ctx.rng is not None:
+                victim, _ = ctx.rng.element(pool, ctx.rng.seed("madness"))
+                if not _sliced(ctx.blueprint_card or card):
+                    victim.getting_sliced = True
+                    return JokerResult(extra={"destroy_joker": victim})
+            return JokerResult()
     if ctx.joker_main:
         x = card.ability.get("x_mult", 1)
         if x > 1:
@@ -1934,10 +2074,12 @@ def _yorick(card: Card, ctx: JokerContext) -> JokerResult | None:
 def _ceremonial(card: Card, ctx: JokerContext) -> JokerResult | None:
     """Ceremonial Dagger: +2× right neighbor's sell_cost as mult when destroyed.
 
-    Source: card.lua:2561. Fires in setting_blind. Returns mult_mod (NOT xMult).
-    Side effect: signals destruction of right neighbor via extra.
+    Source: card.lua:2561-2579. At calc time the neighbour is marked
+    getting_sliced and G.GAME.joker_buffer drops by one (Riff-raff later in
+    the loop counts the freed slot); the event adds 2x its sell value to
+    the mult and dissolves it.
     """
-    if ctx.setting_blind and not ctx.blueprint and ctx.jokers:
+    if ctx.setting_blind and not _sliced(card) and not ctx.blueprint and ctx.jokers:
         my_pos = None
         for i, j in enumerate(ctx.jokers):
             if j is card:
@@ -1945,11 +2087,11 @@ def _ceremonial(card: Card, ctx: JokerContext) -> JokerResult | None:
                 break
         if my_pos is not None and my_pos + 1 < len(ctx.jokers):
             target = ctx.jokers[my_pos + 1]
-            if (
-                not getattr(target, "eternal", False)
-                and not getattr(target, "getting_sliced", False)
-                and not getattr(card, "getting_sliced", False)
-            ):
+            if not getattr(target, "eternal", False) and not _sliced(target):
+                target.getting_sliced = True
+                if ctx.game_state is not None:
+                    gs = ctx.game_state
+                    gs["joker_buffer"] = gs.get("joker_buffer", 0) - 1
                 card.ability["mult"] = card.ability.get("mult", 0) + target.sell_cost * 2
                 return JokerResult(
                     extra={"destroy_joker": target},
@@ -1992,11 +2134,12 @@ def _baseball(card: Card, ctx: JokerContext) -> JokerResult | None:
 def _swashbuckler(card: Card, ctx: JokerContext) -> JokerResult | None:
     """Swashbuckler: +mult = sum of all other jokers' sell values.
 
-    Source: card.lua:4240 (computed in Card:update, not calculate_joker).
+    Source: card.lua:4240-4248 (computed in Card:update, not
+    calculate_joker): every other card in G.jokers, debuffed ones included.
     We compute it in joker_main since we don't have a game tick loop.
     """
     if ctx.joker_main and ctx.jokers:
-        sell_total = sum(j.sell_cost for j in ctx.jokers if j is not card and not j.debuff)
+        sell_total = sum(j.sell_cost for j in ctx.jokers if j is not card)
         if sell_total > 0:
             return JokerResult(mult_mod=sell_total)
     return None
@@ -2027,9 +2170,10 @@ def _certificate(card: Card, ctx: JokerContext) -> JokerResult | None:
 def _marble(card: Card, ctx: JokerContext) -> JokerResult | None:
     """Marble Joker: add Stone Card to deck on setting_blind.
 
-    Source: card.lua:2580. Seed: 'marb_fr'.
+    Source: card.lua:2580-2601. Seed: 'marb_fr'.  Skipped while it, or the
+    Blueprint/Brainstorm copying it, is being sliced.
     """
-    if ctx.setting_blind and not getattr(card, "getting_sliced", False):
+    if ctx.setting_blind and not _sliced(card) and not _sliced(ctx.blueprint_card or card):
         return JokerResult(
             extra={
                 "create": {"type": "playing_card", "enhancement": "m_stone", "key": "marble"},
@@ -2042,10 +2186,11 @@ def _marble(card: Card, ctx: JokerContext) -> JokerResult | None:
 def _dna(card: Card, ctx: JokerContext) -> JokerResult | None:
     """DNA: copy first card into deck on first hand (1 card played).
 
-    Source: card.lua:3501. Fires in before context when hands_played == 0
-    and exactly 1 card in full_hand.
+    Source: card.lua:3501-3523. Fires in before context when hands_played
+    == 0 and exactly 1 card in full_hand.  No ``not context.blueprint``
+    guard: each Blueprint/Brainstorm copy makes another copy.
     """
-    if ctx.before and not ctx.blueprint:
+    if ctx.before:
         if ctx.game.hands_played == 0 and ctx.full_hand and len(ctx.full_hand) == 1:
             return JokerResult(
                 extra={
@@ -2063,14 +2208,23 @@ def _dna(card: Card, ctx: JokerContext) -> JokerResult | None:
 def _riff_raff(card: Card, ctx: JokerContext) -> JokerResult | None:
     """Riff-raff: create up to 2 Common jokers on setting_blind.
 
-    Source: card.lua:2529. Checks joker slot availability.
+    Source: card.lua:2529-2544. The room check counts
+    G.GAME.joker_buffer (a Dagger earlier in the loop frees a slot, an
+    earlier Riff-raff reserves its own), and the count is reserved in it.
     """
-    if ctx.setting_blind and not getattr(card, "getting_sliced", False):
-        joker_count = ctx.game.joker_count if ctx.game else 0
-        joker_slots = ctx.game.joker_slots if ctx.game else 5
+    if ctx.setting_blind and not _sliced(card) and not _sliced(ctx.blueprint_card or card):
+        gs = ctx.game_state
+        if gs is not None:
+            joker_count = len(gs.get("jokers", [])) + gs.get("joker_buffer", 0)
+            joker_slots = gs.get("joker_slots", 5)
+        else:
+            joker_count = ctx.game.joker_count if ctx.game else 0
+            joker_slots = ctx.game.joker_slots if ctx.game else 5
         available = joker_slots - joker_count
         if available > 0:
             count = min(card.ability.get("extra", 2), available)
+            if gs is not None:
+                gs["joker_buffer"] = gs.get("joker_buffer", 0) + count
             return JokerResult(
                 extra={
                     "create": {
@@ -2088,9 +2242,16 @@ def _riff_raff(card: Card, ctx: JokerContext) -> JokerResult | None:
 def _cartomancer(card: Card, ctx: JokerContext) -> JokerResult | None:
     """Cartomancer: create Tarot card on setting_blind.
 
-    Source: card.lua:2545. Checks consumable slot.
+    Source: card.lua:2545-2559 — gated on the consumable room including
+    G.GAME.consumeable_buffer, which it then increments.
     """
-    if ctx.setting_blind and not getattr(card, "getting_sliced", False):
+    if (
+        ctx.setting_blind
+        and not _sliced(card)
+        and not _sliced(ctx.blueprint_card or card)
+        and _consumable_room(ctx)
+    ):
+        _reserve_consumable(ctx)
         return JokerResult(
             extra={
                 "create": {"type": "Tarot", "key": "car"},
@@ -2103,13 +2264,16 @@ def _cartomancer(card: Card, ctx: JokerContext) -> JokerResult | None:
 def _eight_ball(card: Card, ctx: JokerContext) -> JokerResult | None:
     """8 Ball: scored rank 8 → 1/4 chance → create Tarot.
 
-    Source: card.lua:3106. Seed: '8ball'. Probability: normal/extra (1/4).
+    Source: card.lua:3106-3125. Seed: '8ball'. Probability: normal/extra
+    (1/4).  The room check (with G.GAME.consumeable_buffer) gates the roll:
+    at full slots no '8ball' draw is made.  A hit reserves a slot.
     """
     if ctx.individual and ctx.cardarea == "play" and ctx.other_card is not None:
-        if ctx.other_card.get_id() == 8:
+        if _consumable_room(ctx) and ctx.other_card.get_id() == 8:
             odds = card.ability.get("extra", 4)
             if ctx.rng is not None:
                 if ctx.rng.random("8ball") < ctx.game.probabilities_normal / odds:
+                    _reserve_consumable(ctx)
                     return JokerResult(
                         extra={
                             "create": {"type": "Tarot", "key": "8ba"},
@@ -2120,9 +2284,14 @@ def _eight_ball(card: Card, ctx: JokerContext) -> JokerResult | None:
 
 @register("j_vagabond")
 def _vagabond(card: Card, ctx: JokerContext) -> JokerResult | None:
-    """Vagabond: create Tarot if money ≤ $4. Source: card.lua:3743."""
-    if ctx.joker_main:
+    """Vagabond: create Tarot if money ≤ $4.
+
+    Source: card.lua:3743-3761 — room (with consumeable_buffer) first; reads
+    G.GAME.dollars without the dollar buffer.
+    """
+    if ctx.joker_main and _consumable_room(ctx):
         if ctx.game.money <= card.ability.get("extra", 4):
+            _reserve_consumable(ctx)
             return JokerResult(
                 extra={
                     "create": {"type": "Tarot", "key": "vag"},
@@ -2135,13 +2304,14 @@ def _vagabond(card: Card, ctx: JokerContext) -> JokerResult | None:
 def _superposition(card: Card, ctx: JokerContext) -> JokerResult | None:
     """Superposition: Ace in hand + Straight → create Tarot.
 
-    Source: card.lua:3762. Checks scoring_hand for Ace and poker_hands
-    for Straight.
+    Source: card.lua:3762-3786. Checks scoring_hand for Ace and poker_hands
+    for Straight, behind the consumable room check (with consumeable_buffer).
     """
-    if ctx.joker_main and ctx.scoring_hand and ctx.poker_hands:
+    if ctx.joker_main and ctx.scoring_hand and ctx.poker_hands and _consumable_room(ctx):
         has_ace = any(c.get_id() == 14 for c in ctx.scoring_hand)
         has_straight = bool(ctx.poker_hands.get("Straight"))
         if has_ace and has_straight:
+            _reserve_consumable(ctx)
             return JokerResult(
                 extra={
                     "create": {"type": "Tarot", "key": "sup"},
@@ -2154,12 +2324,14 @@ def _superposition(card: Card, ctx: JokerContext) -> JokerResult | None:
 def _seance(card: Card, ctx: JokerContext) -> JokerResult | None:
     """Seance: hand matches target type → create Spectral.
 
-    Source: card.lua:3787. Default target: Straight Flush.
+    Source: card.lua:3787-3806. Default target: Straight Flush.  Behind
+    the consumable room check (with consumeable_buffer).
     """
-    if ctx.joker_main and ctx.poker_hands:
+    if ctx.joker_main and ctx.poker_hands and _consumable_room(ctx):
         extra = card.ability.get("extra", {})
         target = extra.get("poker_hand", "Straight Flush")
         if ctx.poker_hands.get(target):
+            _reserve_consumable(ctx)
             return JokerResult(
                 extra={
                     "create": {"type": "Spectral", "key": "sea"},
@@ -2172,7 +2344,9 @@ def _seance(card: Card, ctx: JokerContext) -> JokerResult | None:
 def _sixth_sense(card: Card, ctx: JokerContext) -> JokerResult | None:
     """Sixth Sense: rank 6, first hand, 1 card played → create Spectral + destroy.
 
-    Source: card.lua:2604. Fires in destroying_card context.
+    Source: card.lua:2603-2620. Fires in destroying_card context: the six
+    is destroyed either way; the Spectral only with room (counting
+    G.GAME.consumeable_buffer, which it then increments).
     """
     if ctx.destroying_card is not None and not ctx.blueprint:
         if (
@@ -2181,10 +2355,13 @@ def _sixth_sense(card: Card, ctx: JokerContext) -> JokerResult | None:
             and ctx.full_hand[0].get_id() == 6
             and ctx.game.hands_played == 0
         ):
-            return JokerResult(
-                remove=True,
-                extra={"create": {"type": "Spectral", "key": "sixth"}},
-            )
+            if _consumable_room(ctx):
+                _reserve_consumable(ctx)
+                return JokerResult(
+                    remove=True,
+                    extra={"create": {"type": "Spectral", "key": "sixth"}},
+                )
+            return JokerResult(remove=True)
     return None
 
 
@@ -2199,15 +2376,15 @@ def _hallucination(card: Card, ctx: JokerContext) -> JokerResult | None:
         # Vanilla room-gates BEFORE the roll: the slot check sits in the
         # OUTER if (card.lua:2336) and pseudorandom('halu'+ante) in the
         # INNER if (card.lua:2337) — at full consumable slots NO halu
-        # roll is consumed.  The old always-roll here desynced the halu
-        # stream after any full-slot pack open (live-verified:
-        # LSVRQFEU — sim fired The Moon at step 52, live's un-shifted
-        # roll stayed quiet).
-        if ctx.game.consumable_count >= ctx.game.consumable_slots:
+        # roll is consumed.  The check counts G.GAME.consumeable_buffer, so
+        # a second Hallucination (or a copy) sees the first one's
+        # reservation (live-verified: LSVRQFEU).
+        if not _consumable_room(ctx):
             return None
         if ctx.rng is not None:
             roll = ctx.rng.random("halu" + str(ctx.game.ante))
             if roll < ctx.game.probabilities_normal / odds:
+                _reserve_consumable(ctx)
                 return JokerResult(
                     extra={
                         "create": {"type": "Tarot", "count": 1, "seed": "hal"},
@@ -2271,9 +2448,9 @@ def _cavendish(card: Card, ctx: JokerContext) -> JokerResult | None:
 def _chicot(card: Card, ctx: JokerContext) -> JokerResult | None:
     """Chicot: disable boss blind on setting_blind. Persists (does NOT self-destruct).
 
-    Source: card.lua:2492. Also fires when added to deck (card.lua:596).
+    Source: card.lua:2491-2502. Also fires when added to deck (card.lua:596).
     """
-    if ctx.setting_blind and not ctx.blueprint:
+    if ctx.setting_blind and not _sliced(card) and not ctx.blueprint:
         if ctx.blind and getattr(ctx.blind, "boss", False):
             if not getattr(ctx.blind, "disabled", False):
                 return JokerResult(extra={"disable_blind": True})
@@ -2297,9 +2474,9 @@ def _luchador(card: Card, ctx: JokerContext) -> JokerResult | None:
 def _burglar(card: Card, ctx: JokerContext) -> JokerResult | None:
     """Burglar: on setting_blind, +3 hands, remove all discards.
 
-    Source: card.lua:2522. Returns side-effect descriptor.
+    Source: card.lua:2522-2528. Returns side-effect descriptor.
     """
-    if ctx.setting_blind and not getattr(card, "getting_sliced", False):
+    if ctx.setting_blind and not _sliced(card) and not _sliced(ctx.blueprint_card or card):
         extra_hands = card.ability.get("extra", 3)
         return JokerResult(
             extra={
@@ -2336,13 +2513,14 @@ def _midas_mask(card: Card, ctx: JokerContext) -> JokerResult | None:
 def _hiker(card: Card, ctx: JokerContext) -> JokerResult | None:
     """Hiker: +5 permanent chip bonus per scored card.
 
-    Source: card.lua:3067. Fires in individual/play context.
-    Mutates other_card.ability.perma_bonus in-place.
+    Source: card.lua:3067-3074. Fires in individual/play context and
+    mutates other_card.ability.perma_bonus in place.  The branch has no
+    ``not context.blueprint`` guard, so Blueprint/Brainstorm copies add
+    their own bonus.
     """
     if ctx.individual and ctx.cardarea == "play" and ctx.other_card is not None:
-        if not ctx.blueprint:
-            pb = ctx.other_card.ability.get("perma_bonus", 0)
-            ctx.other_card.ability["perma_bonus"] = pb + card.ability.get("extra", 5)
+        pb = ctx.other_card.ability.get("perma_bonus", 0)
+        ctx.other_card.ability["perma_bonus"] = pb + card.ability.get("extra", 5)
         return JokerResult()
     return None
 
@@ -2382,10 +2560,13 @@ def _rocket_dollars(card: Card, game: GameSnapshot) -> int:
 
 @register_dollars("j_satellite")
 def _satellite_dollars(card: Card, game: GameSnapshot) -> int:
-    """Satellite: +$1 per unique Planet type used. Source: card.lua:1669."""
-    planet_types = card.ability.get("planet_types_used", 0)
-    if planet_types > 0:
-        return card.ability.get("extra", 1) * planet_types
+    """Satellite: +$extra per distinct Planet card used this run.
+
+    Source: card.lua:1667-1674 — counts the G.GAME.consumeable_usage
+    entries with set 'Planet' (see :func:`count_planets_used`).
+    """
+    if game.planets_used > 0:
+        return card.ability.get("extra", 1) * game.planets_used
     return 0
 
 
@@ -2606,7 +2787,8 @@ def _mr_bones(card: Card, ctx: JokerContext) -> JokerResult | None:
     ctx.chips_ratio.  Returns saved=True and remove=True
     (self-destructs after saving).
     """
-    if getattr(ctx, "game_over", False):
+    # Inside end_of_round's `elseif not context.blueprint` (card.lua:2888).
+    if getattr(ctx, "game_over", False) and not ctx.blueprint:
         if getattr(ctx, "chips_ratio", 0.0) >= 0.25:
             return JokerResult(saved=True, remove=True)
     return None
@@ -2614,14 +2796,16 @@ def _mr_bones(card: Card, ctx: JokerContext) -> JokerResult | None:
 
 @register("j_burnt")
 def _burnt(card: Card, ctx: JokerContext) -> JokerResult | None:
-    """Burnt Joker: level up discard hand on first discard of round.
+    """Burnt Joker: level up the discarded hand on the first discard of a round.
 
-    Source: card.lua:2749. Fires in discard context when discards_used <= 0.
+    Source: card.lua:2748-2755 — the ``pre_discard`` context (once per
+    discard, before any card is processed), gated on discards_used <= 0
+    and not The Hook's forced discard.  No ``not context.blueprint`` guard:
+    each Blueprint/Brainstorm copy levels the hand again.  The caller
+    detects the hand (get_poker_hand_info on the highlighted cards).
     """
-    if ctx.discard and not ctx.blueprint and not ctx.hook:
-        if ctx.game.discards_used <= 0 and ctx.other_card is not None:
-            if ctx.full_hand and ctx.other_card is ctx.full_hand[-1]:
-                return JokerResult(level_up=True)
+    if ctx.pre_discard and not ctx.hook and ctx.game.discards_used <= 0:
+        return JokerResult(level_up=True)
     return None
 
 
@@ -2650,8 +2834,12 @@ def _turtle_bean(card: Card, ctx: JokerContext) -> JokerResult | None:
 
 @register("j_perkeo")
 def _perkeo(card: Card, ctx: JokerContext) -> JokerResult | None:
-    """Perkeo: copy random consumable when leaving shop. Source: card.lua:2413."""
-    if ctx.ending_shop and not ctx.blueprint:
+    """Perkeo: copy random consumable when leaving shop.
+
+    Source: card.lua:2412-2426 — no ``not context.blueprint`` guard, so a
+    Blueprint/Brainstorm copy duplicates another consumable.
+    """
+    if ctx.ending_shop:
         return JokerResult(
             extra={
                 "create": {"type": "consumable_copy", "edition": "negative", "key": "perkeo"},

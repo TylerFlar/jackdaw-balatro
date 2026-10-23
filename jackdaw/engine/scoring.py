@@ -10,7 +10,7 @@ pipeline from ``state_events.lua:571-1065``.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -471,7 +471,7 @@ def score_hand(
             jokers in Phase 9 (Observatory's held-Planet X1.5).
     """
     from jackdaw.engine.hand_eval import evaluate_hand
-    from jackdaw.engine.jokers import GameSnapshot, JokerContext, calculate_joker
+    from jackdaw.engine.jokers import GameSnapshot, JokerContext, calculate_joker, effect_flags
 
     gs = game_state or {}
     dollars = 0
@@ -482,9 +482,10 @@ def score_hand(
     if joker_count == 0:
         joker_count = len(jokers)  # fallback: count all
 
-    # Check for meta-jokers
-    smeared = any(j.ability.get("name") == "Smeared Joker" and not j.debuff for j in jokers)
-    pareidolia = any(j.ability.get("name") == "Pareidolia" and not j.debuff for j in jokers)
+    # Check for meta-jokers (find_joker semantics: debuffed ones don't count)
+    flags = effect_flags(jokers)
+    smeared = flags["smeared"]
+    pareidolia = flags["pareidolia"]
 
     # Build GameSnapshot once — shared across all JokerContext instances
     snapshot = GameSnapshot(
@@ -551,8 +552,6 @@ def score_hand(
     if getattr(blind, "name", "") == "The Ox" and blind.triggered and "dollars" in gs:
         # The Ox emptied the bank before the hand scores (blind.lua:565):
         # every joker from here on reads G.GAME.dollars = 0.
-        from dataclasses import replace
-
         gs["money"] = gs["dollars"]
         snapshot = replace(snapshot, money=gs["dollars"])
     if debuffed:
@@ -569,6 +568,7 @@ def score_hand(
             blind=blind,
             held_cards=held_cards,
             game=snapshot,
+            game_state=game_state,
         )
         # Phase 3a: Matador check on debuffed hands
         ctx = None
@@ -685,6 +685,10 @@ def score_hand(
         blind=blind,
         held_cards=held_cards,
         game=snapshot,
+        # live state: G.GAME.consumeable_buffer is shared by every creator
+        # in this evaluation (8 Ball, Vagabond, Superposition, Seance, Sixth
+        # Sense); game.py zeroes it when it makes the cards afterwards.
+        game_state=game_state,
     )
 
     joker_creates: list[dict] = []
@@ -702,10 +706,29 @@ def score_hand(
             base_chips, base_mult = hand_levels.get(hand_type)
             hand_chips = _mod_chips(float(base_chips), chip_cap)
             mult = float(base_mult)
-        # DNA's playing-card copy is a before-context create
-        # (card.lua:3501-13) — this pass used to drop extra entirely.
+        # To Do List pays here (card.lua:3491-3499)
+        if result and result.dollars:
+            dollars += result.dollars
         if result and result.extra and "create" in result.extra:
-            joker_creates.append(result.extra["create"])
+            create = result.extra["create"]
+            if create.get("type") == "playing_card_copy":
+                # DNA (card.lua:3501-3508): copy_card runs right here and the
+                # copy is emplaced into G.hand at once, so it is a held card
+                # for the rest of this evaluation (held effects, Raised Fist,
+                # Blackboard) and already counts in G.playing_cards (Erosion).
+                from jackdaw.engine.card_factory import copy_card
+                from jackdaw.engine.jokers import playing_card_joker_effects
+
+                dna_copy = copy_card(create["source_card"], game_state=game_state)
+                held_cards.append(dna_copy)
+                snapshot = replace(snapshot, playing_cards_count=snapshot.playing_cards_count + 1)
+                _shared["game"] = snapshot
+                # playing_cards_created -> playing_card_joker_effects, right
+                # in this pass (card.lua:3521, common_events.lua:922-923):
+                # Hologram grows before this hand's joker_main.
+                playing_card_joker_effects(jokers, [dna_copy], game=snapshot)
+            else:
+                joker_creates.append(create)
 
     for card in scoring_cards:
         if getattr(card, "vampired", False):
@@ -803,37 +826,24 @@ def score_hand(
                 chip_cap,
             )
 
-    # === Phase 8: Per held card (with retriggers) ===
+    # === Phase 8: Per held card (state_events.lua:784-872) ===
+    # Each repetition recomputes the card's effects; only the first pass
+    # decides the retriggers, and only if it produced something
+    # (``next(effects[1]) or #effects > 1``, state_events.lua:809-829): Red
+    # Seal and Mime then repeat it.  Debuffed held cards are skipped: all
+    # they can produce are message-only tables and they draw no RNG
+    # (Reserved Parking's is_face() is false for them), so nothing they do
+    # is observable.
+    from jackdaw.engine.jokers import has_card_effects
+
     for card in held_cards:
         if card.debuff:
             continue
 
-        # 8a: Collect retriggers
-        reps = [1]
-        seal_result = card.calculate_seal(repetition=True)
-        if seal_result and seal_result.get("repetitions"):
-            for _ in range(seal_result["repetitions"]):
-                reps.append(seal_result)
-
-        rep_ctx = None
-        for joker in jokers:
-            if joker.debuff:
-                continue
-            if rep_ctx is None:
-                rep_ctx = JokerContext(
-                    repetition=True,
-                    cardarea="hand",
-                    other_card=card,
-                    **_shared,
-                )
-            rep_result = calculate_joker(joker, rep_ctx)
-            if rep_result and rep_result.repetitions > 0:
-                for _ in range(rep_result.repetitions):
-                    reps.append(rep_result)
-
-        # 8b-c: Each repetition
+        reps: list[Any] = [1]
         ind_ctx = None
-        for _rep in reps:
+        rep_index = 0
+        while rep_index < len(reps):
             ev = eval_card(
                 card,
                 {"cardarea": "hand"},
@@ -842,7 +852,8 @@ def score_hand(
             )
             effects_h: list[dict[str, Any]] = [ev]
 
-            # Joker individual effects on held card
+            # Joker individual effects on held card (every non-nil return
+            # counts towards #effects, message-only ones included)
             for joker in jokers:
                 if joker.debuff:
                     continue
@@ -862,14 +873,36 @@ def score_hand(
                         eff_h["x_mult"] = ind_result.x_mult
                     if ind_result.dollars:
                         eff_h["dollars"] = ind_result.dollars
-                    if eff_h:
-                        effects_h.append(eff_h)
+                    effects_h.append(eff_h)
+
+            if rep_index == 0 and has_card_effects(effects_h):
+                # Red Seal (state_events.lua:812-818)
+                seal_result = card.calculate_seal(repetition=True)
+                if seal_result and seal_result.get("repetitions"):
+                    reps.extend([seal_result] * seal_result["repetitions"])
+                # Mime and its copies (state_events.lua:820-829)
+                rep_ctx = None
+                for joker in jokers:
+                    if joker.debuff:
+                        continue
+                    if rep_ctx is None:
+                        rep_ctx = JokerContext(
+                            repetition=True,
+                            cardarea="hand",
+                            other_card=card,
+                            card_effects=effects_h,
+                            **_shared,
+                        )
+                    rep_result = calculate_joker(joker, rep_ctx)
+                    if rep_result and rep_result.repetitions > 0:
+                        reps.extend([rep_result] * rep_result.repetitions)
 
             mult, dollars = _apply_held_joker_effects(
                 effects_h,
                 mult,
                 dollars,
             )
+            rep_index += 1
 
     # === Phase 8d: individual_hand_end (Obelisk check) ===
     ihe_ctx = None
@@ -902,10 +935,14 @@ def score_hand(
             hand_chips = _mod_chips(hand_chips + edition.get("chip_mod", 0), chip_cap)
             mult += edition.get("mult_mod", 0)
 
-        # 9b: Main joker effect
+        # 9b: Main joker effect.  `dollars` is everything this evaluation
+        # has paid so far, i.e. G.GAME.dollar_buffer: every scoring payout
+        # adds itself to it (card.lua:1084-1087, 2739, 3152, 3178, 3226,
+        # 3312, 3493, 3722) and only an event after the hand zeroes it.
         if i < n_jokers:
             if main_ctx is None:
                 main_ctx = JokerContext(joker_main=True, **_shared)
+            main_ctx.dollar_buffer = dollars
             result = calculate_joker(card, main_ctx)
         else:
             result = _planet_joker_main(card, hand_type, gs)
@@ -958,11 +995,13 @@ def score_hand(
             )
     hand_chips = _mod_chips(hand_chips, chip_cap)  # state_events.lua:948
 
-    # === Phase 11: Card destruction ===
+    # === Phase 11: Card destruction (state_events.lua:950-973) ===
+    # Every scoring card, debuffed ones included, is offered to the jokers'
+    # destroying_card context (Sixth Sense reads get_id(), which ignores the
+    # debuff); then a non-debuffed Glass Card rolls 'glass' whether or not a
+    # joker already destroyed it.
     cards_destroyed: list[Card] = []
     for sc in scoring_cards:
-        if sc.debuff:
-            continue
         destroyed = False
         # Joker destroying_card checks (Sixth Sense, etc.)
         dest_ctx = None
@@ -982,9 +1021,11 @@ def score_hand(
                     joker_creates.append(dest_result.extra["create"])
                 destroyed = True
                 break
-        # Glass Card self-shatter: 1 in (1/probabilities_normal * 4) chance
-        if not destroyed and sc.ability.get("name") == "Glass Card":
-            if rng.random("glass") < probabilities_normal / 4:
+        # Glass Card self-shatter: pseudorandom('glass') <
+        # G.GAME.probabilities.normal / ability.extra (state_events.lua:961)
+        if sc.ability.get("name") == "Glass Card" and not sc.debuff:
+            odds = sc.ability.get("extra") or 4
+            if rng.random("glass") < probabilities_normal / odds:
                 destroyed = True
         if destroyed:
             # A destroyed Glass Card shatters (state_events.lua:967), which

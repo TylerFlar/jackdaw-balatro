@@ -551,16 +551,23 @@ def create_card(
                 "enable_rentals_in_shop", gs.get("enable_rentals_in_shop", False)
             )
 
-            # -- Eternal / Perishable (shared roll) --
+            # -- Eternal / Perishable (shared roll, common_events.lua:2138-2143):
+            # Eternal above 0.7, Perishable in (0.4, 0.7]; the setters skip
+            # incompatible centers (card.lua:506-519).
             ep_roll = rng.random(_EP_KEY[area] + str(ante))
-            if ep_roll > _EP_ETERNAL_THRESHOLD and enable_eternals:
+            if enable_eternals and ep_roll > _EP_ETERNAL_THRESHOLD:
                 card.set_eternal(True)
-            elif ep_roll > _EP_PERISHABLE_THRESHOLD and enable_perishables:
-                card.set_perishable(True)
+            elif (
+                enable_perishables
+                and ep_roll > _EP_PERISHABLE_THRESHOLD
+                and ep_roll <= _EP_ETERNAL_THRESHOLD
+            ):
+                card.set_perishable(True, rounds=gs.get("perishable_rounds", 5))
 
-            # -- Rental (independent roll) --
-            r_roll = rng.random(_RENTAL_KEY[area] + str(ante))
-            if r_roll > _RENTAL_THRESHOLD and enable_rentals:
+            # -- Rental: `enable_rentals_in_shop and pseudorandom(...) > 0.7`
+            # short-circuits, so the stream is only drawn with rentals on
+            # (common_events.lua:2144).
+            if enable_rentals and rng.random(_RENTAL_KEY[area] + str(ante)) > _RENTAL_THRESHOLD:
                 card.set_rental(True)
 
         # ...but the EDITION poll runs for EVERY created Joker —
@@ -696,35 +703,26 @@ def resolve_create_descriptor(
         )
 
     # ------------------------------------------------------------------
-    # Copy of an existing card (Ankh)
+    # Copy of an existing card (Ankh, card.lua:1445: copy_card)
     # ------------------------------------------------------------------
     copy_source: Card | None = descriptor.get("copy_of")
     if copy_source is not None:
-        duplicate = copy.deepcopy(copy_source)
-        # copy_card builds a fresh Card, so the caller's add_to_deck runs anew
-        duplicate.added_to_deck = False
-        return duplicate
+        return copy_card(
+            copy_source,
+            strip_edition=bool(descriptor.get("strip_edition")),
+            game_state=game_state,
+        )
 
     # ------------------------------------------------------------------
-    # DNA: copy of a played playing card (card.lua:3505 copy_card).
-    # A FRESH Card object — vanilla's Card:init assigns the next global
-    # sort_id, so the copy must NOT share the source's (shuffles sort
-    # by sort_id first; a duplicate id would desync deck order).
+    # DNA: copy of a played playing card (card.lua:3504 copy_card).
+    # score_hand makes this copy itself, in the ``before`` pass where
+    # vanilla makes it; this branch serves direct callers.
     # ------------------------------------------------------------------
     if card_type == "playing_card_copy":
         source: Card | None = descriptor.get("source_card")
         if source is None or getattr(source, "base", None) is None:
             return None
-        suit = source.base.suit
-        rank = source.base.rank
-        return create_playing_card(
-            Suit(suit.value if hasattr(suit, "value") else suit),
-            Rank(rank.value if hasattr(rank, "value") else rank),
-            enhancement=getattr(source, "center_key", None) or "c_base",
-            edition=dict(source.edition) if getattr(source, "edition", None) else None,
-            seal=getattr(source, "seal", None),
-            hands_played=game_state.get("hands_played", 0) if game_state else 0,
-        )
+        return copy_card(source, game_state=game_state)
 
     # ------------------------------------------------------------------
     # Pool-drawn consumables and jokers
@@ -798,6 +796,86 @@ def resolve_destroy_descriptor(
 
     # disable_blind and any other unknown descriptors: no card to destroy
     return None
+
+
+def copy_card(
+    other: Card,
+    new_card: Card | None = None,
+    *,
+    playing_card: int | None = None,
+    strip_edition: bool = False,
+    game_state: dict[str, Any] | None = None,
+) -> Card:
+    """Duplicate *other*, mirroring ``copy_card`` (common_events.lua:2156-2181).
+
+    Without *new_card* the copy is a fresh :class:`Card` — Card:init assigns
+    the next ``G.sort_id`` (card.lua:24-25), so ``rng.element``/``shuffle``
+    (which sort by ``sort_id``) treat it as a new card.  Then, in Lua order:
+
+    * ``set_ability(other.config.center)``: a fresh ability for the center.
+      To Do List pulls a target hand on ``'to_do'`` here (card.lua:311-322;
+      the ability copy below restores the source's hand) and the center key
+      joins ``used_jokers`` (card.lua:349-355);
+    * ``set_base(other.config.card)``: a fresh base, so ``times_played``
+      restarts at 0 (card.lua:111-120);
+    * every ``other.ability`` entry, tables deep-copied (``pairs`` skips nil
+      entries, so ``None`` values leave the new card's own value).  The
+      stickers live in ``ability`` in Lua and are copied with it;
+    * the edition through ``set_edition`` unless *strip_edition*, the seal,
+      ``debuff`` and ``pinned``; ``set_edition``/``set_seal`` end in
+      ``set_cost`` (card.lua:461, 498), so the copy is repriced.
+
+    Not copied: ``sort_id``, ``facing``, ``playing_card`` (*playing_card*
+    for a new card) and per-play flags such as ``lucky_trigger``.  Death
+    passes the target as *new_card* (card.lua:1117), which keeps its own
+    ``sort_id``, ``facing`` and ``playing_card``.
+    """
+    gs = game_state if game_state is not None else {}
+    if new_card is None:
+        new_card = Card()
+        new_card.playing_card = playing_card
+
+    new_card.set_ability(other.center_key, hands_played=gs.get("hands_played", 0))
+    if new_card.ability.get("name") == "To Do List" and gs.get("rng") is not None:
+        roll_to_do_hand(new_card, gs["rng"], gs.get("hand_levels"))
+    if game_state is not None and new_card.ability.get("set") in (
+        "Joker",
+        "Tarot",
+        "Planet",
+        "Spectral",
+    ):
+        game_state.setdefault("used_jokers", {})[other.center_key] = True
+
+    if other.base is not None:
+        new_card.set_base(other.card_key or "", other.base.suit.value, other.base.rank.value)
+
+    for key, value in other.ability.items():
+        if value is not None:
+            new_card.ability[key] = copy.deepcopy(value)
+    new_card.eternal = other.eternal
+    new_card.perishable = other.perishable
+    new_card.perish_tally = other.perish_tally
+    new_card.rental = other.rental
+
+    if not strip_edition:
+        new_card.set_edition(other.edition)
+    new_card.set_seal(other.seal)
+    new_card.debuff = other.debuff
+    if getattr(other, "pinned", False):
+        new_card.pinned = True  # type: ignore[attr-defined]
+    elif getattr(new_card, "pinned", False):
+        new_card.pinned = False  # type: ignore[attr-defined]
+
+    from jackdaw.engine.card_utils import astronomer_active
+
+    new_card.set_cost(
+        inflation=gs.get("inflation", 0),
+        discount_percent=gs.get("discount_percent", 0),
+        ante=gs.get("round_resets", {}).get("ante", 1),
+        booster_ante_scaling=gs.get("booster_ante_scaling", False),
+        has_astronomer=astronomer_active(gs),
+    )
+    return new_card
 
 
 def roll_to_do_hand(card, rng, hand_levels, exclude_current: bool = False) -> None:

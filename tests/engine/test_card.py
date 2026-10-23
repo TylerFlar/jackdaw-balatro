@@ -399,6 +399,7 @@ class TestScoringMethods:
 class TestStickers:
     def test_set_perishable_resets_tally(self):
         c = Card()
+        c.set_ability("j_joker")  # perishable_compat (card.lua:515)
         c.perish_tally = 0
         c.set_perishable(True)
         assert c.perish_tally == 5
