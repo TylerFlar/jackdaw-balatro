@@ -259,6 +259,7 @@ impl Game {
         match set {
             CenterSet::Default | CenterSet::Enhanced => {
                 self.gs.areas.emplace(AreaId::Deck, card, false, false);
+                self.add_to_deck(id, false);
                 self.playing_card_joker_effects(&[id]);
             }
             _ => {

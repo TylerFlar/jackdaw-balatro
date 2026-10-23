@@ -720,6 +720,9 @@ def score_hand(
                 from jackdaw.engine.jokers import playing_card_joker_effects
 
                 dna_copy = copy_card(create["source_card"], game_state=game_state)
+                # _card:add_to_deck() marks the copy added (card.lua:3505, 568-575):
+                # its removal re-runs the boss debuffs (G205).
+                dna_copy.add_to_deck(game_state or {})
                 held_cards.append(dna_copy)
                 snapshot = replace(snapshot, playing_cards_count=snapshot.playing_cards_count + 1)
                 _shared["game"] = snapshot

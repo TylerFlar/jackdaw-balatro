@@ -154,7 +154,7 @@ Keys: `deck` (index 0 is the bottom; cards are drawn from the end), `hand`
 | `edition` | The Lua edition table, e.g. `{"foil": true, "chips": 50, "type": "foil"}`, or null |
 | `seal` | `Red`, `Blue`, `Gold`, `Purple`, or null |
 | `debuff`, `facing` | Boolean; `front`/`back`. Cards in `deck` and `discard` are always written `front`: Lua turns them face down every frame (`CardArea:align_cards`, cardarea.lua:410-430), so their facing carries nothing, and a card drawn from them faces whichever way the draw decides |
-| `added_to_deck` | `Card.added_to_deck`: whether the card's `add_to_deck` effects (passives, a Negative's slot) are applied. True for owned jokers and consumables; false while a joker is debuffed (its passives are off), for shop and pack cards, and for playing cards (the sim never runs their no-op `add_to_deck`) |
+| `added_to_deck` | `Card.added_to_deck`: whether the card went through `add_to_deck` (its passives and a Negative's slot are applied). True for owned jokers and consumables; false while a joker is debuffed (its passives are off) and for shop and pack cards. A playing card gets only the flag, and only when it came in through `add_to_deck`: bought in the shop, picked from a Standard pack, or copied by Cryptid or DNA (card.lua:568-575). The starting deck and the cards Marble Joker, Certificate, Familiar, Grim and Incantation make carry false. Removing a flagged card re-runs the boss's debuffs (card.lua:698) |
 | `costs` | `{base_cost, extra_cost, cost, sell_cost}` |
 
 A card has no `playing_card` field. Lua numbers playing cards from the session-wide

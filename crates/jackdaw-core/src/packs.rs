@@ -195,6 +195,8 @@ impl Game {
             CenterSet::Default | CenterSet::Enhanced => {
                 self.gs.areas.emplace(AreaId::Deck, card, false, false);
                 self.playing_card_joker_effects(&[id]);
+                // `card:add_to_deck()` (button_callbacks.lua:2229): the flag its removal reads.
+                self.add_to_deck(id, false);
             }
             _ => {
                 self.gs.areas.emplace(AreaId::Jokers, card, false, false);

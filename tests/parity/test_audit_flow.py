@@ -354,3 +354,34 @@ class TestLegality:
         snap = check(eng, ["SellCard", "jokers", 0])
         assert snap["phase"] == "round_eval"
         assert snap["areas"]["jokers"] == []
+
+
+# ---------------------------------------------------------------------------
+# Playing cards that went through add_to_deck (G205)
+# ---------------------------------------------------------------------------
+
+
+class TestDeckAddedCards:
+    def test_cryptid_copies_are_added_to_the_deck(self):
+        """card.lua:1206-1213 and 568-575: each copy runs add_to_deck, which
+        flags a playing card and returns."""
+        eng = in_round("AU_G205_CRYPTID", ("c_cryptid",))
+        before = {c["sort_id"] for c in eng.snapshot()["areas"]["hand"]}
+        snap = check(eng, ["UseConsumable", 0, [0]])
+        copies = [c for c in snap["areas"]["hand"] if c["sort_id"] not in before]
+        assert len(copies) == 2 and all(c["added_to_deck"] for c in copies)
+
+    def test_a_destroyed_deck_added_card_reruns_the_boss_debuffs(self):
+        """card.lua:698 and 4733: removing a flagged card queues
+        set_blind(nil, true), whose pass debuffs the card played earlier in
+        The Pillar's blind (blind.lua:207-210, 634-636)."""
+        eng = in_round("AU_G205_PILLAR", boss="bl_pillar")
+        eng.gs["blind"].chips = 10**9
+        eng.gs["probabilities"]["normal"] = 4  # every Glass Card breaks
+        glass = eng.gs["hand"][0]
+        glass.set_ability("m_glass")
+        glass.added_to_deck = True  # as a Standard-pack pick leaves it
+        snap = check(eng, ["PlayHand", [1]])
+        assert not snap["areas"]["discard"][0]["debuff"]
+        snap = check(eng, ["PlayHand", [eng.gs["hand"].index(glass)]])
+        assert snap["areas"]["discard"][0]["debuff"]
