@@ -132,13 +132,13 @@ impl Tw223 {
     /// `math.random(m)`: an integer in `[1, m]`.
     #[inline]
     pub fn random_n(&mut self, m: i64) -> i64 {
-        (self.random() * m as f64).floor() as i64 + 1
+        crate::lua::floor(self.random() * m as f64) as i64 + 1
     }
 
     /// `math.random(m, n)`: an integer in `[m, n]`.
     #[inline]
     pub fn random_range(&mut self, m: i64, n: i64) -> i64 {
-        (self.random() * (n - m + 1) as f64).floor() as i64 + m
+        crate::lua::floor(self.random() * (n - m + 1) as f64) as i64 + m
     }
 }
 

@@ -74,10 +74,18 @@ pub fn div(a: f64, b: f64) -> f64 {
 }
 
 /// LuaJIT's `math.floor`. Values of magnitude 2^52 and up (and NaN) pass through unchanged.
+///
+/// Below 2^52 a truncation to `i64` is exact, so the floor is computed inline: baseline x86-64
+/// has no rounding instruction (SSE4.1), and `f64::floor` would call the C runtime on every RNG
+/// draw. Zero keeps its sign, as `floor` does.
 #[inline]
 pub fn floor(x: f64) -> f64 {
     if x.abs() < 4_503_599_627_370_496.0 {
-        x.floor()
+        if x == 0.0 {
+            return x;
+        }
+        let t = x as i64 as f64;
+        if t > x { t - 1.0 } else { t }
     } else {
         x
     }
@@ -263,6 +271,48 @@ fn trim_fraction(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_inline_floor_is_the_c_floor() {
+        let big = 4_503_599_627_370_496.0; // 2^52: from here on, every double is an integer
+        let mut cases = vec![
+            0.0,
+            -0.0,
+            0.3,
+            -0.3,
+            1.0,
+            -1.0,
+            2.5,
+            -2.5,
+            f64::MIN_POSITIVE,
+            -f64::MIN_POSITIVE,
+            1.0 - f64::EPSILON / 2.0,
+            -(1.0 - f64::EPSILON / 2.0),
+            big - 0.5,
+            -(big - 0.5),
+            big,
+            -big,
+            1e300,
+            -1e300,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+        ];
+        let mut x = 0x2545_F491_4F6C_DD1Du64;
+        for _ in 0..100_000 {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            let v = f64::from_bits(x);
+            if v.is_finite() {
+                cases.push(v);
+                cases.push(v.fract() * 1e6);
+            }
+        }
+        for v in cases {
+            assert_eq!(floor(v).to_bits(), v.floor().to_bits(), "floor({v:e})");
+        }
+        assert!(floor(f64::NAN).is_nan());
+    }
 
     #[test]
     fn invalid_operations_give_the_negative_default_nan() {

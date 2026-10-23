@@ -198,12 +198,7 @@ impl Game {
                         .and_then(crate::hand_eval::HandType::from_name);
                     add = !softlock || hand.is_some_and(|h| self.gs.hand(h).played > 0.0);
                 } else if let Some(gate) = v.enhancement_gate {
-                    add = self.playing_card_ids().into_iter().any(|pc| {
-                        self.gs
-                            .areas
-                            .card(pc)
-                            .is_some_and(|c| c.center.key() == gate)
-                    });
+                    add = self.playing_cards().any(|c| c.center.key() == gate);
                 } else {
                     add = true;
                 }

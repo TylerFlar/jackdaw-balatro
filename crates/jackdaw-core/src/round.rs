@@ -224,10 +224,12 @@ impl Game {
 
     /// The playing cards a per-round pick draws from: everything but Stone Cards, by sort id.
     fn non_stone_cards(&self) -> Vec<u32> {
-        let mut ids: Vec<u32> = self
-            .playing_card_ids()
+        // Marble's pending stones are Stone Cards: the areas hold every other playing card.
+        let mut ids: Vec<u32> = AreaId::PLAYING
             .into_iter()
-            .filter(|&id| self.gs.areas.card(id).is_some_and(|c| !c.is_stone()))
+            .flat_map(|a| self.gs.areas.get(a).iter())
+            .filter(|c| !c.is_stone())
+            .map(|c| c.sort_id)
             .collect();
         ids.sort_unstable();
         ids
@@ -382,9 +384,8 @@ impl Game {
 
     /// Cloud 9's `nine_tally` (per frame, card.lua:4191-4196): playing cards with rank 9.
     pub(crate) fn nine_tally(&self) -> f64 {
-        self.playing_card_ids()
-            .into_iter()
-            .filter(|&id| self.gs.areas.card(id).and_then(|c| c.get_id()) == Some(9))
+        self.playing_cards()
+            .filter(|c| c.get_id() == Some(9))
             .count() as f64
     }
 }

@@ -227,6 +227,15 @@ impl Game {
             ..Runtime::default()
         };
         let mut game = Game { gs, rt };
+        // Card:update's perma_debuff line (card.lua:4158), for a snapshot that was edited:
+        // the engine itself never leaves such a card undebuffed (`update_cards`).
+        for a in AreaId::PLAYING {
+            for c in game.gs.areas.get_mut(a) {
+                if c.ability.perma_debuff {
+                    c.debuff = true;
+                }
+            }
+        }
         game.update_cards();
         game
     }
@@ -309,13 +318,17 @@ impl Game {
     /// pile and play area), by sort id. Lua's list is in insertion order, which no game rule
     /// depends on: its users count, test membership, or pick by sort id.
     pub fn playing_card_ids(&self) -> Vec<u32> {
-        let mut cards: Vec<u32> = AreaId::PLAYING
-            .into_iter()
-            .flat_map(|a| self.gs.areas.get(a).iter())
-            .chain(self.gs.sim.pending_deck_bottom.iter())
-            .map(|c| c.sort_id)
-            .collect();
+        let mut cards: Vec<u32> = self.playing_cards().map(|c| c.sort_id).collect();
+        cards.extend(self.gs.sim.pending_deck_bottom.iter().map(|c| c.sort_id));
         cards.sort_unstable();
         cards
+    }
+
+    /// The playing cards in the areas (the deck, hand, discard pile and play), area by area:
+    /// `G.playing_cards` but Marble's pending stones, for passes whose order doesn't matter.
+    pub fn playing_cards(&self) -> impl Iterator<Item = &crate::card::Card> {
+        AreaId::PLAYING
+            .into_iter()
+            .flat_map(|a| self.gs.areas.get(a).iter())
     }
 }

@@ -30,10 +30,15 @@ impl Game {
     /// `Card:set_debuff(should_debuff)` (card.lua:526-538). A spent perishable stays debuffed;
     /// a joker that changes state loses or regains its passive effects.
     pub(crate) fn set_debuff(&mut self, id: u32, should_debuff: bool) {
-        let Some((area, i)) = self.gs.areas.locate(id) else {
-            return;
-        };
+        if let Some((area, i)) = self.gs.areas.locate(id) {
+            self.set_debuff_at(area, i, should_debuff);
+        }
+    }
+
+    /// [`Game::set_debuff`] on the card at `area[i]`.
+    pub(crate) fn set_debuff_at(&mut self, area: AreaId, i: usize, should_debuff: bool) {
         let card = &self.gs.areas.get(area)[i];
+        let id = card.sort_id;
         if card.ability.perishable && card.ability.perish_tally.unwrap_or(0.0) <= 0.0 {
             if !card.debuff {
                 self.gs.areas.get_mut(area)[i].debuff = true;
@@ -52,9 +57,12 @@ impl Game {
                 } else {
                     self.add_to_deck(id, true);
                 }
-            }
-            if let Some(c) = self.gs.areas.card_mut(id) {
-                c.debuff = should_debuff;
+                // The passives may have moved cards: find this one again.
+                if let Some(c) = self.gs.areas.card_mut(id) {
+                    c.debuff = should_debuff;
+                }
+            } else {
+                self.gs.areas.get_mut(area)[i].debuff = should_debuff;
             }
         }
     }
@@ -240,11 +248,16 @@ impl Game {
             + self.gs.sim.pending_deck_bottom.len()) as f64;
         let memo = &mut self.rt.areas;
         memo.deck_limit = memo.deck_limit.max(deck).min(playing);
+        // `if self.ability.perma_debuff then self.debuff = true end` (card.lua:4158) needs no
+        // pass here: set_debuff never clears a perma_debuff card's debuff, the copies (Death,
+        // copy_card) carry the debuff with the ability, and a snapshot load runs the pass once
+        // (`from_state`).
         use jackdaw_data::centers::{
             C_BASE, C_TEMPERANCE, J_CLOUD_9, J_DRIVERS_LICENSE, J_STEEL_JOKER, J_STENCIL, J_STONE,
             J_SWASHBUCKLER, J_THROWBACK, M_STEEL, M_STONE,
         };
-        // The cards with per-frame values, one bit each (each name has a single center).
+        // The cards with per-frame values, one bit each (each name has a single center). They
+        // are jokers and a Tarot: never in the deck, hand, discard pile or play.
         let bit = |c: &crate::card::Card| -> u8 {
             match c.center {
                 J_STEEL_JOKER => 1,
@@ -259,11 +272,8 @@ impl Game {
             }
         };
         let mut present = 0u8;
-        for a in AreaId::ALL {
-            for c in self.gs.areas.get_mut(a) {
-                if c.ability.perma_debuff {
-                    c.debuff = true;
-                }
+        for a in AreaId::NOT_PLAYING {
+            for c in self.gs.areas.get(a) {
                 present |= bit(c);
             }
         }
@@ -271,10 +281,7 @@ impl Game {
             return;
         }
         let count = |g: &Game, f: &dyn Fn(&crate::card::Card) -> bool| {
-            g.playing_card_ids()
-                .into_iter()
-                .filter(|&id| g.gs.areas.card(id).is_some_and(f))
-                .count() as f64
+            g.playing_cards().filter(|c| f(c)).count() as f64
         };
         let steel = (present & 1 != 0).then(|| count(self, &|c| c.center == M_STEEL));
         let stone = (present & 2 != 0).then(|| count(self, &|c| c.center == M_STONE));
@@ -295,7 +302,7 @@ impl Game {
             Vec::new()
         };
         let skips = self.gs.skips;
-        for a in AreaId::ALL {
+        for a in AreaId::NOT_PLAYING {
             for c in self.gs.areas.get_mut(a) {
                 match c.center {
                     C_TEMPERANCE => {
