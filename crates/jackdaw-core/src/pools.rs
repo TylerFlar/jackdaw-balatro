@@ -309,6 +309,18 @@ impl Game {
         }
     }
 
+    /// `card:set_ability(center)` on a card already in play (an enhancement change): the new
+    /// ability, its game-level effects, then the boss re-debuff of a non-initial call
+    /// (card.lua:223-366).
+    pub fn set_card_ability(&mut self, id: u32, center: CenterId) {
+        let hands_played = self.gs.hands_played;
+        let mut card = self.card(id).clone();
+        card.set_ability(center, hands_played);
+        self.set_ability_effects(&mut card);
+        *self.card_mut(id) = card;
+        self.debuff_card(id, false);
+    }
+
     /// `pseudorandom_element(G.P_CARDS, pseudoseed(key))`: a random front.
     pub fn random_front(&mut self, key: &str) -> CardId {
         let seed = self.gs.rng.seed(key);
