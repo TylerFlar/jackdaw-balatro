@@ -158,7 +158,7 @@ def _play(
     return steps
 
 
-@pytest.mark.parametrize("i", range(12))
+@pytest.mark.parametrize("i", range(24))
 def test_fuzz_states_match(i: int) -> None:
     challenge = _CHALLENGES[(i // 4) % len(_CHALLENGES)] if i % 4 == 3 else None
     start = {
@@ -167,7 +167,8 @@ def test_fuzz_states_match(i: int) -> None:
         "seed": f"OBS_FUZZ{i}",
         "challenge": challenge,
     }
-    _play(PyEngine(start), start["seed"], steps=250, eps=(0.1, 0.3, 0.6)[i % 3])
+    eps = (0.0, 0.05, 0.2)[i % 3]
+    _play(PyEngine(start), start["seed"], steps=300, eps=eps, skip_rate=(0.0, 0.2)[i % 2])
 
 
 _SELECT = {"op": "action", "action": ["SelectBlind"]}
