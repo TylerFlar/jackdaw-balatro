@@ -1147,6 +1147,14 @@ def _handle_discard(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str, A
     discard_pile: list = gs.setdefault("discard_pile", [])
     discard_pile.extend(surviving)
 
+    # A Purple Seal's Tarot or an eaten Ramen came or went: its add_to_deck /
+    # remove_from_deck queued the boss debuff pass (card.lua:641, 698), which
+    # runs after the queued draws to the discard pile and before the draw to
+    # hand, so it covers the discarded cards too (a Wild Card under The Club,
+    # G263).
+    if purple_tarots or jokers_to_remove:
+        reapply_blind_debuffs(gs)
+
     # Track stat
     gs["round_scores"] = gs.get("round_scores", {})
     gs["round_scores"]["cards_discarded"] = gs["round_scores"].get("cards_discarded", 0) + len(
@@ -2591,6 +2599,12 @@ def _round_won(gs: dict[str, Any]) -> None:
     # nothing (cardarea.lua:100).
     gs["phase"] = GamePhase.ROUND_EVAL
 
+    # end_round adds the round's discards left to unused_discards
+    # (state_events.lua:124) before the ease_discard events its joker pass
+    # queued have run: a perishing Drunkard or Merry Andy's remove_from_deck
+    # takes its discard away in an event (card.lua:686-693, G262).
+    discards_left = cr.get("discards_left", 0)
+
     # ------------------------------------------------------------------
     # 1-2. Joker end_of_round effects + perishable/rental — shared with
     # the LOSS path (vanilla's end_round fires these for every outcome,
@@ -2659,7 +2673,7 @@ def _round_won(gs: dict[str, Any]) -> None:
     #    - G.GAME.unused_discards += current_round.discards_left  (state_events.lua:124)
     #    - G.GAME.hands_played += 1 per hand  (state_events.lua:523, tracked at line 522)
     # ------------------------------------------------------------------
-    gs["unused_discards"] = gs.get("unused_discards", 0) + cr.get("discards_left", 0)
+    gs["unused_discards"] = gs.get("unused_discards", 0) + discards_left
 
     # 6b. After a boss, end_round re-tallies the most played hand — the one
     #     The Ox reads until the next boss falls (state_events.lua:129-138).

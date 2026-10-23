@@ -21,6 +21,9 @@ from jackdaw.engine.hand_eval import evaluate_hand
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 FIXTURE_PATH = PROJECT_ROOT / "tests" / "fixtures" / "hand_eval_oracle.json"
 ORACLE_SCRIPT = PROJECT_ROOT / "scripts" / "lua_hand_eval_oracle.lua"
+# The game's Lua source, which the live oracle loads; gitignored, so absent in CI
+# and in fresh checkouts.
+SOURCE_DIR = PROJECT_ROOT / "balatro_source"
 
 
 def _card(suit: str, rank: str, enhancement: str = "c_base") -> Card:
@@ -338,10 +341,8 @@ class TestLiveOracle:
     @pytest.fixture(scope="class")
     @classmethod
     def live_data(cls, lua_path) -> dict:
-        # The oracle loads the game's own source, which is gitignored (a fresh clone or
-        # a git worktree has none).
-        if not (PROJECT_ROOT / "balatro_source" / "functions" / "misc_functions.lua").exists():
-            pytest.skip("No balatro_source/ in this checkout")
+        if not SOURCE_DIR.is_dir():
+            pytest.skip("balatro_source/ (the game's Lua source) is not present")
         result = subprocess.run(
             [lua_path, str(ORACLE_SCRIPT)],
             cwd=str(PROJECT_ROOT),
