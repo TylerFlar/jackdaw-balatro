@@ -17,6 +17,7 @@ import pytest
 
 from jackdaw.engine.actions import (
     CashOut,
+    Discard,
     GamePhase,
     NextRound,
     PlayHand,
@@ -48,6 +49,32 @@ class TestGreedyAgentCrashResistance:
     def test_no_crash(self, seed_idx):
         gs = simulate_run("b_red", 1, f"CRASH_GRDY_{seed_idx}", greedy_play_agent, max_actions=500)
         assert gs["actions_taken"] <= 500
+
+
+class TestCeruleanBellForcedCard:
+    """The agents always include the Bell's forced card, which the engine
+    requires in every play and discard (#31)."""
+
+    @staticmethod
+    def _bell_hand(forced: int) -> dict:
+        gs = initialize_run("b_red", 1, "RUNNER_BELL")
+        step(gs, SelectBlind())
+        gs["hand"][forced].ability["forced_selection"] = True
+        return gs
+
+    def test_random_agent_selections_include_it(self):
+        gs = self._bell_hand(forced=6)
+        markers = [PlayHand(card_indices=()), Discard(card_indices=())]
+        for _ in range(100):
+            action = random_agent(gs, markers)
+            assert 6 in action.card_indices
+            assert 1 <= len(action.card_indices) <= 5
+
+    def test_greedy_agent_swaps_it_in(self):
+        gs = self._bell_hand(forced=7)
+        action = greedy_play_agent(gs, [PlayHand(card_indices=())])
+        assert action.card_indices == (0, 1, 2, 3, 7)
+        step(gs, action)
 
 
 # ---------------------------------------------------------------------------

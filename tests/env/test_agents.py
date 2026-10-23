@@ -149,3 +149,26 @@ class TestRandomAgent:
         fa = RandomAgent().act({}, mask, {"raw_state": gs})
         assert fa.entity_target == 0
         assert fa.card_target is not None and 1 <= len(fa.card_target) <= 2
+
+    def test_keeps_the_cerulean_bell_forced_card(self):
+        """Every play/discard includes the Bell's forced card (#31)."""
+        from jackdaw.engine.actions import SelectBlind
+        from jackdaw.env.action_space import ActionType
+
+        adapter = DirectAdapter()
+        adapter.reset(BACK, STAKE, SEED)
+        gs = adapter.raw_state
+        gs["blind_on_deck"] = "Boss"
+        gs["round_resets"]["blind_choices"]["Boss"] = "bl_final_bell"
+        adapter.step(SelectBlind())
+        mask = get_action_mask(gs)
+        assert mask.forced_card is not None
+
+        agent = RandomAgent()
+        for at in (ActionType.PlayHand, ActionType.Discard):
+            mask.type_mask[:] = False
+            mask.type_mask[at] = True
+            for _ in range(50):
+                fa = agent.act({}, mask, {"raw_state": gs})
+                assert mask.forced_card in fa.card_target
+                assert 1 <= len(fa.card_target) <= 5

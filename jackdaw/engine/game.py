@@ -603,6 +603,7 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
     if any(i < 0 or i >= len(hand) for i in indices):
         raise IllegalActionError("Card index out of range")
     _require_forced_card(hand, indices)
+    _clear_forced_selection(gs)
 
     # ------------------------------------------------------------------
     # 2. Move cards from hand to play area
@@ -845,6 +846,19 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
     return gs
 
 
+def forced_card_index(hand: list) -> int | None:
+    """Index of Cerulean Bell's forced card in *hand*, or None.
+
+    Every play and discard must include it (see ``_require_forced_card``);
+    the env action masks read it from here so they offer only those.
+    """
+    for i, c in enumerate(hand):
+        ability = getattr(c, "ability", None)
+        if isinstance(ability, dict) and ability.get("forced_selection"):
+            return i
+    return None
+
+
 def _require_forced_card(hand: list, indices: tuple[int, ...]) -> None:
     """Cerulean Bell's forced card cannot be deselected in vanilla — a
     play/discard without it is UI-impossible (blind.lua:572-87: the
@@ -852,12 +866,28 @@ def _require_forced_card(hand: list, indices: tuple[int, ...]) -> None:
     the sim rolled the SAME forced card as live but let the policy
     play around it; live's endpoint force-included it and cap-dropped
     the 5th requested card (full house became trips)."""
-    for i, c in enumerate(hand):
-        ability = getattr(c, "ability", None)
-        if isinstance(ability, dict) and ability.get("forced_selection"):
-            if i not in indices:
-                raise IllegalActionError("Forced card (Cerulean Bell) must be in the selection")
-            return
+    forced = forced_card_index(hand)
+    if forced is not None and forced not in indices:
+        raise IllegalActionError("Forced card (Cerulean Bell) must be in the selection")
+
+
+def _clear_forced_selection(gs: dict[str, Any]) -> None:
+    """Drop Cerulean Bell's forced flag from every playing card.
+
+    Vanilla clears it on all of ``G.playing_cards`` before each play and
+    discard (state_events.lua:384, 459) and at round end (:279); the
+    redraw's ``drawn_to_hand`` then forces a new card.  Left set, the
+    played or discarded card stayed forced when it was dealt again in a
+    later round, whatever the blind.
+
+    The key stays, as ``None``: ``Card.set_ability`` keeps it on every card.
+    """
+    from jackdaw.engine.card_factory import _PLAYING_CARD_AREAS
+
+    for area in _PLAYING_CARD_AREAS:
+        for card in gs.get(area) or ():
+            if card.ability.get("forced_selection"):
+                card.ability["forced_selection"] = None
 
 
 def _handle_discard(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str, Any]:
@@ -892,6 +922,7 @@ def _handle_discard(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str, A
     if any(i < 0 or i >= len(hand) for i in indices):
         raise IllegalActionError("Card index out of range")
     _require_forced_card(hand, indices)
+    _clear_forced_selection(gs)
 
     # ------------------------------------------------------------------
     # 2. Extract discarded cards in sorted order
@@ -1386,8 +1417,10 @@ def _disable_active_blind(gs: dict[str, Any]) -> None:
     if blind is None:
         return
 
+    from jackdaw.engine.card_factory import _PLAYING_CARD_AREAS
+
     playing_cards = []
-    for area in ("deck", "hand", "play", "discard_pile"):
+    for area in _PLAYING_CARD_AREAS:
         playing_cards.extend(gs.get(area, []))
     effects = blind.disable(playing_cards=playing_cards, joker_cards=gs.get("jokers", []))
 
@@ -1396,8 +1429,7 @@ def _disable_active_blind(gs: dict[str, Any]) -> None:
     cr["hands_left"] = cr.get("hands_left", 0) + effects.get("restore_hands", 0)
     gs["hand_size"] = gs.get("hand_size", 0) + effects.get("restore_hand_size", 0)
     if effects.get("clear_forced"):
-        for card in playing_cards:
-            card.ability.pop("forced_selection", None)
+        _clear_forced_selection(gs)
 
 
 def _handle_use_consumable(
@@ -2127,7 +2159,8 @@ def _round_won(gs: dict[str, Any]) -> None:
     # ------------------------------------------------------------------
     # 5. Un-debuff all playing cards (blind debuffs don't persist)
     #    and flip everything face up (The Fish/House/Wheel/Mark flips and
-    #    Amber Acorn's joker flip last only for the blind).
+    #    Amber Acorn's joker flip last only for the blind).  Cerulean
+    #    Bell's forced flag goes too (state_events.lua:279).
     # ------------------------------------------------------------------
     for card in deck:
         # Only clear blind-applied debuffs; perishable debuffs are permanent
@@ -2137,6 +2170,7 @@ def _round_won(gs: dict[str, Any]) -> None:
         card.facing = "front"
     for j in jokers:
         j.facing = "front"
+    _clear_forced_selection(gs)
 
     # ------------------------------------------------------------------
     # 6. Track unused discards / hands played (for Garbage/Handy Tags)

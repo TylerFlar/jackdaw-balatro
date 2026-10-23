@@ -197,6 +197,62 @@ class TestPackPickTargets:
         assert chosen.center_key == "m_glass"
 
 
+class TestCeruleanBell:
+    """Every play and discard must include the Bell's forced card; the
+    table used to offer ones without it, which the engine rejects (#31)."""
+
+    @staticmethod
+    def _bell_env(seed: int = 7) -> BalatroGymnasiumEnv:
+        from jackdaw.engine.actions import SelectBlind
+        from jackdaw.engine.game import step
+        from jackdaw.env.action_space import get_action_mask
+
+        env = BalatroGymnasiumEnv(adapter_factory=DirectAdapter)
+        env.reset(seed=seed)
+        gs = env._inner._adapter.raw_state
+        gs["blind_on_deck"] = "Boss"
+        gs["round_resets"]["blind_choices"]["Boss"] = "bl_final_bell"
+        step(gs, SelectBlind())
+        env._action_table = env._enumerate_actions(get_action_mask(gs), {"raw_state": gs})
+        return env
+
+    def test_selections_are_exactly_those_with_the_forced_card(self) -> None:
+        from itertools import combinations
+
+        from jackdaw.engine.game import forced_card_index
+
+        env = self._bell_env()
+        hand = env._inner._adapter.raw_state["hand"]
+        forced = forced_card_index(hand)
+        assert forced is not None
+        others = [i for i in range(len(hand)) if i != forced]
+        expected = sorted(
+            tuple(sorted((forced, *rest))) for k in range(5) for rest in combinations(others, k)
+        )
+        for t in (ActionType.PlayHand, ActionType.Discard):
+            got = sorted(fa.card_target for fa in env._action_table if fa.action_type == t)
+            assert got == expected
+
+    def test_random_policy_plays_through_the_bell(self) -> None:
+        from jackdaw.engine.actions import GamePhase
+
+        env = self._bell_env()
+        gs = env._inner._adapter.raw_state
+        rng = np.random.default_rng(0)
+        mask = env.action_masks()
+        selections = 0
+        for _ in range(500):
+            if gs["phase"] != GamePhase.SELECTING_HAND:
+                break
+            action = int(rng.choice(np.flatnonzero(mask)))
+            if env._action_table[action].action_type in (ActionType.PlayHand, ActionType.Discard):
+                selections += 1
+            *_, info = env.step(action)  # used to raise IllegalActionError
+            mask = info["action_mask"]
+        assert gs["phase"] != GamePhase.SELECTING_HAND
+        assert selections > 1
+
+
 # ------------------------------------------------------------------
 # Rewards
 # ------------------------------------------------------------------

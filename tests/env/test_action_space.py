@@ -309,6 +309,15 @@ class TestMaskSelectingHand:
         assert not mask.type_mask[ActionType.PlayHand]
         assert not mask.type_mask[ActionType.Discard]
 
+    def test_no_forced_card_by_default(self):
+        assert get_action_mask(_selecting_hand_state()).forced_card is None
+
+    def test_cerulean_bell_forced_card_reported(self):
+        hand = _make_hand(8)
+        hand[5].ability["forced_selection"] = True
+        mask = get_action_mask(_selecting_hand_state(hand=hand))
+        assert mask.forced_card == 5
+
     def test_sort_available_with_multiple_cards(self):
         mask = get_action_mask(_selecting_hand_state())
         assert mask.type_mask[ActionType.SortHandRank]

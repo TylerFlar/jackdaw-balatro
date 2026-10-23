@@ -76,9 +76,10 @@ mask.card_mask        # np.ndarray, shape (N_hand,) bool — which hand cards ca
 mask.entity_masks     # dict[int, np.ndarray] — per action type, which entities are legal targets
 mask.min_card_select  # int — minimum cards to select (for play/discard)
 mask.max_card_select  # int — maximum cards to select
+mask.forced_card      # int | None — hand index every play/discard must include (Cerulean Bell)
 ```
 
-Always respect the masks. If `type_mask[i]` is False, don't emit action type `i`.
+Always respect the masks. If `type_mask[i]` is False, don't emit action type `i`. Against the Cerulean Bell, a play or discard that leaves out `forced_card` is illegal, as in vanilla, where the forced card can't be deselected.
 
 ## Actions
 
@@ -228,7 +229,11 @@ class MyAgent:
         if action_type in (0, 1):  # PlayHand or Discard
             legal_cards = np.nonzero(action_mask.card_mask)[0]
             n = min(len(legal_cards), action_mask.max_card_select)
-            card_target = tuple(int(i) for i in legal_cards[:n])
+            selected = [int(i) for i in legal_cards[:n]]
+            forced = action_mask.forced_card  # Cerulean Bell
+            if forced is not None and forced not in selected:
+                selected[-1] = forced
+            card_target = tuple(sorted(selected))
 
         return FactoredAction(
             action_type=action_type,

@@ -34,7 +34,7 @@ from jackdaw.engine.actions import (
 )
 from jackdaw.engine.blind import Blind
 from jackdaw.engine.card import Card
-from jackdaw.engine.game import IllegalActionError, step
+from jackdaw.engine.game import IllegalActionError, forced_card_index, step
 from jackdaw.engine.run_init import initialize_run
 
 # ---------------------------------------------------------------------------
@@ -1767,6 +1767,63 @@ class TestCeruleanBellForcedCard:
         gs = self._setup()
         with pytest.raises(IllegalActionError, match="Forced card"):
             step(gs, Discard(card_indices=(0, 1)))
+
+    # Vanilla clears forced_selection on every playing card before each
+    # play and discard and at round end (state_events.lua:384, 459, 279);
+    # the redraw then forces a new card.  The sim never cleared it, so a
+    # card forced once stayed forced whenever it was dealt again (#31).
+
+    @staticmethod
+    def _bell_round(seed="BELL_LIFE"):
+        gs = _init_gs(seed)
+        gs["blind_on_deck"] = "Boss"
+        gs["round_resets"]["blind_choices"]["Boss"] = "bl_final_bell"
+        step(gs, SelectBlind())
+        assert gs["blind"].name == "Cerulean Bell"
+        return gs
+
+    @staticmethod
+    def _flagged(gs):
+        """(area, card) for every playing card still carrying the flag."""
+        return [
+            (area, c)
+            for area in ("deck", "hand", "discard_pile", "played_cards_area")
+            for c in gs.get(area, [])
+            if c.ability.get("forced_selection")
+        ]
+
+    def test_discard_moves_the_force_to_a_new_hand_card(self):
+        gs = self._bell_round()
+        idx = forced_card_index(gs["hand"])
+        old = gs["hand"][idx]
+        step(gs, Discard(card_indices=(idx,)))
+        flagged = self._flagged(gs)
+        assert [area for area, _ in flagged] == ["hand"]
+        assert flagged[0][1] is not old
+
+    def test_play_moves_the_force_to_a_new_hand_card(self):
+        gs = self._bell_round()
+        gs["blind"].chips = 10**9  # the round goes on
+        idx = forced_card_index(gs["hand"])
+        old = gs["hand"][idx]
+        step(gs, PlayHand(card_indices=(idx,)))
+        flagged = self._flagged(gs)
+        assert [area for area, _ in flagged] == ["hand"]
+        assert flagged[0][1] is not old
+
+    def test_no_card_stays_forced_after_the_round(self):
+        gs = self._bell_round()
+        for _ in range(3):
+            step(gs, Discard(card_indices=(forced_card_index(gs["hand"]),)))
+        gs["blind"].chips = 1
+        step(gs, PlayHand(card_indices=(forced_card_index(gs["hand"]),)))
+        assert gs["phase"] == GamePhase.ROUND_EVAL
+        assert self._flagged(gs) == []
+        step(gs, CashOut())
+        step(gs, NextRound())
+        step(gs, SelectBlind())  # ante 2 Small Blind: nothing is forced
+        assert forced_card_index(gs["hand"]) is None
+        step(gs, PlayHand(card_indices=(0,)))
 
 
 # ---------------------------------------------------------------------------

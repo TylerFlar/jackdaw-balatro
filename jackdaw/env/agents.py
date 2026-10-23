@@ -74,7 +74,13 @@ class RandomAgent:
             if len(legal_cards) > 0:
                 n = min(len(legal_cards), action_mask.max_card_select)
                 count = _random.randint(action_mask.min_card_select, n)
-                selected = sorted(_random.sample(list(legal_cards), count))
+                forced = action_mask.forced_card
+                if forced is None:
+                    selected = sorted(_random.sample(list(legal_cards), count))
+                else:
+                    # Cerulean Bell: the forced card is in every selection
+                    others = [c for c in legal_cards if c != forced]
+                    selected = sorted([forced, *_random.sample(others, count - 1)])
                 card_target = tuple(int(i) for i in selected)
 
         # Card target for a targeting Tarot/Spectral, used from the tray or
