@@ -1,27 +1,23 @@
-"""The Rust observation encoder matches ``encode_observation`` bit for bit.
+"""The Rust observation encoder (encoder v1), against the Python encoder's frozen outputs.
 
-``jackdaw._core`` ports :mod:`jackdaw.env.observation` (encoder v1) to Rust.
-For every state along every parity tape, including the state right after the
-tape's setup, the Python encoder reads the live oracle state and the Rust
-encoder reads the oracle's canonical snapshot: every array must have the same
-shape, dtype and bytes (a NaN matches any NaN).  Where the Rust engine plays a
-tape itself and stays in step with the oracle (same state hash), its own run's
-observation must match as well.  Seeded fuzz runs, targeted setups and edited
-snapshots cover what the tapes don't reach.
+``jackdaw._core`` ports the Python observation encoder bit for bit. That encoder read the
+oracle's state; its outputs are kept as digests (:mod:`tests.parity.frozen`). The parity
+tapes' states are checked in ``test_golden_env.py``. Here: seeded fuzz runs and scenario boards
+(``tests/fixtures/env_fuzz.json``), and edited and random snapshots
+(``tests/fixtures/env_states.json``), which reach states the tapes don't.
 """
 
 from __future__ import annotations
 
 import copy
+import json
 import random
 from typing import Any
 
 import numpy as np
 import pytest
 
-from jackdaw.core import Game, IllegalActionError, NotPortedError
-from jackdaw.engine import actions as A
-from jackdaw.engine.actions import get_legal_actions
+from jackdaw.core import Game, IllegalActionError
 from jackdaw.env import rust_observation
 from jackdaw.env.observation import (
     D_CONSUMABLE,
@@ -30,15 +26,13 @@ from jackdaw.env.observation import (
     D_PLAYING_CARD,
     D_SHOP,
     Observation,
-    encode_observation,
 )
-from tests.golden.trajectories import _BACKS, _CHALLENGES, _mixed_policy, encode_action
-from tests.parity import canon
+from tests.parity import frozen
 from tests.parity.harness import load_specs
-from tests.parity.pyengine import PyEngine
 
 _SPECS = load_specs()
 _FIELDS = ("global_context", "hand_cards", "jokers", "consumables", "shop_cards", "pack_cards")
+_FUZZ = frozen.load("env_fuzz.json")
 
 
 def assert_same(py: Observation, rs: Observation, where: str) -> None:
@@ -54,125 +48,25 @@ def assert_same(py: Observation, rs: Observation, where: str) -> None:
         bad = np.argwhere(~same)
         if bad.size:
             shown = ", ".join(
-                f"{tuple(int(x) for x in i)}: py {a[tuple(i)]!r} rust {b[tuple(i)]!r}"
-                for i in bad[:5]
+                f"{tuple(int(x) for x in i)}: {a[tuple(i)]!r} vs {b[tuple(i)]!r}" for i in bad[:5]
             )
             raise AssertionError(f"{where} {name}: {len(bad)} values differ: {shown}")
 
 
-def _check(engine: PyEngine, where: str) -> tuple[dict[str, Any], Observation]:
-    """Compare the encoders on the oracle's state; return its snapshot and observation."""
-    snap = engine.snapshot()
-    py = encode_observation(engine.gs)
-    assert_same(py, rust_observation.encode_snapshot(snap), where)
-    return snap, py
-
-
-def _done(snap: dict[str, Any]) -> bool:
-    return snap["phase"] == "game_over" or snap["run"]["won"]
+def snapshot_digest(snap: dict[str, Any]) -> str:
+    """The observation digest of the state a snapshot describes, encoded in Rust."""
+    return frozen.obs_digest(rust_observation.encode_snapshot(snap))
 
 
 # ---------------------------------------------------------------------------
-# Tapes
+# Seeded fuzz runs and scenario boards
 # ---------------------------------------------------------------------------
-
-
-def _rust_run(spec: Any, engine: PyEngine) -> Game | None:
-    """The Rust engine's own run at the tape's start."""
-    if spec.setup:
-        return Game.from_dict(engine.snapshot())
-    s = spec.start
-    try:
-        return Game.new(s["back"], s["stake"], s["seed"], s.get("challenge"))
-    except (ValueError, NotPortedError):
-        return None
-
-
-@pytest.mark.parametrize("spec", _SPECS, ids=[s.name for s in _SPECS])
-def test_tape_states_match(spec: Any) -> None:
-    engine = PyEngine(spec.start, spec.setup)
-    game = _rust_run(spec, engine)
-    for pos in range(len(spec.tape) + 1):
-        where = f"{spec.name}@{pos}"
-        snap, py = _check(engine, where)
-        # The Rust run counts only while it is in the oracle's state; the lockstep tests own
-        # engine parity.
-        if game is not None and game.state_hash() == canon.digest(snap):
-            assert_same(py, rust_observation.encode_game(game), f"{where} (rust run)")
-        else:
-            game = None
-        if _done(snap) or pos == len(spec.tape):
-            return
-        action = spec.tape[pos]
-        try:
-            engine.step(action)
-        except Exception:  # the oracle refuses the action: the tape ends here
-            return
-        if game is not None:
-            try:
-                game.step(action)
-            except (IllegalActionError, NotPortedError):
-                game = None
-
-
-# ---------------------------------------------------------------------------
-# Seeded fuzz runs and targeted setups
-# ---------------------------------------------------------------------------
-
-
-def _play(
-    engine: PyEngine,
-    seed: str,
-    steps: int,
-    *,
-    eps: float = 0.2,
-    skip_rate: float = 0.0,
-    boss: str | None = None,
-) -> int:
-    """Play the mixed policy, comparing the encoders at every state; return states checked.
-
-    ``skip_rate`` skips blinds that often; ``boss`` is forced at the first blind select.
-    """
-    rng = random.Random(seed)
-    for pos in range(steps):
-        snap, _ = _check(engine, f"{seed}@{pos}")
-        if _done(snap):
-            return pos + 1
-        if boss is not None and snap["phase"] == "blind_select":
-            engine.apply({"op": "force_boss", "key": boss})
-            boss = None
-            continue
-        with engine._ids():
-            legal = get_legal_actions(engine.gs)
-            if not legal:
-                return pos + 1
-            skips = [a for a in legal if isinstance(a, A.SkipBlind)]
-            if skips and rng.random() < skip_rate:
-                action = encode_action(skips[0])
-            else:
-                action = encode_action(_mixed_policy(engine.gs, legal, rng, eps))
-        try:
-            engine.step(action)
-        except Exception:  # an action the oracle refuses ends the run
-            return pos + 1
-    return steps
-
-
-@pytest.mark.parametrize("i", range(24))
-def test_fuzz_states_match(i: int) -> None:
-    challenge = _CHALLENGES[(i // 4) % len(_CHALLENGES)] if i % 4 == 3 else None
-    start = {
-        "back": "b_challenge" if challenge else _BACKS[i % len(_BACKS)],
-        "stake": 1 + (i * 5) % 8,
-        "seed": f"OBS_FUZZ{i}",
-        "challenge": challenge,
-    }
-    eps = (0.0, 0.05, 0.2)[i % 3]
-    _play(PyEngine(start), start["seed"], steps=300, eps=eps, skip_rate=(0.0, 0.2)[i % 2])
-
 
 _SELECT = {"op": "action", "action": ["SelectBlind"]}
 
+# Each board is played from two seeds (stakes 1 and 4) by the golden mixed policy with the
+# given options: ``eps`` its exploration rate, ``skip_rate`` how often it skips a blind and
+# ``boss`` a boss forced at the first blind select.
 _SCENARIOS: dict[str, tuple[list[dict[str, Any]], dict[str, Any]]] = {
     # Five-card hands with every detection joker: flushes and straights reach the hand types.
     "detection_jokers": (
@@ -198,7 +92,7 @@ _SCENARIOS: dict[str, tuple[list[dict[str, Any]], dict[str, Any]]] = {
          {"op": "add", "key": "j_joker", "edition": "negative"}],
         {"eps": 0.6},
     ),
-    # The jokers whose Python values skip Card:update, with blinds skipped (Throwback).
+    # The jokers whose values come from Card:update, with blinds skipped (Throwback).
     "per_frame_jokers": (
         [_SELECT, *({"op": "add", "key": k} for k in
                     ("j_throwback", "j_stencil", "j_swashbuckler", "j_egg"))],
@@ -215,54 +109,51 @@ _SCENARIOS: dict[str, tuple[list[dict[str, Any]], dict[str, Any]]] = {
 }  # fmt: skip
 
 
+@pytest.mark.parametrize("run", _FUZZ["observation"], ids=[r["name"] for r in _FUZZ["observation"]])
+def test_fuzz_states_match(run: dict[str, Any]) -> None:
+    frozen.replay_env_run(run)
+
+
 @pytest.mark.parametrize("name", sorted(_SCENARIOS))
 def test_scenario_states_match(name: str) -> None:
-    setup, play = _SCENARIOS[name]
-    for k, seed in enumerate(("OBSCEN1", "OBSCEN2")):
-        start = {"back": "b_red", "stake": 1 + 3 * k, "seed": seed + name, "challenge": None}
-        engine = PyEngine(start, setup)
-        _play(engine, f"{seed}{name}", steps=150, **play)
+    runs = [r for r in _FUZZ["scenarios"] if r["name"].endswith(name)]
+    assert len(runs) == 2
+    for run in runs:
+        frozen.replay_env_run(run)
 
 
 # ---------------------------------------------------------------------------
 # Edited snapshots: rare states, built directly
 # ---------------------------------------------------------------------------
 
-# Python keeps these jokers' set_ability values in the live state (no Card:update), which the
-# Rust encoder reproduces; a Python state rebuilt from a snapshot holds the per-frame values
-# instead, so the edited-snapshot tests leave them out.
+# The jokers whose values come from Card:update. The Python encoder read the oracle's live
+# values for them, which a state rebuilt from a snapshot doesn't hold, so the snapshot tests
+# leave them out.
 _PER_FRAME = {"j_throwback", "j_stencil", "j_swashbuckler"}
 
 
-def _tape_snapshots(phase: str, count: int) -> list[dict[str, Any]]:
+def tape_snapshots(phase: str, count: int) -> list[dict[str, Any]]:
     """Snapshots in ``phase`` along the tapes, a few per tape, without per-frame jokers."""
     out: list[dict[str, Any]] = []
     for spec in _SPECS:
-        engine = PyEngine(spec.start, spec.setup)
+        game = frozen.new_game(spec.start, spec.setup)
         taken = 0
         for action in spec.tape:
-            snap = engine.snapshot()
-            jokers = {c["center"] for c in snap["areas"]["jokers"]}
-            if snap["phase"] == phase and not jokers & _PER_FRAME and taken < 2:
-                out.append(snap)
+            if game.phase == phase and taken < 2 and not {j.key for j in game.jokers} & _PER_FRAME:
+                out.append(game.to_dict())
                 taken += 1
                 if len(out) >= count:
                     return out
-            if _done(snap):
+            if game.phase == "game_over" or game.won:
                 break
             try:
-                engine.step(action)
-            except Exception:
+                game.step(action)
+            except IllegalActionError:
                 break
     return out
 
 
-def _check_snapshot(snap: dict[str, Any], where: str) -> None:
-    engine = PyEngine.from_snapshot(snap)
-    assert_same(encode_observation(engine.gs), rust_observation.encode_snapshot(snap), where)
-
-
-def _edits(snap: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+def snapshot_edits(snap: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
     out = []
     s = copy.deepcopy(snap)
     s["blind"]["chips"] = float("nan")
@@ -289,21 +180,29 @@ def _edits(snap: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
     return out
 
 
+def edited_snapshots(phase: str) -> list[tuple[str, dict[str, Any]]]:
+    """The tape snapshots in ``phase`` and their edits, labelled."""
+    out = []
+    for n, snap in enumerate(tape_snapshots(phase, count=12)):
+        out.append((f"{phase}#{n}", snap))
+        if snap["blind"] is not None:
+            out += [(f"{phase}#{n} {name}", s) for name, s in snapshot_edits(snap)]
+    return out
+
+
 @pytest.mark.parametrize("phase", ["selecting_hand", "shop", "pack_opening"])
 def test_edited_snapshots_match(phase: str) -> None:
-    snaps = _tape_snapshots(phase, count=12)
-    assert snaps
-    for n, snap in enumerate(snaps):
-        _check_snapshot(snap, f"{phase}#{n}")
-        if snap["blind"] is None:
-            continue
-        for name, edited in _edits(snap):
-            _check_snapshot(edited, f"{phase}#{n} {name}")
+    states = edited_snapshots(phase)
+    expected = frozen.load("env_states.json")["edited"][phase]
+    assert len(states) == len(expected)
+    for (where, snap), digest in zip(states, expected, strict=True):
+        assert snapshot_digest(snap) == digest, where
 
 
 # Random boards written into real snapshots: hands built to form groups, flushes and
 # straights (of every size, around the five-card limit), every detection joker, consumable
-# gates at their limits, and shop slots.
+# gates at their limits, and shop slots. The cards are made by BalatroBot's add in a scratch
+# run, then edited.
 
 _RANKS = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "Jack", "Queen", "King", "Ace"]
 _RANK_LETTERS = dict(zip(_RANKS, "23456789TJQKA", strict=True))
@@ -313,6 +212,18 @@ _ENHANCEMENTS = ["c_base"] * 8 + [
 ]  # fmt: skip
 _EDITIONS = ["foil", "holo", "polychrome", "negative"]
 _DETECTION = ["j_four_fingers", "j_shortcut", "j_smeared", "j_splash", "j_pareidolia"]
+
+
+def _centers(*sets: str) -> list[str]:
+    data = json.loads((frozen.ROOT / "jackdaw/engine/data/centers.json").read_text("utf-8"))
+    return sorted(k for k, v in data.items() if v.get("set") in sets)
+
+
+_JOKERS = _centers("Joker")
+_CONSUMABLES = _centers("Tarot", "Planet", "Spectral")
+_VOUCHERS = _centers("Voucher")
+_BOOSTERS = _centers("Booster")
+_AREA_OF = {"j_": "jokers", "c_": "consumables", "v_": "shop_vouchers", "p_": "shop_booster"}
 
 
 def _random_hand_spec(rng: random.Random, n: int) -> list[tuple[str, str]]:
@@ -336,99 +247,96 @@ def _random_hand_spec(rng: random.Random, n: int) -> list[tuple[str, str]]:
 
 
 class _Cards:
-    """Fresh cards with explicit sort ids, exported as snapshot cards."""
+    """Fresh cards with explicit sort ids, made by BalatroBot's ``add`` in a scratch run."""
 
-    def __init__(self, rng: random.Random, next_id: int) -> None:
+    def __init__(self, rng: random.Random, next_id: int, factory: Game) -> None:
         self.rng = rng
         self.next_id = next_id
+        self.factory = factory
 
-    def _new(self) -> Any:
-        from jackdaw.engine.card import Card
-
+    def _make(self, key: str, **params: Any) -> dict[str, Any]:
+        game = self.factory.clone()
+        sort_id = game.debug_add(key, **params)
+        areas = [_AREA_OF[key[:2]]] if key[:2] in _AREA_OF else ["hand", "deck"]
+        card = next(
+            c for area in areas for c in json.loads(game._g.view(area)) if c["sort_id"] == sort_id
+        )
+        card["sort_id"] = self.next_id
         self.next_id += 1
-        return Card(sort_id=self.next_id - 1)
+        return card
 
     def playing(self, suit: str, rank: str) -> dict[str, Any]:
-        from tests.parity.py_export import export_card
-
         rng = self.rng
-        c = self._new()
-        c.set_base(f"{suit[0]}_{_RANK_LETTERS[rank]}", suit, rank)
-        c.set_ability(rng.choice(_ENHANCEMENTS))
+        params: dict[str, Any] = {"enhancement": rng.choice(_ENHANCEMENTS)}
         if rng.random() < 0.25:
-            c.set_edition({rng.choice(_EDITIONS): True})
+            params["edition"] = rng.choice(_EDITIONS)
         if rng.random() < 0.2:
-            c.set_seal(rng.choice(["Gold", "Red", "Blue", "Purple"]))
-        c.debuff = rng.random() < 0.15
-        c.facing = "back" if rng.random() < 0.08 else "front"
-        c.ability["perma_bonus"] = rng.choice([0, 0, 0, 5, 10, 25])
-        c.base.times_played = rng.choice([0, 0, 1, 3, 12])
-        return export_card(c)
+            params["seal"] = rng.choice(["Gold", "Red", "Blue", "Purple"])
+        c = self._make(f"{suit[0]}_{_RANK_LETTERS[rank]}", **params)
+        c["added_to_deck"] = False
+        c["debuff"] = rng.random() < 0.15
+        c["facing"] = "back" if rng.random() < 0.08 else "front"
+        c["ability"]["perma_bonus"] = rng.choice([0, 0, 0, 5, 10, 25])
+        c["base"]["times_played"] = rng.choice([0, 0, 1, 3, 12])
+        return c
 
-    def other(self, key: str, *, cost: int | None = None) -> dict[str, Any]:
-        from tests.parity.py_export import export_card
-
+    def other(self, key: str, *, owned: bool, cost: int | None = None) -> dict[str, Any]:
         rng = self.rng
-        c = self._new()
-        c.set_ability(key)
-        c.set_cost()
-        if c.ability.get("set") == "Joker":
+        joker = key.startswith("j_")
+        params: dict[str, Any] = {}
+        if joker:
             if rng.random() < 0.3:
-                c.set_edition({rng.choice(_EDITIONS): True})
-                c.set_cost()
-            c.debuff = rng.random() < 0.15
-            c.facing = "back" if rng.random() < 0.05 else "front"
-            c.eternal = rng.random() < 0.1
-            if not c.eternal and rng.random() < 0.15:
-                c.perishable = True
-                c.perish_tally = rng.randint(0, 5)
-            c.rental = rng.random() < 0.1
-            c.ability["mult"] = rng.choice([c.ability["mult"], 4, 7.5])
-            c.ability["x_mult"] = rng.choice([c.ability["x_mult"], 1.5, 2.25, 0.1 * 7])
-            c.ability["t_chips"] = rng.choice([c.ability["t_chips"], 30])
-            extra = c.ability.get("extra")
+                params["edition"] = rng.choice(_EDITIONS)
+            params["eternal"] = rng.random() < 0.1
+            if not params["eternal"] and rng.random() < 0.15:
+                params["perishable"] = rng.randint(0, 5)
+            params["rental"] = rng.random() < 0.1
+        c = self._make(key, **params)
+        c["added_to_deck"] = owned
+        if joker:
+            c["debuff"] = rng.random() < 0.15
+            c["facing"] = "back" if rng.random() < 0.05 else "front"
+            a = c["ability"]
+            a["mult"] = rng.choice([a["mult"], 4, 7.5])
+            a["x_mult"] = rng.choice([a["x_mult"], 1.5, 2.25, 0.1 * 7])
+            a["t_chips"] = rng.choice([a["t_chips"], 30])
+            extra = a.get("extra")
             if isinstance(extra, (int, float)) and not isinstance(extra, bool):
-                c.ability["extra"] = rng.choice([extra, 0.1, 0.7, -2, 1e6])
+                a["extra"] = rng.choice([extra, 0.1, 0.7, -2, 1e6])
             elif isinstance(extra, dict):
                 for k, v in extra.items():
                     if isinstance(v, (int, float)) and not isinstance(v, bool):
                         extra[k] = rng.choice([v, 0.1, 0.2, 0.3, -1, 1e16])
+        costs = c["costs"]
         if cost is not None:
-            c.cost = cost
-        c.sell_cost = rng.choice([c.sell_cost, 0, 1, 13])
-        return export_card(c)
+            costs["cost"] = cost
+        costs["sell_cost"] = rng.choice([costs["sell_cost"], 0, 1, 13])
+        return c
 
 
-def _random_state(base: dict[str, Any], rng: random.Random) -> dict[str, Any]:
-    from jackdaw.engine.data.prototypes import (
-        BOOSTERS,
-        JOKERS,
-        PLANETS,
-        SPECTRALS,
-        TAROTS,
-        VOUCHERS,
-    )
-
+def random_state(base: dict[str, Any], rng: random.Random, factory: Game) -> dict[str, Any]:
     snap = copy.deepcopy(base)
-    cards = _Cards(rng, snap["sim"]["next_sort_id"])
+    cards = _Cards(rng, snap["sim"]["next_sort_id"], factory)
     areas = snap["areas"]
     n = rng.choice([0, 1, 2, 3, 4, 4, 5, 5, 5, 5, 6, 7, 8, 8, 9, 11, 14])
     areas["hand"] = [cards.playing(s, r) for s, r in _random_hand_spec(rng, n)]
     jokers = [k for k in _DETECTION if rng.random() < 0.4]
-    other_jokers = sorted(set(JOKERS) - _PER_FRAME - set(_DETECTION))
+    other_jokers = sorted(set(_JOKERS) - _PER_FRAME - set(_DETECTION))
     jokers += rng.sample(other_jokers, rng.randint(0, 4))
-    areas["jokers"] = [cards.other(k) for k in jokers]
-    consumables = sorted(set(TAROTS) | set(PLANETS) | set(SPECTRALS))
-    areas["consumables"] = [cards.other(k) for k in rng.sample(consumables, rng.randint(0, 4))]
-    shop = sorted(set(JOKERS) - _PER_FRAME) + consumables
+    areas["jokers"] = [cards.other(k, owned=True) for k in jokers]
+    areas["consumables"] = [
+        cards.other(k, owned=True) for k in rng.sample(_CONSUMABLES, rng.randint(0, 4))
+    ]
+    shop = sorted(set(_JOKERS) - _PER_FRAME) + _CONSUMABLES
     areas["shop_jokers"] = [
-        cards.other(k, cost=rng.choice([0, 3, 8, 30])) for k in rng.sample(shop, rng.randint(0, 3))
+        cards.other(k, owned=False, cost=rng.choice([0, 3, 8, 30]))
+        for k in rng.sample(shop, rng.randint(0, 3))
     ]
     areas["shop_vouchers"] = [
-        cards.other(k) for k in rng.sample(sorted(VOUCHERS), rng.randint(0, 2))
+        cards.other(k, owned=False) for k in rng.sample(_VOUCHERS, rng.randint(0, 2))
     ]
     areas["shop_booster"] = [
-        cards.other(k) for k in rng.sample(sorted(BOOSTERS), rng.randint(0, 2))
+        cards.other(k, owned=False) for k in rng.sample(_BOOSTERS, rng.randint(0, 2))
     ]
     pack_n = rng.choice([0, 0, 2, 3, 5])
     areas["pack_cards"] = [cards.playing(s, r) for s, r in _random_hand_spec(rng, pack_n)]
@@ -448,13 +356,20 @@ def _random_state(base: dict[str, Any], rng: random.Random) -> dict[str, Any]:
     return snap
 
 
-def test_random_states_match() -> None:
-    bases = [s for s in _tape_snapshots("selecting_hand", 6) if s["blind"] is not None]
-    bases += _tape_snapshots("shop", 3) + _tape_snapshots("pack_opening", 3)
+def random_states(count: int = 400) -> list[dict[str, Any]]:
+    bases = [s for s in tape_snapshots("selecting_hand", 6) if s["blind"] is not None]
+    bases += tape_snapshots("shop", 3) + tape_snapshots("pack_opening", 3)
+    factory = Game.new("b_red", 1, "OBS_CARDS")
+    factory.step(["SelectBlind"])
     rng = random.Random("OBS_RANDOM_STATES")
-    for n in range(400):
-        snap = _random_state(bases[n % len(bases)], rng)
-        _check_snapshot(snap, f"random#{n}")
+    return [random_state(bases[n % len(bases)], rng, factory) for n in range(count)]
+
+
+def test_random_states_match() -> None:
+    expected = frozen.load("env_states.json")["random"]
+    states = random_states(len(expected))
+    for n, (snap, digest) in enumerate(zip(states, expected, strict=True)):
+        assert snapshot_digest(snap) == digest, f"random#{n}"
 
 
 # ---------------------------------------------------------------------------

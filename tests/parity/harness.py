@@ -77,6 +77,27 @@ class Engine(Protocol):
     def step(self, action: list[Any]) -> None: ...  # raises on an illegal action
 
 
+class RustEngine:
+    """The Rust engine (:class:`jackdaw.core.Game`) behind the :class:`Engine` interface: a new
+    run with the spec's setup ops applied natively (``Game.apply_setup``)."""
+
+    def __init__(self, start: dict[str, Any], setup: list[dict[str, Any]] = ()) -> None:
+        from jackdaw.core import Game
+
+        self.game = Game.new(start["back"], start["stake"], start["seed"], start.get("challenge"))
+        for op in setup:
+            self.game.apply_setup(op)
+
+    def snapshot(self) -> dict[str, Any]:
+        return self.game.to_dict()
+
+    def legal_actions(self) -> list[list[Any]]:
+        return json.loads(self.game._g.legal_actions())
+
+    def step(self, action: list[Any]) -> None:
+        self.game.step(action)
+
+
 # ---------------------------------------------------------------------------
 # Scenario checks, evaluated on snapshots (engine-agnostic)
 # ---------------------------------------------------------------------------

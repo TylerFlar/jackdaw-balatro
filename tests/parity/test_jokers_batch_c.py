@@ -1,17 +1,16 @@
 """Targeted parity cases for joker batch C: the branches seeded play rarely reaches.
 
-Each case builds a board on the oracle (jokers, playing cards, a forced boss), then checks
-every action against the Rust engine (:func:`tests.parity.rust_step.check_step`): the
-oracle's snapshot goes into Rust, both engines take the action, and the snapshots must
-match. Every step must be checked (not refused as unported), and each case also asserts on
-the oracle's state that the branch it is about fired.
+Each case builds a board (jokers, playing cards, a forced boss), then takes its steps; each
+step must match the oracle's (:mod:`tests.parity.cases`), and each case also asserts that the
+branch it is about fired.
 
 Jokers join without BalatroBot's edition poll (a stray edition would change the scores
-asserted here). Playing cards join the end of the hand through BalatroBot's ``add``; most
-cases first move the dealt hand to the bottom of the deck so that only the cards they add
-are held. A boss checks cards created mid-round only on its next debuff pass, so cases that
-need a boss's debuffs run that pass (``set_blind(nil, true)``) after adding their cards.
-Rolls are forced by raising ``G.GAME.probabilities.normal``.
+asserted here); the oracle added them with its own helper, which the fixture records. Playing
+cards join the end of the hand through BalatroBot's ``add``; most cases first move the dealt
+hand to the bottom of the deck so that only the cards they add are held. A boss checks cards
+created mid-round only on its next debuff pass, so cases that need a boss's debuffs run that
+pass (``set_blind(nil, true)``) after adding their cards. Rolls are forced by raising
+``G.GAME.probabilities.normal``.
 
 Hand scores: High Card 5 chips x1, Pair 10 x2, Two Pair 20 x2, Flush 35 x4 at level 1.
 """
@@ -20,17 +19,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from jackdaw.engine.actions import GamePhase
-from jackdaw.engine.game import reapply_blind_debuffs
-from tests.engine.audit._joker_helpers import give_joker, rng_twin
-from tests.parity.pyengine import PyEngine
-from tests.parity.rust_step import Report, check_step
-
-_RANK_LETTER = {"10": "T", "Jack": "J", "Queen": "Q", "King": "K", "Ace": "A"}
+from tests.parity.cases import CardRef, Run, front_key
 
 
 class Board:
-    """An oracle run in its first round, and the parity report of the steps checked on it."""
+    """A run in its first round, whose steps are checked against the oracle's."""
 
     def __init__(self, name: str, *jokers: str, boss: str | None = None) -> None:
         self.name = name
@@ -39,88 +32,63 @@ class Board:
         if boss:
             setup.append({"op": "force_boss", "key": boss})
         setup.append({"op": "action", "action": ["SelectBlind"]})
-        self.engine = PyEngine(start, setup)
-        self.report = Report()
-        self.steps = 0
+        self.run = Run(start, setup)
         self.jokers = [self.joker(key) for key in jokers]
-
-    @property
-    def gs(self) -> dict[str, Any]:
-        return self.engine.gs
 
     # -- setup ----------------------------------------------------------------
 
-    def joker(self, key: str) -> Any:
-        with self.engine._ids():
-            return give_joker(self.gs, key)
+    def joker(self, key: str) -> CardRef:
+        """A joker added without BalatroBot's edition poll."""
+        self.run.oracle(f"{key} added without the edition poll")
+        return self.run.add(key)
 
-    def consumable(self, key: str) -> Any:
-        self.engine.apply({"op": "add", "key": key})
-        return self.gs["consumables"][-1]
+    def consumable(self, key: str) -> CardRef:
+        return self.run.add(key)
 
-    def card(self, key: str, **params: Any) -> Any:
+    def card(self, key: str, **params: Any) -> CardRef:
         """A playing card added to the end of the hand."""
-        self.engine.apply({"op": "add", "key": key, **params})
-        return self.gs["hand"][-1]
+        return self.run.add(key, **params)
 
-    def cards(self, *keys: str) -> list[Any]:
+    def cards(self, *keys: str) -> list[CardRef]:
         return [self.card(key) for key in keys]
 
     def clear_hand(self) -> None:
         """Move the dealt hand to the bottom of the deck."""
-        self.gs["deck"][:0] = self.gs["hand"]
-        self.gs["hand"] = []
+        self.run.move("hand", "deck", to_front=True)
 
     def recheck(self) -> None:
         """The boss's debuff pass over every playing card (``set_blind(nil, true)``)."""
-        reapply_blind_debuffs(self.gs)
+        self.run.recheck()
 
     def odds(self, normal: float) -> None:
         """``G.GAME.probabilities.normal``."""
-        self.gs["probabilities"]["normal"] = normal
+        self.run.write("game.probabilities_normal", normal)
 
     def to_win(self) -> None:
         """One chip short of the blind: the next scoring hand wins the round."""
-        self.engine.apply({"op": "set", "chips": self.gs["blind"].chips - 1})
+        self.run.op({"op": "set", "chips": self.run.read("blind.chips") - 1})
 
     # -- checked steps ----------------------------------------------------------
 
-    def step(self, action: list[Any]) -> None:
-        where = f"{self.name}@{self.steps}"
-        self.steps += 1
-        before = sum(self.report.matched.values())
-        legal = check_step(self.engine, action, where, self.report)
-        found = [
-            f"{w}: {'; '.join(diff[:8])}"
-            for items in self.report.mismatches.values()
-            for w, diff in items
-        ]
-        assert not found, "\n".join(found)
-        assert not self.report.unported, f"{where}: unported {dict(self.report.unported)}"
-        assert legal, f"{where}: {action} is illegal"
-        assert sum(self.report.matched.values()) == before + 1
-
-    def indices(self, cards: tuple[Any, ...]) -> list[int]:
-        hand = self.gs["hand"]
-        return sorted(next(i for i, c in enumerate(hand) if c is card) for card in cards)
-
-    def play(self, *cards: Any) -> None:
-        self.step(["PlayHand", self.indices(cards)])
+    def play(self, *cards: CardRef) -> None:
+        action = ["PlayHand", self.run.indices(cards)]
+        assert self.run.step(action), f"{self.name}: {action} is illegal"
 
     # -- results ----------------------------------------------------------------
 
     @property
     def total(self) -> float:
-        return self.gs["last_score_result"].total
+        score = self.run.game.last_score
+        assert score is not None
+        return score.total
 
     @property
     def dollars(self) -> float:
-        return self.gs["dollars"]
+        return self.run.game.dollars
 
-
-def _key(suit: str, rank: str) -> str:
-    """The ``add`` key of a playing card (``"S_T"``)."""
-    return f"{suit[0]}_{_RANK_LETTER.get(rank, rank)}"
+    def streams(self) -> dict[str, Any]:
+        """The RNG streams drawn so far (``G.GAME.pseudorandom``)."""
+        return self.run.read("rng.streams")
 
 
 # ---------------------------------------------------------------------------
@@ -211,7 +179,7 @@ def test_rough_gem_pays_for_diamonds():
     dollars = b.dollars
     b.play(*b.cards("D_2", "H_2"))
     assert b.dollars == dollars + 2
-    assert b.gs["last_score_result"].dollars_earned == 2
+    assert b.run.game.last_score.dollars == 2
 
 
 def test_bloodstone_rolls_only_for_hearts():
@@ -224,37 +192,38 @@ def test_bloodstone_rolls_only_for_hearts():
 def test_bloodstone_misses_and_smeared_diamonds():
     b = Board("bloodstone_smeared", "j_bloodstone", "j_smeared")
     b.play(*b.cards("D_K", "C_K"))
-    assert b.gs["rng"].state.get("bloodstone") is not None
+    assert b.streams().get("bloodstone") is not None
 
 
 def test_ancient_joker_matches_its_suit_and_wild_cards():
     b = Board("ancient", "j_ancient")
-    suit = b.gs["current_round"]["ancient_card"]["suit"]
+    suit = b.run.read("current_round.ancient_card.suit")
     other = next(s for s in ("Spades", "Hearts", "Clubs", "Diamonds") if s != suit)
-    b.play(b.card(_key(suit, "9")), b.card(_key(other, "9"), enhancement="m_wild"))
+    b.play(b.card(front_key(suit, "9")), b.card(front_key(other, "9"), enhancement="m_wild"))
     assert b.total == 28 * 2 * 1.5 * 1.5
 
 
 def test_the_idol_matches_rank_and_suit():
     b = Board("idol", "j_idol")
-    idol = b.gs["current_round"]["idol_card"]
+    idol = b.run.read("current_round.idol_card")
     other = next(s for s in ("Spades", "Hearts", "Clubs", "Diamonds") if s != idol["suit"])
-    first = b.card(_key(idol["suit"], idol["rank"]))
-    wild = b.card(_key(other, idol["rank"]), enhancement="m_wild")
-    miss = b.card(_key(other, idol["rank"]))
+    first = b.card(front_key(idol["suit"], idol["rank"]))
+    wild = b.card(front_key(other, idol["rank"]), enhancement="m_wild")
+    miss = b.card(front_key(other, idol["rank"]))
+    nominal = first.base["nominal"]
     b.play(first, wild, miss)
-    nominal = first.base.nominal
     # Three of a Kind (30 x3): the idol card and the Wild Card match, the third does not.
     assert b.total == (30 + 3 * nominal) * 3 * 2 * 2
 
 
 def test_the_idol_with_smeared_joker():
     b = Board("idol_smeared", "j_idol", "j_smeared")
-    idol = b.gs["current_round"]["idol_card"]
+    idol = b.run.read("current_round.idol_card")
     twin = {"Spades": "Clubs", "Clubs": "Spades", "Hearts": "Diamonds", "Diamonds": "Hearts"}
-    first = b.card(_key(twin[idol["suit"]], idol["rank"]))
+    first = b.card(front_key(twin[idol["suit"]], idol["rank"]))
+    nominal = first.base["nominal"]
     b.play(first)
-    assert b.total == (5 + first.base.nominal) * 2
+    assert b.total == (5 + nominal) * 2
 
 
 def test_photograph_skips_a_debuffed_first_face():
@@ -308,7 +277,7 @@ def test_business_card_skips_faces_debuffed_by_the_plant():
     dollars = b.dollars
     b.play(king)
     assert b.dollars == dollars
-    assert b.gs["rng"].state.get("business") is None
+    assert b.streams().get("business") is None
 
 
 # ---------------------------------------------------------------------------
@@ -373,7 +342,7 @@ def test_eight_ball_makes_a_tarot():
     b = Board("eight_ball", "j_8_ball")
     b.odds(4)
     b.play(b.card("S_8"))
-    assert len(b.gs["consumables"]) == 1
+    assert len(b.run.cards("consumables")) == 1
 
 
 def test_eight_ball_does_not_roll_with_full_slots():
@@ -382,8 +351,8 @@ def test_eight_ball_does_not_roll_with_full_slots():
     b.consumable("c_pluto")
     b.consumable("c_pluto")
     b.play(b.card("S_8"))
-    assert b.gs["rng"].state.get("8ball") is None
-    assert len(b.gs["consumables"]) == 2
+    assert b.streams().get("8ball") is None
+    assert len(b.run.cards("consumables")) == 2
 
 
 def test_eight_ball_buffer_reserves_the_last_slot():
@@ -391,7 +360,7 @@ def test_eight_ball_buffer_reserves_the_last_slot():
     b.odds(4)
     b.consumable("c_pluto")
     b.play(*b.cards("S_8", "H_8"))
-    assert len(b.gs["consumables"]) == 2
+    assert len(b.run.cards("consumables")) == 2
 
 
 def test_eight_ball_copies_and_red_seal():
@@ -399,7 +368,7 @@ def test_eight_ball_copies_and_red_seal():
     b.odds(4)
     b.play(b.card("S_8", seal="Red"))
     # The copy and 8 Ball fill both slots on the first evaluation; the Red Seal's finds none.
-    assert len(b.gs["consumables"]) == 2
+    assert len(b.run.cards("consumables")) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -471,7 +440,7 @@ def test_reserved_parking_skips_faces_debuffed_by_the_plant():
     dollars = b.dollars
     b.play(*pair)
     assert b.dollars == dollars
-    assert b.gs["rng"].state.get("parking") is None
+    assert b.streams().get("parking") is None
 
 
 def test_the_plant_with_pareidolia_debuffs_every_card():
@@ -581,7 +550,7 @@ def test_hanging_chad_with_splash():
 
 def test_repetitions_stack_on_the_first_face():
     b = Board("repetitions", "j_sock_and_buskin", "j_hanging_chad", "j_dusk")
-    b.engine.apply({"op": "set", "hands_left": 1})
+    b.run.op({"op": "set", "hands_left": 1})
     b.play(b.card("S_K", seal="Red"), b.card("H_K"))
     # The first King: once, Red Seal, Sock and Buskin, Hanging Chad twice and Dusk. The second:
     # once, Sock and Buskin and Dusk.
@@ -590,14 +559,14 @@ def test_repetitions_stack_on_the_first_face():
 
 def test_dusk_retriggers_the_last_hand():
     b = Board("dusk", "j_blueprint", "j_dusk")
-    b.engine.apply({"op": "set", "hands_left": 1})
+    b.run.op({"op": "set", "hands_left": 1})
     b.play(b.card("S_K"))
     assert b.total == 5 + 3 * 10
 
 
 def test_dusk_waits_for_the_last_hand():
     b = Board("dusk_early", "j_dusk")
-    b.engine.apply({"op": "set", "hands_left": 2})
+    b.run.op({"op": "set", "hands_left": 2})
     b.play(b.card("S_K"))
     assert b.total == 5 + 10
 
@@ -605,18 +574,19 @@ def test_dusk_waits_for_the_last_hand():
 def test_seltzer_counts_down_and_is_drunk():
     b = Board("seltzer", "j_blueprint", "j_selzer")
     seltzer = b.jokers[1]
-    seltzer.ability["extra"] = 2
+    with b.run.edit_card(seltzer) as card:
+        card["ability"]["extra"] = 2
     b.play(b.card("S_K"))
     assert b.total == 5 + 3 * 10
     assert seltzer.ability["extra"] == 1
     b.play(b.card("H_K"))
-    assert seltzer not in b.gs["jokers"]
+    assert seltzer not in b.run.cards("jokers")
 
 
 def test_seltzer_counts_a_hand_debuffed_by_the_psychic():
     b = Board("seltzer_psychic", "j_selzer", boss="bl_psychic")
     b.play(b.card("S_K"))
-    assert b.gs["last_score_result"].debuffed
+    assert b.run.game.last_score.debuffed
     assert b.jokers[0].ability["extra"] == 9
 
 
@@ -633,22 +603,17 @@ def test_mime_retriggers_held_cards_with_an_effect():
 
 def test_mime_repeats_only_the_parking_rolls_that_paid():
     """G20: a held face whose Reserved Parking roll misses has no effect, so Mime doesn't
-    repeat it; one that paid is repeated and rolls again."""
+    repeat it; one that paid is repeated and rolls again. Six held faces roll at least six
+    times; the oracle's verdict, which an RNG twin confirmed roll by roll, pins the outcome."""
     b = Board("mime_parking", "j_mime", "j_reserved_parking")
     b.clear_hand()
     pair = b.cards("S_2", "H_2")
     b.cards("S_K", "H_K", "D_K", "C_K", "S_Q", "H_Q")
-    twin = rng_twin(b.gs)
-    rolls = []
-    for _ in range(6):
-        rolls.append(twin.random("parking") < 0.5)
-        if rolls[-1]:
-            rolls.append(twin.random("parking") < 0.5)
-    assert len(rolls) > 6 and not all(rolls)  # some paid, some missed
     dollars = b.dollars
     b.play(*pair)
-    assert b.dollars == dollars + sum(rolls)
-    assert b.gs["rng"].state["parking"] == twin.state["parking"]
+    paid = b.dollars - dollars
+    assert 0 < paid < 12  # some rolls paid (each repeated once), not all
+    assert "parking" in b.streams()
 
 
 def test_mime_red_seal_and_copies_on_a_steel_card():
@@ -681,7 +646,7 @@ def test_mime_at_round_end_repeats_gold_cards():
     b.to_win()
     dollars = b.dollars
     b.play(*pair)
-    assert b.gs["phase"] == GamePhase.ROUND_EVAL
+    assert b.run.game.phase == "round_eval"
     assert b.dollars == dollars + 2 * 3 + 3 * 3
 
 
@@ -709,7 +674,7 @@ def test_mime_skips_a_gold_card_debuffed_by_the_club():
     b.to_win()
     dollars = b.dollars
     b.play(*pair)
-    assert b.gs["phase"] == GamePhase.ROUND_EVAL
+    assert b.run.game.phase == "round_eval"
     assert b.dollars == dollars + 2 * 3
 
 
@@ -724,7 +689,7 @@ def test_mime_and_blue_seals_without_room():
     b.to_win()
     b.play(*pair)
     # The first Blue Seal takes the last slot; Mime's repeat and the second card find none.
-    assert [c.center_key for c in b.gs["consumables"]] == ["c_pluto", "c_mercury"]
+    assert b.run.keys("consumables") == ["c_pluto", "c_mercury"]
 
 
 def test_mime_at_round_end_repeats_blue_seals():
@@ -734,7 +699,7 @@ def test_mime_at_round_end_repeats_blue_seals():
     b.card("S_K", seal="Blue")
     b.to_win()
     b.play(*pair)
-    assert [c.center_key for c in b.gs["consumables"]] == ["c_mercury", "c_mercury"]
+    assert b.run.keys("consumables") == ["c_mercury", "c_mercury"]
 
 
 # ---------------------------------------------------------------------------
@@ -751,9 +716,9 @@ def test_baseball_card_and_uncommon_jokers():
 
 def test_baseball_card_counts_a_debuffed_uncommon_and_is_copied():
     b = Board("baseball_copies", "j_blueprint", "j_baseball", "j_mime")
-    mime = b.jokers[2]
-    mime.set_debuff(True, b.gs)
+    b.run.oracle("set_debuff(True) on Mime")
     b.play(b.card("S_9"))
+    assert b.jokers[2].debuff
     assert b.total == int(14 * 1.5 * 1.5)
 
 
@@ -764,7 +729,8 @@ def test_baseball_card_counts_a_debuffed_uncommon_and_is_copied():
 
 def test_g80_pillar_recheck_after_seltzer():
     b = Board("g80_seltzer", "j_selzer", boss="bl_pillar")
-    b.jokers[0].ability["extra"] = 1
+    with b.run.edit_card(b.jokers[0]) as card:
+        card["ability"]["extra"] = 1
     cards = b.cards("S_9", "H_9")
     b.play(*cards)
     assert all(c.debuff for c in cards)
@@ -775,5 +741,5 @@ def test_g80_pillar_recheck_after_eight_ball():
     b.odds(4)
     cards = b.cards("S_8", "H_8")
     b.play(*cards)
-    assert len(b.gs["consumables"]) == 2
+    assert len(b.run.cards("consumables")) == 2
     assert all(c.debuff for c in cards)

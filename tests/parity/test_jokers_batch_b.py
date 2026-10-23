@@ -1,32 +1,26 @@
 """Targeted parity cases for joker batch B (main step, ``before`` and ``after``).
 
-The seeded scenarios (:mod:`tests.parity.joker_scenarios`) rarely reach some
-branches: a Straight Flush for Seance, a repeated hand for Card Sharp, a full
-board of Stencils, a melting Ice Cream.  Each case here builds an oracle run
-(BalatroBot ``add`` for the jokers and the playing cards, which join the hand),
-writes the few values play would take long to reach straight into the oracle's
-state, and checks every action against the Rust engine: the oracle's snapshot
-goes into Rust, both engines take the action, and the snapshots must match.
-
-Every step must be checked (none refused as unported); the assertions after a
-step confirm that the branch under test was taken.
+The seeded scenarios (``test_joker_scenarios.py``) rarely reach some branches: a Straight Flush
+for Seance, a repeated hand for Card Sharp, a full board of Stencils, a melting Ice Cream. Each
+case builds a run (BalatroBot ``add`` for the jokers and the playing cards, which join the
+hand), writes the few values play would take long to reach straight into the state, and takes
+its steps; each step must match the oracle's (:mod:`tests.parity.cases`). The assertions after
+a step confirm that the branch under test was taken.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from jackdaw.engine.actions import GamePhase
-from jackdaw.engine.game import blind_debuff_card
-from tests.parity.pyengine import PyEngine
-from tests.parity.rust_step import Report, check_step
+from jackdaw.core import Score
+from tests.parity.cases import CardRef, Run
 
 # Jokers with no effect while a hand scores (dollar bonus, interest, bankruptcy): board filler.
 FILLER = ("j_golden", "j_credit_card", "j_to_the_moon", "j_cloud_9")
 
 
 class Board:
-    """A targeted oracle run whose steps are checked against Rust one at a time."""
+    """A targeted run whose steps are checked against the oracle's one at a time."""
 
     def __init__(self, seed: str, *jokers: str, boss: str | None = None, edition: str = "foil"):
         setup: list[dict[str, Any]] = []
@@ -37,79 +31,55 @@ class Board:
         setup += [{"op": "add", "key": key, "edition": edition} for key in jokers]
         start = {"back": "b_red", "stake": 1, "seed": seed, "challenge": None}
         self.seed = seed
-        self.engine = PyEngine(start, setup)
+        self.run = Run(start, setup)
         # Out of reach: a hand ends the round only when a case wins it on purpose.
-        self.gs["blind"].chips = 10**9
-        self.report = Report()
-        self.steps = 0
+        self.run.write("blind.chips", 10**9)
 
-    @property
-    def gs(self) -> dict[str, Any]:
-        return self.engine.gs
-
-    def add(self, key: str, **params: Any) -> Any:
+    def add(self, key: str, **params: Any) -> CardRef:
         """BalatroBot ``add``: a joker, a consumable, or a playing card into the hand. A playing
         card meets the boss as a card dealt this round did at set_blind (blind.lua:207-210)."""
-        self.engine.apply({"op": "add", "key": key, **params})
-        area = {"j_": "jokers", "c_": "consumables"}.get(key[:2], "hand")
-        card = self.gs[area][-1]
-        if area == "hand":
-            blind_debuff_card(self.gs, card)
+        card = self.run.add(key, **params)
+        if card.area == "hand":
+            self.run.boss_check(card)
         return card
 
-    def cards(self, *keys: str, **params: Any) -> list[Any]:
+    def cards(self, *keys: str, **params: Any) -> list[CardRef]:
         return [self.add(k, **params) for k in keys]
 
-    def joker(self, key: str, n: int = 0) -> Any:
-        return [j for j in self.gs["jokers"] if j.center_key == key][n]
+    def joker(self, key: str, n: int = 0) -> CardRef:
+        return [j for j in self.run.cards("jokers") if j.key == key][n]
 
     def has(self, key: str) -> bool:
-        return any(j.center_key == key for j in self.gs["jokers"])
+        return key in self.run.keys("jokers")
 
-    def hold_only(self, *keys: str, **params: Any) -> list[Any]:
+    def hold_only(self, *keys: str, **params: Any) -> list[CardRef]:
         """Return the dealt hand to the deck and hold exactly these cards."""
-        self.gs["deck"].extend(self.gs["hand"])
-        self.gs["hand"] = []
+        self.run.move("hand", "deck")
         return self.cards(*keys, **params)
 
-    def indices(self, cards: tuple[Any, ...]) -> list[int]:
-        hand = self.gs["hand"]
-        return sorted(next(i for i, c in enumerate(hand) if c is card) for card in cards)
-
     def step(self, action: list[Any]) -> None:
-        where = f"{self.seed}@{self.steps}"
-        self.steps += 1
-        kind = action[0]
-        checked = self.report.matched[kind]
-        ok = check_step(self.engine, action, where, self.report)
-        found = [
-            f"{w}: {'; '.join(d[:8])}"
-            for items in self.report.mismatches.values()
-            for w, d in items
-        ]
-        assert not found, "\n".join(found)
-        assert not self.report.unported, f"{where}: unported {dict(self.report.unported)}"
-        assert ok, f"{where}: the oracle refused {action}"
-        assert self.report.matched[kind] == checked + 1, f"{where}: step not checked"
+        assert self.run.step(action), f"{self.seed}: the oracle refused {action}"
 
-    def play(self, *cards: Any) -> None:
-        self.step(["PlayHand", self.indices(cards)])
+    def play(self, *cards: CardRef) -> None:
+        self.step(["PlayHand", self.run.indices(cards)])
 
-    def discard(self, *cards: Any) -> None:
-        self.step(["Discard", self.indices(cards)])
+    def discard(self, *cards: CardRef) -> None:
+        self.step(["Discard", self.run.indices(cards)])
 
-    def win_with(self, *cards: Any) -> None:
+    def win_with(self, *cards: CardRef) -> None:
         """Play the cards with the blind one chip from beaten."""
-        self.gs["chips"] = self.gs["blind"].chips - 1
+        self.run.write("game.chips", self.run.read("blind.chips") - 1)
         self.play(*cards)
-        assert self.gs["phase"] == GamePhase.ROUND_EVAL
+        assert self.run.game.phase == "round_eval"
 
     @property
-    def last(self) -> Any:
-        return self.gs["last_score_result"]
+    def last(self) -> Score:
+        score = self.run.game.last_score
+        assert score is not None
+        return score
 
-    def level(self, hand: str) -> int:
-        return self.gs["hand_levels"][hand].level
+    def level(self, hand: str) -> float:
+        return self.run.game.hand_levels[hand].level
 
 
 # ---------------------------------------------------------------------------
@@ -131,7 +101,7 @@ def test_two_stencils_score_on_a_full_board() -> None:
     """G58: x_mult = empty slots + Stencils = 0 + 2, and the shared x_mult > 1 rule scores it
     (card.lua:3653-3659, 4203-4208), however full the board."""
     b = Board("BB_STENCIL_FULL", "j_stencil", "j_stencil", *FILLER[:3])
-    assert len(b.gs["jokers"]) == b.gs["joker_slots"] == 5
+    assert len(b.run.cards("jokers")) == b.run.read("game.joker_slots") == 5
     b.play(*b.cards("S_5", "H_5"))
     assert b.last.mult == 2 * 2 * 2
 
@@ -159,7 +129,7 @@ def test_banner_and_mystic_summit_read_the_discards_left() -> None:
     played = b.cards("S_5", "H_5")
     b.play(*played)
     assert b.last.mult == 2
-    b.gs["current_round"]["discards_left"] = 0
+    b.run.write("current_round.discards_left", 0)
     b.play(*b.cards("S_6", "H_6"))
     assert b.last.mult == 2 + 15
 
@@ -187,15 +157,14 @@ def test_abstract_and_supernova() -> None:
     b = Board("BB_ABSTRACT_NOVA", "j_abstract", "j_blueprint", "j_supernova")
     b.play(*b.cards("S_5", "H_5"))
     b.play(*b.cards("S_8", "H_8"))
-    assert b.gs["hand_levels"]["Pair"].played == 2
+    assert b.run.game.hand_levels["Pair"].played == 2
 
 
 def test_blue_joker_with_an_empty_deck() -> None:
     """Blue Joker: +2 Chips per card in the deck, nothing once it is empty (card.lua:3887-3893)."""
     b = Board("BB_BLUE", "j_blueprint", "j_blue_joker")
     b.play(*b.cards("S_5", "H_5"))
-    b.gs["discard_pile"].extend(b.gs["deck"])
-    b.gs["deck"] = []
+    b.run.move("deck", "discard")
     b.play(*b.cards("S_6", "H_6"))
 
 
@@ -213,7 +182,8 @@ def test_erosion_below_the_starting_deck() -> None:
     b = Board("BB_EROSION", "j_erosion", "j_brainstorm")
     b.play(*b.cards("S_5", "H_5"))  # 52 + 2 added cards: none missing
     assert b.last.mult == 2
-    del b.gs["deck"][:8]
+    with b.run.edit() as snap:
+        del snap["areas"]["deck"][:8]
     b.play(*b.cards("S_6", "H_6"))  # 54 - 8 + 2 = 48 cards: 4 missing
     assert b.last.mult == 2 + 16 + 16
 
@@ -222,11 +192,11 @@ def test_bull_and_bootstraps_see_the_dollar_buffer() -> None:
     """Bull and Bootstraps read G.GAME.dollars + G.GAME.dollar_buffer, which a Gold Seal scored
     earlier in the hand feeds (card.lua:1084-1087, 3936-3942, 4046-4051)."""
     b = Board("BB_BULL", "j_bull", "j_blueprint", "j_bootstraps")
-    b.gs["dollars"] = 4
+    b.run.write("game.dollars", 4)
     b.play(*b.cards("S_5", "H_5", seal="Gold"))
-    b.gs["dollars"] = 0
+    b.run.write("game.dollars", 0)
     b.play(*b.cards("S_6", "H_6"))
-    b.gs["dollars"] = -3
+    b.run.write("game.dollars", -3)
     b.play(*b.cards("S_7", "H_7"))
 
 
@@ -235,7 +205,7 @@ def test_acrobat_on_the_last_hand() -> None:
     b = Board("BB_ACROBAT", "j_blueprint", "j_acrobat")
     b.play(*b.cards("S_5", "H_5"))
     assert b.last.mult == 2
-    b.gs["current_round"]["hands_left"] = 1
+    b.run.write("current_round.hands_left", 1)
     b.win_with(*b.cards("S_6", "H_6"))
     assert b.last.mult == 2 * 3 * 3
 
@@ -243,16 +213,17 @@ def test_acrobat_on_the_last_hand() -> None:
 def test_acrobat_on_a_lost_last_hand() -> None:
     """The last hand fails the blind: the round ends in a game over."""
     b = Board("BB_ACROBAT_LOSS", "j_acrobat")
-    b.gs["current_round"]["hands_left"] = 1
+    b.run.write("current_round.hands_left", 1)
     b.play(*b.cards("S_6", "H_6"))
-    assert b.gs["phase"] == GamePhase.GAME_OVER
+    assert b.run.game.phase == "game_over"
 
 
 def test_swashbuckler_sums_the_other_jokers() -> None:
     """Swashbuckler: +Mult = the other jokers' sell value, debuffed ones included
     (card.lua:3974-3979, 4240-4248)."""
     b = Board("BB_SWASH", "j_blueprint", "j_swashbuckler", "j_golden", "j_credit_card")
-    b.joker("j_credit_card").debuff = True
+    with b.run.edit_card(b.joker("j_credit_card")) as card:
+        card["debuff"] = True
     b.play(*b.cards("S_5", "H_5"))
 
 
@@ -268,11 +239,10 @@ def test_drivers_license_needs_sixteen_enhanced_cards() -> None:
     """Driver's License: X3 with at least 16 enhanced playing cards (card.lua:3943-3950,
     4179-4184)."""
     b = Board("BB_DRIVER", "j_blueprint", "j_drivers_license")
-    for card in b.gs["deck"][:15]:
-        card.set_ability("m_bonus")
+    b.run.oracle("set_ability('m_bonus') on the first 15 deck cards")
     b.play(*b.cards("S_5", "H_5"))
     assert b.last.mult == 2
-    b.gs["deck"][20].set_ability("m_mult")
+    b.run.oracle("set_ability('m_mult') on deck card 20")
     b.play(*b.cards("S_6", "H_6"))
     assert b.last.mult == 2 * 3 * 3
 
@@ -379,37 +349,37 @@ def test_superposition_needs_an_ace_and_a_straight() -> None:
     its Blueprint copy makes one more while there is room."""
     b = Board("BB_SUPERPOSITION", "j_blueprint", "j_superposition")
     b.play(*b.cards("H_A", "D_2", "S_3", "C_4", "H_5"))
-    assert len(b.gs["consumables"]) == 2
-    b.gs["consumables"].clear()
+    assert len(b.run.cards("consumables")) == 2
+    b.run.write("areas.consumables", [])
     b.play(*b.cards("H_6", "D_7", "S_8", "C_9", "H_T"))  # no Ace
     b.play(*b.cards("H_A", "D_A"))  # no Straight
-    assert not b.gs["consumables"]
+    assert not b.run.cards("consumables")
 
 
 def test_seance_on_a_straight_flush() -> None:
     """Seance: a Spectral for a hand containing a Straight Flush (card.lua:3787-3806)."""
     b = Board("BB_SEANCE", "j_seance", "j_brainstorm")
     b.play(*b.cards("H_5", "H_6", "H_7", "H_8", "H_9"))
-    assert [c.ability["set"] for c in b.gs["consumables"]] == ["Spectral", "Spectral"]
+    assert [c.set for c in b.run.cards("consumables")] == ["Spectral", "Spectral"]
     b.play(*b.cards("S_5", "S_6", "S_7", "S_8", "H_T"))  # a Straight, no flush
-    assert len(b.gs["consumables"]) == 2
+    assert len(b.run.cards("consumables")) == 2
 
 
 def test_vagabond_at_four_dollars_or_less() -> None:
     """Vagabond: a Tarot when the hand is played with $4 or less (card.lua:3743-3761). The copies
     share G.GAME.consumeable_buffer: with one free slot only the first makes a card."""
     b = Board("BB_VAGABOND", "j_blueprint", "j_vagabond")
-    b.gs["dollars"] = 4
+    b.run.write("game.dollars", 4)
     b.add("c_pluto")
     b.play(*b.cards("S_5", "H_5"))
-    assert len(b.gs["consumables"]) == 2
-    b.gs["consumables"].clear()
-    b.gs["dollars"] = 5
+    assert len(b.run.cards("consumables")) == 2
+    b.run.write("areas.consumables", [])
+    b.run.write("game.dollars", 5)
     b.play(*b.cards("S_6", "H_6"))
-    assert not b.gs["consumables"]
-    b.gs["dollars"] = 0
+    assert not b.run.cards("consumables")
+    b.run.write("game.dollars", 0)
     b.play(*b.cards("S_7", "H_7"))
-    assert len(b.gs["consumables"]) == 2
+    assert len(b.run.cards("consumables")) == 2
 
 
 def test_superposition_counts_a_debuffed_ace() -> None:
@@ -419,16 +389,16 @@ def test_superposition_counts_a_debuffed_ace() -> None:
     straight = b.cards("S_A", "D_2", "H_3", "C_4", "D_5")
     assert straight[0].debuff
     b.play(*straight)
-    assert len(b.gs["consumables"]) == 1
+    assert len(b.run.cards("consumables")) == 1
 
 
 def test_vagabond_ignores_the_dollar_buffer() -> None:
     """Vagabond reads G.GAME.dollars alone (card.lua:3744): the Gold Seals scored earlier in the
     hand do not lift it over $4."""
     b = Board("BB_VAGABOND_BUFFER", "j_vagabond")
-    b.gs["dollars"] = 4
+    b.run.write("game.dollars", 4)
     b.play(*b.cards("S_5", "H_5", seal="Gold"))
-    assert len(b.gs["consumables"]) == 1
+    assert len(b.run.cards("consumables")) == 1
 
 
 def test_creators_need_a_free_slot() -> None:
@@ -436,9 +406,9 @@ def test_creators_need_a_free_slot() -> None:
     b = Board("BB_FULL_SLOTS", "j_superposition", "j_seance", "j_vagabond")
     b.add("c_pluto")
     b.add("c_mercury")
-    b.gs["dollars"] = 0
+    b.run.write("game.dollars", 0)
     b.play(*b.cards("H_A", "H_2", "H_3", "H_4", "H_5"))
-    assert [c.center_key for c in b.gs["consumables"]] == ["c_pluto", "c_mercury"]
+    assert b.run.keys("consumables") == ["c_pluto", "c_mercury"]
 
 
 # ---------------------------------------------------------------------------
@@ -547,7 +517,7 @@ def test_obelisk_grows_and_resets() -> None:
     """Obelisk (card.lua:3543-3562): +0.2 when another visible hand was played as often, back
     to X1 when the played hand is the most played; Brainstorm copies its X."""
     b = Board("BB_OBELISK", "j_obelisk", "j_brainstorm")
-    b.engine.apply({"op": "set", "hands_left": 6})
+    b.run.op({"op": "set", "hands_left": 6})
     obelisk = b.joker("j_obelisk")
     b.play(*b.cards("S_5", "H_5"))  # Pair 1: the most played, already X1
     assert obelisk.ability["x_mult"] == 1
@@ -566,7 +536,8 @@ def test_ice_cream_melts() -> None:
     """Ice Cream: -5 Chips after each hand, melting when that reaches 0 (card.lua:3571-3600);
     its Blueprint copy scores the chips but never decays it."""
     b = Board("BB_ICE_CREAM", "j_blueprint", "j_ice_cream")
-    b.joker("j_ice_cream").ability["extra"]["chips"] = 10
+    with b.run.edit_card(b.joker("j_ice_cream")) as card:
+        card["ability"]["extra"]["chips"] = 10
     b.play(*b.cards("S_5", "H_5"))
     assert b.joker("j_ice_cream").ability["extra"]["chips"] == 5
     b.play(*b.cards("S_6", "H_6"))
@@ -577,9 +548,10 @@ def test_popcorn_is_eaten_at_the_end_of_the_round() -> None:
     """Popcorn: -4 Mult at the end of each round, eaten when that reaches 0
     (card.lua:2945-2974)."""
     b = Board("BB_POPCORN", "j_popcorn", "j_blueprint", "j_popcorn")
-    b.joker("j_popcorn", 1).ability["mult"] = 4
+    with b.run.edit_card(b.joker("j_popcorn", 1)) as card:
+        card["ability"]["mult"] = 4
     b.win_with(*b.cards("S_5", "H_5"))
-    assert [j.ability["mult"] for j in b.gs["jokers"] if j.center_key == "j_popcorn"] == [16]
+    assert [j.ability["mult"] for j in b.run.cards("jokers") if j.key == "j_popcorn"] == [16]
 
 
 # ---------------------------------------------------------------------------
@@ -594,7 +566,7 @@ def test_midas_mask_gilds_the_scoring_face_cards() -> None:
     b.play(*b.cards("S_5", "H_5"))
     faces = b.cards("S_K", "H_K", "D_K", "C_2")
     b.play(*faces)
-    assert [c.center_key for c in faces] == ["m_gold", "m_gold", "m_gold", "c_base"]
+    assert [c.key for c in faces] == ["m_gold", "m_gold", "m_gold", "c_base"]
     assert faces[0].ability["hands_played_at_create"] == 1
 
 
@@ -603,7 +575,7 @@ def test_midas_mask_skips_debuffed_faces() -> None:
     b = Board("BB_MIDAS_PLANT", "j_midas_mask", boss="bl_plant")
     faces = b.cards("S_Q", "H_Q")
     b.play(*faces)
-    assert [c.center_key for c in faces] == ["c_base", "c_base"]
+    assert [c.key for c in faces] == ["c_base", "c_base"]
 
 
 def test_midas_mask_with_pareidolia_gilds_a_stone() -> None:
@@ -612,7 +584,7 @@ def test_midas_mask_with_pareidolia_gilds_a_stone() -> None:
     played = b.cards("S_5", "H_5")
     played.append(b.add("D_9", enhancement="m_stone"))
     b.play(*played)
-    assert [c.center_key for c in played] == ["m_gold", "m_gold", "m_gold"]
+    assert [c.key for c in played] == ["m_gold", "m_gold", "m_gold"]
 
 
 def test_midas_mask_under_the_pillar() -> None:
@@ -622,7 +594,7 @@ def test_midas_mask_under_the_pillar() -> None:
     b = Board("BB_MIDAS_PILLAR", "j_midas_mask", boss="bl_pillar")
     jacks, twos = b.cards("S_J", "H_J"), b.cards("S_2", "H_2")
     b.play(*jacks, *twos)
-    assert [c.center_key for c in jacks] == ["m_gold", "m_gold"]
+    assert [c.key for c in jacks] == ["m_gold", "m_gold"]
     assert not any(c.debuff or c.ability.get("played_this_ante") for c in jacks)
     assert all(c.ability.get("played_this_ante") for c in twos)
 
@@ -639,7 +611,7 @@ def test_vampire_drains_the_enhanced_cards() -> None:
     ]
     b.play(*played)
     assert b.joker("j_vampire").ability["x_mult"] == 1 + 0.1 * 3
-    assert all(c.center_key == "c_base" for c in played)
+    assert all(c.key == "c_base" for c in played)
     assert played[0].ability["hands_played_at_create"] == 0
     b.play(*b.cards("S_9", "H_9"))
 
@@ -650,7 +622,7 @@ def test_midas_mask_then_vampire() -> None:
     b = Board("BB_MIDAS_VAMPIRE", "j_midas_mask", "j_vampire")
     kings = b.cards("S_K", "H_K")
     b.play(*kings)
-    assert [c.center_key for c in kings] == ["c_base", "c_base"]
+    assert [c.key for c in kings] == ["c_base", "c_base"]
     assert b.joker("j_vampire").ability["x_mult"] == 1 + 0.1 * 2
 
 
@@ -661,7 +633,7 @@ def test_vampire_skips_debuffed_cards() -> None:
     spade, heart = b.add("S_5", enhancement="m_bonus"), b.add("H_5", enhancement="m_bonus")
     assert spade.debuff
     b.play(spade, heart)
-    assert (spade.center_key, heart.center_key) == ("m_bonus", "c_base")
+    assert (spade.key, heart.key) == ("m_bonus", "c_base")
 
 
 def test_vampire_drains_a_stone_under_the_goad() -> None:
@@ -670,7 +642,7 @@ def test_vampire_drains_a_stone_under_the_goad() -> None:
     b = Board("BB_VAMPIRE_GOAD", "j_vampire", boss="bl_goad")
     stone = b.add("S_2", enhancement="m_stone")
     b.play(stone, *b.cards("H_7", "D_7"))
-    assert stone.center_key == "c_base"
+    assert stone.key == "c_base"
     assert stone.debuff
 
 
@@ -690,8 +662,8 @@ def test_the_arm_preview_sets_triggered_on_a_discard() -> None:
     """Selecting a hand above level 1 under The Arm sets blind.triggered in the preview
     (parse_highlighted -> debuff_hand(check), blind.lua:550-559), and a discard keeps it."""
     b = Board("BB_ARM_PREVIEW", "j_space", boss="bl_arm")
-    b.gs["hand_levels"].level_up("Pair")
+    b.run.level_up("Pair")
     b.discard(*b.cards("S_5", "H_5"))
-    assert b.gs["blind"].triggered
+    assert b.run.read("blind.triggered")
     b.discard(b.add("S_9"))
-    assert not b.gs["blind"].triggered
+    assert not b.run.read("blind.triggered")

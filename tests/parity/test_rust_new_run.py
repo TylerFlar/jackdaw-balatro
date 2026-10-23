@@ -1,45 +1,33 @@
-"""A run started in Rust matches the oracle's new run.
+"""A run started in Rust is the oracle's new run.
 
-For every back and stake, and every challenge, ``_core._new_run`` must produce
-the same snapshot as the oracle's ``initialize_run`` at the blind-select screen.
+For every back and stake, and every challenge, at two seeds, ``Game.new`` must give the
+canonical digest the oracle's ``initialize_run`` gave at the blind-select screen
+(``tests/fixtures/new_runs.json``).
 """
 
 from __future__ import annotations
 
-import json
-
 import pytest
 
-from jackdaw import _core
-from jackdaw.engine.challenges import CHALLENGES
-from jackdaw.engine.data.prototypes import BACKS
-from tests.parity import canon
-from tests.parity.pyengine import PyEngine
-from tests.parity.rust_step import plain
+from jackdaw.core import Game
+from tests.parity import frozen
 
-_BACKS = sorted(k for k in BACKS if k != "b_challenge")
-_STAKES = range(1, 9)
-_CHALLENGES = sorted(CHALLENGES)
+_RUNS = frozen.load("new_runs.json")
+_BACKS = sorted({k.split("/")[0] for k in _RUNS if k.startswith("b_")})
+_CHALLENGES = sorted({k.split("/")[0] for k in _RUNS if k.startswith("c_")})
 _SEEDS = ("NEWRUN01", "7LB2WVPK")
 
 
-def _check(back: str, stake: int, seed: str, challenge: str | None) -> list[str]:
-    start = {"back": back, "stake": stake, "seed": seed, "challenge": challenge}
-    py = plain(PyEngine(start).snapshot())
-    rs = canon.from_json_compatible(json.loads(_core._new_run(back, stake, seed, challenge)))
-    return canon.diff(py, rs)
-
-
 @pytest.mark.parametrize("back", _BACKS)
-@pytest.mark.parametrize("stake", _STAKES)
+@pytest.mark.parametrize("stake", range(1, 9))
 def test_new_run_matches_the_oracle(back: str, stake: int) -> None:
     for seed in _SEEDS:
-        found = _check(back, stake, seed, None)
-        assert not found, f"{back} stake {stake} {seed}: " + "; ".join(found[:8])
+        got = Game.new(back, stake, seed).state_hash()
+        assert got == _RUNS[f"{back}/{stake}/{seed}"], f"{back} stake {stake} {seed}"
 
 
 @pytest.mark.parametrize("challenge", _CHALLENGES)
 def test_challenge_run_matches_the_oracle(challenge: str) -> None:
     for seed in _SEEDS:
-        found = _check("b_challenge", 1, seed, challenge)
-        assert not found, f"{challenge} {seed}: " + "; ".join(found[:8])
+        got = Game.new("b_challenge", 1, seed, challenge).state_hash()
+        assert got == _RUNS[f"{challenge}/{seed}"], f"{challenge} {seed}"
