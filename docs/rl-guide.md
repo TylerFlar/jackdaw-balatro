@@ -21,7 +21,7 @@ obs, mask, info = env.reset()
 terminated = False
 truncated = False
 
-while not (terminated or truncated): 
+while not (terminated or truncated):
     action = agent.act(obs, mask, info)
     obs, terminated, truncated, mask, info = env.step(action)
 ```
@@ -184,7 +184,7 @@ for episode in range(10):
     terminated = False
     truncated = False
 
-    while not (terminated or truncated): 
+    while not (terminated or truncated):
         action = agent.act(
             obs={"global": obs.global_context, **obs.entities},
             action_mask=mask,

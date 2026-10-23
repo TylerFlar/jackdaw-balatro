@@ -445,13 +445,15 @@ class TestFixtureOracle:
     """Validate Python RNG against pre-generated Lua fixture (TESTSEED)."""
 
     @pytest.fixture(scope="class")
-    def fixture(self) -> dict:
+    @classmethod
+    def fixture(cls) -> dict:
         if not FIXTURE_PATH.exists():
             pytest.skip(f"Fixture not found: {FIXTURE_PATH}")
         return load_fixture()
 
     @pytest.fixture(scope="class")
-    def prng(self) -> PseudoRandom:
+    @classmethod
+    def prng(cls) -> PseudoRandom:
         return PseudoRandom("TESTSEED")
 
     def test_hashed_seed(self, fixture):
@@ -547,7 +549,8 @@ class TestLiveLuaOracle:
     """Run the Lua oracle script live and validate against Python."""
 
     @pytest.fixture(scope="class")
-    def lua_path(self):
+    @classmethod
+    def lua_path(cls):
         path = find_lua()
         if not path:
             pytest.skip(
@@ -557,7 +560,8 @@ class TestLiveLuaOracle:
         return path
 
     @pytest.fixture(scope="class")
-    def oracle_data(self, lua_path) -> dict:
+    @classmethod
+    def oracle_data(cls, lua_path) -> dict:
         """Run oracle for TESTSEED and parse output."""
         return run_lua_oracle("TESTSEED", lua_path)
 
@@ -638,7 +642,8 @@ class TestFullPipelineOracle:
     """
 
     @pytest.fixture(scope="class")
-    def pipeline(self) -> dict:
+    @classmethod
+    def pipeline(cls) -> dict:
         if not PIPELINE_FIXTURE.exists():
             pytest.skip(f"Pipeline fixture not found: {PIPELINE_FIXTURE}")
         with open(PIPELINE_FIXTURE) as f:

@@ -502,7 +502,8 @@ class TestScoringOracle:
     """Validate Python scoring against Lua ground truth."""
 
     @pytest.fixture(scope="class")
-    def fixture(self) -> list[dict]:
+    @classmethod
+    def fixture(cls) -> list[dict]:
         if not FIXTURE_PATH.exists():
             pytest.skip(f"Fixture not found: {FIXTURE_PATH}")
         with open(FIXTURE_PATH) as f:

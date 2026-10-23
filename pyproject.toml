@@ -8,6 +8,8 @@ license = "MIT"
 authors = [{name = "Tyler Flar"}]
 classifiers = [
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = ["gymnasium>=1.0", "numpy>=1.24"]
@@ -34,10 +36,10 @@ Repository = "https://github.com/TylerFlar/jackdaw-balatro"
 [dependency-groups]
 dev = [
     "httpx>=0.28.1",
-    "lupa>=2.6",
-    "pytest>=8.0",
-    "pytest-cov>=6.0",
-    "ruff>=0.15.6",
+    "lupa>=2.8",
+    "pytest>=9.1",
+    "pytest-cov>=7.1",
+    "ruff>=0.17.2",
 ]
 
 [tool.pytest.ini_options]
@@ -55,3 +57,8 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
+
+[tool.ruff.format]
+# Ruff 0.17 also formats Python blocks in Markdown; the docs keep their
+# hand-aligned comments.
+exclude = ["*.md"]
