@@ -250,14 +250,16 @@ class TestFixtureOracle:
     """Validate Python evaluator against pre-generated Lua output."""
 
     @pytest.fixture(scope="class")
-    def fixture(self) -> dict:
+    @classmethod
+    def fixture(cls) -> dict:
         if not FIXTURE_PATH.exists():
             pytest.skip(f"Fixture not found: {FIXTURE_PATH}")
         with open(FIXTURE_PATH) as f:
             return json.load(f)
 
     @pytest.fixture(scope="class")
-    def hands(self) -> dict:
+    @classmethod
+    def hands(cls) -> dict:
         return _build_test_hands()
 
     def test_all_detected_hands_match(self, fixture, hands):
@@ -326,14 +328,16 @@ class TestFixtureOracle:
 
 class TestLiveOracle:
     @pytest.fixture(scope="class")
-    def lua_path(self):
+    @classmethod
+    def lua_path(cls):
         path = _find_lua()
         if not path:
             pytest.skip("No Lua interpreter found")
         return path
 
     @pytest.fixture(scope="class")
-    def live_data(self, lua_path) -> dict:
+    @classmethod
+    def live_data(cls, lua_path) -> dict:
         result = subprocess.run(
             [lua_path, str(ORACLE_SCRIPT)],
             cwd=str(PROJECT_ROOT),

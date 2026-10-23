@@ -44,25 +44,9 @@ while not info.get("done"):
     obs, terminated, truncated, mask, info = env.step(action)
 ```
 
-## Training with SB3
+## Gymnasium Wrapper
 
-Jackdaw includes a Gymnasium-compatible wrapper and a ready-to-run MaskablePPO training script. Install the training extras (PyTorch, Stable-Baselines3, sb3-contrib):
-
-```bash
-uv sync --extra train
-```
-
-Train an agent:
-
-```bash
-python scripts/train_ppo.py --total-timesteps 500000
-```
-
-Monitor in tensorboard (`balatro/mean_ante_reached`, `balatro/win_rate`, etc.):
-
-```bash
-tensorboard --logdir runs/balatro_ppo
-```
+`BalatroGymnasiumEnv` exposes the game as a flat `Discrete(500)` action space with an `action_masks()` method, so it works with action-masking RL libraries such as sb3-contrib's MaskablePPO. Jackdaw doesn't depend on any RL library; install the one you use in your own project.
 
 See the [RL Project Guide](https://tylerflar.github.io/jackdaw-balatro/rl-guide) for details on the gymnasium wrapper, reward shaping, and writing custom agents.
 
@@ -103,8 +87,6 @@ jackdaw/
 
   bridge/           Validation bridge to live Balatro via BalatroBot
   cli/              CLI tools & 250+ validation scenarios
-scripts/
-  train_ppo.py      MaskablePPO training with tensorboard logging
 ```
 
 ## CLI
