@@ -182,6 +182,11 @@ class JokerContext:
     smeared: bool = False
     pareidolia: bool = False
 
+    # G.GAME.dollar_buffer: money already earned in the hand being evaluated
+    # but not yet eased into G.GAME.dollars (Bull / Bootstraps read
+    # dollars + dollar_buffer, card.lua:3936, 4046).  Set by score_hand.
+    dollar_buffer: int = 0
+
     # Shared game snapshot (built once per score_hand call)
     game: GameSnapshot = field(default_factory=lambda: _DEFAULT_GAME)
 
@@ -1107,11 +1112,13 @@ def _steel_joker(card: Card, ctx: JokerContext) -> JokerResult | None:
 
 @register("j_bull")
 def _bull(card: Card, ctx: JokerContext) -> JokerResult | None:
-    """Bull: +2 chips per $1 held. Source: card.lua:3936."""
-    if ctx.joker_main and ctx.game.money > 0:
-        return JokerResult(
-            chip_mod=card.ability.get("extra", 2) * max(0, ctx.game.money),
-        )
+    """Bull: +2 chips per $1 held, counting money already earned this hand.
+
+    Source: card.lua:3936-3942 — reads G.GAME.dollars + G.GAME.dollar_buffer.
+    """
+    money = ctx.game.money + ctx.dollar_buffer
+    if ctx.joker_main and money > 0:
+        return JokerResult(chip_mod=card.ability.get("extra", 2) * max(0, money))
     return None
 
 
@@ -1220,11 +1227,15 @@ def _seeing_double(card: Card, ctx: JokerContext) -> JokerResult | None:
 
 @register("j_bootstraps")
 def _bootstraps(card: Card, ctx: JokerContext) -> JokerResult | None:
-    """Bootstraps: +2 mult per $5 held. Source: card.lua:4046."""
+    """Bootstraps: +2 mult per $5 held, counting money already earned this hand.
+
+    Source: card.lua:4046-4051 — floor((G.GAME.dollars +
+    G.GAME.dollar_buffer) / extra.dollars).
+    """
     if ctx.joker_main:
         extra = card.ability.get("extra", {})
         per = extra.get("dollars", 5)
-        buckets = ctx.game.money // per if per > 0 else 0
+        buckets = (ctx.game.money + ctx.dollar_buffer) // per if per > 0 else 0
         if buckets >= 1:
             return JokerResult(mult_mod=extra.get("mult", 2) * buckets)
     return None
@@ -1419,13 +1430,14 @@ def _trading(card: Card, ctx: JokerContext) -> JokerResult | None:
 
 @register("j_todo_list")
 def _to_do_list(card: Card, ctx: JokerContext) -> JokerResult | None:
-    """To Do List: +$4 if hand matches to_do_poker_hand. Source: card.lua:3491.
+    """To Do List: +$4 if the scored hand is to_do_poker_hand.
 
-    The target rolls at creation (card.lua:311, wired in create_card) and
-    re-rolls at end of round from a pool excluding the current hand
-    (card.lua:2975).  Found dead by lockstep: nothing ever wrote the field.
+    Pays in the ``before`` pass (card.lua:3491-3499: ease_dollars plus
+    dollar_buffer), ahead of every joker_main read.  The target rolls at
+    creation (card.lua:311, wired in create_card) and re-rolls at end of
+    round from a pool excluding the current hand (card.lua:2975).
     """
-    if ctx.joker_main and ctx.scoring_name:
+    if ctx.before and ctx.scoring_name:
         target = card.ability.get("to_do_poker_hand")
         if target and ctx.scoring_name == target:
             extra = card.ability.get("extra", {})

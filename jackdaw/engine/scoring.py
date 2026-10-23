@@ -674,6 +674,9 @@ def score_hand(
             base_chips, base_mult = hand_levels.get(hand_type)
             hand_chips = float(base_chips)
             mult = float(base_mult)
+        # To Do List pays here (card.lua:3491-3499)
+        if result and result.dollars:
+            dollars += result.dollars
         if result and result.extra and "create" in result.extra:
             create = result.extra["create"]
             if create.get("type") == "playing_card_copy":
@@ -882,10 +885,14 @@ def score_hand(
             hand_chips += edition.get("chip_mod", 0)
             mult += edition.get("mult_mod", 0)
 
-        # 9b: Main joker effect
+        # 9b: Main joker effect.  `dollars` is everything this evaluation
+        # has paid so far, i.e. G.GAME.dollar_buffer: every scoring payout
+        # adds itself to it (card.lua:1084-1087, 2739, 3152, 3178, 3226,
+        # 3312, 3493, 3722) and only an event after the hand zeroes it.
         if i < n_jokers:
             if main_ctx is None:
                 main_ctx = JokerContext(joker_main=True, **_shared)
+            main_ctx.dollar_buffer = dollars
             result = calculate_joker(card, main_ctx)
         else:
             result = _planet_joker_main(card, hand_type, gs)

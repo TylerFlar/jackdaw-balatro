@@ -160,6 +160,47 @@ class TestEffectFlags:
         assert gs["hand_levels"]["Flush"].level == 2
 
 
+class TestDollarBuffer:
+    """Money earned while a hand is evaluated is eased in later events, so
+    G.GAME.dollars is frozen during evaluate_play; every scoring payout also
+    adds itself to G.GAME.dollar_buffer (get_p_dollars card.lua:1084-1087;
+    Golden Ticket 3152, Business Card 3178, Rough Gem 3226, Reserved Parking
+    3312, To Do List 3493, Matador 2739/3722) until an event after the hand
+    zeroes it.  Bull and Bootstraps read dollars + dollar_buffer (card.lua:3936,
+    4046)."""
+
+    def test_bull_sees_money_scored_earlier_in_the_hand(self):
+        gs = select_blind(new_run("AUDIT_BULL"))
+        give_joker(gs, "j_bull")
+        card = give_card(gs, "S_2", seal="Gold")
+        dollars = gs["dollars"]
+        play(gs, card)
+        # High Card L1 5 chips + 2; Bull +2 per $ of (dollars + the Gold Seal's $3)
+        assert gs["last_score_result"].total == 5 + 2 + 2 * (dollars + 3)
+        assert gs["dollars"] == dollars + 3
+
+    def test_bootstraps_sees_money_scored_earlier_in_the_hand(self):
+        gs = select_blind(new_run("AUDIT_BOOTSTRAPS"))
+        give_joker(gs, "j_bootstraps")
+        card = give_card(gs, "S_2", seal="Gold")
+        assert gs["dollars"] == 4  # 4 // 5 == 0, (4 + 3) // 5 == 1
+        play(gs, card)
+        assert gs["last_score_result"].total == (5 + 2) * (1 + 2)
+
+    def test_to_do_list_pays_before_scoring(self):
+        """To Do List pays in the ``before`` pass (card.lua:3491-3499), so a Bull
+        to its left already sees the $4."""
+        gs = select_blind(new_run("AUDIT_TODO_BEFORE"))
+        give_joker(gs, "j_bull")
+        todo = give_joker(gs, "j_todo_list")
+        todo.ability["to_do_poker_hand"] = "High Card"
+        card = give_card(gs, "S_2")
+        dollars = gs["dollars"]
+        play(gs, card)
+        assert gs["last_score_result"].total == 5 + 2 + 2 * (dollars + 4)
+        assert gs["dollars"] == dollars + 4
+
+
 class TestMrBones:
     def test_save_pays_no_blind_reward(self):
         """evaluate_round pays the blind only when G.GAME.chips >=
