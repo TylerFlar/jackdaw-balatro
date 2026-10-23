@@ -94,12 +94,115 @@ pub fn subsample_indices(
     out.extend((0..n).filter(|&i| picked[i] == keep_picked));
 }
 
+/// The card selections of one enumeration: which cards, how many, which card each must hold.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ComboKey {
+    /// The legal cards, as bits by hand index.
+    legal: u128,
+    lower: usize,
+    upper: usize,
+    required: Option<usize>,
+}
+
+/// Selections already enumerated (a table asks for the same ones for PlayHand and Discard, and
+/// the hand rarely changes size between steps).
+#[derive(Clone, Debug, Default)]
+struct ComboCache {
+    entries: Vec<(ComboKey, Vec<Selection>)>,
+    next: usize,
+    /// Selections for a hand too large to key (128 cards or more), never cached.
+    spare: Vec<Selection>,
+}
+
+const COMBO_CACHE_SIZE: usize = 8;
+
+impl ComboCache {
+    /// The selections of `lower..=upper` of `legal` (by size, then lexicographically) that hold
+    /// `required`, enumerated once per key.
+    fn get(
+        &mut self,
+        legal: &[usize],
+        lower: usize,
+        upper: usize,
+        required: Option<usize>,
+    ) -> &[Selection] {
+        let bits = legal
+            .iter()
+            .try_fold(0u128, |acc, &i| (i < 128).then(|| acc | (1u128 << i)));
+        let Some(bits) = bits else {
+            self.spare.clear();
+            combinations_into(legal, lower, upper, required, &mut self.spare);
+            return &self.spare;
+        };
+        let key = ComboKey {
+            legal: bits,
+            lower,
+            upper,
+            required,
+        };
+        if let Some(i) = self.entries.iter().position(|(k, _)| *k == key) {
+            return &self.entries[i].1;
+        }
+        let slot = if self.entries.len() < COMBO_CACHE_SIZE {
+            self.entries.push((key, Vec::new()));
+            self.entries.len() - 1
+        } else {
+            let slot = self.next;
+            self.next = (self.next + 1) % COMBO_CACHE_SIZE;
+            self.entries[slot].0 = key;
+            slot
+        };
+        let out = &mut self.entries[slot].1;
+        out.clear();
+        combinations_into(legal, lower, upper, required, out);
+        out
+    }
+}
+
+/// The `lower..=upper`-card selections of `legal`, by size then lexicographically, those holding
+/// `required` only, appended to `out`.
+fn combinations_into(
+    legal: &[usize],
+    lower: usize,
+    upper: usize,
+    required: Option<usize>,
+    out: &mut Vec<Selection>,
+) {
+    let n = legal.len();
+    let mut idx = [0usize; MAX_SELECTION];
+    for k in lower..=upper.min(MAX_SELECTION) {
+        for (j, slot) in idx.iter_mut().take(k).enumerate() {
+            *slot = j;
+        }
+        loop {
+            let mut sel = Selection::default();
+            for &p in &idx[..k] {
+                sel.push(legal[p]);
+            }
+            if required.is_none_or(|r| sel.as_slice().contains(&(r as u8))) {
+                out.push(sel);
+            }
+            let mut i = k;
+            while i > 0 && idx[i - 1] == i - 1 + n - k {
+                i -= 1;
+            }
+            if i == 0 {
+                break;
+            }
+            idx[i - 1] += 1;
+            for j in i..k {
+                idx[j] = idx[j - 1] + 1;
+            }
+        }
+    }
+}
+
 /// The flat action table and its scratch buffers, reused across enumerations.
 #[derive(Clone, Debug, Default)]
 pub struct ActionTable {
     actions: Vec<FactoredAction>,
     legal_cards: Vec<usize>,
-    combos: Vec<Selection>,
+    combos: ComboCache,
     picked: Vec<bool>,
     chosen: Vec<usize>,
 }
@@ -244,52 +347,25 @@ impl ActionTable {
         let n = self.legal_cards.len();
         let upper = n.min(max_select);
         let lower = min_select.min(upper);
-        self.combos.clear();
-        let mut idx = [0usize; MAX_SELECTION];
-        for k in lower..=upper.min(MAX_SELECTION) {
-            // Lexicographic k-combinations of positions 0..n.
-            for (j, slot) in idx.iter_mut().take(k).enumerate() {
-                *slot = j;
-            }
-            loop {
-                let mut sel = Selection::default();
-                for &p in &idx[..k] {
-                    sel.push(self.legal_cards[p]);
-                }
-                if required.is_none_or(|r| sel.as_slice().contains(&(r as u8))) {
-                    self.combos.push(sel);
-                }
-                let mut i = k;
-                while i > 0 && idx[i - 1] == i - 1 + n - k {
-                    i -= 1;
-                }
-                if i == 0 {
-                    break;
-                }
-                idx[i - 1] += 1;
-                for j in i..k {
-                    idx[j] = idx[j - 1] + 1;
-                }
-            }
-        }
+        let ActionTable {
+            actions,
+            legal_cards,
+            combos,
+            picked,
+            chosen,
+        } = self;
+        let combos = combos.get(legal_cards, lower, upper, required);
         let entity_target = entity.map(|e| e as u32);
         let make = |sel: Selection| FactoredAction {
             action_type: t,
             entity_target,
             card_target: Some(sel),
         };
-        if self.combos.len() <= CARD_COMBO_BUDGET {
-            self.actions.extend(self.combos.iter().map(|&s| make(s)));
+        if combos.len() <= CARD_COMBO_BUDGET {
+            actions.extend(combos.iter().map(|&s| make(s)));
         } else {
-            subsample_indices(
-                self.combos.len(),
-                CARD_COMBO_BUDGET,
-                rng,
-                &mut self.picked,
-                &mut self.chosen,
-            );
-            self.actions
-                .extend(self.chosen.iter().map(|&i| make(self.combos[i])));
+            subsample_indices(combos.len(), CARD_COMBO_BUDGET, rng, picked, chosen);
+            actions.extend(chosen.iter().map(|&i| make(combos[i])));
         }
     }
 }

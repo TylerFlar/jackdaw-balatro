@@ -15,8 +15,14 @@ crate-type = ["cdylib"]
 jackdaw-bot.workspace = true
 jackdaw-core.workspace = true
 jackdaw-env.workspace = true
+# The extension's global allocator: engine steps clone the game, and with many threads
+# (BalatroVectorEnv) the system allocator becomes the bottleneck.
+mimalloc = { version = "0.1.52", default-features = false, optional = true }
 pyo3 = { version = "0.30.1", features = ["abi3-py312"] }
 serde_json.workspace = true
+
+[features]
+default = ["mimalloc"]
 
 [lints]
 workspace = true

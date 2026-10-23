@@ -137,11 +137,13 @@ class BalatroVectorEnv(VectorEnv):
             for _ in range(num_envs)
         ]
         self._core = _core.VectorEnv(inits, max_steps, end_on_win, kind, weights, num_threads)
+        # Each step writes fresh observation and mask arrays (copy=True) or reuses these.
         self._obs = np.zeros((num_envs, OBS_LEN), dtype=np.float32)
         self._masks = np.zeros((num_envs, MAX_ACTIONS), dtype=np.bool_)
         self._stats = np.zeros((num_envs, 9), dtype=np.float64)
         self._obs_views = batched_gym_obs(self._obs)
-        self._autoreset = np.zeros(num_envs, dtype=np.bool_)
+        # Sub-envs whose episode ended on the last step: the next step resets them.
+        self._pending: list[int] = []
         self._reset_once = False
 
     # ------------------------------------------------------------------
@@ -165,30 +167,31 @@ class BalatroVectorEnv(VectorEnv):
             if len(seeds) != self.num_envs:
                 raise ValueError(f"expected {self.num_envs} seeds, got {len(seeds)}")
         resets = [self._reset_tuple(i, s) for i, s in enumerate(seeds)]
-        self._core.reset(resets, self._obs, self._masks.view(np.uint8))
-        self._autoreset[:] = False
+        obs, masks = self._outputs()
+        self._core.reset(resets, obs, masks.view(np.uint8))
+        self._pending = []
         self._reset_once = True
-        return self._observations(), {"action_mask": self._masks.copy()}
+        return self._observations(obs), {"action_mask": masks}
 
     def step(
         self, actions: Any
     ) -> tuple[dict[str, np.ndarray], np.ndarray, np.ndarray, np.ndarray, dict[str, Any]]:
         """Step every sub-env with its action (an index into its action table); a sub-env
-        whose episode ended on the last step starts a new one instead."""
+        whose episode ended on the last step starts a new one instead (its action is
+        ignored: pass anything)."""
         if not self._reset_once:
             raise RuntimeError("BalatroVectorEnv: call reset() before step()")
         actions = np.ascontiguousarray(actions, dtype=np.int64).reshape(self.num_envs)
-        resets = [
-            self._reset_tuple(i, None) if self._autoreset[i] else None for i in range(self.num_envs)
-        ]
-        self._core.step(actions, resets, self._obs, self._masks.view(np.uint8), self._stats)
+        resets = [(i, self._reset_tuple(i, None)) for i in self._pending]
+        obs, masks = self._outputs()
+        self._core.step(actions, resets, obs, masks.view(np.uint8), self._stats)
         stats = self._stats
         rewards = stats[:, _REWARD].copy()
         terminated = stats[:, _TERMINATED] != 0
         truncated = stats[:, _TRUNCATED] != 0
         ended = stats[:, _ENDED] != 0
-        self._autoreset = ended.copy()
-        info: dict[str, Any] = {"action_mask": self._masks.copy()}
+        self._pending = np.flatnonzero(ended).tolist()
+        info: dict[str, Any] = {"action_mask": masks}
         if ended.any():
             info["balatro/ante_reached"] = stats[:, _ANTE].astype(np.int64)
             info["_balatro/ante_reached"] = ended
@@ -201,7 +204,7 @@ class BalatroVectorEnv(VectorEnv):
                 if flags.any():
                     info[key] = flags
                     info["_" + key] = flags
-        return self._observations(), rewards, terminated, truncated, info
+        return self._observations(obs), rewards, terminated, truncated, info
 
     def action_masks(self) -> np.ndarray:
         """``(num_envs, 500)`` bool: each sub-env's legal actions (for MaskablePPO)."""
@@ -239,7 +242,15 @@ class BalatroVectorEnv(VectorEnv):
         rng_seed = None if seed is None else sampler_seed(seed)
         return (back, stake, run_seed, None, rng_seed)
 
-    def _observations(self) -> dict[str, np.ndarray]:
+    def _outputs(self) -> tuple[np.ndarray, np.ndarray]:
+        """The arrays the next step writes: fresh ones (copy=True, so what was handed out stays
+        as it was), else the env's own."""
         if self.copy:
-            return {k: v.copy() for k, v in self._obs_views.items()}
+            self._obs = np.empty((self.num_envs, OBS_LEN), dtype=np.float32)
+            self._masks = np.empty((self.num_envs, MAX_ACTIONS), dtype=np.bool_)
+        return self._obs, self._masks
+
+    def _observations(self, obs: np.ndarray) -> dict[str, np.ndarray]:
+        if self.copy:
+            return batched_gym_obs(obs)
         return self._obs_views

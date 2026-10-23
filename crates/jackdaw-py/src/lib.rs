@@ -9,6 +9,12 @@
 mod env;
 mod gym;
 
+/// mimalloc for every Rust allocation in the extension (Python's own allocations are
+/// unaffected): it keeps the vector env's worker threads from contending on the system heap.
+#[cfg(feature = "mimalloc")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use jackdaw_core::area::AreaId;
 use jackdaw_env::mask::ActionMask;
 use jackdaw_env::observation::{Encoder, Observation};

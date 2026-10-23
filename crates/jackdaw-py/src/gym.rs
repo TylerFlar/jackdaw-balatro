@@ -7,7 +7,7 @@ use jackdaw_env::env::{EnvConfig, GYM_OBS_LEN, GymEnv as CoreGymEnv, StepError, 
 use jackdaw_env::gym::MAX_ACTIONS;
 use jackdaw_env::reward::{Reward, ShapedWeights, StateSummary};
 use jackdaw_env::vector::{EnvOut, ResetSpec, VectorEnv as CoreVectorEnv};
-use pyo3::buffer::PyBuffer;
+use pyo3::buffer::{Element, PyBuffer};
 use pyo3::exceptions::{PyIndexError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyByteArray;
@@ -311,18 +311,39 @@ impl GymEnv {
     }
 }
 
+/// A caller's buffer of `len` items as a mutable slice, for the worker threads to write.
+///
+/// The buffer must be writable and C-contiguous with exactly `len` items (`PyBuffer<T>` has
+/// checked their format, size and alignment against `T`). The slice borrows `buf` mutably, so
+/// one export gives one slice at a time.
+fn writable<'a, T: Element>(
+    buf: &'a mut PyBuffer<T>,
+    len: usize,
+    what: &str,
+) -> PyResult<&'a mut [T]> {
+    if buf.readonly() || !buf.is_c_contiguous() || buf.item_count() != len {
+        return Err(value_error(format!(
+            "{what}: expected a writable C-contiguous buffer of {len} items"
+        )));
+    }
+    // SAFETY: the export held in `buf` keeps the memory alive and in place, and it holds
+    // exactly `len` initialised, aligned items of `T`, any bit pattern of which is valid. No
+    // other Rust reference to it exists while the slice lives (it borrows `buf` mutably). The
+    // memory is a numpy array the vector env owns; Python code could only reach it from another
+    // thread while the GIL is released, the same contract numpy's own GIL-free loops have.
+    Ok(unsafe { std::slice::from_raw_parts_mut(buf.buf_ptr().cast::<T>(), len) })
+}
+
 /// Envs stepped together on worker threads, the GIL released (`BalatroVectorEnv`'s engine).
 ///
-/// Outputs go to caller-owned buffers: observations (``num_envs x 614`` float32), action masks
-/// (``num_envs x 500`` bytes) and per-env stats (``num_envs x 9`` float64: reward, terminated,
-/// truncated, episode_end, ante_reached, rounds_beaten, won, not_ported, refused).
+/// The worker threads write straight into caller-owned buffers: observations (``num_envs x
+/// 614`` float32), action masks (``num_envs x 500`` bytes) and per-env stats (``num_envs x 9``
+/// float64: reward, terminated, truncated, episode_end, ante_reached, rounds_beaten, won,
+/// not_ported, refused).
 #[pyclass(name = "VectorEnv", module = "jackdaw._core")]
 pub struct VectorEnv {
     inner: CoreVectorEnv,
-    obs: Vec<f32>,
-    masks: Vec<u8>,
     out: Vec<EnvOut>,
-    stats: Vec<f64>,
 }
 
 /// Columns of the stats buffer.
@@ -354,10 +375,7 @@ impl VectorEnv {
         let n = inner.len();
         Ok(VectorEnv {
             inner,
-            obs: vec![0.0; n * GYM_OBS_LEN],
-            masks: vec![0; n * MAX_ACTIONS],
             out: vec![EnvOut::default(); n],
-            stats: vec![0.0; n * STATS],
         })
     }
 
@@ -366,41 +384,36 @@ impl VectorEnv {
         &mut self,
         py: Python<'_>,
         resets: Vec<ResetTuple>,
-        obs: PyBuffer<f32>,
-        masks: PyBuffer<u8>,
+        mut obs: PyBuffer<f32>,
+        mut masks: PyBuffer<u8>,
     ) -> PyResult<()> {
+        let n = self.inner.len();
         let specs = resets
             .iter()
             .map(reset_spec)
             .collect::<PyResult<Vec<_>>>()?;
-        if specs.len() != self.inner.len() {
+        if specs.len() != n {
             return Err(value_error("one reset per env"));
         }
-        let VectorEnv {
-            inner,
-            obs: o,
-            masks: m,
-            ..
-        } = self;
-        py.detach(|| inner.reset(&specs, o, m))
-            .map_err(value_error)?;
-        obs.copy_from_slice(py, &self.obs)?;
-        masks.copy_from_slice(py, &self.masks)?;
-        Ok(())
+        let obs = writable(&mut obs, n * GYM_OBS_LEN, "obs")?;
+        let masks = writable(&mut masks, n * MAX_ACTIONS, "masks")?;
+        let inner = &mut self.inner;
+        py.detach(|| inner.reset(&specs, obs, masks))
+            .map_err(value_error)
     }
 
-    /// Step every env: one with a reset tuple in ``resets`` starts its next run instead (its
-    /// stats are zero), every other takes its action from ``actions`` (int64, an index into its
-    /// table). Writes the observations, action masks and stats. Raises ``IndexError`` without
-    /// stepping anything when an action is past its env's table.
+    /// Step every env: the envs listed in ``resets`` as ``(env, reset tuple)`` start their next
+    /// run instead (their stats are zero), every other takes its action from ``actions``
+    /// (int64, an index into its table). Writes the observations, action masks and stats.
+    /// Raises ``IndexError`` without stepping anything when an action is past its env's table.
     fn step(
         &mut self,
         py: Python<'_>,
         actions: PyBuffer<i64>,
-        resets: Vec<Option<ResetTuple>>,
-        obs: PyBuffer<f32>,
-        masks: PyBuffer<u8>,
-        stats: PyBuffer<f64>,
+        resets: Vec<(usize, ResetTuple)>,
+        mut obs: PyBuffer<f32>,
+        mut masks: PyBuffer<u8>,
+        mut stats: PyBuffer<f64>,
     ) -> PyResult<()> {
         let n = self.inner.len();
         let actions: Vec<usize> = actions
@@ -408,39 +421,38 @@ impl VectorEnv {
             .into_iter()
             .map(|a| usize::try_from(a).map_err(|_| PyIndexError::new_err(format!("action {a}"))))
             .collect::<PyResult<_>>()?;
-        if actions.len() != n || resets.len() != n {
-            return Err(value_error("one action and one reset slot per env"));
+        if actions.len() != n {
+            return Err(value_error("one action per env"));
         }
-        let specs = resets
-            .iter()
-            .map(|r| r.as_ref().map(reset_spec).transpose())
-            .collect::<PyResult<Vec<_>>>()?;
-        let VectorEnv {
-            inner,
-            obs: o,
-            masks: m,
-            out,
-            stats: s,
-        } = self;
-        py.detach(|| inner.step(&actions, &specs, o, m, out))
-            .map_err(PyIndexError::new_err)?;
-        for (row, e) in s.as_chunks_mut::<STATS>().0.iter_mut().zip(out.iter()) {
-            *row = [
-                e.reward,
-                f64::from(u8::from(e.terminated)),
-                f64::from(u8::from(e.truncated)),
-                f64::from(u8::from(e.episode_end)),
-                e.ante_reached,
-                e.rounds_beaten as f64,
-                f64::from(u8::from(e.won)),
-                f64::from(u8::from(e.not_ported)),
-                f64::from(u8::from(e.refused)),
-            ];
+        let mut specs: Vec<Option<ResetSpec>> = vec![None; n];
+        for (i, t) in &resets {
+            let slot = specs
+                .get_mut(*i)
+                .ok_or_else(|| PyIndexError::new_err(format!("no env {i}")))?;
+            *slot = Some(reset_spec(t)?);
         }
-        obs.copy_from_slice(py, &self.obs)?;
-        masks.copy_from_slice(py, &self.masks)?;
-        stats.copy_from_slice(py, &self.stats)?;
-        Ok(())
+        let obs = writable(&mut obs, n * GYM_OBS_LEN, "obs")?;
+        let masks = writable(&mut masks, n * MAX_ACTIONS, "masks")?;
+        let stats = writable(&mut stats, n * STATS, "stats")?;
+        let VectorEnv { inner, out } = self;
+        py.detach(|| -> Result<(), String> {
+            inner.step(&actions, &specs, obs, masks, out)?;
+            for (row, e) in stats.as_chunks_mut::<STATS>().0.iter_mut().zip(out.iter()) {
+                *row = [
+                    e.reward,
+                    f64::from(u8::from(e.terminated)),
+                    f64::from(u8::from(e.truncated)),
+                    f64::from(u8::from(e.episode_end)),
+                    e.ante_reached,
+                    e.rounds_beaten as f64,
+                    f64::from(u8::from(e.won)),
+                    f64::from(u8::from(e.not_ported)),
+                    f64::from(u8::from(e.refused)),
+                ];
+            }
+            Ok(())
+        })
+        .map_err(PyIndexError::new_err)
     }
 
     /// A copy of env ``i``'s run.

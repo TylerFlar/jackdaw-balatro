@@ -4,8 +4,10 @@
 //! Each env owns its run, buffers and sampler, and writes only its own slice of the outputs, so
 //! the results don't depend on how many threads step them.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Mutex, PoisonError};
+
 use jackdaw_core::run::RunSpec;
-use rayon::prelude::*;
 
 use crate::env::{EnvConfig, GYM_OBS_LEN, GymEnv, StepError};
 use crate::gym::MAX_ACTIONS;
@@ -49,12 +51,16 @@ impl VectorEnv {
             .num_threads(threads)
             .build()
             .map_err(|e| e.to_string())?;
-        let envs = pool.install(|| {
-            resets
-                .par_iter()
-                .map(|r| GymEnv::new(&r.spec, config, r.rng_seed.unwrap_or(0)))
-                .collect::<Result<Vec<_>, _>>()
+        // Each env is built on its home thread, so its memory starts out there.
+        let mut built: Vec<Option<GymEnv>> = resets.iter().map(|_| None).collect();
+        for_each_home(&pool, built.iter_mut().zip(resets), |(slot, r)| {
+            *slot = Some(GymEnv::new(&r.spec, config, r.rng_seed.unwrap_or(0))?);
+            Ok(())
         })?;
+        let envs = built
+            .into_iter()
+            .map(|e| e.expect("every env is built"))
+            .collect();
         Ok(VectorEnv { envs, pool })
     }
 
@@ -83,18 +89,17 @@ impl VectorEnv {
         masks: &mut [u8],
     ) -> Result<(), String> {
         assert_eq!(resets.len(), self.envs.len());
-        self.pool.install(|| {
-            self.envs
-                .par_iter_mut()
-                .zip(resets.par_iter())
-                .zip(obs.par_chunks_mut(GYM_OBS_LEN))
-                .zip(masks.par_chunks_mut(MAX_ACTIONS))
-                .try_for_each(|(((env, reset), o), m)| {
-                    env.reset(&reset.spec, reset.rng_seed)?;
-                    env.write_obs(o);
-                    env.write_action_mask(m);
-                    Ok(())
-                })
+        let items = self
+            .envs
+            .iter_mut()
+            .zip(resets)
+            .zip(obs.chunks_mut(GYM_OBS_LEN))
+            .zip(masks.chunks_mut(MAX_ACTIONS));
+        for_each_home(&self.pool, items, |(((env, reset), o), m)| {
+            env.reset(&reset.spec, reset.rng_seed)?;
+            env.write_obs(o);
+            env.write_action_mask(m);
+            Ok(())
         })
     }
 
@@ -120,27 +125,76 @@ impl VectorEnv {
                 ));
             }
         }
-        self.pool.install(|| {
-            self.envs
-                .par_iter_mut()
-                .zip(actions.par_iter())
-                .zip(resets.par_iter())
-                .zip(obs.par_chunks_mut(GYM_OBS_LEN))
-                .zip(masks.par_chunks_mut(MAX_ACTIONS))
-                .zip(out.par_iter_mut())
-                .try_for_each(|(((((env, &a), reset), o), m), r)| {
-                    *r = match reset {
-                        Some(reset) => {
-                            env.reset(&reset.spec, reset.rng_seed)?;
-                            EnvOut::default()
-                        }
-                        None => step_one(env, a),
-                    };
-                    env.write_obs(o);
-                    env.write_action_mask(m);
-                    Ok(())
-                })
+        let items = self
+            .envs
+            .iter_mut()
+            .zip(actions)
+            .zip(resets)
+            .zip(obs.chunks_mut(GYM_OBS_LEN))
+            .zip(masks.chunks_mut(MAX_ACTIONS))
+            .zip(out.iter_mut());
+        for_each_home(&self.pool, items, |(((((env, &a), reset), o), m), r)| {
+            *r = match reset {
+                Some(reset) => {
+                    env.reset(&reset.spec, reset.rng_seed)?;
+                    EnvOut::default()
+                }
+                None => step_one(env, a),
+            };
+            env.write_obs(o);
+            env.write_action_mask(m);
+            Ok(())
         })
+    }
+}
+
+/// A counter on a cache line of its own.
+#[repr(align(128))]
+struct Counter(AtomicUsize);
+
+/// Run `f` on every item on the pool's threads. The items are split into one contiguous share
+/// per thread; each thread works through its own share, then helps with the others'. So an env
+/// is stepped on the same thread step after step, its run still in that core's caches (rayon's
+/// work-stealing split moves envs between threads, and is markedly slower for it), while the
+/// helping keeps the threads evenly loaded. Returns the error of the first item that failed.
+fn for_each_home<T: Send>(
+    pool: &rayon::ThreadPool,
+    items: impl Iterator<Item = T>,
+    f: impl Fn(T) -> Result<(), String> + Sync,
+) -> Result<(), String> {
+    let cells: Vec<Mutex<Option<T>>> = items.map(|x| Mutex::new(Some(x))).collect();
+    let n = cells.len();
+    let threads = pool.current_num_threads().max(1);
+    let bounds: Vec<usize> = (0..=threads).map(|k| k * n / threads).collect();
+    let next: Vec<Counter> = (0..threads).map(|_| Counter(AtomicUsize::new(0))).collect();
+    let failed: Mutex<Option<(usize, String)>> = Mutex::new(None);
+    pool.broadcast(|ctx| {
+        let home = ctx.index();
+        for share in (home..home + threads).map(|k| k % threads) {
+            let (lo, hi) = (bounds[share], bounds[share + 1]);
+            loop {
+                let i = lo + next[share].0.fetch_add(1, Ordering::Relaxed);
+                if i >= hi {
+                    break;
+                }
+                let item = cells[i]
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .take();
+                if let Some(item) = item
+                    && let Err(e) = f(item)
+                {
+                    let mut failed = failed.lock().unwrap_or_else(PoisonError::into_inner);
+                    if failed.as_ref().is_none_or(|(j, _)| i < *j) {
+                        *failed = Some((i, e));
+                    }
+                }
+            }
+        }
+    });
+    match failed.into_inner().unwrap_or_else(PoisonError::into_inner) {
+        Some((_, e)) => Err(e),
+        None => Ok(()),
     }
 }
 
