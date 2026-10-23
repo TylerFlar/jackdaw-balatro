@@ -6,7 +6,16 @@ Each test cites the vanilla 1.0.1o Lua it pins (``balatro_source/``).
 
 from __future__ import annotations
 
-from jackdaw.engine.actions import Discard, PlayHand, SelectBlind, UseConsumable
+from jackdaw.engine.actions import (
+    BuyCard,
+    Discard,
+    OpenBooster,
+    PickPackCard,
+    PlayHand,
+    SelectBlind,
+    UseConsumable,
+)
+from jackdaw.engine.card import Card
 from jackdaw.engine.data.enums import Rank, Suit
 from jackdaw.engine.game import step
 from tests.engine.audit._boards import (
@@ -16,6 +25,7 @@ from tests.engine.audit._boards import (
     index_of,
     new_run,
     playing_card,
+    to_shop,
 )
 
 # ---------------------------------------------------------------------------
@@ -166,3 +176,45 @@ def test_g35_playing_a_secret_hand_reveals_it():
 
     assert gs["last_score_result"].hand_type == "Flush Five"
     assert gs["hand_levels"].get_state("Flush Five").visible
+
+
+# ---------------------------------------------------------------------------
+# G38 — cards emplaced into the deck go to the bottom
+# ---------------------------------------------------------------------------
+
+
+def test_g38_bought_playing_card_goes_to_the_bottom_of_the_deck():
+    """buy_from_shop emplaces a bought playing card with G.deck:emplace
+    (button_callbacks.lua:2427), and a 'deck' CardArea inserts at index 1
+    (cardarea.lua:33-34) — the bottom, drawn last (remove_card takes the
+    last card, cardarea.lua:76-77)."""
+    gs = to_shop(new_run("AUDIT_G38"))
+    card = playing_card("Hearts", "Ace")
+    card.set_cost()
+    gs["shop_cards"].insert(0, card)
+    gs["dollars"] = 50
+    top = gs["deck"][-1]
+
+    step(gs, BuyCard(shop_index=0))
+
+    assert gs["deck"][0] is card
+    assert gs["deck"][-1] is top
+
+
+def test_g38_standard_pack_pick_goes_to_the_bottom_of_the_deck():
+    """Picking a playing card from a Standard pack: use_card emplaces it with
+    G.deck:emplace (button_callbacks.lua:2222-2224)."""
+    gs = to_shop(new_run("AUDIT_G38P"))
+    pack = Card()
+    pack.set_ability("p_standard_normal_1")
+    pack.set_cost()
+    gs["shop_boosters"] = [pack]
+    gs["dollars"] = 50
+    step(gs, OpenBooster(card_index=0))
+    picked = gs["pack_cards"][0]
+    top = gs["deck"][-1]
+
+    step(gs, PickPackCard(card_index=0))
+
+    assert gs["deck"][0] is picked
+    assert gs["deck"][-1] is top

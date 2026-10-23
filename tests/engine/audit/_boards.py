@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from jackdaw.engine.actions import SelectBlind
+from jackdaw.engine.actions import CashOut, GamePhase, PlayHand, SelectBlind
 from jackdaw.engine.card import Card
 from jackdaw.engine.card_factory import create_consumable, create_joker, create_playing_card
 from jackdaw.engine.data.enums import Rank, Suit
@@ -33,6 +33,24 @@ def start_boss(gs: dict[str, Any], boss_key: str) -> dict[str, Any]:
     """Select *boss_key* as the next blind and play into SELECTING_HAND."""
     force_boss(gs, boss_key)
     return step(gs, SelectBlind())
+
+
+def win_round(gs: dict[str, Any]) -> dict[str, Any]:
+    """From SELECTING_HAND: score the target already, then play one card."""
+    gs["chips"] = gs["blind"].chips
+    step(gs, PlayHand(card_indices=(0,)))
+    assert gs["phase"] == GamePhase.ROUND_EVAL, gs["phase"]
+    return gs
+
+
+def to_shop(gs: dict[str, Any]) -> dict[str, Any]:
+    """From BLIND_SELECT or SELECTING_HAND: win the round and cash out."""
+    if gs["phase"] == GamePhase.BLIND_SELECT:
+        step(gs, SelectBlind())
+    win_round(gs)
+    step(gs, CashOut())
+    assert gs["phase"] == GamePhase.SHOP, gs["phase"]
+    return gs
 
 
 def give_joker(gs: dict[str, Any], key: str, **kwargs: Any) -> Card:

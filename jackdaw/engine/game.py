@@ -1261,7 +1261,8 @@ def _handle_buy_card(gs: dict[str, Any], idx: int) -> dict[str, Any]:
         gs.setdefault("consumables", []).append(card)
         card.add_to_deck(gs)
     else:
-        gs.setdefault("deck", []).append(card)
+        # G.deck:emplace (button_callbacks.lua:2427): bottom of the deck.
+        _emplace_in_deck(gs, card)
         added_playing_card = True
 
     # Astronomer joining the board runs the all-cards set_cost pass
@@ -1723,8 +1724,9 @@ def _handle_pick_pack_card(
             _all_cards_set_cost_pass(gs)
 
     else:
-        # Standard pack: playing card → add to deck
-        gs.setdefault("deck", []).append(card)
+        # Standard pack: playing card → G.deck:emplace, the bottom of the
+        # deck (button_callbacks.lua:2222-2224).
+        _emplace_in_deck(gs, card)
         # Fire playing_card_added joker context (Hologram)
         _fire_shop_joker_context(gs, playing_card_added=True, cards=[card])
 
@@ -1889,6 +1891,13 @@ def _handle_swap_jokers(gs: dict[str, Any], idx: int, direction: int) -> dict[st
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+def _emplace_in_deck(gs: dict[str, Any], card: Any) -> None:
+    """``G.deck:emplace(card)``: a 'deck' CardArea inserts at index 1
+    (cardarea.lua:33-34) — the bottom, drawn last.  The deck list's index 0
+    is the bottom; draws pop from the end."""
+    gs.setdefault("deck", []).insert(0, card)
 
 
 def _sort_hand_desc(hand: list) -> None:
@@ -2416,7 +2425,7 @@ def _apply_setting_blind_mutations(
                         # stone-less 52-card shuffle).
                         gs.setdefault("pending_deck_bottom", []).append(c)
                     else:
-                        gs.setdefault("deck", []).append(c)
+                        _emplace_in_deck(gs, c)
             elif ctype in ("Joker", "Tarot", "Planet", "Spectral"):
                 # Riff-raff ('rif', Common), Cartomancer ('car'), 8 Ball
                 # ('8ba'), etc. — roll the real pool with the descriptor's
@@ -2667,7 +2676,6 @@ def _apply_consumable_result(
         from jackdaw.engine.card import Card as _Card
         from jackdaw.engine.card import _next_sort_id
 
-        deck_list: list = gs.setdefault("deck", [])
         for card_spec in result.add_to_deck:
             # Cryptid: copy an existing card — copies are emplaced into the
             # HAND, not the draw pile (card.lua:1206-1213: copy_card +
@@ -2680,7 +2688,7 @@ def _apply_consumable_result(
                     gs.setdefault("hand", []).append(new_card)
                     _sort_hand_desc(gs.get("hand", []))
                 else:
-                    deck_list.append(new_card)
+                    _emplace_in_deck(gs, new_card)
                 continue
             new_card = _Card()
             if "suit" in card_spec and "rank" in card_spec:
@@ -2691,7 +2699,7 @@ def _apply_consumable_result(
                 )
             if "enhancement" in card_spec:
                 new_card.set_ability(card_spec["enhancement"])
-            deck_list.append(new_card)
+            _emplace_in_deck(gs, new_card)
 
     # ---- Joker effects ----
 
@@ -2748,7 +2756,6 @@ def _resolve_create_descriptors(gs: dict[str, Any], descriptors: list[dict[str, 
     consumable_limit = gs.get("consumable_slots", 2)
     jokers: list = gs.setdefault("jokers", [])
     joker_slots = gs.get("joker_slots", 5)
-    deck: list = gs.setdefault("deck", [])
 
     for desc in descriptors:
         count = desc.get("count", 1)
@@ -2794,7 +2801,7 @@ def _resolve_create_descriptors(gs: dict[str, Any], descriptors: list[dict[str, 
                 if gs.get("phase") == GamePhase.SELECTING_HAND:
                     gs.setdefault("hand", []).append(card)
                 else:
-                    deck.append(card)
+                    _emplace_in_deck(gs, card)
 
     # Re-sort hand if any cards were added during SELECTING_HAND
     if gs.get("phase") == GamePhase.SELECTING_HAND:
