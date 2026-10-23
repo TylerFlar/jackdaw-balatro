@@ -78,6 +78,8 @@ impl Game {
             }
             LuaState::RoundEval => {
                 out.push(Action::CashOut);
+                // Card:can_sell_card has no state gate (card.lua:1640-1653; G203).
+                self.sell_actions(&mut out);
                 self.usable_consumables(&mut out);
             }
             LuaState::Shop => self.shop_actions(&mut out),
@@ -103,7 +105,9 @@ impl Game {
                         out.push(Action::PickPackCard { index: i, targets });
                     }
                 }
-                out.push(Action::SkipPack);
+                if self.can_skip_booster() {
+                    out.push(Action::SkipPack);
+                }
                 self.sell_actions(&mut out);
                 self.usable_consumables(&mut out);
             }
@@ -131,8 +135,8 @@ impl Game {
             if !self.spend_ok(card.cost) {
                 continue;
             }
-            // The same check the purchase makes: a Negative card raises the limit by one
-            // (G264).
+            // The same check the purchase makes (G.FUNCS.check_for_buy_space): a Negative card
+            // raises the limit by one (G201, G264).
             if !self.check_for_buy_space(card) {
                 continue;
             }
@@ -232,6 +236,11 @@ impl Game {
     /// Whether the boss can be rerolled here (Director's Cut / Retcon, $10).
     pub fn boss_reroll_allowed(&self) -> bool {
         self.can_reroll_boss()
+    }
+
+    /// Whether the open pack can be skipped now (`G.FUNCS.can_skip_booster`, G202).
+    pub fn pack_skip_allowed(&self) -> bool {
+        self.can_skip_booster()
     }
 
     /// `Some(targets)` when the consumable (by sort id) can be used now: `Some(None)` for one

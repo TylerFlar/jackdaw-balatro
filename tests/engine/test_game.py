@@ -708,6 +708,7 @@ class TestLegalPackOpening:
     def test_pick_and_skip(self):
         gs = {
             "phase": GamePhase.PACK_OPENING,
+            "pack_type": "Buffoon",
             "pack_cards": [_action_card(), _action_card(), _action_card()],
             "pack_choices_remaining": 1,
         }
@@ -1015,6 +1016,7 @@ class TestUsedKeyRelease:
         c.center_key = "c_probe_tarot"
         gs.setdefault("used_jokers", {})["c_probe_tarot"] = True
         gs["phase"] = GamePhase.PACK_OPENING
+        gs["pack_type"] = "Celestial"
         gs["pack_cards"] = [c]
         gs["pack_choices_remaining"] = 1
         step(gs, SkipPack())
@@ -1308,13 +1310,14 @@ class TestMarbleStoneShuffleTiming:
 
 
 class TestDiscountRepricesOwnedCards:
-    """Bug #34: buying Clearance Sale repriced only shop areas — vanilla's
-    per-frame set_cost also drops OWNED jokers'/consumables' buy AND sell
-    values immediately (live-verified: LSPNZ98T, -25% across the board)."""
+    """Bug #34: buying Clearance Sale repriced only shop areas — the redeem's
+    set_cost pass over G.I.CARD (card.lua:1917-1923) also drops OWNED
+    jokers'/consumables' buy AND sell values immediately (live-verified:
+    LSPNZ98T, -25% across the board)."""
 
     def test_clearance_sale_lowers_owned_sell_values(self):
         from jackdaw.engine.card_factory import create_joker
-        from jackdaw.engine.shop import reprice_shop
+        from jackdaw.engine.game import _all_cards_set_cost_pass
 
         gs = _init_gs("DISC1")
         gs["phase"] = GamePhase.SHOP
@@ -1325,7 +1328,7 @@ class TestDiscountRepricesOwnedCards:
         assert (j.cost, j.sell_cost) == (8, 4)
 
         gs["discount_percent"] = 25
-        reprice_shop(gs)
+        _all_cards_set_cost_pass(gs)
         assert j.cost == 6  # floor(8.5 * 0.75) = 6
         assert j.sell_cost == 3
 

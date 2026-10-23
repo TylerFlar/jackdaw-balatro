@@ -178,8 +178,22 @@ def _mixed_policy(gs: dict[str, Any], legal: list[Any], rng: random.Random, eps:
     from jackdaw.cli.smart_agent import smart_agent
 
     if rng.random() < eps:
-        return _with_forced_card(_resolve(rng.choice(legal), gs, rng), gs)
+        return _with_forced_card(_resolve(rng.choice(_explorable(gs, legal)), gs, rng), gs)
     return _with_forced_card(smart_agent(gs, legal), gs)
+
+
+def _explorable(gs: dict[str, Any], legal: list[Any]) -> list[Any]:
+    """The legal actions random exploration picks from.
+
+    Selling became legal on the cash-out screen with G203. Exploring it there
+    would mostly sell the injected jokers before they score and rewrite the
+    tapes the parity ledger cites, so exploration at round eval keeps to
+    cashing out and using consumables; the digests still pin the full legal
+    lists and masks.
+    """
+    if gs.get("phase") == GamePhase.ROUND_EVAL:
+        return [a for a in legal if not isinstance(a, A.SellCard)]
+    return legal
 
 
 # ---------------------------------------------------------------------------

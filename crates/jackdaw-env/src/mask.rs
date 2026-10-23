@@ -178,6 +178,9 @@ impl ActionMask {
             }
             Phase::RoundEval => {
                 self.set(ActionType::CashOut);
+                // Card:can_sell_card has no state gate (card.lua:1640-1653; G203).
+                self.sell_jokers(game);
+                self.sell_consumables(game);
                 self.consumables(game);
             }
             Phase::Shop => {
@@ -208,7 +211,10 @@ impl ActionMask {
                         pack_pick_allowed(game, &pack[i])
                     });
                 }
-                self.set(ActionType::SkipPack);
+                // can_skip_booster: an Arcana or Spectral pack waits for its hand (G202).
+                if game.pack_skip_allowed() {
+                    self.set(ActionType::SkipPack);
+                }
                 self.sell_jokers(game);
                 self.sell_consumables(game);
                 self.consumables(game);

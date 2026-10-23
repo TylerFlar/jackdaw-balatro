@@ -71,17 +71,13 @@ def step(game_state: dict[str, Any], action: Action) -> dict[str, Any]:
     _align_pinned_jokers(result.get("jokers") or [])
     _sync_hand_size_to_dollars(result)
     run_pending_reprice(result)
+    run_pending_blind_redebuff(result)
     # Game:update checks SELECTING_HAND every frame: an emptied hand is
     # redrawn, and a round out of cards ends (game.lua:2544-2550, 3056-3069).
     if result.get("phase") == GamePhase.SELECTING_HAND:
         _update_selecting_hand(result)
-    # Vanilla recomputes shop prices continuously while shopping
-    # (Card:update → set_cost each frame), so cost-relevant changes —
-    # buying/selling Astronomer, coupon tags — reflect immediately.
-    if result.get("phase") == GamePhase.SHOP:
-        from jackdaw.engine.shop import reprice_shop
-
-        reprice_shop(result)
+    # No per-step reprice: Lua re-runs set_cost only where it calls it
+    # (shop.shop_set_cost lists the points; G204).
     return result
 
 
@@ -847,6 +843,7 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
     # Playing card destruction (Glass shatter, etc.)
     destroyed_set = set(id(c) for c in result.cards_destroyed)
     played = [c for c in played if id(c) not in destroyed_set]
+    _playing_cards_removed(gs, result.cards_destroyed)
 
     # Joker card creation (Vagabond, 8-Ball, Superposition, etc.): the
     # events queued during evaluate_play make the cards, each zeroing
@@ -1283,16 +1280,15 @@ def _handle_buy_card(gs: dict[str, Any], idx: int) -> dict[str, Any]:
     if not can_afford(gs, card.cost):
         raise IllegalActionError("Cannot afford card")
 
-    # check_for_buy_space (button_callbacks.lua:2390-2401): a Negative card
-    # raises the area's limit by one, so an over-full board takes none (G264).
+    # check_for_buy_space (button_callbacks.lua:2392-2402): a Negative card
+    # raises the area's limit by one, so an over-full board takes none (G201, G264).
+    from jackdaw.engine.actions import buy_space
+
     card_set = _get_card_set(card)
-    bonus = 1 if card.edition and card.edition.get("negative") else 0
-    if card_set == "Joker":
-        if len(gs.get("jokers", [])) >= gs.get("joker_slots", 5) + bonus:
-            raise IllegalActionError("No room for joker")
-    elif card_set in ("Tarot", "Planet", "Spectral"):
-        if len(gs.get("consumables", [])) >= gs.get("consumable_slots", 2) + bonus:
-            raise IllegalActionError("No room for consumable")
+    if not buy_space(card, gs):
+        raise IllegalActionError(
+            "No room for joker" if card_set == "Joker" else "No room for consumable"
+        )
 
     gs["dollars"] -= card.cost
     shop_cards.pop(idx)
@@ -1313,6 +1309,9 @@ def _handle_buy_card(gs: dict[str, Any], idx: int) -> dict[str, Any]:
         gs.setdefault("consumables", []).append(card)
         card.add_to_deck(gs)
     else:
+        # c1:add_to_deck() marks a playing card added too (button_callbacks.lua:
+        # 2418; card.lua:568-575), which its removal reads (G205).
+        card.add_to_deck(gs)
         # G.deck:emplace (button_callbacks.lua:2427): bottom of the deck.
         _emplace_in_deck(gs, card)
         added_playing_card = True
@@ -1388,6 +1387,7 @@ _SELLABLE_PHASES = frozenset(
     {
         GamePhase.BLIND_SELECT,
         GamePhase.SELECTING_HAND,
+        GamePhase.ROUND_EVAL,
         GamePhase.SHOP,
         GamePhase.PACK_OPENING,
     }
@@ -1876,6 +1876,8 @@ def _handle_pick_pack_card(
         _emplace_in_deck(gs, card)
         # playing_card_joker_effects({card}) (button_callbacks.lua:2228)
         _playing_card_joker_effects(gs, [card])
+        # card:add_to_deck() (button_callbacks.lua:2229) marks it added (G205).
+        card.add_to_deck(gs)
 
     # Check if pack should close
     if gs["pack_choices_remaining"] <= 0 or not pack_cards:
@@ -1891,6 +1893,11 @@ def _handle_skip_pack(gs: dict[str, Any]) -> dict[str, Any]:
     then closes the pack.
     """
     _require_phase(gs, GamePhase.PACK_OPENING)
+    from jackdaw.engine.actions import can_skip_booster
+
+    if not can_skip_booster(gs):
+        # The skip button waits for an Arcana or Spectral pack's hand (G202).
+        raise IllegalActionError("The pack can't be skipped before its hand is dealt")
 
     # Fire skipping_booster joker context (Red Card +mult)
     _fire_shop_joker_context(gs, skipping_booster=True)
@@ -3396,6 +3403,8 @@ def _apply_consumable_result(
             copy_source = card_spec.get("copy_of")
             if copy_source is not None:
                 new_card = copy_card(copy_source, game_state=gs)
+                # _card:add_to_deck() (card.lua:1209) marks the copy added (G205).
+                new_card.add_to_deck(gs)
                 added.append(new_card)
                 # Emplaced at the right end; nothing sorts the hand until the
                 # next draw (cardarea.lua:32-37).  In an Arcana or Spectral
@@ -3605,6 +3614,7 @@ def _fire_shop_tags(gs: dict[str, Any], rerolled: bool) -> None:
     ``store_joker_create`` (Rare/Uncommon Tag) is wired separately via
     :func:`~jackdaw.engine.shop.apply_store_joker_create_tag`.
     """
+    from jackdaw.engine.shop import shop_set_cost
     from jackdaw.engine.tags import Tag
 
     awarded: list[dict[str, Any]] = gs.get("awarded_tags", [])
@@ -3630,11 +3640,12 @@ def _fire_shop_tags(gs: dict[str, Any], rerolled: bool) -> None:
                 target.set_edition(edition)
             else:
                 target.edition = edition
-            # Vanilla marks the joker couponed (tags.lua) — set_cost then
-            # zeroes it (card.lua:383).  The flag must live on the card so
-            # reprice_shop doesn't restore the price.
+            # The tag's event (tag.lua:398-441): set_edition prices the
+            # edition in (card.lua:461), then the joker is couponed and
+            # set_cost zeroes its price (card.lua:383); the sell value keeps
+            # the full price (G204).
             target.ability["couponed"] = True
-            target.cost = 0
+            shop_set_cost(gs, target)
             entry["shop_fired"] = True
             continue
 
@@ -3686,9 +3697,10 @@ def _fire_shop_tags(gs: dict[str, Any], rerolled: bool) -> None:
                 continue
             gs["shop_free"] = True
             for c in gs.get("shop_cards", []) + gs.get("shop_boosters", []):
-                # couponed flag (not a bare cost=0) so reprice_shop keeps it.
+                # couponed, then set_cost (tag.lua:450-459): the flag keeps the
+                # card free through later passes in the shop.
                 c.ability["couponed"] = True
-                c.cost = 0
+                shop_set_cost(gs, c)
             entry["shop_fired"] = True
             continue
 
@@ -4007,12 +4019,36 @@ def _notify_cards_destroyed(gs: dict[str, Any], destroyed: list) -> None:
         return
     from jackdaw.engine.jokers import JokerContext, calculate_joker, effect_flags
 
+    _playing_cards_removed(gs, destroyed)
     jokers = gs.get("jokers", [])
     flags = effect_flags(jokers)  # Caino counts is_face() cards (card.lua:2676)
     for joker in jokers:
         if getattr(joker, "debuff", False):
             continue
         calculate_joker(joker, JokerContext(cards_destroyed=destroyed, jokers=jokers, **flags))
+
+
+def _playing_cards_removed(gs: dict[str, Any], cards: list) -> None:
+    """``Card:remove()`` for destroyed playing cards (card.lua:4727-4733).
+
+    Its ``remove_from_deck()`` does something only for a card that went
+    through ``add_to_deck`` (a shop purchase, a Standard-pack pick, a Cryptid
+    or DNA copy; card.lua:568-575): that queues ``set_blind(nil, true)``
+    (card.lua:698), which re-runs the boss's debuffs over every playing card.
+    The event runs after the action's other events, so the step runs it at
+    the end (G205).
+    """
+    for card in cards:
+        if getattr(card, "added_to_deck", False):
+            card.added_to_deck = False
+            gs["blind_redebuff_pending"] = True
+
+
+def run_pending_blind_redebuff(gs: dict[str, Any]) -> None:
+    """The ``set_blind(nil, true)`` a deck-added playing card's removal queued
+    (see :func:`_playing_cards_removed`)."""
+    if gs.pop("blind_redebuff_pending", False):
+        reapply_blind_debuffs(gs)
 
 
 def _fire_discard_effects(gs: dict[str, Any], discarded: list, *, hook: bool) -> None:

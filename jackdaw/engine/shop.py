@@ -151,7 +151,7 @@ def select_shop_card_type(
 # ---------------------------------------------------------------------------
 
 
-def apply_illusion_shop_edition(rng: PseudoRandom, card: Any) -> None:
+def apply_illusion_shop_edition(rng: PseudoRandom, card: Any) -> bool:
     """Post-creation Illusion edition rolls for a shop playing card.
 
     Vanilla (UI_definitions.lua:786-794): with Illusion owned, after a
@@ -159,7 +159,8 @@ def apply_illusion_shop_edition(rng: PseudoRandom, card: Any) -> None:
     whether it gets an edition (> 0.8), and if so a second ``'illusion'``
     pull picks it: polychrome > 0.85, holo > 0.5, else foil.  Both pulls
     come from the SAME plain ``'illusion'`` stream as the slot-type roll
-    (no ante suffix).
+    (no ante suffix).  Returns whether the card got an edition, which
+    Card:set_edition then prices (card.lua:461; see :func:`shop_set_cost`).
     """
     if rng.random("illusion") > 0.8:
         edition_poll = rng.random("illusion")
@@ -169,6 +170,8 @@ def apply_illusion_shop_edition(rng: PseudoRandom, card: Any) -> None:
             card.set_edition({"holo": True})
         else:
             card.set_edition({"foil": True})
+        return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -313,12 +316,9 @@ def apply_store_joker_create_tag(gs, rng, ante):
             append=append,
             game_state=gs,
         )
+        # The tag's event: couponed, then set_cost (tag.lua:358-363, 372-377).
         card.ability["couponed"] = True
-        card.set_cost(
-            inflation=gs.get("inflation", 0),
-            discount_percent=gs.get("discount_percent", 0),
-            is_couponed=True,
-        )
+        shop_set_cost(gs, card)
         return card
     return None
 
@@ -364,7 +364,8 @@ def create_card_for_shop(gs: dict[str, Any], rng: PseudoRandom, ante: int) -> Ca
         game_state=gs,
     )
     if card_type in ("Base", "Enhanced") and has_illusion:
-        apply_illusion_shop_edition(rng, card)
+        if apply_illusion_shop_edition(rng, card):
+            shop_set_cost(gs, card)
     return card
 
 
@@ -390,44 +391,37 @@ def fill_shop_slots(gs: dict[str, Any], count: int) -> list:
     return new_cards
 
 
-def reprice_shop(gs: dict[str, Any]) -> None:
-    """Recompute costs for everything currently offered in the shop.
+def shop_set_cost(gs: dict[str, Any], card: Any) -> None:
+    """``Card:set_cost()`` (card.lua:369-385) for a card in a shop area.
 
-    Vanilla recalls ``Card:set_cost`` continuously while the shop is open
-    (``Card:update``), so price-affecting changes reflect immediately —
-    e.g. buying Astronomer zeroes Planet cards and Celestial Packs already
-    on offer, and selling it restores their prices.  ``step()`` calls this
-    after every action that leaves the game in the SHOP phase.
+    Prices change only when something calls set_cost: Card:init, set_edition,
+    set_seal and set_rental, the tags that make or modify a shop card, and the
+    all-cards passes (Astronomer, inflation, Clearance Sale and Liquidation,
+    Gift Card; see ``game._all_cards_set_cost_pass``). Nothing reprices per
+    frame (G204). In the shop areas a couponed card costs 0 (card.lua:383);
+    its sell value still comes from the full price.
     """
-    kwargs: dict[str, Any] = dict(
+    card.set_cost(
         inflation=gs.get("inflation", 0),
         discount_percent=gs.get("discount_percent", 0),
         ante=gs.get("round_resets", {}).get("ante", 1),
         booster_ante_scaling=gs.get("booster_ante_scaling", False),
         has_astronomer=astronomer_active(gs),
+        is_couponed=bool(card.ability.get("couponed")),
     )
+
+
+def reprice_shop(gs: dict[str, Any]) -> None:
+    """The shop's share of a ``G.I.CARD`` set_cost pass: every card on offer.
+
+    ``game._all_cards_set_cost_pass`` runs it with the owned cards, an open
+    pack's and the playing cards (live-verified: LSPNZ98T dropped every cost
+    25% the moment Clearance Sale was bought).
+    """
     for area in ("shop_cards", "shop_vouchers", "shop_boosters"):
         for card in gs.get(area, []):
             if hasattr(card, "set_cost"):
-                card.set_cost(
-                    is_couponed=bool(card.ability.get("couponed")),
-                    **kwargs,
-                )
-    # Discount vouchers reprice OWNED cards too: the redeem runs
-    # set_cost over every card instance (card.lua apply_to_run's
-    # G.I.CARD pass; live-verified: LSPNZ98T dropped every owned cost
-    # 25% the moment Clearance Sale was bought).  set_cost is NOT
-    # per-frame though — a couponed card bought for $0 keeps cost 0
-    # until the next explicit pass (Gift Card round-end / voucher /
-    # inflation; live-verified: LSM98F1Z's free Uncommon-Tag Gift Card
-    # stayed buy=0 through the whole shop AND round, flipping to 6 only
-    # at its own round-end set_cost).  So: skip couponed owned cards
-    # here; the explicit passes recompute them (area check neuters the
-    # coupon outside shop areas, dump card.lua:511).
-    for area in ("jokers", "consumables"):
-        for card in gs.get(area, []):
-            if hasattr(card, "set_cost") and not card.ability.get("couponed"):
-                card.set_cost(is_couponed=False, **kwargs)
+                shop_set_cost(gs, card)
 
 
 def populate_shop(

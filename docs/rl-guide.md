@@ -108,10 +108,10 @@ action = FactoredAction(
 | 4 | CashOut | — | Round eval |
 | 5 | Reroll | — | Shop |
 | 6 | NextRound | — | Shop |
-| 7 | SkipPack | — | Pack opening |
+| 7 | SkipPack | — | Pack opening (an Arcana or Spectral pack once its hand is dealt) |
 | 8 | BuyCard | entity_target (shop index) | Shop |
-| 9 | SellJoker | entity_target (joker index) | Blind select / Play / Shop / Pack opening |
-| 10 | SellConsumable | entity_target (consumable index) | Blind select / Play / Shop / Pack opening |
+| 9 | SellJoker | entity_target (joker index) | Blind select / Play / Round eval / Shop / Pack opening |
+| 10 | SellConsumable | entity_target (consumable index) | Blind select / Play / Round eval / Shop / Pack opening |
 | 11 | UseConsumable | entity_target + card_target | Any phase but game over |
 | 12 | RedeemVoucher | entity_target (shop index) | Shop |
 | 13 | OpenBooster | entity_target (shop index) | Shop |
