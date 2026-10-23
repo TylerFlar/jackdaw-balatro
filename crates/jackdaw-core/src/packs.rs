@@ -242,6 +242,18 @@ impl Game {
         }
     }
 
+    /// `G.FUNCS.can_skip_booster` (button_callbacks.lua:2132-2141): a pack with cards left can
+    /// be skipped, an Arcana or Spectral pack only once its hand is dealt (or when the hand can
+    /// hold no cards).
+    pub(crate) fn can_skip_booster(&self) -> bool {
+        let dealt_or_none = matches!(
+            self.rt.state,
+            LuaState::PlanetPack | LuaState::StandardPack | LuaState::BuffoonPack
+        ) || !self.gs.areas.hand.is_empty()
+            || self.hand_limit() <= 0.0;
+        !self.gs.areas.pack_cards.is_empty() && dealt_or_none
+    }
+
     /// `G.FUNCS.skip_booster`: the jokers see the skip, then the pack closes.
     pub(crate) fn skip_booster(&mut self) {
         for j in self.joker_ids() {

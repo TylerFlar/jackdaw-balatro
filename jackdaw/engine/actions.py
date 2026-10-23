@@ -25,7 +25,7 @@ Each phase permits a specific subset of actions:
 +---------------------+------------------------------------------------------+
 | PACK_OPENING        | PickPackCard, SkipPack, SellCard, UseConsumable      |
 +---------------------+------------------------------------------------------+
-| ROUND_EVAL          | CashOut, UseConsumable                               |
+| ROUND_EVAL          | CashOut, SellCard, UseConsumable                     |
 +---------------------+------------------------------------------------------+
 | GAME_OVER           | *(terminal — no valid actions)*                      |
 +---------------------+------------------------------------------------------+
@@ -487,6 +487,9 @@ def _joker_swap_actions(jokers: list[Card]) -> list[Action]:
 
 def _legal_round_eval(gs: dict[str, Any]) -> list[Action]:
     actions: list[Action] = [CashOut()]
+    # Card:can_sell_card has no state gate (card.lua:1640-1653): the cash-out
+    # screen sells too (G203).
+    actions.extend(_sell_actions(gs))
     actions.extend(_usable_consumables(gs))
     return actions
 
@@ -496,9 +499,6 @@ def _legal_shop(gs: dict[str, Any]) -> list[Action]:
 
     actions: list[Action] = []
     jokers: list[Card] = gs.get("jokers", [])
-    joker_slots: int = gs.get("joker_slots", 5)
-    consumables: list[Card] = gs.get("consumables", [])
-    consumable_slots: int = gs.get("consumable_slots", 2)
 
     # Buy cards from shop
     shop_cards: list[Card] = gs.get("shop_cards", [])
@@ -506,14 +506,8 @@ def _legal_shop(gs: dict[str, Any]) -> list[Action]:
         if not can_afford(gs, card.cost):
             continue
         # Check slot availability
-        card_set = card.ability.get("set", "") if isinstance(card.ability, dict) else ""
-        if card_set == "Joker":
-            is_negative = isinstance(card.edition, dict) and card.edition.get("negative")
-            if len(jokers) >= joker_slots and not is_negative:
-                continue
-        elif card_set in ("Tarot", "Planet", "Spectral"):
-            if len(consumables) >= consumable_slots:
-                continue  # No room — agent must use/sell a consumable first
+        if not buy_space(card, gs):
+            continue  # No room — agent must use/sell a card first
         actions.append(BuyCard(shop_index=i))
 
     # Buy and use: affordable shop consumables that can be used right now,
@@ -583,13 +577,42 @@ def _legal_pack_opening(gs: dict[str, Any]) -> list[Action]:
                     PickPackCard(card_index=i, target_indices=default_use_targets(card, gs))
                 )
 
-    actions.append(SkipPack())
+    if can_skip_booster(gs):
+        actions.append(SkipPack())
     actions.extend(_sell_actions(gs))
 
     # Owned consumables stay usable while a pack is open, without
     # spending a pick (button_callbacks.lua:2269).
     actions.extend(_usable_consumables(gs))
     return actions
+
+
+def buy_space(card: Card, gs: dict[str, Any]) -> bool:
+    """``G.FUNCS.check_for_buy_space(card)`` (button_callbacks.lua:2392-2402).
+
+    Vouchers and playing cards always fit; a Joker or consumable needs its area
+    to hold fewer cards than the limit, plus one for a Negative card (G201).
+    """
+    card_set = card.ability.get("set", "") if isinstance(card.ability, dict) else ""
+    bonus = 1 if isinstance(card.edition, dict) and card.edition.get("negative") else 0
+    if card_set == "Joker":
+        return len(gs.get("jokers", [])) < gs.get("joker_slots", 5) + bonus
+    if card_set in ("Tarot", "Planet", "Spectral"):
+        return len(gs.get("consumables", [])) < gs.get("consumable_slots", 2) + bonus
+    return True
+
+
+def can_skip_booster(gs: dict[str, Any]) -> bool:
+    """``G.FUNCS.can_skip_booster`` (button_callbacks.lua:2132-2141, G202).
+
+    A pack with cards left can be skipped, but an Arcana or Spectral pack only
+    once its hand is dealt, or when the hand can hold no cards.
+    """
+    if not gs.get("pack_cards"):
+        return False
+    if gs.get("pack_type") in ("Celestial", "Standard", "Buffoon"):
+        return True
+    return bool(gs.get("hand")) or gs.get("hand_size", 8) <= 0
 
 
 def _sell_actions(gs: dict[str, Any]) -> list[Action]:

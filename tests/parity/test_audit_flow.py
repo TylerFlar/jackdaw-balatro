@@ -10,10 +10,17 @@ ran.  Line references are into ``balatro_source/``.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
+from jackdaw import _core
+from jackdaw.engine.actions import get_legal_actions
+from jackdaw.engine.card import Card
+from jackdaw.engine.card_factory import create_joker
+from tests.golden.trajectories import encode_action
+from tests.parity import canon
 from tests.parity.pyengine import PyEngine
-from tests.parity.rust_step import Report, check_step
+from tests.parity.rust_step import Report, check_step, plain
 
 
 def _start(seed: str, challenge: str | None = None) -> dict[str, Any]:
@@ -268,3 +275,82 @@ class TestChallengeRules:
         snap = check(eng, ["PlayHand", [0]])
         assert snap["game"]["joker_slots"] == 0
         assert all(j["stickers"]["eternal"] for j in snap["areas"]["jokers"])
+
+
+# ---------------------------------------------------------------------------
+# Legal actions against vanilla's button gates (G201-G203)
+# ---------------------------------------------------------------------------
+
+
+def legal_lists(engine: PyEngine) -> tuple[list[Any], list[Any]]:
+    """The oracle's and Rust's legal actions at the engine's state."""
+    with engine._ids():
+        py = [encode_action(a) for a in get_legal_actions(engine.gs)]
+    snap = canon.to_json_compatible(plain(engine.snapshot()))
+    rs = json.loads(_core.Game.from_snapshot(json.dumps(snap)).legal_actions())
+    return json.loads(json.dumps(py)), rs
+
+
+def refused(engine: PyEngine, action: list[Any]) -> bool:
+    """Both engines refuse ``action`` (and agree on it)."""
+    report = Report()
+    ok = check_step(engine, action, str(action), report)
+    return not ok and not report.mismatches and not report.unported
+
+
+def to_big_blind_shop(seed: str, jokers: tuple[str, ...] = ()) -> PyEngine:
+    """The shop after the Big Blind, checking the steps that lead there."""
+    eng = at_blind_select(seed, jokers)
+    check(eng, ["SelectBlind"])
+    eng.gs["chips"] = 10**12
+    check(eng, ["PlayHand", [0]], ["CashOut"])
+    return eng
+
+
+class TestLegality:
+    def test_a_negative_shop_joker_needs_the_extra_slot(self):
+        """G201: check_for_buy_space (button_callbacks.lua:2392-2402) raises the
+        limit by one for a Negative card; it doesn't lift it."""
+        eng = to_big_blind_shop("AU_G201", ("j_greedy_joker",))
+        with eng._ids():
+            card = create_joker("j_joker", edition={"negative": True})
+        card.set_cost(ante=eng.gs["round_resets"]["ante"])
+        eng.gs["shop_cards"][0] = card
+        eng.gs["dollars"] = 100
+        eng.gs["joker_slots"] = 0
+        py, rs = legal_lists(eng)
+        assert py == rs and ["BuyCard", 0] not in py
+        assert refused(eng, ["BuyCard", 0])
+        eng.gs["joker_slots"] = 1
+        py, rs = legal_lists(eng)
+        assert py == rs and ["BuyCard", 0] in py
+        check(eng, ["BuyCard", 0])
+
+    def test_an_arcana_pack_waits_for_its_hand(self):
+        """G202: can_skip_booster (button_callbacks.lua:2132-2141)."""
+        eng = to_big_blind_shop("AU_G202")
+        with eng._ids():
+            pack = Card()
+        pack.set_ability("p_arcana_normal_1")
+        pack.set_cost()
+        eng.gs["shop_boosters"] = [pack]
+        eng.gs["dollars"] = 50
+        check(eng, ["OpenBooster", 0])
+        py, rs = legal_lists(eng)
+        assert py == rs and ["SkipPack"] in py
+        eng.gs["deck"].extend(eng.gs["hand"])
+        eng.gs["hand"].clear()
+        py, rs = legal_lists(eng)
+        assert py == rs and ["SkipPack"] not in py
+        assert refused(eng, ["SkipPack"])
+
+    def test_a_joker_can_be_sold_at_round_eval(self):
+        """G203: Card:can_sell_card (card.lua:1640-1653) has no state gate."""
+        eng = in_round("AU_G203", ("j_joker",))
+        eng.gs["chips"] = 10**12
+        check(eng, ["PlayHand", [0]])
+        py, rs = legal_lists(eng)
+        assert py == rs and ["SellCard", "jokers", 0] in py
+        snap = check(eng, ["SellCard", "jokers", 0])
+        assert snap["phase"] == "round_eval"
+        assert snap["areas"]["jokers"] == []

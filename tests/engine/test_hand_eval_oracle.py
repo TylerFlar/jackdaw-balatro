@@ -338,6 +338,10 @@ class TestLiveOracle:
     @pytest.fixture(scope="class")
     @classmethod
     def live_data(cls, lua_path) -> dict:
+        # The oracle loads the game's own source, which is gitignored (a fresh clone or
+        # a git worktree has none).
+        if not (PROJECT_ROOT / "balatro_source" / "functions" / "misc_functions.lua").exists():
+            pytest.skip("No balatro_source/ in this checkout")
         result = subprocess.run(
             [lua_path, str(ORACLE_SCRIPT)],
             cwd=str(PROJECT_ROOT),

@@ -1273,15 +1273,13 @@ def _handle_buy_card(gs: dict[str, Any], idx: int) -> dict[str, Any]:
     if not can_afford(gs, card.cost):
         raise IllegalActionError("Cannot afford card")
 
-    # Space check — mirrors shop.py:buy_card; Negative cards need no room.
+    # check_for_buy_space (button_callbacks.lua:2392-2402): a Negative card
+    # raises the limit by one, it doesn't lift it (G201).
+    from jackdaw.engine.actions import buy_space
+
     card_set = _get_card_set(card)
-    negative = bool(card.edition and card.edition.get("negative"))
-    if card_set == "Joker" and not negative:
-        if len(gs.get("jokers", [])) >= gs.get("joker_slots", 5):
-            raise IllegalActionError("No room for joker")
-    elif card_set in ("Tarot", "Planet", "Spectral") and not negative:
-        if len(gs.get("consumables", [])) >= gs.get("consumable_slots", 2):
-            raise IllegalActionError("No room for consumable")
+    if not buy_space(card, gs):
+        raise IllegalActionError(f"No room for the {card_set}")
 
     gs["dollars"] -= card.cost
     shop_cards.pop(idx)
@@ -1377,6 +1375,7 @@ _SELLABLE_PHASES = frozenset(
     {
         GamePhase.BLIND_SELECT,
         GamePhase.SELECTING_HAND,
+        GamePhase.ROUND_EVAL,
         GamePhase.SHOP,
         GamePhase.PACK_OPENING,
     }
@@ -1880,6 +1879,11 @@ def _handle_skip_pack(gs: dict[str, Any]) -> dict[str, Any]:
     then closes the pack.
     """
     _require_phase(gs, GamePhase.PACK_OPENING)
+    from jackdaw.engine.actions import can_skip_booster
+
+    if not can_skip_booster(gs):
+        # The skip button waits for an Arcana or Spectral pack's hand (G202).
+        raise IllegalActionError("The pack can't be skipped before its hand is dealt")
 
     # Fire skipping_booster joker context (Red Card +mult)
     _fire_shop_joker_context(gs, skipping_booster=True)

@@ -500,13 +500,7 @@ impl Game {
             }
             Action::SkipPack => {
                 self.require_pack()?;
-                // G.FUNCS.can_skip_booster (button_callbacks.lua:2132-2141).
-                let dealt_or_none = matches!(
-                    self.rt.state,
-                    LuaState::PlanetPack | LuaState::StandardPack | LuaState::BuffoonPack
-                ) || !self.gs.areas.hand.is_empty()
-                    || self.hand_limit() <= 0.0;
-                if self.gs.areas.pack_cards.is_empty() || !dealt_or_none {
+                if !self.can_skip_booster() {
                     return illegal("the pack can't be skipped now");
                 }
                 self.skip_booster();

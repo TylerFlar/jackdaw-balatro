@@ -708,6 +708,7 @@ class TestLegalPackOpening:
     def test_pick_and_skip(self):
         gs = {
             "phase": GamePhase.PACK_OPENING,
+            "pack_type": "Buffoon",
             "pack_cards": [_action_card(), _action_card(), _action_card()],
             "pack_choices_remaining": 1,
         }
@@ -1015,6 +1016,7 @@ class TestUsedKeyRelease:
         c.center_key = "c_probe_tarot"
         gs.setdefault("used_jokers", {})["c_probe_tarot"] = True
         gs["phase"] = GamePhase.PACK_OPENING
+        gs["pack_type"] = "Celestial"
         gs["pack_cards"] = [c]
         gs["pack_choices_remaining"] = 1
         step(gs, SkipPack())

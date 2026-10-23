@@ -78,6 +78,8 @@ impl Game {
             }
             LuaState::RoundEval => {
                 out.push(Action::CashOut);
+                // Card:can_sell_card has no state gate (card.lua:1640-1653; G203).
+                self.sell_actions(&mut out);
                 self.usable_consumables(&mut out);
             }
             LuaState::Shop => self.shop_actions(&mut out),
@@ -103,7 +105,9 @@ impl Game {
                         out.push(Action::PickPackCard { index: i, targets });
                     }
                 }
-                out.push(Action::SkipPack);
+                if self.can_skip_booster() {
+                    out.push(Action::SkipPack);
+                }
                 self.sell_actions(&mut out);
                 self.usable_consumables(&mut out);
             }
@@ -129,14 +133,9 @@ impl Game {
             if !self.spend_ok(card.cost) {
                 continue;
             }
-            match card.set() {
-                CenterSet::Joker if !self.joker_fits(card) => continue,
-                CenterSet::Tarot | CenterSet::Planet | CenterSet::Spectral
-                    if (self.gs.areas.consumables.len() as f64) >= self.gs.consumable_slots =>
-                {
-                    continue;
-                }
-                _ => {}
+            // G.FUNCS.check_for_buy_space: a Negative card raises the limit by one (G201).
+            if !self.check_for_buy_space(card) {
+                continue;
             }
             out.push(Action::BuyCard(i));
         }

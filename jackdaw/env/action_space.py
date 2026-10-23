@@ -45,6 +45,7 @@ import numpy as np
 from jackdaw.engine.actions import (
     Action,
     GamePhase,
+    can_skip_booster,
     joker_swap_allowed,
 )
 from jackdaw.engine.actions import (
@@ -263,6 +264,8 @@ def get_action_mask(game_state: dict[str, Any]) -> ActionMask:
     # --- ROUND_EVAL ---
     elif phase == GamePhase.ROUND_EVAL:
         type_mask[ActionType.CashOut] = True
+        _mask_sell_jokers(type_mask, entity_masks, jokers)
+        _mask_sell_consumables(type_mask, entity_masks, consumables)
         _mask_consumables(type_mask, entity_masks, game_state)
 
     # --- SHOP ---
@@ -311,7 +314,9 @@ def get_action_mask(game_state: dict[str, Any]) -> ActionMask:
             if pick_mask.any():
                 type_mask[ActionType.PickPackCard] = True
                 entity_masks[ActionType.PickPackCard] = pick_mask
-        type_mask[ActionType.SkipPack] = True
+        # can_skip_booster (button_callbacks.lua:2132-2141): an Arcana or Spectral
+        # pack waits for its hand (G202).
+        type_mask[ActionType.SkipPack] = can_skip_booster(game_state)
         _mask_sell_jokers(type_mask, entity_masks, jokers)
         _mask_sell_consumables(type_mask, entity_masks, consumables)
         # Owned consumables stay usable while a pack is open; an Arcana or

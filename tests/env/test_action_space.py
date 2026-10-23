@@ -475,8 +475,17 @@ class TestMaskPackOpening:
         assert mask.entity_masks[ActionType.PickPackCard].shape == (3,)
         assert mask.entity_masks[ActionType.PickPackCard].all()
 
-    def test_skip_pack_always(self):
-        mask = get_action_mask(_pack_opening_state())
+    def test_skip_pack_follows_can_skip_booster(self):
+        """G202: can_skip_booster (button_callbacks.lua:2132-2141) lets a
+        Celestial, Standard or Buffoon pack go at once, an Arcana or Spectral
+        pack only once its hand is dealt (or the hand can hold no cards)."""
+        mask = get_action_mask(_pack_opening_state(pack_type="Buffoon"))
+        assert mask.type_mask[ActionType.SkipPack]
+        mask = get_action_mask(_pack_opening_state(pack_type="Arcana"))
+        assert not mask.type_mask[ActionType.SkipPack]
+        mask = get_action_mask(_pack_opening_state(pack_type="Arcana", hand=_make_hand(5)))
+        assert mask.type_mask[ActionType.SkipPack]
+        mask = get_action_mask(_pack_opening_state(pack_type="Spectral", hand_size=0))
         assert mask.type_mask[ActionType.SkipPack]
 
     def test_no_pick_when_no_remaining(self):
@@ -1155,7 +1164,8 @@ class TestMaskConsistencyWithEngine:
             (GamePhase.SELECTING_HAND, True),
             (GamePhase.BLIND_SELECT, True),
             (GamePhase.SHOP, True),
-            (GamePhase.ROUND_EVAL, False),
+            # G203: the cash-out screen sells too.
+            (GamePhase.ROUND_EVAL, True),
         ):
             gs = _blind_select_state(phase=phase, jokers=real_jokers(2), hand=_make_hand(5))
             mask = get_action_mask(gs)
