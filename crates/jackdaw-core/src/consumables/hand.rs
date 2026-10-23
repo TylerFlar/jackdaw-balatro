@@ -1,7 +1,7 @@
 //! The `Card:use_consumeable` blocks that work on the hand: the enhancing, suit and rank Tarots
-//! and Death (`mod_conv` / `suit_conv`, card.lua:1102-1151), the seal Spectrals (1176-1191),
-//! Aura (1192-1200), Cryptid (1201-1221), Sigil and Ouija (1222-1262), and the `remove_card`
-//! block: The Hanged Man, Familiar, Grim, Incantation and Immolate (1269-1372).
+//! and Death (`mod_conv` / `suit_conv`, card.lua:1101-1151), the seal Spectrals (1178-1190),
+//! Aura (1192-1199), Cryptid (1201-1220), Sigil and Ouija (1222-1262), and the `remove_card`
+//! block: The Hanged Man, Familiar, Grim, Incantation and Immolate (1269-1371).
 
 use jackdaw_data::{CardId, POOL_ENHANCED, centers};
 
@@ -16,7 +16,7 @@ use crate::joker::{Ctx, Kind};
 const SUITS: [Suit; 4] = [Suit::Spades, Suit::Hearts, Suit::Diamonds, Suit::Clubs];
 
 impl Game {
-    /// The `mod_conv` / `suit_conv` block (card.lua:1102-1151). Each highlighted card changes in
+    /// The `mod_conv` / `suit_conv` block (card.lua:1101-1151). Each highlighted card changes in
     /// its own event; a last event unhighlights the hand.
     pub(super) fn use_conversion(&mut self, id: u32) {
         let n = self.rt.highlighted.len();
@@ -54,7 +54,7 @@ impl Game {
         self.queue(Event::Call(unhighlight_hand, id, 0.0));
     }
 
-    /// Talisman, Deja Vu, Trance and Medium (card.lua:1176-1191): the first highlighted card,
+    /// Talisman, Deja Vu, Trance and Medium (card.lua:1178-1190): the first highlighted card,
     /// taken now, gets the seal in `ability.extra`; then the hand is unhighlighted.
     pub(super) fn use_seal(&mut self, id: u32) {
         let conv_card = self.rt.highlighted[0];
@@ -83,7 +83,7 @@ impl Game {
         }
     }
 
-    /// The `remove_card` block (card.lua:1269-1372): the cards to destroy are chosen now and
+    /// The `remove_card` block (card.lua:1269-1371): the cards to destroy are chosen now and
     /// destroyed in an event, and the jokers see them as removed at once, before any of it
     /// happens (Glass Cards are not `shattered` yet).
     pub(super) fn use_remove_card(&mut self, id: u32) {
@@ -143,7 +143,7 @@ fn highlighted(g: &Game, i: f64) -> u32 {
 }
 
 /// Death: `copy_card(rightmost, G.hand.highlighted[i])` unless it is the rightmost
-/// (card.lua:1115-1121).
+/// (card.lua:1115-1119).
 fn death_copy(g: &mut Game, rightmost: u32, i: f64) {
     let target = highlighted(g, i);
     if target != rightmost {
@@ -151,7 +151,7 @@ fn death_copy(g: &mut Game, rightmost: u32, i: f64) {
     }
 }
 
-/// Strength: the next rank, an Ace going to 2 (card.lua:1122-1136).
+/// Strength: the next rank, an Ace going to 2 (card.lua:1121-1135).
 fn strength_rank_up(g: &mut Game, _: u32, i: f64) {
     let card = highlighted(g, i);
     let base = g.card(card).base.expect("a playing card");
@@ -182,7 +182,7 @@ fn enhance(g: &mut Game, consumable: u32, i: f64) {
     g.set_card_ability(card, center);
 }
 
-/// `conv_card:set_seal(self.ability.extra, nil, true)` (card.lua:1184-1186).
+/// `conv_card:set_seal(self.ability.extra, nil, true)` (card.lua:1185-1187).
 fn set_seal(g: &mut Game, consumable: u32, conv_card: f64) {
     let seal = match g.card(consumable).ability.extra {
         Extra::Str(s) => Seal::from_name(s).expect("a seal Spectral's seal"),
@@ -194,7 +194,7 @@ fn set_seal(g: &mut Game, consumable: u32, conv_card: f64) {
     g.card_mut(card).set_seal(Some(seal), &cost);
 }
 
-/// Aura: a guaranteed edition, never Negative, on the highlighted card (card.lua:1192-1200).
+/// Aura: a guaranteed edition, never Negative, on the highlighted card (card.lua:1192-1199).
 pub(super) fn aura(g: &mut Game, _: u32, _: f64) {
     let edition = g.poll_edition("aura", 1.0, true, true);
     let card = highlighted(g, 0.0);
@@ -202,7 +202,7 @@ pub(super) fn aura(g: &mut Game, _: u32, _: f64) {
 }
 
 /// Cryptid: `extra` copies of the highlighted card join the hand, then the jokers see them
-/// (card.lua:1201-1221). Each copy is added to the deck (nothing for a playing card) and
+/// (card.lua:1201-1220). Each copy is added to the deck (nothing for a playing card) and
 /// `G.deck`'s card limit grows, which nothing reads.
 pub(super) fn cryptid(g: &mut Game, id: u32, _: f64) {
     let extra = g.extra(id);
@@ -218,14 +218,14 @@ pub(super) fn cryptid(g: &mut Game, id: u32, _: f64) {
     g.playing_card_joker_effects(&new_cards);
 }
 
-/// Sigil: `G.hand.cards[i]` takes the drawn suit, keeping its rank (card.lua:1232-1243).
+/// Sigil: `G.hand.cards[i]` takes the drawn suit, keeping its rank (card.lua:1232-1244).
 fn sigil_card(g: &mut Game, i: u32, suit: f64) {
     let card = g.gs.areas.hand[i as usize].sort_id;
     let base = g.card(card).base.expect("a playing card");
     g.set_card_base(card, Base::front_for(SUITS[suit as usize], base.value));
 }
 
-/// Ouija: `G.hand.cards[i]` takes the drawn rank, keeping its suit (card.lua:1245-1255).
+/// Ouija: `G.hand.cards[i]` takes the drawn rank, keeping its suit (card.lua:1246-1256).
 fn ouija_card(g: &mut Game, i: u32, rank: f64) {
     let card = g.gs.areas.hand[i as usize].sort_id;
     let base = g.card(card).base.expect("a playing card");
@@ -233,7 +233,7 @@ fn ouija_card(g: &mut Game, i: u32, rank: f64) {
 }
 
 /// The Hanged Man: every highlighted card, last first, shatters or dissolves
-/// (card.lua:1279-1290).
+/// (card.lua:1279-1291).
 fn hanged_man_destroy(g: &mut Game, _: u32, _: f64) {
     for card in g.rt.highlighted.clone().into_iter().rev() {
         g.shatter_or_dissolve(card);
@@ -246,7 +246,7 @@ fn destroy_one(g: &mut Game, card: u32, _: f64) {
 }
 
 /// Familiar, Grim and Incantation: `extra` new enhanced cards join the hand
-/// (card.lua:1311-1338). Each draws its rank and suit, then a non-Stone enhancement from
+/// (card.lua:1311-1339). Each draws its rank and suit, then a non-Stone enhancement from
 /// `'spe_card'`. Lua hands the jokers a list of `true`s, one per card; the port hands them the
 /// new cards, which no joker reads beyond their number.
 fn create_spectral_cards(g: &mut Game, id: u32, _: f64) {

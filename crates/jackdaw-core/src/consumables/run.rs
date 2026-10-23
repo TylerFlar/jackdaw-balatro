@@ -1,7 +1,7 @@
 //! The `Card:use_consumeable` blocks that make cards, move money or change the jokers: The
-//! Fool (card.lua:1373-1384), The Hermit (1385-1392), Temperance (1393-1400), The Emperor and
-//! The High Priestess (1401-1414), Judgement and The Soul (1415-1425), Ankh (1426-1455), Wraith
-//! (1456-1468) and the edition block of The Wheel of Fortune, Ectoplasm and Hex (1469-1518).
+//! Fool (card.lua:1373-1383), The Hermit (1385-1391), Temperance (1393-1399), The Emperor and
+//! The High Priestess (1401-1413), Judgement and The Soul (1415-1424), Ankh (1426-1452), Wraith
+//! (1454-1465) and the edition block of The Wheel of Fortune, Ectoplasm and Hex (1467-1519).
 
 use crate::area::AreaId;
 use crate::card::EditionKind;
@@ -10,7 +10,7 @@ use crate::game::Game;
 use crate::pools::{CardSpec, PoolType};
 
 impl Game {
-    /// The Emperor and The High Priestess (card.lua:1401-1414): one event per card that fits
+    /// The Emperor and The High Priestess (card.lua:1401-1413): one event per card that fits
     /// now, each making its card if there is still room.
     pub(super) fn use_emperor_priestess(&mut self, id: u32) {
         let center = self.card(id).center();
@@ -26,7 +26,7 @@ impl Game {
         }
     }
 
-    /// Ankh (card.lua:1426-1455): a random joker is chosen now; one event dissolves every other
+    /// Ankh (card.lua:1426-1452): a random joker is chosen now; one event dissolves every other
     /// non-eternal joker, the next copies the chosen one.
     ///
     /// The first event blocks for 0.75s, longer than a dissolve takes (0.735s), so the jokers
@@ -55,7 +55,7 @@ impl Game {
         self.queue(Event::Call(ankh_copy, chosen, 0.0));
     }
 
-    /// The Wheel of Fortune, Ectoplasm and Hex (card.lua:1469-1518). The Wheel rolls its chance
+    /// The Wheel of Fortune, Ectoplasm and Hex (card.lua:1467-1519). The Wheel rolls its chance
     /// now; on a miss its event only shows "Nope!".
     pub(super) fn use_edition_joker(&mut self, id: u32) {
         let wheel = self.card(id).name() == "The Wheel of Fortune";
@@ -68,7 +68,7 @@ impl Game {
     }
 }
 
-/// The Fool: a copy of the last Tarot or Planet used, if there is room (card.lua:1374-1383).
+/// The Fool: a copy of the last Tarot or Planet used, if there is room (card.lua:1374-1382).
 /// `G.GAME.last_tarot_planet` still holds the card before The Fool: The Fool's own entry is set
 /// two events later.
 pub(super) fn fool(g: &mut Game, _: u32, _: f64) {
@@ -86,7 +86,7 @@ pub(super) fn hermit(g: &mut Game, id: u32, _: f64) {
 }
 
 /// Temperance: the jokers' sell value, capped, as `Card:update` keeps it in `ability.money`
-/// (card.lua:1394-1398, 4163-4171); `ease_dollars(..., true)`.
+/// (card.lua:1394-1398, 4167-4174); `ease_dollars(..., true)`.
 pub(super) fn temperance(g: &mut Game, id: u32, _: f64) {
     let money = g.card(id).ability.money.unwrap_or(0.0);
     g.gs.dollars += money;
@@ -122,7 +122,7 @@ fn ankh_remove(g: &mut Game, joker: u32, _: f64) {
     g.remove_card(joker);
 }
 
-/// Ankh's second event (card.lua:1444-1453): `copy_card` of the chosen joker, without its
+/// Ankh's second event (card.lua:1444-1452): `copy_card` of the chosen joker, without its
 /// edition when that is Negative, added to the deck and emplaced. (Lua then drops a Negative
 /// edition from the copy, which never has one.)
 fn ankh_copy(g: &mut Game, chosen: u32, _: f64) {
@@ -136,7 +136,7 @@ fn ankh_copy(g: &mut Game, chosen: u32, _: f64) {
     g.add_to_deck(id, false);
 }
 
-/// Wraith: a Rare joker ('wra'), then the money goes to 0 (card.lua:1457-1466).
+/// Wraith: a Rare joker ('wra'), then the money goes to 0 (card.lua:1455-1464).
 pub(super) fn wraith(g: &mut Game, _: u32, _: f64) {
     let spec = CardSpec::new(PoolType::Joker, AreaId::Jokers, "wra").rarity(0.99);
     g.create_and_emplace(spec, AreaId::Jokers);
@@ -146,7 +146,7 @@ pub(super) fn wraith(g: &mut Game, _: u32, _: f64) {
     }
 }
 
-/// The edition event (card.lua:1473-1501): an editionless joker, picked from the list
+/// The edition event (card.lua:1471-1500): an editionless joker, picked from the list
 /// `Card:update` keeps, gets Negative (Ectoplasm), Polychrome (Hex) or a guaranteed non-Negative
 /// edition (The Wheel of Fortune). Hex dissolves every other non-eternal joker; Ectoplasm takes
 /// `ecto_minus` hand size, which then grows by one.

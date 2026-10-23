@@ -1,6 +1,6 @@
 //! Consumables: using one (`G.FUNCS.use_card`, button_callbacks.lua:2155-2316, and
-//! `Card:use_consumeable`, card.lua:1091-1519), when it can be used
-//! (`Card:can_use_consumeable`, 1521-1572, and `Card:check_use`, 1574-1581), and the usage
+//! `Card:use_consumeable`, card.lua:1091-1521), when it can be used
+//! (`Card:can_use_consumeable`, 1523-1579, and `Card:check_use`, 1581-1588), and the usage
 //! counts (`set_consumeable_usage`, misc_functions.lua:1184-1229).
 //!
 //! [`Game::use_consumeable`] is the Lua function's body: a run of independent `if` blocks, kept
@@ -78,7 +78,7 @@ impl Game {
         });
     }
 
-    /// `Card:use_consumeable(area, copier)` for the card's own use (card.lua:1091-1519). The used
+    /// `Card:use_consumeable(area, copier)` for the card's own use (card.lua:1091-1521). The used
     /// card is `used_tarot`; it stays in the play area until `use_card` dissolves it, after
     /// every event queued here.
     pub(crate) fn use_consumeable(&mut self, id: u32) {
@@ -95,7 +95,7 @@ impl Game {
             self.use_conversion(id);
         }
         if name == "Black Hole" {
-            // Every hand, in `pairs(G.GAME.hands)` order (card.lua:1153-1174).
+            // Every hand, in `pairs(G.GAME.hands)` order (card.lua:1153-1176).
             for h in PAIRS_ORDER {
                 self.level_up_hand(h, 1.0);
             }
@@ -117,7 +117,7 @@ impl Game {
             .and_then(|v| v.as_str())
             .and_then(HandType::from_name)
         {
-            // card.lua:1264-1268.
+            // card.lua:1264-1267.
             self.level_up_hand(h, 1.0);
         }
         if center
@@ -292,7 +292,7 @@ impl Game {
         false
     }
 
-    /// `card:check_use()`: Ankh refuses to be used with the joker slots full (card.lua:1574).
+    /// `card:check_use()`: Ankh refuses to be used with the joker slots full (card.lua:1581-1588).
     pub(crate) fn check_use(&self, id: u32) -> bool {
         self.card(id).name() == "Ankh" && (self.gs.areas.jokers.len() as f64) >= self.gs.joker_slots
     }
@@ -327,7 +327,7 @@ impl Game {
         self.debuff_card(id, false);
     }
 
-    /// `card:change_suit(suit)` (card.lua:545-562): `set_base` with the new suit's front, then
+    /// `card:change_suit(suit)` (card.lua:547-562): `set_base` with the new suit's front, then
     /// the boss check once more.
     fn change_card_suit(&mut self, id: u32, suit: Suit) {
         let value = self.card(id).base.expect("a playing card").value;

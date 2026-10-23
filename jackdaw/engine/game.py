@@ -1604,13 +1604,15 @@ def _handle_use_consumable(
         raise IllegalActionError(f"Consumable {consumable_name!r} cannot be used at this time")
 
     consumables.pop(idx)
-    card.remove_from_deck(gs)
     _use_consumable_card(gs, card, targets)
-    # The used card's no-repeat key releases only AFTER the use chain:
-    # vanilla's card is still in play (dissolving) while its creates
-    # roll, so e.g. a used Emperor stays excluded from its own Tarot
-    # pool draw (live-verified: LSUNHM8G — sim released early and
-    # self-recreated c_emperor where live drew c_justice).
+    # The used card dissolves in use_card's last events, after the use's
+    # own: Card:remove's remove_from_deck (a Negative's slot, the boss
+    # re-check of set_blind(nil, true), card.lua:645-698) and the release of
+    # its no-repeat key (card.lua:4741-4748) come after them (G140).  So a
+    # used Emperor stays excluded from its own Tarot pool draw (live-verified:
+    # LSUNHM8G — sim released early and self-recreated c_emperor where live
+    # drew c_justice).
+    card.remove_from_deck(gs)
     _release_used_key(gs, card)
 
     # Phase does NOT change — returns to whatever it was
@@ -3274,8 +3276,10 @@ def _apply_consumable_result(
             was_negative = bool(target.edition and target.edition.get("negative"))
             target.set_edition(edition)
             # Going Negative while already added to the deck raises the
-            # owning area's limit (card.lua:405-415).
-            if edition.get("negative") and not was_negative:
+            # owning area's limit (card.lua:405-415).  A debuffed joker is out
+            # of the deck (set_debuff -> remove_from_deck(true), card.lua:526-538),
+            # so Ectoplasm on it adds no slot (G139).
+            if edition.get("negative") and not was_negative and target.added_to_deck:
                 if target in gs.get("jokers", []):
                     gs["joker_slots"] = gs.get("joker_slots", 5) + 1
                 elif target in gs.get("consumables", []):
@@ -3324,7 +3328,9 @@ def _resolve_create_descriptors(gs: dict[str, Any], descriptors: list[dict[str, 
             # slots and created c_lovers where live created the
             # c_wheel_of_fortune the sim had wasted).
             desc_type = desc.get("type", "")
-            if desc_type in ("Tarot", "Planet", "Spectral"):
+            # The Fool's 'Tarot_Planet' too: its event checks the room before
+            # create_card (card.lua:1375-1377; G142).
+            if desc_type in ("Tarot", "Planet", "Spectral", "Tarot_Planet"):
                 if len(consumables) >= gs.get("consumable_slots", 2):
                     continue
             elif desc_type == "Joker":

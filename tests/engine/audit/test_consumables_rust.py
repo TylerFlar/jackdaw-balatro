@@ -1,4 +1,4 @@
-"""Consumable fidelity found by the Rust port (G130-G137).
+"""Consumable fidelity found by the Rust port (G130-G140).
 
 Each test drives the oracle through its public ``step`` and checks the behaviour the vanilla
 Lua source fixes; the Lua lines are cited in each docstring.
@@ -116,7 +116,7 @@ class TestPackCardsJoinTheDealtHand:
 class TestHandSizeDuringAUse:
     def test_ankh_copy_of_a_juggler_draws_nothing(self):
         """G133: use_card sets G.STATE = PLAY_TAROT until its last event
-        (button_callbacks.lua:2181-2186, 2253-2256); the change_size event the
+        (button_callbacks.lua:2181-2186, 2258-2263); the change_size event the
         copy's add_to_deck queues runs before that, and CardArea:change_size
         draws only in DRAW_TO_HAND or SELECTING_HAND (cardarea.lua:94-112)."""
         gs = select_blind(new_run("AUDIT_G133_ANKH"))
@@ -128,7 +128,7 @@ class TestHandSizeDuringAUse:
 
     def test_hex_removing_merry_andy_draws_nothing(self):
         """G133: Hex's dissolved jokers are removed before use_card's last event
-        (card.lua:1488-1493): Merry Andy's hand size comes back in PLAY_TAROT."""
+        (card.lua:1488-1492): Merry Andy's hand size comes back in PLAY_TAROT."""
         gs = select_blind(new_run("AUDIT_G133_HEX"))
         give_joker(gs, "j_joker")
         give_joker(gs, "j_merry_andy", edition={"foil": True})
@@ -171,9 +171,9 @@ class TestBuyAndUseAnkhWithFullSlots:
     def test_ankh_is_bought_then_check_use_stops_it(self):
         """G138: can_buy_and_use asks can_use_consumeable alone
         (button_callbacks.lua:77-89), which for Ankh needs a joker and a joker
-        limit above 1 (card.lua:1536-1541).  buy_from_shop pays and calls
+        limit above 1 (card.lua:1536-1542).  buy_from_shop pays and calls
         use_card (2404-2477), whose check_use stops the use with every joker slot
-        taken (2163-2169, card.lua:1574-1581): the card is paid for and gone."""
+        taken (2163-2169, card.lua:1581-1588): the card is paid for and gone."""
         gs = to_shop(new_run("AUDIT_G138"))
         for key in ("j_joker", "j_greedy_joker", "j_lusty_joker", "j_wrathful_joker", "j_mad"):
             give_joker(gs, key)
@@ -195,7 +195,7 @@ class TestAnkhRemovesBeforeItCopies:
     def test_removed_merry_andy_takes_the_discard_before_the_copy_adds_one(self):
         """G136: Ankh's first event dissolves the jokers and blocks for 0.75s,
         longer than the dissolve (card.lua:1435-1443, 2130-2181), so Card:remove
-        runs before the copy event (card.lua:1444-1453).  ease_discard stops at
+        runs before the copy event (card.lua:1444-1452).  ease_discard stops at
         0 (common_events.lua:113-116): removing Merry Andy first takes the one
         discard left, then the Drunkard copy adds one."""
         for i in range(30):
@@ -214,11 +214,90 @@ class TestAnkhRemovesBeforeItCopies:
         assert gs["current_round"]["discards_left"] == 1
 
 
+class TestEctoplasmOnADebuffedJoker:
+    def test_negative_on_a_debuffed_joker_adds_no_slot(self):
+        """G139: a debuffed joker is out of the deck (set_debuff calls
+        remove_from_deck(true), card.lua:526-538, 645-647), and set_edition adds
+        a slot for a Negative only on a card added to the deck
+        (card.lua:405-415)."""
+        gs = select_blind(new_run("AUDIT_G139"))
+        joker = give_joker(gs, "j_joker")
+        joker.set_debuff(True, gs)
+        slots = gs["joker_slots"]
+        _use(gs, give_consumable(gs, "c_ectoplasm"))
+        assert joker.edition["negative"]
+        assert gs["joker_slots"] == slots
+
+
+class TestTheUsedCardGoesAfterItsUse:
+    def test_a_negative_emperor_counts_its_own_slot(self):
+        """G140: use_card takes the card out of G.consumeables
+        (button_callbacks.lua:2209) but its Card:remove, whose remove_from_deck
+        gives back a Negative's slot (card.lua:686-693), comes with the dissolve
+        after the use's events (2252-2254): a Negative Emperor in a full tray
+        still has room for one Tarot (card.lua:1401-1402)."""
+        gs = select_blind(new_run("AUDIT_G140_EMPEROR"))
+        give_consumable(gs, "c_hermit")
+        give_consumable(gs, "c_temperance")
+        emperor = give_consumable(gs, "c_emperor")
+        emperor.set_edition({"negative": True})
+        gs["consumable_slots"] += 1
+        _use(gs, emperor)
+        assert len(gs["consumables"]) == 3
+        assert gs["consumable_slots"] == 2
+
+    def test_the_familiar_going_re_checks_the_new_cards(self):
+        """G140: the used card's remove_from_deck queues set_blind(nil, true)
+        (card.lua:696-698), which re-checks every playing card after Familiar
+        made its cards: under The Club a new Club is debuffed."""
+        for i in range(20):
+            gs = new_run(f"AUDIT_G140_CLUB{i}")
+            gs["round_resets"]["blind_choices"]["Boss"] = "bl_club"
+            gs["blind_on_deck"] = "Boss"
+            select_blind(gs)
+            familiar = give_consumable(gs, "c_familiar")
+            _use(gs, familiar)
+            new = gs["hand"][-familiar.ability["extra"] :]
+            clubs = [c for c in new if c.base.suit.value == "Clubs"]
+            if clubs:
+                assert all(c.debuff for c in clubs)
+                return
+        raise AssertionError("no Club made in 20 seeds")
+
+
+class TestCreatorsInAnOverfullTray:
+    def test_the_emperor_from_an_overfull_tray(self):
+        """G142: can_use_consumeable lets The Emperor, The High Priestess and The
+        Fool go from the tray whatever its count (``self.area ==
+        G.consumeables``, card.lua:1550-1555); over the limit they make nothing
+        (card.lua:1402-1404)."""
+        gs = select_blind(new_run("AUDIT_G142"))
+        for key in ("c_hermit", "c_temperance"):
+            give_consumable(gs, key)
+        emperor = give_consumable(gs, "c_emperor")
+        assert len(gs["consumables"]) > gs["consumable_slots"]
+        _use(gs, emperor)
+        assert [c.center_key for c in gs["consumables"]] == ["c_hermit", "c_temperance"]
+
+    def test_the_fool_without_room_makes_no_card(self):
+        """G142: The Fool's event checks the room before create_card
+        (card.lua:1375-1377): with none, no card is made, so the forced key is
+        never marked in used_jokers."""
+        gs = select_blind(new_run("AUDIT_G142_FOOL"))
+        gs["last_tarot_planet"] = "c_pluto"
+        for key in ("c_hermit", "c_temperance"):
+            give_consumable(gs, key)
+        fool = give_consumable(gs, "c_fool")
+        _use(gs, fool)
+        assert [c.center_key for c in gs["consumables"]] == ["c_hermit", "c_temperance"]
+        assert "c_pluto" not in gs["used_jokers"]
+
+
 class TestCeruleanBellForcedCard:
     def test_a_one_card_tarot_takes_only_the_forced_card(self):
         """G137: the forced card is always highlighted (CardArea:update,
         cardarea.lua:252-256; remove_from_highlighted keeps it, 187-188), so The
-        Lovers (max_highlighted 1) works on it alone (card.lua:1564-1567)."""
+        Lovers (max_highlighted 1) works on it alone (card.lua:1564-1568)."""
         gs = new_run("AUDIT_G137")
         gs["round_resets"]["blind_choices"]["Boss"] = "bl_final_bell"
         gs["blind_on_deck"] = "Boss"

@@ -469,11 +469,11 @@ def can_use_consumable(
     if cfg.get("hand_type"):
         return True
 
-    # Need consumable slot
+    # Need consumable slot: ``#G.consumeables.cards < G.consumeables.config.card_limit
+    # or self.area == G.consumeables`` (card.lua:1550-1555) — from the tray always,
+    # even when the tray is over its limit (a Negative card gone, G142)
     if key in _NEED_CONSUMABLE_SLOT:
-        # The card itself frees a slot when used from consumable area
-        effective = len(consumables) - (1 if card in consumables else 0)
-        if effective < consumable_limit:
+        if len(consumables) < consumable_limit or card in consumables:
             if key == "c_fool":
                 ltp = gs.get("last_tarot_planet")
                 return bool(ltp) and ltp != "c_fool"
