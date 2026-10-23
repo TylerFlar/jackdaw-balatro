@@ -1350,13 +1350,22 @@ def _handle_buy_and_use(
         raise IllegalActionError("Only consumables can be bought and used")
     if not can_afford(gs, card.cost):
         raise IllegalActionError("Cannot afford card")
-    if (reason := consumable_block_reason(card, gs, targets)) is not None:
+    if (reason := consumable_block_reason(card, gs, targets, check_use=False)) is not None:
         raise IllegalActionError(reason)
 
     gs["dollars"] -= card.cost
     shop_cards.pop(idx)
     _fire_shop_joker_context(gs, buying_card=True)
     _inflate(gs)
+    from jackdaw.engine.consumables import ankh_check_use
+
+    if card.center_key == "c_ankh" and ankh_check_use(
+        gs.get("jokers", []), gs.get("joker_slots", 5)
+    ):
+        # use_card's check_use returns before anything happens
+        # (button_callbacks.lua:2163-2169): the paid card is in no area and
+        # never removed, so it is gone, its used_jokers mark kept (G138).
+        return gs
     _use_consumable_card(gs, card, targets)
     _release_used_key(gs, card)
     return gs
@@ -1602,12 +1611,10 @@ def _handle_use_consumable(
     card = consumables[idx]
 
     # Validate can_use before consuming (matches Balatro's can_use_consumeable)
-    from jackdaw.engine.consumables import can_use_consumable
+    from jackdaw.engine.consumables import can_use_consumable, highlighted_cards
 
     hand: list = gs.get("hand", [])
-    highlighted: list = []
-    if targets:
-        highlighted = [hand[i] for i in targets if i < len(hand)]
+    highlighted = highlighted_cards(hand, targets)
 
     if not can_use_consumable(
         card,
@@ -1623,13 +1630,15 @@ def _handle_use_consumable(
         raise IllegalActionError(f"Consumable {consumable_name!r} cannot be used at this time")
 
     consumables.pop(idx)
-    card.remove_from_deck(gs)
     _use_consumable_card(gs, card, targets)
-    # The used card's no-repeat key releases only AFTER the use chain:
-    # vanilla's card is still in play (dissolving) while its creates
-    # roll, so e.g. a used Emperor stays excluded from its own Tarot
-    # pool draw (live-verified: LSUNHM8G — sim released early and
-    # self-recreated c_emperor where live drew c_justice).
+    # The used card dissolves in use_card's last events, after the use's
+    # own: Card:remove's remove_from_deck (a Negative's slot, the boss
+    # re-check of set_blind(nil, true), card.lua:645-698) and the release of
+    # its no-repeat key (card.lua:4741-4748) come after them (G140).  So a
+    # used Emperor stays excluded from its own Tarot pool draw (live-verified:
+    # LSUNHM8G — sim released early and self-recreated c_emperor where live
+    # drew c_justice).
+    card.remove_from_deck(gs)
     _release_used_key(gs, card)
 
     # Phase does NOT change — returns to whatever it was
@@ -2287,11 +2296,16 @@ def change_hand_size(gs: dict[str, Any], delta: int) -> None:
     if not delta:
         return
     gs["hand_size"] = gs.get("hand_size", 0) + delta
+    # While a consumable is used G.STATE is PLAY_TAROT (button_callbacks.lua:
+    # 2181-2186) until use_card's last event restores it, and every
+    # change_size event the use queues (a joker made, copied or destroyed)
+    # runs before that: the hand grows without a draw (G133).
     if (
         delta > 0
         and gs["hand_size"] > 1
         and gs.get("hand")
         and gs.get("phase") == GamePhase.SELECTING_HAND
+        and not gs.get(_PLAY_TAROT)
     ):
         _draw_cards(gs, delta)
 
@@ -3109,6 +3123,11 @@ def _apply_boss_blind_effects(gs: dict[str, Any], blind: Any) -> None:
 # ---------------------------------------------------------------------------
 
 
+#: ``gs`` key set while a consumable is being used: vanilla's ``G.STATE`` is
+#: ``PLAY_TAROT`` then (button_callbacks.lua:2181-2186), outside a pack.
+_PLAY_TAROT = "_play_tarot"
+
+
 def _use_consumable_card(
     gs: dict[str, Any],
     card: Any,
@@ -3124,13 +3143,26 @@ def _use_consumable_card(
     2. Call handler → ConsumableResult
     3. Apply all result mutations (incl. last_tarot_planet)
     4. Fire the ``using_consumeable`` joker context
+
+    ``G.STATE`` is ``PLAY_TAROT`` throughout (``gs[_PLAY_TAROT]``): a hand
+    size grown meanwhile draws nothing (:func:`change_hand_size`).
     """
-    from jackdaw.engine.consumables import ConsumableContext, use_consumable
+    gs[_PLAY_TAROT] = True
+    try:
+        _use_consumable_card_now(gs, card, targets)
+    finally:
+        gs.pop(_PLAY_TAROT, None)
+
+
+def _use_consumable_card_now(
+    gs: dict[str, Any],
+    card: Any,
+    targets: tuple[int, ...] | None,
+) -> None:
+    from jackdaw.engine.consumables import ConsumableContext, highlighted_cards, use_consumable
 
     hand: list = gs.get("hand", [])
-    highlighted: list = []
-    if targets:
-        highlighted = [hand[i] for i in targets if i < len(hand)]
+    highlighted = highlighted_cards(hand, targets)
 
     ctx = ConsumableContext(
         card=card,
@@ -3191,11 +3223,13 @@ def _apply_consumable_result(
     # G.GAME.blind:debuff_card(self) (card.lua:143, 365), and change_suit
     # runs it again (card.lua:561): the boss debuff is re-checked at once.
 
-    # a. Enhancement
+    # a. Enhancement: set_ability(G.P_CENTERS[mod_conv]) stamps
+    #    hands_played_at_create = G.GAME.hands_played like every set_ability
+    #    (card.lua:337, 1141-1144; G130).
     if getattr(result, "enhance", None):
         for target, enh_key in result.enhance:
             if hasattr(target, "set_ability"):
-                target.set_ability(enh_key)
+                target.set_ability(enh_key, hands_played=gs.get("hands_played", 0))
                 blind_debuff_card(gs, target)
 
     # b. Suit changes
@@ -3243,6 +3277,19 @@ def _apply_consumable_result(
         for target, seal_type in result.add_seal:
             target.seal = seal_type
 
+    # m. Destroy jokers (Hex, Ankh).  Ankh's dissolving event blocks for
+    #    0.75s, longer than the 0.735s dissolve, so the jokers are removed
+    #    (Card:remove: their passives end) before the copy is made
+    #    (card.lua:1435-1453; G136): ease_discard stops at 0, so the order
+    #    shows in the discards left.
+    if getattr(result, "destroy_jokers", None):
+        jokers: list = gs.get("jokers", [])
+        for j in result.destroy_jokers:
+            if j in jokers:
+                jokers.remove(j)
+                j.remove_from_deck(gs)
+                _release_used_key(gs, j)
+
     # g. Create cards (High Priestess, Emperor, Judgement, etc.)
     if getattr(result, "create", None):
         created = _resolve_create_descriptors(gs, result.create)
@@ -3287,12 +3334,11 @@ def _apply_consumable_result(
             if copy_source is not None:
                 new_card = copy_card(copy_source, game_state=gs)
                 added.append(new_card)
-                if gs.get("phase") == GamePhase.SELECTING_HAND:
-                    # Emplaced at the right end; nothing sorts the hand
-                    # until the next draw (cardarea.lua:32-37).
-                    gs.setdefault("hand", []).append(new_card)
-                else:
-                    _emplace_in_deck(gs, new_card)
+                # Emplaced at the right end; nothing sorts the hand until the
+                # next draw (cardarea.lua:32-37).  In an Arcana or Spectral
+                # pack that is the dealt hand, which returns to the deck when
+                # the pack closes (G132).
+                gs.setdefault("hand", []).append(new_card)
                 continue
             new_card = _Card()
             if "suit" in card_spec and "rank" in card_spec:
@@ -3323,22 +3369,15 @@ def _apply_consumable_result(
             was_negative = bool(target.edition and target.edition.get("negative"))
             target.set_edition(edition)
             # Going Negative while already added to the deck raises the
-            # owning area's limit (card.lua:405-415).
-            if edition.get("negative") and not was_negative:
+            # owning area's limit (card.lua:405-415).  A debuffed joker is out
+            # of the deck (set_debuff -> remove_from_deck(true), card.lua:526-538),
+            # so Ectoplasm on it adds no slot (G139).
+            if edition.get("negative") and not was_negative and target.added_to_deck:
                 if target in gs.get("jokers", []):
                     gs["joker_slots"] = gs.get("joker_slots", 5) + 1
                 elif target in gs.get("consumables", []):
                     gs["consumable_slots"] = gs.get("consumable_slots", 2) + 1
             _reprice(gs, target)
-
-    # m. Destroy jokers (Ankh: destroy all except one)
-    if getattr(result, "destroy_jokers", None):
-        jokers: list = gs.get("jokers", [])
-        for j in result.destroy_jokers:
-            if j in jokers:
-                jokers.remove(j)
-                j.remove_from_deck(gs)
-                _release_used_key(gs, j)
 
     # ---- Game state ----
 
@@ -3382,7 +3421,9 @@ def _resolve_create_descriptors(gs: dict[str, Any], descriptors: list[dict[str, 
             # slots and created c_lovers where live created the
             # c_wheel_of_fortune the sim had wasted).
             desc_type = desc.get("type", "")
-            if desc_type in ("Tarot", "Planet", "Spectral"):
+            # The Fool's 'Tarot_Planet' too: its event checks the room before
+            # create_card (card.lua:1375-1377; G142).
+            if desc_type in ("Tarot", "Planet", "Spectral", "Tarot_Planet"):
                 if len(consumables) >= gs.get("consumable_slots", 2):
                     continue
             elif desc_type == "Joker":
@@ -3412,12 +3453,12 @@ def _resolve_create_descriptors(gs: dict[str, Any], descriptors: list[dict[str, 
             elif card_set in ("Default", "Enhanced", ""):
                 # Card:init priced it with the run's inflation (card.lua:72).
                 _reprice(gs, card)
-                # Playing card — add to hand if mid-round, otherwise deck.
-                # Matches Balatro which routes spectral-created cards to
-                # the hand area during SELECTING_HAND.  G.hand:emplace
-                # appends (cardarea.lua:32-37) and nothing sorts the hand
-                # until the next draw.
-                if gs.get("phase") == GamePhase.SELECTING_HAND:
+                # Familiar, Grim and Incantation: create_playing_card(..., G.hand)
+                # (card.lua:1336).  G.hand:emplace appends (cardarea.lua:32-37)
+                # and nothing sorts the hand until the next draw.  In an
+                # Arcana or Spectral pack that is the dealt hand, which returns
+                # to the deck when the pack closes (G132).
+                if gs.get("phase") in (GamePhase.SELECTING_HAND, GamePhase.PACK_OPENING):
                     gs.setdefault("hand", []).append(card)
                 else:
                     _emplace_in_deck(gs, card)
@@ -3806,23 +3847,19 @@ def _close_pack(gs: dict[str, Any]) -> None:
     # repeated for all cards.  Net effect: hand cards end up REVERSED
     # at the FRONT of the deck.
     pack_hand: list = gs.get("pack_hand", [])
-    if pack_hand:
+    hand: list = gs.get("hand", [])
+    if pack_hand or hand:
         deck: list = gs.setdefault("deck", [])
-        hand: list = gs.get("hand", [])
-        # Only return cards that are still in the hand (not destroyed),
-        # in the HAND's current (sorted display) order — vanilla's
-        # draw_from_hand_to_deck pops hand[1] repeatedly
-        # (state_events.lua:1121), i.e. sorted order, NOT deal order.
-        # Deal-order returns diverge the deck whenever no seeded shuffle
-        # intervenes before the next deal (found by lockstep at the first
-        # back-to-back pack open; reproduced at normal speed).
-        pack_id_set = set(id(c) for c in pack_hand)
-        surviving = [c for c in hand if id(c) in pack_id_set]
-        deck[:0] = list(reversed(surviving))
-        # Remove only the pack_hand cards from hand, preserving any
-        # cards that were there before the pack opened.
-        pack_ids = set(id(c) for c in pack_hand)
-        gs["hand"] = [c for c in hand if id(c) not in pack_ids]
+        # draw_from_hand_to_deck (state_events.lua:1121-1126) draws every
+        # held card, in the HAND's current (sorted display) order — it pops
+        # hand[1] repeatedly, NOT deal order (deal-order returns diverged the
+        # deck whenever no seeded shuffle intervened before the next deal;
+        # found by lockstep at the first back-to-back pack open).  The hand
+        # is empty when a pack opens, so it holds the dealt cards a pick left
+        # plus the cards Familiar, Grim, Incantation and Cryptid made there
+        # (card.lua:1213, 1336; G132).
+        deck[:0] = list(reversed(hand))
+        gs["hand"] = []
         gs["pack_hand"] = []
 
     # Queued tag packs open back-to-back before the phase is restored.  Only

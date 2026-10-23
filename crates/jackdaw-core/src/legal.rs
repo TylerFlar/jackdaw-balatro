@@ -90,7 +90,7 @@ impl Game {
                 if remaining > 0.0 {
                     for (i, card) in self.gs.areas.pack_cards.iter().enumerate() {
                         let targets = if card.center().consumeable {
-                            match self.consumable_use(card.sort_id) {
+                            match self.consumable_use(card.sort_id, true) {
                                 Some(t) => t,
                                 None => continue,
                             }
@@ -144,7 +144,7 @@ impl Game {
             if !card.center().consumeable || !self.spend_ok(card.cost) {
                 continue;
             }
-            if let Some(targets) = self.consumable_use(card.sort_id) {
+            if let Some(targets) = self.consumable_use(card.sort_id, false) {
                 out.push(Action::BuyAndUse { index: i, targets });
             }
         }
@@ -203,7 +203,7 @@ impl Game {
 
     fn usable_consumables(&self, out: &mut Vec<Action>) {
         for (i, c) in self.gs.areas.consumables.iter().enumerate() {
-            if let Some(targets) = self.consumable_use(c.sort_id) {
+            if let Some(targets) = self.consumable_use(c.sort_id, true) {
                 out.push(Action::UseConsumable { index: i, targets });
             }
         }
@@ -220,31 +220,35 @@ impl Game {
     }
 
     /// Whether the consumable can be used on `selection` (hand indices), judged with that
-    /// selection highlighted.
-    fn usable_with(&self, id: u32, selection: &[usize]) -> bool {
+    /// selection highlighted (after Cerulean Bell's card, as a use highlights them). With
+    /// `check_use`, `Card:check_use` must pass too: Buy and Use asks only
+    /// `can_use_consumeable` (button_callbacks.lua:77-89, G138).
+    fn usable_with(&self, id: u32, selection: &[usize], check_use: bool) -> bool {
         let mut g = self.clone();
-        let hand = g.gs.areas.ids(AreaId::Hand);
-        g.rt.highlighted = selection.iter().map(|&i| hand[i]).collect();
-        g.can_use_consumeable(id) && !g.check_use(id)
+        let Ok(highlighted) = g.consumable_highlight(selection) else {
+            return false;
+        };
+        g.rt.highlighted = highlighted;
+        g.can_use_consumeable(id) && !(check_use && g.check_use(id))
     }
 
     /// `Some(targets)` when the consumable can be used now: `Some(None)` for one that takes no
     /// selection, `Some(Some(selection))` with its default selection.
-    fn consumable_use(&self, id: u32) -> Option<Option<Vec<usize>>> {
+    fn consumable_use(&self, id: u32, check_use: bool) -> Option<Option<Vec<usize>>> {
         let Some(size) = self.selection_size(id) else {
-            return self.usable_with(id, &[]).then_some(None);
+            return self.usable_with(id, &[], check_use).then_some(None);
         };
         let n = self.gs.areas.hand.len();
         if n < size {
             return None;
         }
         let first: Vec<usize> = (0..size).collect();
-        if self.usable_with(id, &first) {
+        if self.usable_with(id, &first, check_use) {
             return Some(Some(first));
         }
         combinations(n, size)
             .into_iter()
-            .find(|sel| *sel != first && self.usable_with(id, sel))
+            .find(|sel| *sel != first && self.usable_with(id, sel, check_use))
             .map(Some)
     }
 }
