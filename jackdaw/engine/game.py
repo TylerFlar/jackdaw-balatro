@@ -1150,6 +1150,14 @@ def _handle_discard(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str, A
     discard_pile: list = gs.setdefault("discard_pile", [])
     discard_pile.extend(surviving)
 
+    # A Purple Seal's Tarot or an eaten Ramen came or went: its add_to_deck /
+    # remove_from_deck queued the boss debuff pass (card.lua:641, 698), which
+    # runs after the queued draws to the discard pile and before the draw to
+    # hand, so it covers the discarded cards too (a Wild Card under The Club,
+    # G263).
+    if purple_tarots or jokers_to_remove:
+        reapply_blind_debuffs(gs)
+
     # Track stat
     gs["round_scores"] = gs.get("round_scores", {})
     gs["round_scores"]["cards_discarded"] = gs["round_scores"].get("cards_discarded", 0) + len(
