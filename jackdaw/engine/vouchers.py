@@ -322,28 +322,11 @@ def apply_voucher(key: str, game_state: dict[str, Any]) -> dict[str, Any]:
         mutations["round_resets.discards"] = rr["discards"]
 
     # -----------------------------------------------------------------------
-    # Director's Cut — enable 1 boss blind reroll per ante at cost extra ($10)
-    # (not present in extracted apply_to_run; modelled from game behaviour)
-    # -----------------------------------------------------------------------
-    elif name == "Director's Cut":
-        game_state["boss_blind_rerolls"] = game_state.get("boss_blind_rerolls", 0) + 1
-        game_state["boss_blind_reroll_cost"] = extra
-        mutations["boss_blind_rerolls"] = game_state["boss_blind_rerolls"]
-        mutations["boss_blind_reroll_cost"] = game_state["boss_blind_reroll_cost"]
-
-    # -----------------------------------------------------------------------
-    # Retcon — unlimited boss blind rerolls, free
-    # -----------------------------------------------------------------------
-    elif name == "Retcon":
-        game_state["boss_blind_rerolls"] = -1  # -1 = unlimited
-        game_state["boss_blind_reroll_cost"] = 0
-        mutations["boss_blind_rerolls"] = -1
-        mutations["boss_blind_reroll_cost"] = 0
-
-    # -----------------------------------------------------------------------
     # Blank — unlock check only; no gameplay mutation (card.lua:1943)
     # Telescope — passive, read by pack generation (packs.py)
     # Observatory — passive, read by scoring (held Planets, scoring.py)
+    # Director's Cut / Retcon — no apply_to_run branch: being redeemed is
+    # what enables the $10 boss reroll (actions.can_reroll_boss)
     # -----------------------------------------------------------------------
 
     return mutations

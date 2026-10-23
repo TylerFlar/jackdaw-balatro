@@ -34,6 +34,7 @@ from jackdaw.engine.actions import (
     PlayHand,
     RedeemVoucher,
     Reroll,
+    RerollBoss,
     SelectBlind,
     SellCard,
     SkipBlind,
@@ -84,6 +85,8 @@ def _dispatch(game_state: dict[str, Any], action: Action) -> dict[str, Any]:
             return _handle_select_blind(game_state)
         case SkipBlind():
             return _handle_skip_blind(game_state)
+        case RerollBoss():
+            return _handle_reroll_boss(game_state)
         case PlayHand(card_indices=indices):
             return _handle_play_hand(game_state, indices)
         case Discard(card_indices=indices):
@@ -341,7 +344,6 @@ def _fire_new_blind_choice_tags(gs: dict[str, Any]) -> None:
 
     awarded: list[dict] = gs.get("awarded_tags", [])
     rng = gs.get("rng")
-    rr = gs.get("round_resets", {})
 
     for entry in awarded:
         tag_key = entry.get("key", "")
@@ -357,21 +359,54 @@ def _fire_new_blind_choice_tags(gs: dict[str, Any]) -> None:
             continue
 
         if result.reroll_boss:
-            from jackdaw.engine.blind import get_new_boss
-
-            bosses_used = gs.setdefault("bosses_used", {})
-            ante = rr.get("ante", 1)
-            new_boss = get_new_boss(
-                ante,
-                bosses_used,
-                rng,
-                win_ante=gs.get("win_ante", 8),
-                banned_keys=gs.get("banned_keys"),
-            )
-            rr.setdefault("blind_choices", {})["Boss"] = new_boss
+            # Boss Tag: G.from_boss_tag + G.FUNCS.reroll_boss (tag.lua:284-300).
+            # The loop goes on to the next pending tag, as reroll_boss's own
+            # new_blind_choice pass would.
+            _reroll_boss(gs, from_tag=True)
 
         if result.create_pack:
             _open_tag_pack(gs, result.create_pack)
+
+
+def _reroll_boss(gs: dict[str, Any], *, from_tag: bool) -> None:
+    """``G.FUNCS.reroll_boss`` (button_callbacks.lua:2800-2853).
+
+    Marks the ante rerolled (Director's Cut's once-per-ante gate) even when
+    a Boss Tag does it, charges $10 unless it is the Boss Tag
+    (``G.from_boss_tag``), and draws a new boss from the ante's pool — bans
+    and the win ante included (get_new_boss, common_events.lua:2338-2383).
+    The rebuilt boss UI finds its Orbital hand set, so nothing else rolls.
+    """
+    from jackdaw.engine.actions import BOSS_REROLL_COST
+    from jackdaw.engine.blind import get_new_boss
+
+    rr = gs["round_resets"]
+    rr["boss_rerolled"] = True
+    if not from_tag:
+        gs["dollars"] = gs.get("dollars", 0) - BOSS_REROLL_COST
+    rr.setdefault("blind_choices", {})["Boss"] = get_new_boss(
+        rr.get("ante", 1),
+        gs.setdefault("bosses_used", {}),
+        gs.get("rng"),
+        win_ante=gs.get("win_ante", 8),
+        banned_keys=gs.get("banned_keys"),
+    )
+
+
+def _handle_reroll_boss(gs: dict[str, Any]) -> dict[str, Any]:
+    """Reroll the boss blind with Director's Cut or Retcon (G.FUNCS.reroll_boss).
+
+    After the new boss, reroll_boss's event gives pending new_blind_choice
+    tags their turn (button_callbacks.lua:2847-2849).
+    """
+    _require_phase(gs, GamePhase.BLIND_SELECT)
+    from jackdaw.engine.actions import can_reroll_boss
+
+    if not can_reroll_boss(gs):
+        raise IllegalActionError("Boss reroll not available")
+    _reroll_boss(gs, from_tag=False)
+    _fire_new_blind_choice_tags(gs)
+    return gs
 
 
 def _open_tag_pack(gs: dict[str, Any], pack_key: str, force: bool = False) -> None:

@@ -97,3 +97,29 @@ def test_double_tag_copy_keeps_the_orbital_hand():
     levels = {ht.value: gs["hand_levels"][ht].level for ht in HAND_BASE}
     assert levels[hand] == 7
     assert all(lvl == 1 for name, lvl in levels.items() if name != hand)
+
+
+# ---------------------------------------------------------------------------
+# G41 — Boss Tag
+# ---------------------------------------------------------------------------
+
+
+def test_boss_tag_reroll_marks_the_ante_rerolled_and_respects_bans():
+    """The Boss Tag rerolls through G.FUNCS.reroll_boss, for free.
+
+    tag.lua:284-300 sets G.from_boss_tag and calls G.FUNCS.reroll_boss
+    (button_callbacks.lua:2800-2853): ``boss_rerolled = true`` (so
+    Director's Cut can no longer reroll this ante, :2784-2787), no $10
+    from a tag, and get_new_boss, which drops banned blinds
+    (common_events.lua:2359-2361).
+    """
+    for i in range(6):
+        gs = new_run(challenge="c_jokerless_1", seed=f"AUDIT_G41_{i}")
+        gs["round_resets"]["ante"] = 8  # showdown pool: 3 of 5 bosses banned
+        gs["round_resets"]["blind_tags"]["Small"] = "tag_boss"
+        dollars = gs["dollars"]
+        step(gs, SkipBlind())
+        rr = gs["round_resets"]
+        assert rr["boss_rerolled"] is True
+        assert rr["blind_choices"]["Boss"] in {"bl_final_vessel", "bl_final_bell"}
+        assert gs["dollars"] == dollars

@@ -190,7 +190,14 @@ def bot_refusal(method: str, params: dict[str, Any], game_state: dict[str, Any])
 
 
 def bot_accepts(action: Action, game_state: dict[str, Any]) -> bool:
-    """Whether live balatrobot would execute *action* in the current state."""
+    """Whether live balatrobot would execute *action* in the current state.
+
+    The sim-only actions (RerollBoss, ...) have no endpoint at all.
+    """
+    from jackdaw.engine.actions import SIM_ONLY_ACTIONS
+
+    if isinstance(action, SIM_ONLY_ACTIONS):
+        return False
     rpc = action_to_rpc(action, game_state)
     return bot_refusal(rpc["method"], rpc["params"], game_state) is None
 

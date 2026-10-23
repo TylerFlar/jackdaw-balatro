@@ -12,7 +12,8 @@ Each phase permits a specific subset of actions:
 +---------------------+------------------------------------------------------+
 | Phase               | Valid actions                                         |
 +=====================+======================================================+
-| BLIND_SELECT        | SelectBlind, SkipBlind, SellCard, UseConsumable      |
+| BLIND_SELECT        | SelectBlind, SkipBlind, RerollBoss, SellCard,        |
+|                     | UseConsumable                                        |
 +---------------------+------------------------------------------------------+
 | SELECTING_HAND      | PlayHand, Discard, SortHand, SellCard,               |
 |                     | UseConsumable, SwapHandLeft/Right,                   |
@@ -71,6 +72,16 @@ class SelectBlind:
 @dataclass(frozen=True)
 class SkipBlind:
     """Skip the current blind (Small or Big) and collect the tag reward."""
+
+
+@dataclass(frozen=True)
+class RerollBoss:
+    """Reroll this ante's boss blind for $10 (Director's Cut / Retcon).
+
+    The blind-select screen's reroll button (button_callbacks.lua:2784-2853):
+    Director's Cut allows one reroll per ante, Retcon any number.  Sim-only
+    for now: the env action space does not offer it yet.
+    """
 
 
 # ---------------------------------------------------------------------------
@@ -265,6 +276,7 @@ Action = (
     | Discard
     | SelectBlind
     | SkipBlind
+    | RerollBoss
     | BuyCard
     | SellCard
     | UseConsumable
@@ -281,6 +293,11 @@ Action = (
     | SwapJokersLeft
     | SwapJokersRight
 )
+
+# Vanilla actions the env's factored action space and BalatroBot's endpoints
+# cannot express yet.  get_legal_actions offers them; the env adapters and
+# the bridge leave them out.
+SIM_ONLY_ACTIONS: tuple[type, ...] = (RerollBoss,)
 
 
 # ---------------------------------------------------------------------------
@@ -364,11 +381,34 @@ def _legal_blind_select(gs: dict[str, Any]) -> list[Action]:
     if blind_on_deck in ("Small", "Big"):
         actions.append(SkipBlind())
 
+    if can_reroll_boss(gs):
+        actions.append(RerollBoss())
+
     actions.extend(_sell_actions(gs))
 
     # Consumables usable during blind select
     actions.extend(_usable_consumables(gs))
     return actions
+
+
+BOSS_REROLL_COST = 10
+
+
+def can_reroll_boss(gs: dict[str, Any]) -> bool:
+    """Whether the blind-select screen's boss reroll button is live.
+
+    The button exists only with Retcon or Director's Cut
+    (UI_definitions.lua:1427-1428), and reroll_boss_button enables it when
+    ``dollars - bankrupt_at - 10 >= 0`` and (Retcon, or Director's Cut
+    with no reroll yet this ante) (button_callbacks.lua:2784-2798).
+    """
+    used = gs.get("used_vouchers") or {}
+    if not (used.get("v_retcon") or used.get("v_directors_cut")):
+        return False
+    if gs.get("dollars", 0) - gs.get("bankrupt_at", 0) - BOSS_REROLL_COST < 0:
+        return False
+    rerolled = (gs.get("round_resets") or {}).get("boss_rerolled")
+    return bool(used.get("v_retcon")) or not rerolled
 
 
 def _legal_selecting_hand(gs: dict[str, Any]) -> list[Action]:

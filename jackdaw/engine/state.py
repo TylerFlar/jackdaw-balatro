@@ -283,10 +283,10 @@ are set/incremented by joker ability application.
                                               Set by run_init (starting vouchers), game (redeem).
     omen_globe              bool              Omen Globe active (spectral in standard packs).
                                               Set by voucher.
-    boss_blind_rerolls      int               Boss blind rerolls remaining (-1 = unlimited).
-                                              Set by voucher (Director's Cut, Retcon).
-    boss_blind_reroll_cost  int               Cost per boss reroll.
-                                              Set by voucher.
+
+Director's Cut / Retcon have no state of their own: being in
+``used_vouchers`` enables the $10 RerollBoss action, and
+``round_resets.boss_rerolled`` is Director's Cut's once-per-ante gate.
 
 
 .. rubric:: Run tracking / statistics
