@@ -226,7 +226,8 @@ impl Game {
             self.gs.sets.used_jokers.insert(c.key);
         }
         if name == "To Do List" {
-            let visible: Vec<_> = crate::hand_eval::HandType::ALL
+            // `pairs(G.GAME.hands)` order (card.lua:312-315).
+            let visible: Vec<_> = crate::hand_eval::PAIRS_ORDER
                 .into_iter()
                 .filter(|&h| self.gs.hand(h).visible)
                 .collect();

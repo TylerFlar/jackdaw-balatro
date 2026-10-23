@@ -461,6 +461,7 @@ pub fn card_json(c: &Card) -> Value {
         "edition": edition_json(&c.edition),
         "seal": c.seal.map(Seal::name),
         "debuff": c.debuff,
+        "added_to_deck": c.added_to_deck,
         "facing": match c.facing { Facing::Front => "front", Facing::Back => "back" },
         "playing_card": c.playing_card,
         "costs": {
@@ -548,6 +549,7 @@ pub fn card_from(v: &Value, path: &str) -> Result<Card> {
         })
         .transpose()?;
     let debuff = o.bool("debuff")?;
+    let added_to_deck = o.bool("added_to_deck")?;
     let facing = match o.str("facing")? {
         "front" => Facing::Front,
         "back" => Facing::Back,
@@ -586,7 +588,7 @@ pub fn card_from(v: &Value, path: &str) -> Result<Card> {
         extra_cost,
         cost,
         sell_cost,
-        added_to_deck: false,
+        added_to_deck,
         pinned,
         lucky_trigger: false,
         vampired: false,
@@ -747,6 +749,7 @@ pub fn export(gs: &GameState) -> Value {
             "playing_card_rate": num(gs.playing_card_rate),
             "probabilities_normal": num(gs.probabilities_normal),
             "hand_size": num(gs.hand_size),
+            "hand_sort": gs.hand_sort.name(),
             "joker_slots": num(gs.joker_slots),
             "consumable_slots": num(gs.consumable_slots),
             "starting_deck_size": num(gs.starting_deck_size),
@@ -758,6 +761,19 @@ pub fn export(gs: &GameState) -> Value {
             "blind_on_deck": gs.blind_on_deck.map(BlindSlot::name),
             "shop_joker_max": num(gs.shop_joker_max),
             "first_shop_buffoon": gs.first_shop_buffoon,
+            "orbital_choices": Value::Object(
+                gs.orbital_choices
+                    .iter()
+                    .map(|(ante, hands)| {
+                        let m: Map<String, Value> = BlindSlot::ALL
+                            .iter()
+                            .zip(hands)
+                            .map(|(s, h)| (s.name().to_owned(), json!(h.name())))
+                            .collect();
+                        (ante.clone(), Value::Object(m))
+                    })
+                    .collect(),
+            ),
         },
         "starting_params": {
             "dollars": num(sp.dollars),
@@ -828,6 +844,8 @@ pub fn export(gs: &GameState) -> Value {
             "pending_tag_packs": gs.sim.pending_tag_packs.iter().map(|c| c.key()).collect::<Vec<_>>(),
             "pending_deck_bottom": cards_json(&gs.sim.pending_deck_bottom),
             "shop_d6ed": gs.sim.shop_d6ed,
+            "shop_free": gs.sim.shop_free,
+            "hand_last_poll_size": num(gs.sim.hand_last_poll_size),
             "last_blind_was_boss": gs.sim.last_blind_was_boss,
             "pending_cashout": num(gs.sim.pending_cashout),
             "last_score": last_score,
@@ -1188,6 +1206,8 @@ pub fn import(v: &Value) -> Result<GameState> {
             "$.sim.pending_deck_bottom",
         )?,
         shop_d6ed: s.bool("shop_d6ed")?,
+        shop_free: s.bool("shop_free")?,
+        hand_last_poll_size: s.num("hand_last_poll_size")?,
         last_blind_was_boss: s.bool("last_blind_was_boss")?,
         pending_cashout: s.num("pending_cashout")?,
         last_score,
@@ -1226,7 +1246,11 @@ pub fn import(v: &Value) -> Result<GameState> {
         playing_card_rate: g.num("playing_card_rate")?,
         probabilities_normal: g.num("probabilities_normal")?,
         hand_size: g.num("hand_size")?,
-        hand_sort: HandSort::Desc,
+        hand_sort: {
+            let m = g.str("hand_sort")?;
+            HandSort::from_name(m)
+                .ok_or_else(|| SnapshotError(format!("$.game.hand_sort: {m:?}")))?
+        },
         joker_slots: g.num("joker_slots")?,
         consumable_slots: g.num("consumable_slots")?,
         starting_deck_size: g.num("starting_deck_size")?,
@@ -1250,6 +1274,22 @@ pub fn import(v: &Value) -> Result<GameState> {
             .transpose()?,
         shop_joker_max: g.num("shop_joker_max")?,
         first_shop_buffoon: g.bool("first_shop_buffoon")?,
+        orbital_choices: match g.field("orbital_choices")? {
+            Value::Object(m) => m
+                .iter()
+                .map(|(ante, v)| {
+                    let p = format!("$.game.orbital_choices.{ante}");
+                    let mut o = Obj::new(v, &p)?;
+                    let mut hands = [HandType::HighCard; 3];
+                    for (i, slot) in BlindSlot::ALL.iter().enumerate() {
+                        hands[i] = hand_type(o.str(slot.name())?, &p)?;
+                    }
+                    o.done()?;
+                    Ok((ante.clone(), hands))
+                })
+                .collect::<Result<_>>()?,
+            other => return err(format!("$.game.orbital_choices: {other}")),
+        },
         starting_params,
         modifiers,
         round_resets,

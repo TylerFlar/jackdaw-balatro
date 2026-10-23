@@ -355,6 +355,10 @@ pub struct SimState {
     /// Marble Joker stones joining the bottom of the deck after the next round-start shuffle.
     pub pending_deck_bottom: Vec<Card>,
     pub shop_d6ed: bool,
+    /// A Coupon Tag already applied this shop (`G.GAME.shop_free`, tag.lua:448).
+    pub shop_free: bool,
+    /// Luxury Tax: `G.hand.config.last_poll_size` (cardarea.lua:245).
+    pub hand_last_poll_size: f64,
     pub last_blind_was_boss: bool,
     /// What `cash_out` pays (only meaningful in round_eval).
     pub pending_cashout: f64,
@@ -408,6 +412,9 @@ pub struct GameState {
     pub blind_on_deck: Option<BlindSlot>,
     pub shop_joker_max: f64,
     pub first_shop_buffoon: bool,
+    /// `G.GAME.orbital_choices`: ante (as its string key) -> the Orbital Tag hand for the
+    /// Small, Big and Boss blind (UI_definitions.lua:1506-1516).
+    pub orbital_choices: BTreeMap<String, [HandType; 3]>,
     // tables
     pub starting_params: StartingParams,
     pub modifiers: BTreeMap<String, LuaValue>,

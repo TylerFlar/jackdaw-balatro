@@ -40,13 +40,13 @@ impl Game {
         }
         self.gs.unused_discards += self.gs.current_round.discards_left;
         if boss {
-            // The most played hand; ties go to the higher hand (lower `order`).
-            let mut best = (HandType::HighCard, -1.0, 100);
-            for h in HandType::ALL {
+            // The most played hand. The loop never updates `_order` (it stays 100), so every
+            // tie replaces the pick: the most played hand that `pairs` visits last wins.
+            let mut best = (HandType::HighCard, -1.0);
+            for h in crate::hand_eval::PAIRS_ORDER {
                 let played = self.gs.hand(h).played;
-                let order = h.index() + 1;
-                if played > best.1 || (played == best.1 && best.2 > order) {
-                    best = (h, played, order);
+                if played >= best.1 {
+                    best = (h, played);
                 }
             }
             self.gs.current_round.most_played_poker_hand = best.0;
