@@ -116,16 +116,18 @@ action = FactoredAction(
 | 12 | RedeemVoucher | entity_target (shop index) | Shop |
 | 13 | OpenBooster | entity_target (shop index) | Shop |
 | 14 | PickPackCard | entity_target + card_target | Pack opening |
-| 15 | SwapJokersLeft | entity_target (joker index) | Play / Shop |
-| 16 | SwapJokersRight | entity_target (joker index) | Play / Shop |
-| 17 | SwapHandLeft | entity_target (card index) | Playing phase |
-| 18 | SwapHandRight | entity_target (card index) | Playing phase |
+| 15 | SwapJokersLeft | entity_target (joker index) | Any phase but game over |
+| 16 | SwapJokersRight | entity_target (joker index) | Any phase but game over |
+| 17 | SwapHandLeft | entity_target (card index) | Playing phase / Pack opening (an Arcana or Spectral pack's dealt hand) |
+| 18 | SwapHandRight | entity_target (card index) | Playing phase / Pack opening (an Arcana or Spectral pack's dealt hand) |
 | 19 | SortHandRank | — | Playing phase |
 | 20 | SortHandSuit | — | Playing phase |
 | 21 | RerollBoss | — | Blind select, with Director's Cut or Retcon ($10) |
 | 22 | BuyAndUse | entity_target (shop index) | Shop: buy a consumable and use it at once |
 
 Types 21 and 22 were added after the first 21, so ids 0-20 keep their meaning; a policy with one logit per type needs two more outputs.
+
+The swaps follow the game's drag and drop: the jokers can be reordered whenever the game waits for a move, the hand whenever it holds cards (while choosing a hand, and in an Arcana or Spectral pack, where the order decides which card Death copies and the order the cards go back into the deck). The sort buttons exist only while choosing a hand. Consumables can be dragged in the game too, but their order changes nothing, so there is no action for it. Under BALATROBOT legality (the live bot) the jokers can't be reordered at blind select or on the cash-out screen: BalatroBot's `rearrange` refuses there.
 
 `UseConsumable` and `PickPackCard` take a `card_target` when the consumable works on hand cards (The Magician, Death, Aura...). Bound it with `get_consumable_target_info(card)`, which returns `(min_cards, max_cards, needs_targets)`; on the Rust engine, `jackdaw.env.rust_env.consumable_target_info(info["game"], "consumables", index)` (or `"pack_cards"`) returns the same. Leave `card_target` as `None` to get the engine's default selection: the lowest-index legal cards.
 

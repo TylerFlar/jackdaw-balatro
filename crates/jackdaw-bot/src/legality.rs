@@ -14,8 +14,9 @@
 //! actions whose request passes the dispatcher's checks and the endpoint's own validation, run
 //! as a dry run ([`Session::check`]). That masks what vanilla allows but the bot refuses:
 //! sim-only actions, selling or using outside `SELECTING_HAND` / `SHOP`, using a card-selecting
-//! consumable in the shop, Aura (`use` never highlights its target), and buying or picking a
-//! Negative joker at full slots.
+//! consumable in the shop, Aura (`use` never highlights its target), buying or picking a
+//! Negative joker at full slots, and reordering the jokers at blind select or on the cash-out
+//! screen (`rearrange` needs `SELECTING_HAND`, `SHOP` or `SMODS_BOOSTER_OPENED`; G206).
 
 use jackdaw_core::action::Action;
 use jackdaw_core::area::AreaId;
@@ -249,5 +250,22 @@ mod tests {
         // The hand is dealt sorted by rank: the rank sort is the identity.
         let sorted = sort_permutation(&g, HandSort::Desc);
         assert_eq!(sorted, (0..g.gs.areas.hand.len()).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn jokers_reorder_where_rearrange_works() {
+        // G206: vanilla lets a drag reorder the jokers at every decision point; BalatroBot's
+        // `rearrange` takes only SELECTING_HAND, SHOP and SMODS_BOOSTER_OPENED.
+        let mut g = run("LEGAL3");
+        for key in ["j_joker", "j_greedy_joker"] {
+            g.apply_setup_op(&serde_json::json!({"op": "add", "key": key}))
+                .unwrap();
+        }
+        let swap = Action::SwapJokersRight(0);
+        assert!(legal_actions(&g, Legality::Vanilla).contains(&swap));
+        assert!(!legal_actions(&g, Legality::Balatrobot).contains(&swap));
+        assert!(!bot_accepts(&g, &swap));
+        g.step(&Action::SelectBlind).unwrap();
+        assert!(legal_actions(&g, Legality::Balatrobot).contains(&swap));
     }
 }

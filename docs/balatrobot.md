@@ -91,7 +91,13 @@ drawn later are still placed by rank, in the live game and in the simulator alik
 - Aura through `use`: its config has no `max_highlighted`, so `use.lua` never highlights a target
   and the card can't be used (`pack` special-cases it, so an Aura pick works);
 - buying, or picking from a pack, a Negative joker at full joker slots (the bot compares the count
-  with the limit and has no Negative exception).
+  with the limit and has no Negative exception);
+- reordering the jokers at blind select and on the cash-out screen: vanilla's drag works at every
+  decision point (`CardArea:align_cards` re-sorts the jokers by position in any state; gaps.md
+  G206), but `rearrange` requires `SELECTING_HAND`, `SHOP` or `SMODS_BOOSTER_OPENED`. Inside a pack
+  the two agree: the jokers, and an Arcana or Spectral pack's dealt hand, can be reordered. The
+  consumables can be dragged too, and `rearrange` takes them, but no rule reads their order, so
+  the engine has no move for it.
 
 **BalatroBot allows, vanilla forbids.** The live endpoints call `G.FUNCS` directly and skip two
 UI gates. The simulator keeps vanilla's rules and refuses, with `NOT_ALLOWED`:

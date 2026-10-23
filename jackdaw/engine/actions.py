@@ -13,7 +13,7 @@ Each phase permits a specific subset of actions:
 | Phase               | Valid actions                                         |
 +=====================+======================================================+
 | BLIND_SELECT        | SelectBlind, SkipBlind, RerollBoss, SellCard,        |
-|                     | UseConsumable                                        |
+|                     | UseConsumable, SwapJokersLeft/Right                  |
 +---------------------+------------------------------------------------------+
 | SELECTING_HAND      | PlayHand, Discard, SortHand, SellCard,               |
 |                     | UseConsumable, SwapHandLeft/Right,                   |
@@ -23,12 +23,18 @@ Each phase permits a specific subset of actions:
 |                     | RedeemVoucher, OpenBooster, Reroll,                  |
 |                     | SwapJokersLeft/Right, NextRound                      |
 +---------------------+------------------------------------------------------+
-| PACK_OPENING        | PickPackCard, SkipPack, SellCard, UseConsumable      |
+| PACK_OPENING        | PickPackCard, SkipPack, SellCard, UseConsumable,     |
+|                     | SwapHandLeft/Right, SwapJokersLeft/Right             |
 +---------------------+------------------------------------------------------+
-| ROUND_EVAL          | CashOut, SellCard, UseConsumable                     |
+| ROUND_EVAL          | CashOut, SellCard, UseConsumable,                    |
+|                     | SwapJokersLeft/Right                                 |
 +---------------------+------------------------------------------------------+
 | GAME_OVER           | *(terminal — no valid actions)*                      |
 +---------------------+------------------------------------------------------+
+
+A drag reorders the jokers in every phase and the hand whenever it holds
+cards (G206): CardArea:align_cards sorts both by position every frame
+(cardarea.lua:450-465, 509-529), in a pack's dealt hand too (436-449).
 """
 
 from __future__ import annotations
@@ -405,6 +411,9 @@ def _legal_blind_select(gs: dict[str, Any]) -> list[Action]:
 
     # Consumables usable during blind select
     actions.extend(_usable_consumables(gs))
+
+    # A drag reorders the jokers here too (G206)
+    actions.extend(_joker_swap_actions(gs.get("jokers", [])))
     return actions
 
 
@@ -491,6 +500,8 @@ def _legal_round_eval(gs: dict[str, Any]) -> list[Action]:
     # screen sells too (G203).
     actions.extend(_sell_actions(gs))
     actions.extend(_usable_consumables(gs))
+    # A drag reorders the jokers here too (G206)
+    actions.extend(_joker_swap_actions(gs.get("jokers", [])))
     return actions
 
 
@@ -585,6 +596,14 @@ def _legal_pack_opening(gs: dict[str, Any]) -> list[Action]:
     # Owned consumables stay usable while a pack is open, without
     # spending a pick (button_callbacks.lua:2269).
     actions.extend(_usable_consumables(gs))
+
+    # A drag reorders an Arcana or Spectral pack's dealt hand and the jokers
+    # (G206): the hand's order picks Death's rightmost card (card.lua:1112-1117)
+    # and the order the hand goes back to the deck (state_events.lua:1121-1126).
+    hand: list[Card] = gs.get("hand", [])
+    actions.extend(SwapHandLeft(idx=i) for i in range(1, len(hand)))
+    actions.extend(SwapHandRight(idx=i) for i in range(len(hand) - 1))
+    actions.extend(_joker_swap_actions(gs.get("jokers", [])))
     return actions
 
 

@@ -954,8 +954,8 @@ CATALOG: tuple[Deviation, ...] = (
         Mode.VETO,
         refusal=lambda ctx: ctx.refusal is not None and _vanilla_legal(ctx),
         note="RerollBoss, BuyAndUse, use/sell outside SELECTING_HAND and SHOP, a card-selecting "
-        "consumable in the shop, Aura through `use`, a Negative joker bought at full slots. "
-        "BALATROBOT legality leaves them out.",
+        "consumable in the shop, Aura through `use`, a Negative joker bought at full slots, "
+        "joker swaps at blind select and round eval. BALATROBOT legality leaves them out.",
     ),
     Deviation(
         "BB-ETERNAL",

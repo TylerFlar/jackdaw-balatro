@@ -2023,9 +2023,11 @@ def _handle_swap_hand(gs: dict[str, Any], idx: int, direction: int) -> dict[str,
     """Swap a hand card with its neighbor.
 
     *direction* is ``-1`` (left) or ``+1`` (right).
-    Free action — no cost, doesn't consume hands or discards.
+    Free action — no cost, doesn't consume hands or discards.  A drag
+    reorders the hand whenever it holds cards (cardarea.lua:214-227,
+    436-465): while choosing a hand and in an Arcana or Spectral pack (G206).
     """
-    _require_phase(gs, GamePhase.SELECTING_HAND)
+    _require_phase(gs, GamePhase.SELECTING_HAND, GamePhase.PACK_OPENING)
 
     hand: list = gs.get("hand", [])
     other = idx + direction
@@ -2039,9 +2041,17 @@ def _handle_swap_hand(gs: dict[str, Any], idx: int, direction: int) -> dict[str,
 def _handle_swap_jokers(gs: dict[str, Any], idx: int, direction: int) -> dict[str, Any]:
     """Swap a joker with its neighbor.
 
-    *direction* is ``-1`` (left) or ``+1`` (right).
+    *direction* is ``-1`` (left) or ``+1`` (right).  A drag reorders the
+    jokers at every decision point (cardarea.lua:214-227, 509-529; G206).
     """
-    _require_phase(gs, GamePhase.SELECTING_HAND, GamePhase.SHOP)
+    _require_phase(
+        gs,
+        GamePhase.BLIND_SELECT,
+        GamePhase.SELECTING_HAND,
+        GamePhase.ROUND_EVAL,
+        GamePhase.SHOP,
+        GamePhase.PACK_OPENING,
+    )
 
     from jackdaw.engine.actions import joker_swap_allowed
 

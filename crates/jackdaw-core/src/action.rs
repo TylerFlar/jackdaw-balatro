@@ -10,7 +10,7 @@ use crate::card::Card;
 use crate::event::Event;
 use crate::flow::HAND_HIGHLIGHT_LIMIT;
 use crate::game::{Game, LuaState, StepError};
-use crate::state::{BlindSlot, HandSort};
+use crate::state::{BlindSlot, HandSort, Phase};
 
 /// A player decision.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -368,7 +368,17 @@ impl Game {
                 self.sort_hand();
             }
             Action::SwapHandLeft(i) | Action::SwapHandRight(i) => {
-                self.require(LuaState::SelectingHand)?;
+                // A drag reorders the hand whenever it holds cards: while choosing a hand, and in
+                // an Arcana or Spectral pack once its hand is dealt (cardarea.lua:436-465; G206).
+                if !matches!(
+                    self.rt.state.phase(),
+                    Some(Phase::SelectingHand | Phase::PackOpening)
+                ) {
+                    return illegal(format!(
+                        "the hand moves while choosing a hand or in a pack (now {:?})",
+                        self.rt.state
+                    ));
+                }
                 let other = match action {
                     Action::SwapHandLeft(_) => i.checked_sub(1),
                     _ => Some(i + 1),
@@ -380,8 +390,13 @@ impl Game {
                 }
             }
             Action::SwapJokersLeft(i) | Action::SwapJokersRight(i) => {
-                if !matches!(self.rt.state, LuaState::SelectingHand | LuaState::Shop) {
-                    return illegal("jokers move in the shop or during a round");
+                // A drag reorders the jokers at every decision point (cardarea.lua:214-227,
+                // 509-529; G206).
+                if matches!(self.rt.state.phase(), None | Some(Phase::GameOver)) {
+                    return illegal(format!(
+                        "jokers move at a decision point (now {:?})",
+                        self.rt.state
+                    ));
                 }
                 let other = match action {
                     Action::SwapJokersLeft(_) => i.checked_sub(1),

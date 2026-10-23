@@ -56,6 +56,8 @@ impl Game {
                 }
                 self.sell_actions(&mut out);
                 self.usable_consumables(&mut out);
+                // A drag reorders the jokers in every state (G206).
+                self.joker_swaps(&mut out);
             }
             LuaState::SelectingHand => {
                 let n = self.gs.areas.hand.len();
@@ -69,9 +71,8 @@ impl Game {
                 if n > 1 {
                     out.push(Action::SortHand(HandSort::Desc));
                     out.push(Action::SortHand(HandSort::SuitDesc));
-                    out.extend((1..n).map(Action::SwapHandLeft));
-                    out.extend((0..n - 1).map(Action::SwapHandRight));
                 }
+                self.hand_swaps(&mut out);
                 self.sell_actions(&mut out);
                 self.usable_consumables(&mut out);
                 self.joker_swaps(&mut out);
@@ -81,6 +82,7 @@ impl Game {
                 // Card:can_sell_card has no state gate (card.lua:1640-1653; G203).
                 self.sell_actions(&mut out);
                 self.usable_consumables(&mut out);
+                self.joker_swaps(&mut out);
             }
             LuaState::Shop => self.shop_actions(&mut out),
             LuaState::TarotPack
@@ -110,10 +112,27 @@ impl Game {
                 }
                 self.sell_actions(&mut out);
                 self.usable_consumables(&mut out);
+                // An Arcana or Spectral pack's dealt hand is dragged like a round's (G206): its
+                // order picks Death's rightmost card (card.lua:1112-1117) and the order it goes
+                // back to the deck (state_events.lua:1121-1126).
+                self.hand_swaps(&mut out);
+                self.joker_swaps(&mut out);
             }
             _ => {}
         }
         out
+    }
+
+    /// Neighbour swaps of the hand: each card but the first moving left, then each but the last
+    /// moving right. A drag reorders the hand whenever it holds cards (`CardArea:align_cards`
+    /// sorts it by position every frame, cardarea.lua:436-465): while choosing a hand, and in an
+    /// Arcana or Spectral pack once its hand is dealt.
+    fn hand_swaps(&self, out: &mut Vec<Action>) {
+        let n = self.gs.areas.hand.len();
+        if n > 1 {
+            out.extend((1..n).map(Action::SwapHandLeft));
+            out.extend((0..n - 1).map(Action::SwapHandRight));
+        }
     }
 
     /// A pack's joker can be taken (`G.FUNCS.can_select_card`, button_callbacks.lua:2112):
@@ -188,6 +207,9 @@ impl Game {
         }
     }
 
+    /// Neighbour swaps of the jokers that move no pinned joker. Their area is a `'joker'` one, so
+    /// its cards can be dragged (cardarea.lua:214-227) and a drag reorders them at every decision
+    /// point (cardarea.lua:509-529); a pinned joker sorts back to the front (cardarea.lua:528).
     fn joker_swaps(&self, out: &mut Vec<Action>) {
         let jokers = &self.gs.areas.jokers;
         let free = |i: usize, o: usize| !jokers[i].pinned && !jokers[o].pinned;
@@ -267,6 +289,35 @@ impl Game {
 #[cfg(test)]
 mod tests {
     use super::combinations;
+    use crate::action::Action;
+    use crate::area::AreaId;
+    use crate::game::Game;
+    use crate::run::RunSpec;
+
+    #[test]
+    fn a_drag_reorders_the_jokers_at_blind_select() {
+        // G206: the joker area re-sorts by position in any state (cardarea.lua:509-529).
+        let mut g = Game::new_run(&RunSpec {
+            back: jackdaw_data::center_by_key("b_red").unwrap(),
+            stake: 1,
+            seed: "REORDER".into(),
+            challenge: None,
+        })
+        .unwrap();
+        for key in ["j_joker", "j_greedy_joker"] {
+            g.apply_setup_op(&serde_json::json!({"op": "add", "key": key}))
+                .unwrap();
+        }
+        let legal = g.legal_actions();
+        assert!(legal.contains(&Action::SwapJokersRight(0)));
+        assert!(legal.contains(&Action::SwapJokersLeft(1)));
+        let before = g.gs.areas.ids(AreaId::Jokers);
+        g.step(&Action::SwapJokersRight(0)).unwrap();
+        assert_eq!(g.gs.areas.ids(AreaId::Jokers), vec![before[1], before[0]]);
+        // The hand holds no cards here, so it has nothing to reorder.
+        assert!(!legal.iter().any(|a| matches!(a, Action::SwapHandRight(_))));
+        assert!(g.step(&Action::SwapHandRight(0)).is_err());
+    }
 
     #[test]
     fn combinations_are_lexicographic() {

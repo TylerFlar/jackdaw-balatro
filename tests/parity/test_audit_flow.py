@@ -291,6 +291,12 @@ def legal_lists(engine: PyEngine) -> tuple[list[Any], list[Any]]:
     return json.loads(json.dumps(py)), rs
 
 
+def bot_legal(engine: PyEngine) -> list[Any]:
+    """Rust's legal actions under BALATROBOT legality at the engine's state."""
+    snap = canon.to_json_compatible(plain(engine.snapshot()))
+    return json.loads(_core.Game.from_snapshot(json.dumps(snap)).legal_actions("balatrobot"))
+
+
 def refused(engine: PyEngine, action: list[Any]) -> bool:
     """Both engines refuse ``action`` (and agree on it)."""
     report = Report()
@@ -354,6 +360,68 @@ class TestLegality:
         snap = check(eng, ["SellCard", "jokers", 0])
         assert snap["phase"] == "round_eval"
         assert snap["areas"]["jokers"] == []
+
+    def test_jokers_reorder_at_blind_select_and_round_eval(self):
+        """G206: a drag reorders the jokers in every state (cardarea.lua:214-227,
+        509-529). BalatroBot's rearrange needs SELECTING_HAND, SHOP or a pack
+        (rearrange.lua's requires_state), so BALATROBOT legality leaves these out."""
+        eng = at_blind_select("AU_G206_BLIND", ("j_ceremonial", "j_joker", "j_greedy_joker"))
+        py, rs = legal_lists(eng)
+        assert py == rs and ["SwapJokersRight", 1] in py
+        assert not any(a[0].startswith("Swap") for a in bot_legal(eng))
+        check(eng, ["SwapJokersRight", 1])
+        # Ceremonial Dagger slices its new right neighbour (card.lua:2561-2580).
+        snap = check(eng, ["SelectBlind"])
+        assert jokers_of(snap) == ["j_ceremonial", "j_joker"]
+        eng.gs["chips"] = 10**12
+        check(eng, ["PlayHand", [0]])
+        py, rs = legal_lists(eng)
+        assert py == rs and ["SwapJokersLeft", 1] in py
+        assert not any(a[0].startswith("Swap") for a in bot_legal(eng))
+        snap = check(eng, ["SwapJokersLeft", 1])
+        assert snap["phase"] == "round_eval"
+        assert jokers_of(snap) == ["j_joker", "j_ceremonial"]
+
+    @staticmethod
+    def _arcana_pack(seed: str, owned: tuple[str, ...]) -> PyEngine:
+        eng = to_big_blind_shop(seed, owned)
+        with eng._ids():
+            pack = Card()
+        pack.set_ability("p_arcana_normal_1")
+        pack.set_cost()
+        eng.gs["shop_boosters"] = [pack]
+        eng.gs["dollars"] = 50
+        check(eng, ["OpenBooster", 0])
+        return eng
+
+    def test_a_packs_dealt_hand_and_the_jokers_reorder(self):
+        """G206: an Arcana pack's dealt hand is laid out and re-sorted by position
+        like a round's (cardarea.lua:436-449). Death then copies the card moved
+        rightmost (card.lua:1112-1117). BalatroBot's rearrange takes the hand and
+        the jokers in SMODS_BOOSTER_OPENED."""
+        eng = self._arcana_pack("AU_G206_PACK", ("j_joker", "j_greedy_joker", "c_death"))
+        py, rs = legal_lists(eng)
+        bot = bot_legal(eng)
+        assert py == rs
+        for action in (["SwapHandRight", 0], ["SwapHandLeft", 1], ["SwapJokersRight", 0]):
+            assert action in py and action in bot, action
+        assert not any(a[0] == "SortHand" for a in py)
+        first, second = (c["front"] for c in eng.snapshot()["areas"]["hand"][:2])
+        assert first != second
+        check(eng, ["SwapHandRight", 0], ["SwapJokersRight", 0])
+        snap = check(eng, ["UseConsumable", 0, [0, 1]])
+        assert [c["front"] for c in snap["areas"]["hand"][:2]] == [first, first]
+        assert jokers_of(snap) == ["j_greedy_joker", "j_joker"]
+
+    def test_a_reordered_pack_hand_goes_back_to_the_deck_in_order(self):
+        """G206: end_consumeable draws the hand back to the deck from the left,
+        each card to the bottom (state_events.lua:1121-1126; cardarea.lua:33-34,
+        76-80), so the reorder reaches the next deal before a shuffle."""
+        eng = self._arcana_pack("AU_G206_RETURN", ())
+        check(eng, ["SwapHandRight", 0], ["SwapHandLeft", 3])
+        hand = [c["sort_id"] for c in eng.snapshot()["areas"]["hand"]]
+        snap = check(eng, ["SkipPack"])
+        assert [c["sort_id"] for c in snap["areas"]["deck"][: len(hand)]] == hand[::-1]
 
 
 # ---------------------------------------------------------------------------

@@ -272,6 +272,8 @@ def get_action_mask(
         _mask_sell_jokers(type_mask, entity_masks, jokers)
         _mask_sell_consumables(type_mask, entity_masks, consumables)
         _mask_consumables(type_mask, entity_masks, game_state)
+        # A drag reorders the jokers in every phase (G206).
+        _mask_joker_swaps(type_mask, entity_masks, jokers)
 
     # --- SELECTING_HAND ---
     elif phase == GamePhase.SELECTING_HAND:
@@ -296,6 +298,7 @@ def get_action_mask(
         _mask_sell_jokers(type_mask, entity_masks, jokers)
         _mask_sell_consumables(type_mask, entity_masks, consumables)
         _mask_consumables(type_mask, entity_masks, game_state)
+        _mask_joker_swaps(type_mask, entity_masks, jokers)
 
     # --- SHOP ---
     elif phase == GamePhase.SHOP:
@@ -354,6 +357,9 @@ def get_action_mask(
         # spent (button_callbacks.lua:2269: a G.consumeables use just
         # restores the pack).
         _mask_consumables(type_mask, entity_masks, game_state)
+        # An Arcana or Spectral pack's dealt hand can be reordered too (G206).
+        _mask_hand_swaps(type_mask, entity_masks, hand)
+        _mask_joker_swaps(type_mask, entity_masks, jokers)
 
     return ActionMask(
         type_mask, card_mask, entity_masks, max_card_select, min_card_select, forced_card
