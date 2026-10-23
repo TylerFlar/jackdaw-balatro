@@ -248,6 +248,15 @@ def test_the_idol_matches_rank_and_suit():
     assert b.total == (30 + 3 * nominal) * 3 * 2 * 2
 
 
+def test_the_idol_with_smeared_joker():
+    b = Board("idol_smeared", "j_idol", "j_smeared")
+    idol = b.gs["current_round"]["idol_card"]
+    twin = {"Spades": "Clubs", "Clubs": "Spades", "Hearts": "Diamonds", "Diamonds": "Hearts"}
+    first = b.card(_key(twin[idol["suit"]], idol["rank"]))
+    b.play(first)
+    assert b.total == (5 + first.base.nominal) * 2
+
+
 def test_photograph_skips_a_debuffed_first_face():
     b = Board("photograph_club", "j_photograph", boss="bl_club")
     club, heart = b.cards("C_K", "H_K")
@@ -270,6 +279,17 @@ def test_golden_ticket_pays_for_gold_cards():
     b.play(b.card("S_K", enhancement="m_gold", seal="Red"))
     # Two evaluations (Red Seal), each paid by Golden Ticket and its Blueprint copy.
     assert b.dollars == dollars + 16
+
+
+def test_golden_ticket_skips_a_gold_card_debuffed_by_the_club():
+    b = Board("ticket_club", "j_ticket", boss="bl_club")
+    b.clear_hand()
+    club = b.card("C_K", enhancement="m_gold")
+    heart = b.card("H_K", enhancement="m_gold")
+    b.recheck()
+    dollars = b.dollars
+    b.play(club, heart)
+    assert b.dollars == dollars + 4
 
 
 def test_business_card_pays_for_faces():
@@ -322,6 +342,23 @@ def test_lucky_cat_grows_on_lucky_triggers():
     assert cat.ability["x_mult"] == 1.5
     assert b.total == int(15 * 41 * 1.5 * 1.5)
     assert b.dollars == dollars + 40
+
+
+def test_lucky_cat_and_a_lucky_card_debuffed_by_the_head():
+    b = Board("lucky_cat_head", "j_lucky_cat", boss="bl_head")
+    b.odds(15)
+    lucky = b.card("H_5", enhancement="m_lucky")
+    b.recheck()
+    b.play(lucky, b.card("S_5", enhancement="m_lucky"))
+    # Only the Spade scores and triggers.
+    assert b.jokers[0].ability["x_mult"] == 1.25
+
+
+def test_wee_joker_counts_retriggered_twos():
+    b = Board("wee_hack", "j_hack", "j_wee")
+    b.play(*b.cards("S_2", "H_2"))
+    assert b.jokers[1].ability["extra"]["chips"] == 32
+    assert b.total == (10 + 4 * 2 + 32) * 2
 
 
 def test_wee_joker_grows_on_twos():
@@ -449,6 +486,21 @@ def test_the_plant_with_pareidolia_debuffs_every_card():
     assert b.total == 10 * 2
 
 
+def test_red_seals_repeat_held_joker_effects():
+    """A held card with an effect is repeated by its Red Seal (state_events.lua:812-818)."""
+    b = Board("held_red", "j_shoot_the_moon", "j_raised_fist", "j_reserved_parking")
+    b.odds(2)
+    b.clear_hand()
+    pair = b.cards("S_2", "H_2")
+    b.card("S_Q", seal="Red")
+    b.card("H_3", seal="Red")
+    dollars = b.dollars
+    b.play(*pair)
+    # The Queen: +13 and $1, twice. The 3 (Raised Fist): +6, twice.
+    assert b.total == 14 * (2 + 26 + 12)
+    assert b.dollars == dollars + 2
+
+
 def test_raised_fist_takes_the_last_lowest_card():
     b = Board("raised_fist", "j_raised_fist")
     b.clear_hand()
@@ -518,6 +570,22 @@ def test_hanging_chad_and_a_debuffed_first_card():
     b.recheck()
     b.play(club, heart)
     assert b.total == 20 * 2
+
+
+def test_hanging_chad_with_splash():
+    b = Board("chad_splash", "j_splash", "j_hanging_chad")
+    b.play(*b.cards("S_3", "H_K", "D_9"))
+    # Splash: every played card scores, the 3 first (three evaluations).
+    assert b.total == 5 + 3 * 3 + 10 + 9
+
+
+def test_repetitions_stack_on_the_first_face():
+    b = Board("repetitions", "j_sock_and_buskin", "j_hanging_chad", "j_dusk")
+    b.engine.apply({"op": "set", "hands_left": 1})
+    b.play(b.card("S_K", seal="Red"), b.card("H_K"))
+    # The first King: once, Red Seal, Sock and Buskin, Hanging Chad twice and Dusk. The second:
+    # once, Sock and Buskin and Dusk.
+    assert b.total == (10 + 6 * 10 + 3 * 10) * 2
 
 
 def test_dusk_retriggers_the_last_hand():
@@ -627,6 +695,36 @@ def test_copied_mime_at_round_end():
     dollars = b.dollars
     b.play(*pair)
     assert b.dollars == dollars + 4 * 3
+
+
+def test_mime_skips_a_gold_card_debuffed_by_the_club():
+    """A debuffed card has no end-of-round effect (card.lua:1033-1036): nothing to repeat."""
+    b = Board("mime_gold_club", "j_mime", boss="bl_club")
+    b.clear_hand()
+    pair = b.cards("S_2", "H_2")
+    club = b.card("C_K", enhancement="m_gold", seal="Red")
+    b.card("H_K", enhancement="m_gold")
+    b.recheck()
+    assert club.debuff
+    b.to_win()
+    dollars = b.dollars
+    b.play(*pair)
+    assert b.gs["phase"] == GamePhase.ROUND_EVAL
+    assert b.dollars == dollars + 2 * 3
+
+
+def test_mime_and_blue_seals_without_room():
+    """A Blue Seal without room makes nothing and has no effect, so Mime doesn't repeat it."""
+    b = Board("mime_blue_full", "j_mime")
+    b.consumable("c_pluto")
+    b.clear_hand()
+    pair = b.cards("S_2", "H_2")
+    b.card("S_K", seal="Blue")
+    b.card("H_K", seal="Blue")
+    b.to_win()
+    b.play(*pair)
+    # The first Blue Seal takes the last slot; Mime's repeat and the second card find none.
+    assert [c.center_key for c in b.gs["consumables"]] == ["c_pluto", "c_mercury"]
 
 
 def test_mime_at_round_end_repeats_blue_seals():
