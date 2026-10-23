@@ -2403,7 +2403,9 @@ class TestEndlessOverflow:
         gs = self._round_at_ante(1)
         gs["chips"] = int(sys.float_info.max)
         step(gs, PlayHand(card_indices=(0, 1, 2, 3, 4)))
-        assert gs["chips"] == math.inf
+        # G.GAME.chips is a double: adding a hand's score to the largest
+        # double rounds back to it rather than overflowing to inf.
+        assert gs["chips"] == sys.float_info.max
         assert gs["phase"] == GamePhase.ROUND_EVAL
 
     def test_disabling_an_overflowed_wall(self):

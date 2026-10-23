@@ -21,6 +21,7 @@ from typing import Any
 
 from jackdaw.engine.actions import GamePhase
 from jackdaw.engine.back import Back
+from jackdaw.engine.card import reset_sort_id_counter
 from jackdaw.engine.challenges import apply_challenge
 from jackdaw.engine.data.prototypes import BLINDS
 from jackdaw.engine.hand_levels import HandLevels
@@ -214,6 +215,10 @@ def initialize_run(
     # -----------------------------------------------------------------------
     # 1. Create base game_state
     # -----------------------------------------------------------------------
+    # sort_id is per run: card ordering ties (get_nominal's unique_val term,
+    # sort_id-ordered RNG picks) must not depend on how many runs this
+    # process has played before.
+    reset_sort_id_counter()
     gs = init_game_object()
 
     # -----------------------------------------------------------------------

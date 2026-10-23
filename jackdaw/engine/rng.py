@@ -279,8 +279,9 @@ def pseudohash(s: str) -> float:
     For an empty string the loop body never executes and the result is 1.0.
     """
     num = 1.0
-    for i in range(len(s), 0, -1):
-        byte = ord(s[i - 1])
+    raw = s.encode("utf-8")  # Lua strings are bytes; string.byte reads bytes
+    for i in range(len(raw), 0, -1):
+        byte = raw[i - 1]
         # Lua float semantics: x/0 = inf, and inf/nan propagate through
         # `% 1` as nan instead of raising. Certain "bugged" seeds (e.g.
         # erratic 7LB2WVPK) hit num == 0 mid-hash and depend on the nan

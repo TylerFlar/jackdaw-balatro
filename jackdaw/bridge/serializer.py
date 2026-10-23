@@ -141,6 +141,17 @@ def _load_tags() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+def _lua_number(v: int | float) -> int | float:
+    """A Lua number as BalatroBot's JSON encoder writes it (``%.14g``).
+
+    Integral doubles go out as JSON integers, so the engine's double-valued
+    counters (e.g. ``G.GAME.chips``) arrive as ``int`` like the live bot's.
+    """
+    if isinstance(v, float) and v.is_integer():
+        return int(v)
+    return v
+
+
 def _edition_to_str(edition: dict[str, Any] | None) -> str | None:
     """Map an engine edition dict to balatrobot's edition string."""
     if not edition:
@@ -391,7 +402,7 @@ def game_state_to_bot_response(gs: dict[str, Any]) -> dict[str, Any]:
             "discards_left": cr.get("discards_left", 0),
             "discards_used": cr.get("discards_used", 0),
             "reroll_cost": cr.get("reroll_cost", 5),
-            "chips": gs.get("chips", 0),
+            "chips": _lua_number(gs.get("chips", 0)),
         },
         "blinds": serialize_blinds(gs),
         "jokers": serialize_area(jokers, gs.get("joker_slots", 5)),

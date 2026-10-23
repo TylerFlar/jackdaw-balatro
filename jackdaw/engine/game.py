@@ -19,8 +19,6 @@ Usage::
 
 from __future__ import annotations
 
-import math
-import sys
 from typing import Any
 
 from jackdaw.engine.actions import (
@@ -714,11 +712,10 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
     # ------------------------------------------------------------------
     # 7. Process scoring side-effects
     # ------------------------------------------------------------------
-    # Accumulate chips.  G.GAME.chips is a double in vanilla, so a total
-    # past the largest double reads as inf ("naneinf") instead of growing
-    # into an int too large for the float math downstream.
-    chips = gs.get("chips", 0) + result.total
-    gs["chips"] = math.inf if chips > sys.float_info.max else chips
+    # Accumulate chips.  G.GAME.chips is a double in vanilla: add as doubles
+    # so sums past 2**53 round exactly like Lua's, and a total past the
+    # largest double reads as inf ("naneinf").
+    gs["chips"] = float(gs.get("chips", 0)) + float(result.total)
     gs["last_score_result"] = result
 
     # Dollars from scoring (Gold Seal, Lucky Card, joker economy)
