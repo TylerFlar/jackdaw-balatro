@@ -409,6 +409,17 @@ def test_a_debuffed_luchador_disables_nothing() -> None:
     assert not b.gs["blind"].disabled
 
 
+def test_luchador_under_verdant_leaf() -> None:
+    """Luchador disables Verdant Leaf in selling_self; selling a joker under it queues another
+    disable (card.lua:1616-1620), which changes nothing more."""
+    b = Board("BE_LUCHADOR_VERDANT", "j_luchador", "j_golden", boss="bl_final_leaf")
+    card = b.add("S_5")
+    assert card.debuff
+    b.sell(b.joker("j_luchador"))
+    assert b.gs["blind"].disabled
+    assert not card.debuff
+
+
 def test_luchador_after_the_boss_was_disabled() -> None:
     """A disabled boss is not disabled again."""
     b = Board("BE_LUCHADOR_TWICE", "j_luchador", "j_luchador", boss="bl_wall")
@@ -531,6 +542,21 @@ def test_invisible_joker_copy_joins_the_deck() -> None:
     assert b.keys("jokers") == ["j_juggler", "j_juggler"]
     assert b.gs["hand_size"] == size + 1
     assert len(b.gs["hand"]) == held + 1
+
+
+def test_invisible_joker_copies_a_debuffed_joker() -> None:
+    """Crimson Heart debuffed the Juggler, which took its hand size back (card.lua:535). The
+    copy keeps the debuff (common_events.lua:2178), yet its add_to_deck gives the hand size
+    (card.lua:564-643 checks no debuff)."""
+    b = Board("BE_INVISIBLE_HEART_1", "j_invisible", "j_juggler", boss="bl_final_heart")
+    b.play_pair()
+    assert [j.center_key for j in b.gs["jokers"] if j.debuff] == ["j_juggler"]
+    b.joker("j_invisible").ability["invis_rounds"] = 2
+    size = b.gs["hand_size"]
+    b.sell(b.joker("j_invisible"))
+    copy = b.joker("j_juggler", 1)
+    assert copy.debuff
+    assert b.gs["hand_size"] == size + 1
 
 
 def test_invisible_joker_alone_copies_nothing() -> None:
