@@ -167,6 +167,34 @@ HAND_BASE: dict[HandType, HandBaseData] = {
 }
 
 # ---------------------------------------------------------------------------
+# pairs(G.GAME.hands) iteration order — a known-nondeterminism constant
+# ---------------------------------------------------------------------------
+# G.GAME.hands is a string-keyed hash table (game.lua init_game_object), so
+# the order ``pairs()`` visits it in is LuaJIT's hash order, which the source
+# does not pin down.  Several gameplay loops depend on it: To Do List's pool
+# (card.lua:313-322, 2977-2984), the Orbital Tag's pool
+# (UI_definitions.lua:1511-1513) and the tie-break of
+# ``current_round.most_played_poker_hand`` that The Ox reads
+# (state_events.lua:129-138).  jackdaw freezes ONE order for all of them —
+# the order the engine has used for To Do List and the Orbital Tag
+# (``tags._ORBITAL_HANDS``) — to be confirmed against live captures.
+
+HANDS_PAIRS_ORDER: tuple[HandType, ...] = (
+    HandType.HIGH_CARD,
+    HandType.PAIR,
+    HandType.TWO_PAIR,
+    HandType.THREE_OF_A_KIND,
+    HandType.STRAIGHT,
+    HandType.FLUSH,
+    HandType.FULL_HOUSE,
+    HandType.FOUR_OF_A_KIND,
+    HandType.STRAIGHT_FLUSH,
+    HandType.FIVE_OF_A_KIND,
+    HandType.FLUSH_HOUSE,
+    HandType.FLUSH_FIVE,
+)
+
+# ---------------------------------------------------------------------------
 # Detection priority order (highest to lowest)
 # ---------------------------------------------------------------------------
 # This is the order used by evaluate_poker_hand (misc_functions.lua:376)

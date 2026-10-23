@@ -711,23 +711,8 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
             gs, [{"type": c.get("type", "Tarot"), **c} for c in result.joker_creates]
         )
 
-    # The Ox: set money to $0 if most-played hand type is played
-    # (blind.lua:debuff_hand fires during scoring in Lua)
-    if (
-        getattr(blind, "name", "") == "The Ox"
-        and not getattr(blind, "disabled", False)
-        and hand_levels is not None
-        and result.hand_type != "NULL"
-    ):
-        from jackdaw.engine.data.hands import HandType as _HT
-
-        try:
-            played_ht = _HT(result.hand_type)
-            if played_ht == hand_levels.most_played():
-                blind.triggered = True
-                gs["dollars"] = 0
-        except ValueError:
-            pass
+    # (The Ox takes the money inside Blind.debuff_hand, before the hand
+    # scores — blind.lua:560-569.)
 
     # ------------------------------------------------------------------
     # 8. Move surviving played cards to discard pile
@@ -2399,6 +2384,13 @@ def _round_won(gs: dict[str, Any]) -> None:
     #    - G.GAME.hands_played += 1 per hand  (state_events.lua:523, tracked at line 522)
     # ------------------------------------------------------------------
     gs["unused_discards"] = gs.get("unused_discards", 0) + cr.get("discards_left", 0)
+
+    # 6b. After a boss, end_round re-tallies the most played hand — the one
+    #     The Ox reads until the next boss falls (state_events.lua:129-138).
+    if blind.get_type() == "Boss" and gs.get("hand_levels") is not None:
+        from jackdaw.engine.hand_levels import most_played_poker_hand
+
+        cr["most_played_poker_hand"] = most_played_poker_hand(gs["hand_levels"])
 
     # ------------------------------------------------------------------
     # 7. Mark blind as Defeated

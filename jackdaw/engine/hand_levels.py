@@ -12,7 +12,26 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from jackdaw.engine.data.hands import HAND_BASE, HandType
+from jackdaw.engine.data.hands import HAND_BASE, HANDS_PAIRS_ORDER, HandType
+
+
+def most_played_poker_hand(levels: HandLevels) -> str:
+    """end_round's tally of ``current_round.most_played_poker_hand``
+    (state_events.lua:129-138), run after a boss is beaten; The Ox reads it.
+
+    The loop starts from 'High Card' with ``_played = -1, _order = 100`` and
+    takes a hand when ``v.played > _played or (v.played == _played and
+    _order > v.order)`` — but never updates ``_order``, so the second test
+    is always true: of the hands tied on the most plays, the one pairs()
+    visits LAST wins.  pairs() order is :data:`HANDS_PAIRS_ORDER`.
+    """
+    name, played, order = "High Card", -1, 100
+    for ht in HANDS_PAIRS_ORDER:
+        h = levels.get_state(ht)
+        if h.played > played or (h.played == played and order > HAND_BASE[ht].order):
+            played = h.played
+            name = ht.value
+    return name
 
 
 @dataclass
@@ -100,10 +119,12 @@ class HandLevels:
             h.played_this_round = 0
 
     def most_played(self) -> HandType:
-        """Return the most-played hand type (for Obelisk, The Ox, etc.).
+        """Return the most-played hand type by the live counts.
 
         Ties broken by hand priority order (highest hand wins).
-        If nothing has been played, returns High Card.
+        If nothing has been played, returns High Card.  The Ox does not use
+        this: it reads the tally frozen at the last boss defeat (see
+        :func:`most_played_poker_hand`).
         """
         best: HandType = HandType.HIGH_CARD
         best_count = 0

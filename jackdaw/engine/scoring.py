@@ -528,7 +528,14 @@ def score_hand(
     # Lua passes G.play.cards (all played cards, not just scoring subset)
     # to debuff_hand (state_events.lua:614).  Matters for The Psychic
     # which checks #cards >= h_size_ge against the full played hand.
-    debuffed = blind.debuff_hand(played_cards, poker_hands, hand_type)
+    debuffed = blind.debuff_hand(played_cards, poker_hands, hand_type, game_state=gs)
+    if getattr(blind, "name", "") == "The Ox" and blind.triggered and "dollars" in gs:
+        # The Ox emptied the bank before the hand scores (blind.lua:565):
+        # every joker from here on reads G.GAME.dollars = 0.
+        from dataclasses import replace
+
+        gs["money"] = gs["dollars"]
+        snapshot = replace(snapshot, money=gs["dollars"])
     if debuffed:
         _debuffed_shared = dict(
             full_hand=played_cards,

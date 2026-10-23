@@ -213,6 +213,103 @@ def test_g08_selling_a_consumable_keeps_verdant_leaf():
 
 
 # ---------------------------------------------------------------------------
+# G09 — The Ox: the frozen most-played hand; money zeroed before scoring
+# ---------------------------------------------------------------------------
+
+
+def _ox(seed: str, *jokers: str) -> dict:
+    gs = new_run(seed)
+    for key in jokers:
+        give_joker(gs, key)
+    start_boss(gs, "bl_ox")
+    gs["dollars"] = 10
+    return gs
+
+
+def test_g09_ox_compares_with_the_frozen_most_played_hand():
+    """The Ox triggers on ``G.GAME.current_round.most_played_poker_hand``
+    (blind.lua:560-569), which only end_round sets, after a boss is beaten
+    (state_events.lua:129-138); before that it is 'High Card' (game.lua:1964).
+    A Pair at the run's first boss keeps the money even though the live play
+    counts already make Pair the most played."""
+    gs = _ox("AUDIT_G09")  # this seed deals a pair of 3s at indices 6 and 7
+    assert gs["hand"][6].base.id == gs["hand"][7].base.id == 3
+
+    step(gs, PlayHand(card_indices=(6, 7)))
+
+    assert gs["last_score_result"].hand_type == "Pair"
+    assert gs["dollars"] == 10
+
+
+def test_g09_ox_zeroes_money_before_the_hand_scores():
+    """debuff_hand runs before scoring (state_events.lua:614) and The Ox's
+    ease_dollars(-G.GAME.dollars, true) is instant (blind.lua:565): money
+    earned while the hand scores — Rough Gem's $1 for a scored Diamond — is
+    kept."""
+    gs = _ox("AUDIT_G09", "j_rough_gem")
+    assert gs["hand"][0].base.suit is Suit.DIAMONDS
+
+    step(gs, PlayHand(card_indices=(0,)))  # High Card: the frozen most-played hand
+
+    assert gs["blind"].triggered
+    assert gs["dollars"] == 1
+
+
+def test_g09_ox_trigger_pays_matador():
+    """The trigger is set inside debuff_hand, before the jokers score, so
+    Matador's joker_main sees it (card.lua:3755-3760)."""
+    gs = _ox("AUDIT_G09", "j_matador")
+
+    step(gs, PlayHand(card_indices=(0,)))
+
+    assert gs["dollars"] == 8
+
+
+def test_g09_most_played_hand_is_set_when_a_boss_is_beaten():
+    """end_round recomputes most_played_poker_hand after a boss only
+    (state_events.lua:129-138): beating the Small Blind with Pairs leaves it
+    'High Card'; beating a boss sets it."""
+    gs = new_run("AUDIT_G09")
+    step(gs, SelectBlind())
+    pair = next(
+        (i, i + 1)
+        for i in range(len(gs["hand"]) - 1)
+        if gs["hand"][i].base.id == gs["hand"][i + 1].base.id
+    )
+    gs["chips"] = gs["blind"].chips - 1
+    step(gs, PlayHand(card_indices=pair))
+    assert gs["phase"] == GamePhase.ROUND_EVAL
+    assert gs["current_round"]["most_played_poker_hand"] == "High Card"
+
+    step(gs, CashOut())
+    gs["phase"] = GamePhase.BLIND_SELECT  # straight on to the boss
+    start_boss(gs, "bl_hook")
+    win_round(gs)  # one High Card: Pair 1, High Card 1 — a tie
+
+    # Ties go to the hand pairs(G.GAME.hands) visits last (end_round never
+    # updates its _order, so ``_order > v.order`` is always true).
+    assert gs["current_round"]["most_played_poker_hand"] == "Pair"
+
+
+def test_g09_most_played_tie_break_follows_the_pairs_order():
+    """The order pairs() visits G.GAME.hands in is not in the source; jackdaw
+    fixes it once (HANDS_PAIRS_ORDER) for every such loop, the same order
+    To Do List and the Orbital Tag use."""
+    from jackdaw.engine.data.hands import HANDS_PAIRS_ORDER
+    from jackdaw.engine.hand_levels import HandLevels, most_played_poker_hand
+    from jackdaw.engine.tags import _ORBITAL_HANDS
+
+    assert list(HANDS_PAIRS_ORDER) == _ORBITAL_HANDS
+    levels = HandLevels()
+    assert most_played_poker_hand(levels) == HANDS_PAIRS_ORDER[-1].value  # all 0: the last
+    for hand in ("Flush", "Pair", "High Card"):
+        levels.record_play(hand)
+    assert most_played_poker_hand(levels) == "Flush"  # Flush comes last of the three
+    levels.record_play("Pair")
+    assert most_played_poker_hand(levels) == "Pair"
+
+
+# ---------------------------------------------------------------------------
 # G11 — Crimson Heart re-picks only after a play; its debuff toggles passives
 # ---------------------------------------------------------------------------
 

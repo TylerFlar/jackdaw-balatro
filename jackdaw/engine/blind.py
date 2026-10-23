@@ -218,6 +218,7 @@ class Blind:
         handname: str,
         *,
         check: bool = False,
+        game_state: dict[str, Any] | None = None,
     ) -> bool:
         """Check whether the entire hand is blocked by the boss blind.
 
@@ -234,7 +235,9 @@ class Blind:
             handname: Detected hand type name (e.g. ``"Full House"``).
             check: If True, don't mutate state (preview mode for
                 ``parse_highlighted``).  The Eye won't register the hand,
-                The Mouth won't lock.
+                The Mouth won't lock, The Ox takes no money.
+            game_state: Read for The Ox (``current_round
+                .most_played_poker_hand``) and changed by it (``dollars``).
         """
         if self.disabled:
             return False
@@ -279,12 +282,25 @@ class Blind:
                 if not check:
                     self.only_hand = handname
 
-        # The Arm / The Ox don't block; `triggered` is set by the
-        # scoring pipeline / play handler only when the effect actually
-        # fires (Arm: level > 1 demote — Matador reads it during
-        # joker_main, live-verified LS7N21KX; Ox: money drain).  The
-        # old conservative always-True Arm flag here would over-pay
-        # Matador on level-1 hands.
+        # The Arm doesn't block; `triggered` is set by the scoring pipeline
+        # only when its demote actually fires (level > 1 — Matador reads it
+        # during joker_main, live-verified LS7N21KX).  The old conservative
+        # always-True Arm flag here would over-pay Matador on level-1 hands.
+
+        # The Ox (blind.lua:560-569): the hand most played as of the last
+        # boss defeat (current_round.most_played_poker_hand, frozen by
+        # end_round, state_events.lua:129-138) triggers it and, unless
+        # previewing, ease_dollars(-G.GAME.dollars, true) takes all the
+        # money at once — before the hand scores.
+        if self.name == "The Ox" and game_state is not None:
+            self.triggered = False
+            most_played = game_state.get("current_round", {}).get(
+                "most_played_poker_hand", "High Card"
+            )
+            if handname == most_played:
+                self.triggered = True
+                if not check:
+                    game_state["dollars"] = 0
 
         return False
 
