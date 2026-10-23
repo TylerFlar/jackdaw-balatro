@@ -191,11 +191,11 @@ def _handle_select_blind(gs: dict[str, Any]) -> dict[str, Any]:
     # ------------------------------------------------------------------
     start_round(gs)
 
-    # set_blind's debuff pass over every playing card (blind.lua:207-210)
-    # runs inside set_blind, before the jokers' setting_blind context: a
-    # card a setting_blind effect creates (Marble Joker's stone) is not
-    # checked here.
-    reapply_blind_debuffs(gs)
+    # set_blind's debuff pass over every playing card and joker
+    # (blind.lua:207-213) runs inside set_blind, before the jokers'
+    # setting_blind context: a card a setting_blind effect creates (Marble
+    # Joker's stone) is not checked here.
+    _set_blind_debuff_pass(gs)
 
     # ------------------------------------------------------------------
     # 3. Fire joker setting_blind context
@@ -1969,6 +1969,18 @@ def reapply_blind_debuffs(gs: dict[str, Any]) -> None:
             blind.debuff_card(card, pareidolia=pareidolia, smeared=smeared)
 
 
+def _set_blind_debuff_pass(gs: dict[str, Any]) -> None:
+    """set_blind's own debuff pass (not a reset, blind.lua:207-213): every
+    playing card, then every joker — which un-debuffs a joker unless the
+    blind is an active Crimson Heart (blind.lua:647-649)."""
+    reapply_blind_debuffs(gs)
+    blind = gs.get("blind")
+    if blind is None:
+        return
+    for joker in list(gs.get("jokers", ())):
+        blind.debuff_card(joker, is_joker_area=True, game_state=gs)
+
+
 def change_hand_size(gs: dict[str, Any], delta: int) -> None:
     """``G.hand:change_size(delta)`` (cardarea.lua:94-111).
 
@@ -2175,6 +2187,7 @@ def _round_won(gs: dict[str, Any]) -> None:
     10. Calculate round earnings
     11. Phase → ROUND_EVAL
     """
+    from jackdaw.engine.blind import Blind
     from jackdaw.engine.economy import calculate_round_earnings
 
     cr = gs["current_round"]
@@ -2270,16 +2283,12 @@ def _round_won(gs: dict[str, Any]) -> None:
     gs["discard_pile"] = []
 
     # ------------------------------------------------------------------
-    # 5. Un-debuff all playing cards (blind debuffs don't persist)
-    #    and flip everything face up (The Fish/House/Wheel/Mark flips and
-    #    Amber Acorn's joker flip last only for the blind).  Cerulean
-    #    Bell's forced flag goes too (state_events.lua:279).
+    # 5. Flip everything face up (The Fish/House/Wheel/Mark flips and
+    #    Amber Acorn's joker flip, blind.lua:338-340, last only for the
+    #    blind).  Cerulean Bell's forced flag goes too
+    #    (state_events.lua:279).  The debuffs go at the defeat, below.
     # ------------------------------------------------------------------
     for card in deck:
-        # Only clear blind-applied debuffs; perishable debuffs are permanent
-        if getattr(card, "debuff", False):
-            if not (getattr(card, "perishable", False) and getattr(card, "perish_tally", 1) <= 0):
-                card.debuff = False
         card.facing = "front"
     for j in jokers:
         j.facing = "front"
@@ -2327,11 +2336,6 @@ def _round_won(gs: dict[str, Any]) -> None:
         _advance_ante(gs)
         gs["blind_on_deck"] = "Small"
 
-    # The Manacle: restore hand size after boss defeat
-    if blind_on_deck == "Boss" and getattr(blind, "name", "") == "The Manacle":
-        if not getattr(blind, "disabled", False):
-            change_hand_size(gs, 1)
-
     # ------------------------------------------------------------------
     # 10. Calculate round earnings (for cash-out screen)
     # ------------------------------------------------------------------
@@ -2346,6 +2350,20 @@ def _round_won(gs: dict[str, Any]) -> None:
         joker_dollars=eor.get("dollars_earned", 0),
     )
     gs["round_earnings"] = earnings
+
+    # ------------------------------------------------------------------
+    # 10b. Blind:defeat (blind.lua:276-344), run by evaluate_round after
+    #      its dollar rows (state_events.lua:1148-1155).  The Manacle
+    #      gives its hand size back; the queued set_blind(nil, nil, true)
+    #      leaves the empty blind for the cash-out screen and the shop,
+    #      and its debuff pass frees every playing card and joker
+    #      (Crimson Heart's victim included) — a perished joker stays
+    #      debuffed (card.lua:527-533).
+    # ------------------------------------------------------------------
+    if getattr(blind, "name", "") == "The Manacle" and not getattr(blind, "disabled", False):
+        change_hand_size(gs, 1)
+    gs["blind"] = Blind.empty()
+    _set_blind_debuff_pass(gs)
 
     # ------------------------------------------------------------------
     # 11. Phase → ROUND_EVAL

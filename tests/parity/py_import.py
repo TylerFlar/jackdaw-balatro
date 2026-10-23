@@ -110,9 +110,8 @@ def _import_blind(bs: dict[str, Any] | None) -> Blind | None:
         only_hand=bs["mouth_hand"],
         discards_sub=bs["discards_sub"],
         hands_sub=bs["hands_sub"],
+        prepped=bs["prepped"],
     )
-    if bs["prepped"]:
-        blind.prepped = True  # type: ignore[attr-defined]
     blind.hands_used = {h: True for h in bs["eye_hands"]}
     return blind
 

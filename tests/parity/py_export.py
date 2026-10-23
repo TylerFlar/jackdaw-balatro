@@ -219,7 +219,7 @@ def _export_blind(blind: Any) -> dict[str, Any] | None:
         "boss": bool(blind.boss),
         "disabled": bool(blind.disabled),
         "triggered": bool(blind.triggered),
-        "prepped": bool(getattr(blind, "prepped", False)),
+        "prepped": bool(blind.prepped),
         "eye_hands": sorted(str(h) for h, used in blind.hands_used.items() if used),
         "mouth_hand": blind.only_hand,
         "discards_sub": blind.discards_sub,

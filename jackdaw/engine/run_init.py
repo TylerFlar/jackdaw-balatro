@@ -21,6 +21,7 @@ from typing import Any
 
 from jackdaw.engine.actions import GamePhase
 from jackdaw.engine.back import Back
+from jackdaw.engine.blind import Blind
 from jackdaw.engine.card import reset_sort_id_counter
 from jackdaw.engine.challenges import apply_challenge
 from jackdaw.engine.data.prototypes import BLINDS
@@ -354,6 +355,10 @@ def initialize_run(
     # HandLevels (not in Lua start_run but needed for scoring)
     # -----------------------------------------------------------------------
     gs["hand_levels"] = HandLevels()
+
+    # G.GAME.blind starts as the empty blind: start_run creates it and calls
+    # set_blind(nil, nil, true) (game.lua:2392, 2431).
+    gs["blind"] = Blind.empty()
 
     # -----------------------------------------------------------------------
     # Card areas — initialize empty lists so callers don't have to

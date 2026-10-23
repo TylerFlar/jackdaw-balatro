@@ -11,6 +11,7 @@ import math
 import pytest
 
 from jackdaw.engine.actions import (
+    CashOut,
     Discard,
     GamePhase,
     PlayHand,
@@ -31,9 +32,73 @@ from tests.engine.audit._boards import (
     index_of,
     new_run,
     start_boss,
+    win_round,
 )
 from tests.parity import canon
 from tests.parity.py_export import export_state
+
+# ---------------------------------------------------------------------------
+# G12 — the blind is reset after defeat (and is empty before the first one)
+# ---------------------------------------------------------------------------
+
+
+def _assert_empty_blind(blind) -> None:
+    """set_blind(nil): no name, no boss, 0 chips/mult/dollars, not disabled
+    (blind.lua:79-110)."""
+    assert blind.key == "" and blind.name == ""
+    assert not blind.boss and not blind.disabled and not blind.triggered
+    assert blind.chips == 0 and blind.mult == 0 and blind.dollars == 0
+
+
+def test_g12_the_run_starts_with_the_empty_blind():
+    """start_run creates G.GAME.blind and calls set_blind(nil, nil, true)
+    (game.lua:2392, 2431)."""
+    _assert_empty_blind(new_run("AUDIT_G12E")["blind"])
+
+
+def test_g12_a_defeated_boss_is_reset_for_the_shop():
+    """evaluate_round calls Blind:defeat (state_events.lua:1148-1155), whose
+    queued event runs set_blind(nil, nil, true) (blind.lua:330-337): in the
+    cash-out screen and the shop G.GAME.blind is the empty blind."""
+    gs = start_boss(new_run("AUDIT_G12"), "bl_manacle")
+    win_round(gs)
+    _assert_empty_blind(gs["blind"])
+
+    step(gs, CashOut())
+
+    _assert_empty_blind(gs["blind"])
+
+
+def test_g12_selling_luchador_in_the_shop_disables_nothing():
+    """Luchador only disables a current boss (``get_type() == 'Boss'``,
+    card.lua:2355-2359); after The Manacle is defeated (its +1 hand size given
+    back at defeat, blind.lua:341-343) selling Luchador in the shop must not
+    hand out another +1."""
+    gs = new_run("AUDIT_G12L")
+    give_joker(gs, "j_luchador")
+    start_boss(gs, "bl_manacle")
+    hand_size = gs["hand_size"] + 1  # The Manacle's -1 comes back at defeat
+    win_round(gs)
+    step(gs, CashOut())
+    assert gs["hand_size"] == hand_size
+
+    step(gs, SellCard(area="jokers", card_index=0))
+
+    assert gs["hand_size"] == hand_size
+
+
+def test_g12_defeat_lifts_crimson_heart_joker_debuff():
+    """set_blind(nil)'s pass runs debuff_card on every joker (blind.lua:211-213),
+    and with no blind left that un-debuffs Crimson Heart's victim."""
+    gs = new_run("AUDIT_G12C")
+    joker = give_joker(gs, "j_joker")
+    start_boss(gs, "bl_final_heart")
+    assert joker.debuff
+
+    win_round(gs)
+
+    assert not joker.debuff
+
 
 # ---------------------------------------------------------------------------
 # G13 — boss debuffs are re-checked when a card or the joker set changes

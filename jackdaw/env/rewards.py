@@ -207,9 +207,11 @@ class ShapedReward:
                 reward += self.boss_beaten * ante_scale
             reward += self.hands_left * t.curr.hands_left
 
-        # Progress toward the blind.  An overflowed target (endless ante
-        # 39+) can't be progressed against.
-        target = t.curr.blind_chips
+        # Progress toward the blind the hand was played against: once a hand
+        # clears it, the state after the step holds the empty blind (reset
+        # at defeat, blind.lua:336).  An overflowed target (endless ante 39+,
+        # NaN) can't be progressed against.
+        target = t.prev.blind_chips
         if 0 < target < math.inf and t.chips_scored:
             reward += self.score_progress * min(t.chips_scored / target, 1.0)
 

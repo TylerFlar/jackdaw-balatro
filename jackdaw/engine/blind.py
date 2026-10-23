@@ -71,6 +71,12 @@ class Blind:
     hands_sub: int | None = None
     """Hands subtracted by The Needle."""
 
+    prepped: bool = True
+    """One-shot flag read by drawn_to_hand (Crimson Heart) and stay_flipped
+    (The Fish).  set_blind sets it (blind.lua:94) — except The Fish, which
+    clears it (blind.lua:176-178) — press_play sets it, and every
+    drawn_to_hand clears it (blind.lua:602)."""
+
     @classmethod
     def create(
         cls,
@@ -108,11 +114,17 @@ class Blind:
             dollars=dollars,
             boss=proto.boss is not None,
             debuff_config=debuff,
+            prepped=proto.name != "The Fish",
         )
 
     @classmethod
     def empty(cls) -> Blind:
-        """Create an empty/null blind (between rounds)."""
+        """The empty blind: ``set_blind(nil)`` (blind.lua:79-110).
+
+        G.GAME.blind holds it before the first blind of a run (start_run,
+        game.lua:2392, 2431) and from each defeat on (Blind:defeat,
+        blind.lua:330-337): no name, no boss, 0 chips, mult and dollars.
+        """
         return cls(
             key="",
             name="",

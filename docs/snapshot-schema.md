@@ -114,10 +114,16 @@ Shared fields:
 - `boss`, `disabled`, `triggered`
 
 Boss-specific state:
-- `prepped`: The Fish / Crimson Heart one-shot flag.
-- `eye_hands`: The Eye's hands already played this round, sorted.
+- `prepped`: The Fish / Crimson Heart one-shot flag. `set_blind` sets it (The
+  Fish clears it), `press_play` sets it and every `drawn_to_hand` clears it.
+- `eye_hands`: The Eye's hands already played this round, sorted (empty for
+  any other blind).
 - `mouth_hand`: The Mouth's locked hand, or null.
 - `discards_sub` / `hands_sub`: what The Water / The Needle removed.
+
+Before the first blind of a run and from each defeat on (`Blind:defeat` runs
+`set_blind(nil)`, blind.lua:336), the blind is the **empty blind**: `key` `""`,
+`chips`, `mult` and `dollars` 0, not a boss, not disabled, `prepped` true.
 
 ### `hands`
 
