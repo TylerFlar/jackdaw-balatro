@@ -17,8 +17,9 @@ from jackdaw.engine import (
     SkipPack,
     step,
 )
-from jackdaw.engine.card_factory import create_joker
+from jackdaw.engine.card_factory import create_card, create_joker
 from jackdaw.engine.challenges import CHALLENGES
+from jackdaw.engine.packs import generate_pack_cards
 from jackdaw.engine.rng import PseudoRandom
 from tests.engine.audit._helpers import new_run, play_round, win_blind
 
@@ -206,3 +207,85 @@ def test_inflation_raises_prices_on_every_purchase():
     step(gs, SkipPack())
     assert gs["shop_boosters"][0].cost == cost_before + 1
     assert math.isfinite(gs["dollars"])
+
+
+# ---------------------------------------------------------------------------
+# G05 — challenge bans reach the boss, tag and voucher pools and the Soul roll
+# ---------------------------------------------------------------------------
+
+
+def _banned(cid: str) -> set[str]:
+    out: set[str] = set()
+    for group in CHALLENGES[cid]["restrictions"].values():
+        for entry in group:
+            out.add(entry["id"])
+            out.update(entry.get("ids", ()))
+    return out
+
+
+def test_banned_tags_never_offered():
+    """Jokerless bans 8 tags; get_next_tag_key never offers them.
+
+    common_events.lua:2030 (get_current_pool): ``if add and not
+    G.GAME.banned_keys[v.key]`` applies to the Tag pool too, and
+    get_next_tag_key (common_events.lua:1914) resamples UNAVAILABLE slots.
+    """
+    banned = _banned("c_jokerless_1")
+    for i in range(30):
+        gs = new_run(challenge="c_jokerless_1", seed=f"AUDIT_G05_TAG{i}")
+        tags = gs["round_resets"]["blind_tags"]
+        assert not ({tags["Small"], tags["Big"]} & banned), (i, tags)
+
+
+def test_banned_vouchers_never_offered():
+    """get_next_voucher_key (common_events.lua:1901) draws from the same
+    banned-key-filtered pool (common_events.lua:2030)."""
+    for cid in ("c_golden_needle_1", "c_inflation_1", "c_omelette_1"):
+        banned = _banned(cid)
+        for i in range(25):
+            gs = new_run(challenge=cid, seed=f"AUDIT_G05_V{cid}{i}")
+            assert gs["current_round"]["voucher"] not in banned, (cid, i)
+
+
+def test_banned_bosses_never_drawn():
+    """get_new_boss drops banned blinds before picking (common_events.lua:2359-2361).
+
+    Jokerless bans three of the five showdown bosses, so the ante-8 boss is
+    The Violet Vessel or The Cerulean Bell.
+    """
+    for i in range(8):
+        gs = new_run(challenge="c_jokerless_1", seed=f"AUDIT_G05_BOSS{i}")
+        gs["round_resets"]["ante"] = 7
+        gs["blind_on_deck"] = "Boss"
+        step(gs, SelectBlind())
+        win_blind(gs)
+        assert gs["round_resets"]["ante"] == 8
+        assert gs["round_resets"]["blind_choices"]["Boss"] in {"bl_final_vessel", "bl_final_bell"}
+
+
+def test_banned_soul_skips_the_soul_rolls():
+    """With c_soul banned there is no Soul / Black Hole roll at all.
+
+    common_events.lua:2088: the forced-key block of create_card runs only
+    ``if not forced_key and soulable and (not G.GAME.banned_keys['c_soul'])``
+    — both the Soul and the Black Hole roll sit inside it.
+    """
+    gs = new_run(challenge="c_jokerless_1", seed="AUDIT_G05_SOUL")
+    generate_pack_cards("p_arcana_normal_1", gs["rng"], 1, gs)
+    generate_pack_cards("p_spectral_normal_1", gs["rng"], 1, gs)
+    assert not any(k.startswith("soul_") for k in gs["rng"].state)
+
+    control = new_run(seed="AUDIT_G05_SOUL")
+    generate_pack_cards("p_arcana_normal_1", control["rng"], 1, control)
+    assert "soul_Tarot1" in control["rng"].state
+
+
+def test_banned_forced_key_falls_back_to_the_pool():
+    """common_events.lua:2109: ``if forced_key and not G.GAME.banned_keys[forced_key]``
+    — a banned forced key is ignored and the pool is drawn instead."""
+    gs = new_run(challenge="c_jokerless_1", seed="AUDIT_G05_FORCED")
+    card = create_card(
+        "Tarot", gs["rng"], 1, area="", soulable=False, forced_key="c_judgement", game_state=gs
+    )
+    assert card.center_key != "c_judgement"
+    assert card.ability["set"] == "Tarot"

@@ -440,6 +440,7 @@ def create_card(
     if key is None and card_type in ("Base", "PlayingCard"):
         key = "c_base"
 
+    banned = gs.get("banned_keys")
     if key is None and soulable:
         key = check_soul_chance(
             card_type,
@@ -447,7 +448,13 @@ def create_card(
             ante,
             used_jokers=gs.get("used_jokers"),
             has_showman=showman_active(gs),
+            banned_keys=banned,
         )
+
+    # A banned forced key is ignored: the pool is drawn instead
+    # (common_events.lua:2109, ``forced_key and not banned_keys[forced_key]``).
+    if key is not None and banned and key in banned:
+        key = None
 
     if key is None:
         key = pick_card_from_pool(

@@ -85,6 +85,7 @@ def get_next_voucher_key(
     *,
     from_tag: bool = False,
     ante: int = 1,
+    banned_keys: dict[str, bool] | set[str] | None = None,
 ) -> str | None:
     """Select the next voucher key for the shop using the RNG stream.
 
@@ -103,6 +104,9 @@ def get_next_voucher_key(
     ``common_events.lua:2052``.  For tag-triggered vouchers, the key is
     ``'Voucher_fromtag'`` (no ante appended).
 
+    Challenge bans (*banned_keys*) are UNAVAILABLE like everything else
+    the pool culls (common_events.lua:2030).
+
     Returns ``None`` if the eligible pool is empty (shouldn't happen in
     practice due to the ``v_blank`` fallback in ``get_current_pool``).
     """
@@ -116,6 +120,7 @@ def get_next_voucher_key(
         rng,
         ante,
         used_vouchers=used_vouchers_set,
+        banned_keys=banned_keys,
         shop_vouchers=shop_vouchers_set,
     )
 

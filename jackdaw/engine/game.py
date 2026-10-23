@@ -361,7 +361,13 @@ def _fire_new_blind_choice_tags(gs: dict[str, Any]) -> None:
 
             bosses_used = gs.setdefault("bosses_used", {})
             ante = rr.get("ante", 1)
-            new_boss = get_new_boss(ante, bosses_used, rng)
+            new_boss = get_new_boss(
+                ante,
+                bosses_used,
+                rng,
+                win_ante=gs.get("win_ante", 8),
+                banned_keys=gs.get("banned_keys"),
+            )
             rr.setdefault("blind_choices", {})["Boss"] = new_boss
 
         if result.create_pack:
@@ -2991,7 +2997,14 @@ def _fire_shop_tags(gs: dict[str, Any], rerolled: bool) -> None:
             ]
             used_v = {k: True for k in gs.get("used_vouchers", [])}
             ante = gs.get("round_resets", {}).get("ante", 1)
-            v_key = get_next_voucher_key(rng, used_v, in_shop, from_tag=True, ante=ante)
+            v_key = get_next_voucher_key(
+                rng,
+                used_v,
+                in_shop,
+                from_tag=True,
+                ante=ante,
+                banned_keys=gs.get("banned_keys"),
+            )
             if v_key:
                 voucher = create_voucher(v_key)
                 voucher.set_cost(

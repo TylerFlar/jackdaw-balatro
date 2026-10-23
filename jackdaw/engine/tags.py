@@ -421,10 +421,13 @@ def generate_blind_tags(
 
     used_vouchers: set[str] = set(game_state.get("used_vouchers", []))
     discovered: set[str] | None = game_state.get("discovered")
+    banned = game_state.get("banned_keys")
     small = pick_card_from_pool(
-        "Tag", rng, ante, used_vouchers=used_vouchers, discovered=discovered
+        "Tag", rng, ante, used_vouchers=used_vouchers, discovered=discovered, banned_keys=banned
     )
-    big = pick_card_from_pool("Tag", rng, ante, used_vouchers=used_vouchers, discovered=discovered)
+    big = pick_card_from_pool(
+        "Tag", rng, ante, used_vouchers=used_vouchers, discovered=discovered, banned_keys=banned
+    )
     return {"Small": small, "Big": big}
 
 
@@ -476,6 +479,8 @@ def assign_ante_blinds(
     bosses_used: dict[str, int] = game_state.setdefault("bosses_used", {})
     used_vouchers: set[str] = set(game_state.get("used_vouchers", []))
     used_v_dict: dict[str, bool] = {k: True for k in used_vouchers}
+    # Challenge bans cull all three pools (common_events.lua:2030, 2359-2361).
+    banned: dict[str, bool] = game_state.get("banned_keys") or {}
 
     # RNG call order must match Lua exactly:
     #   1. get_next_voucher_key() — state_events.lua:263 (boss defeat)
@@ -495,14 +500,21 @@ def assign_ante_blinds(
         used_v_dict,
         in_shop=None,
         ante=ante,
+        banned_keys=banned,
     )
 
     # 2-3. Tags (Small then Big)
-    small = pick_card_from_pool("Tag", rng, ante, used_vouchers=used_vouchers)
-    big = pick_card_from_pool("Tag", rng, ante, used_vouchers=used_vouchers)
+    small = pick_card_from_pool("Tag", rng, ante, used_vouchers=used_vouchers, banned_keys=banned)
+    big = pick_card_from_pool("Tag", rng, ante, used_vouchers=used_vouchers, banned_keys=banned)
 
     # 4. Boss
-    boss = get_new_boss(ante, bosses_used, rng)
+    boss = get_new_boss(
+        ante,
+        bosses_used,
+        rng,
+        win_ante=game_state.get("win_ante", 8),
+        banned_keys=banned,
+    )
 
     blind_tags: dict[str, str] = {"Small": small, "Big": big}
 
