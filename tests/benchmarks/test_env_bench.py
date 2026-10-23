@@ -139,6 +139,43 @@ class TestEncodingLatency:
 
 
 @pytest.mark.benchmark
+class TestRustEncodingLatency:
+    """The Rust encoder (``jackdaw._core``, encoder v1) against ``encode_observation``."""
+
+    def test_rust_encoding_latency(self):
+        """encode_game (Rust encode + numpy views) < 50us mean over the tapes' states."""
+        from jackdaw.core import Game
+        from jackdaw.env.rust_observation import encode_game
+        from tests.parity.harness import load_specs
+        from tests.parity.pyengine import PyEngine
+
+        games = []
+        py_times = []
+        for spec in load_specs()[:40]:
+            engine = PyEngine(spec.start, spec.setup)
+            for action in spec.tape[:80]:
+                t0 = time.perf_counter()
+                encode_observation(engine.gs)
+                py_times.append(time.perf_counter() - t0)
+                games.append(Game.from_dict(engine.snapshot()))
+                try:
+                    engine.step(action)
+                except Exception:
+                    break
+
+        best = float("inf")
+        for _ in range(5):
+            t0 = time.perf_counter()
+            for game in games:
+                encode_game(game)
+            best = min(best, time.perf_counter() - t0)
+        rust_us = best / len(games) * 1e6
+        py_us = sum(py_times) / len(py_times) * 1e6
+        print(f"\n{len(games)} states: Python {py_us:.1f}us, Rust {rust_us:.2f}us per encode")
+        assert rust_us < 50, f"Rust encode mean {rust_us:.1f}us (target: <50us)"
+
+
+@pytest.mark.benchmark
 class TestActionMaskLatency:
     """Assert get_action_mask is fast enough."""
 

@@ -6,7 +6,9 @@
 //! one wheel per platform serves CPython 3.12 and newer. Release builds keep `panic = "unwind"`,
 //! so a Rust panic reaches Python as an exception instead of aborting the interpreter.
 
+use jackdaw_env::observation::{Encoder, Observation};
 use pyo3::prelude::*;
+use pyo3::types::PyByteArray;
 
 pyo3::create_exception!(
     _core,
@@ -30,10 +32,42 @@ pyo3::create_exception!(
 #[derive(Clone)]
 struct Game {
     inner: jackdaw_core::game::Game,
+    /// The observation encoder's buffers, reused by every `observation()` call.
+    encoder: Encoder,
+}
+
+impl Game {
+    fn wrap(inner: jackdaw_core::game::Game) -> Self {
+        Game {
+            inner,
+            encoder: Encoder::new(),
+        }
+    }
 }
 
 fn value_error(e: impl std::fmt::Display) -> PyErr {
     pyo3::exceptions::PyValueError::new_err(e.to_string())
+}
+
+/// Row counts of the five entity arrays (hand, jokers, consumables, shop, pack).
+type ObservationRows = (usize, usize, usize, usize, usize);
+
+/// An encoded observation for Python: its `f32` values in native byte order, in a fresh
+/// `bytearray` (so `np.frombuffer` gives writable arrays without another copy), and the row
+/// counts.
+fn observation_to_py<'py>(
+    py: Python<'py>,
+    obs: &Observation,
+) -> PyResult<(Bound<'py, PyByteArray>, ObservationRows)> {
+    let data = obs.data();
+    let buf = PyByteArray::new_with(py, std::mem::size_of_val(data), |buf| {
+        for (dst, x) in buf.as_chunks_mut::<4>().0.iter_mut().zip(data) {
+            *dst = x.to_ne_bytes();
+        }
+        Ok(())
+    })?;
+    let [a, b, c, d, e] = obs.rows();
+    Ok((buf, (a, b, c, d, e)))
 }
 
 #[pymethods]
@@ -59,7 +93,7 @@ impl Game {
             challenge,
         };
         let inner = jackdaw_core::game::Game::new_run(&spec).map_err(value_error)?;
-        Ok(Game { inner })
+        Ok(Game::wrap(inner))
     }
 
     /// A run resting at a snapshot (JSON text).
@@ -67,12 +101,26 @@ impl Game {
     fn from_snapshot(text: &str) -> PyResult<Self> {
         let value: serde_json::Value = serde_json::from_str(text).map_err(value_error)?;
         let inner = jackdaw_core::game::Game::from_snapshot(&value).map_err(value_error)?;
-        Ok(Game { inner })
+        Ok(Game::wrap(inner))
     }
 
     /// The canonical snapshot (JSON text).
     fn snapshot(&self) -> String {
         self.inner.snapshot().to_string()
+    }
+
+    /// The observation (encoder v1, `jackdaw.env.observation`) of the current state.
+    ///
+    /// Returns ``(data, rows)``: ``data`` is a ``bytearray`` of native-endian float32 values,
+    /// the global context followed by the hand, joker, consumable, shop and pack rows, and
+    /// ``rows`` their row counts. ``jackdaw.env.rust_observation`` wraps it as an
+    /// ``Observation``.
+    fn observation<'py>(
+        &mut self,
+        py: Python<'py>,
+    ) -> PyResult<(Bound<'py, PyByteArray>, ObservationRows)> {
+        let obs = self.encoder.encode(&self.inner.gs);
+        observation_to_py(py, obs)
     }
 
     /// Take one action (its tape form, JSON text) and play until the game waits again.
@@ -225,6 +273,33 @@ mod _core {
         };
         let game = Game::new_run(&spec).map_err(PyValueError::new_err)?;
         Ok(game.snapshot().to_string())
+    }
+
+    /// Encode a canonical snapshot (JSON text) with observation encoder v1
+    /// (``jackdaw.env.observation.encode_observation``).
+    ///
+    /// Returns ``(data, rows)`` as ``Game.observation()`` does. Raises ``ValueError`` when the
+    /// Rust state can't hold the snapshot.
+    #[pyfunction]
+    fn _encode_observation<'py>(
+        py: Python<'py>,
+        text: &str,
+    ) -> PyResult<(Bound<'py, pyo3::types::PyByteArray>, super::ObservationRows)> {
+        use pyo3::exceptions::PyValueError;
+        let value: serde_json::Value = serde_json::from_str(text)
+            .map_err(|e| PyValueError::new_err(format!("snapshot: bad JSON: {e}")))?;
+        let gs = jackdaw_core::snapshot::import(&value)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        let mut encoder = jackdaw_env::observation::Encoder::new();
+        super::observation_to_py(py, encoder.encode(&gs))
+    }
+
+    /// The observation layout: the global context's length and the row width of the hand,
+    /// joker, consumable, shop and pack arrays.
+    #[pyfunction]
+    fn _observation_layout() -> (usize, [usize; 5]) {
+        use jackdaw_env::observation::{D_GLOBAL, ENTITY_WIDTHS};
+        (D_GLOBAL, ENTITY_WIDTHS)
     }
 
     /// Center keys of the jokers the Rust engine has ported; a step that consults any other
