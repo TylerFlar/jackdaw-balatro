@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ._helpers import give_card, give_joker, new_run, play, rng_twin, select_blind
+from ._helpers import discard, give_card, give_joker, new_run, play, rng_twin, select_blind
 
 
 class TestDestructionPass:
@@ -38,3 +38,21 @@ class TestDestructionPass:
         glass.debuff = True
         play(gs, glass)
         assert "glass" not in gs["rng"].state
+
+
+class TestPurpleSeal:
+    def test_debuffed_purple_seal_makes_no_tarot(self):
+        """Card:calculate_seal returns at once for a debuffed card
+        (card.lua:2242-2243), so a debuffed Purple Seal discard creates
+        nothing."""
+        gs = select_blind(new_run("AUDIT_PURPLE"))
+        card = give_card(gs, "H_5", seal="Purple")
+        card.debuff = True
+        discard(gs, card)
+        assert gs["consumables"] == []
+
+    def test_purple_seal_makes_a_tarot(self):
+        gs = select_blind(new_run("AUDIT_PURPLE2"))
+        card = give_card(gs, "H_5", seal="Purple")
+        discard(gs, card)
+        assert [c.ability["set"] for c in gs["consumables"]] == ["Tarot"]

@@ -976,8 +976,9 @@ def _handle_discard(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str, A
     for card in discarded:
         # Seal: Purple Seal → create random Tarot with append '8ba'
         # (card.lua:2254-2260; slot check gates the roll so no RNG is
-        # consumed when consumable slots are full)
-        if getattr(card, "seal", None) == "Purple":
+        # consumed when consumable slots are full).  calculate_seal returns
+        # at once for a debuffed card (card.lua:2243).
+        if getattr(card, "seal", None) == "Purple" and not card.debuff:
             consumables: list = gs.setdefault("consumables", [])
             consumable_limit = gs.get("consumable_slots", 2)
             if len(consumables) < consumable_limit:
@@ -3264,8 +3265,9 @@ def _fire_discard_effects(gs: dict[str, Any], discarded: list, *, hook: bool) ->
     jokers_to_remove: list = []
 
     for card in discarded:
-        # Purple Seal → random Tarot ('8ba' append), slot-gated pre-roll
-        if getattr(card, "seal", None) == "Purple":
+        # Purple Seal → random Tarot ('8ba' append), slot-gated pre-roll;
+        # nothing for a debuffed card (card.lua:2243)
+        if getattr(card, "seal", None) == "Purple" and not card.debuff:
             consumables: list = gs.setdefault("consumables", [])
             if len(consumables) < gs.get("consumable_slots", 2):
                 _resolve_create_descriptors(gs, [{"type": "Tarot", "count": 1, "seed": "8ba"}])
