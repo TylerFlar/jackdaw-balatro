@@ -301,6 +301,54 @@ class TestConsumableBuffer:
         assert gs["consumeable_buffer"] == 0
 
 
+class TestSettingBlind:
+    """new_round calls every joker's setting_blind in order
+    (state_events.lua:335-337); the destructions and creations are queued
+    events, so the decisions see G.jokers as it was, plus the
+    ``getting_sliced`` marks and ``G.GAME.joker_buffer`` set by jokers
+    earlier in the loop (card.lua:2491-2601)."""
+
+    def test_dagger_never_slices_after_madness_marked_its_side(self):
+        """Madness (card.lua:2503-2521) marks its victim getting_sliced at
+        once.  If it marks the Dagger, the Dagger's whole setting_blind branch
+        is skipped (2491); if it marks the Dagger's neighbour, the Dagger
+        skips a neighbour already being sliced (2566).  One joker dies and the
+        Dagger gains nothing."""
+        gs = new_run("AUDIT_MADNESS_DAGGER")
+        madness = give_joker(gs, "j_madness")
+        dagger = give_joker(gs, "j_ceremonial")
+        give_joker(gs, "j_joker")
+        select_blind(gs)
+        assert madness in gs["jokers"]
+        assert len(gs["jokers"]) == 2
+        assert dagger.ability["mult"] == 0
+
+    def test_riff_raff_counts_the_dagger_slot(self):
+        """The Dagger frees a slot through G.GAME.joker_buffer -= 1
+        (card.lua:2569), which Riff-raff's room check counts (2529-2531)."""
+        gs = new_run("AUDIT_DAGGER_RIFF")
+        give_joker(gs, "j_ceremonial")
+        give_joker(gs, "j_joker")
+        give_joker(gs, "j_riff_raff")
+        give_joker(gs, "j_greedy_joker")
+        give_joker(gs, "j_lusty_joker")
+        select_blind(gs)
+        assert len(gs["jokers"]) == 5
+        assert "j_joker" not in [j.center_key for j in gs["jokers"]]
+        assert gs["joker_buffer"] == 0
+
+    def test_a_sliced_marble_joker_makes_no_stone(self):
+        """A joker being sliced skips its setting_blind branch
+        (card.lua:2491): a Marble Joker right of a Dagger adds no Stone."""
+        gs = new_run("AUDIT_DAGGER_MARBLE")
+        give_joker(gs, "j_ceremonial")
+        give_joker(gs, "j_marble")
+        select_blind(gs)
+        owned = gs["deck"] + gs["hand"] + gs["discard_pile"]
+        assert not any(c.center_key == "m_stone" for c in owned)
+        assert [j.center_key for j in gs["jokers"]] == ["j_ceremonial"]
+
+
 class TestMrBones:
     def test_save_pays_no_blind_reward(self):
         """evaluate_round pays the blind only when G.GAME.chips >=

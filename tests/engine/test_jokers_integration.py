@@ -1806,13 +1806,19 @@ class TestMadness:
         return _joker("j_madness", x_mult=1, extra=0.5)
 
     def test_non_boss_increments(self):
+        """Madness grows and, at calc time, draws its victim ('madness') and
+        marks it getting_sliced (card.lua:2503-2521)."""
         j = self._make()
+        other = _joker("j_joker")
         small = Blind.create("bl_small", ante=1)
-        ctx = JokerContext(setting_blind=True, blind=small)
+        ctx = JokerContext(
+            setting_blind=True, blind=small, jokers=[j, other], rng=PseudoRandom("MADNESS")
+        )
         result = calculate_joker(j, ctx)
         assert j.ability["x_mult"] == pytest.approx(1.5)
         assert result is not None
-        assert result.extra == {"destroy_random_joker": True}
+        assert result.extra == {"destroy_joker": other}
+        assert other.getting_sliced
 
     def test_boss_no_effect(self):
         j = self._make()

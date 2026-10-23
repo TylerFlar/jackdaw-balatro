@@ -548,6 +548,12 @@ def _consumable_room(ctx: JokerContext) -> bool:
     )
 
 
+def _sliced(card: Card | None) -> bool:
+    """``card.getting_sliced``: Madness or Ceremonial Dagger has already
+    claimed it this setting_blind (card.lua:2512, 2568)."""
+    return bool(getattr(card, "getting_sliced", False))
+
+
 def _reserve_consumable(ctx: JokerContext) -> None:
     """``G.GAME.consumeable_buffer += 1``: the slot is spoken for until the
     creation event runs (and zeroes the buffer)."""
@@ -1978,12 +1984,25 @@ def _obelisk(card: Card, ctx: JokerContext) -> JokerResult | None:
 def _madness(card: Card, ctx: JokerContext) -> JokerResult | None:
     """Madness: +0.5 xMult per non-boss blind. Destroys random joker.
 
-    Source: card.lua:2503. Side effect returned as extra.
+    Source: card.lua:2503-2521, all at calc time: the x_mult grows, the
+    victim is drawn ('madness') from the other non-eternal jokers not
+    already being sliced, and marked getting_sliced at once (later jokers
+    in the loop skip it).  The destruction itself is an event (the extra).
     """
-    if ctx.setting_blind and not ctx.blueprint:
+    if ctx.setting_blind and not _sliced(card) and not ctx.blueprint:
         if ctx.blind and not getattr(ctx.blind, "boss", False):
             card.ability["x_mult"] = card.ability.get("x_mult", 1) + card.ability.get("extra", 0.5)
-            return JokerResult(extra={"destroy_random_joker": True})
+            pool = [
+                j
+                for j in (ctx.jokers or [])
+                if j is not card and not getattr(j, "eternal", False) and not _sliced(j)
+            ]
+            if pool and ctx.rng is not None:
+                victim, _ = ctx.rng.element(pool, ctx.rng.seed("madness"))
+                if not _sliced(ctx.blueprint_card or card):
+                    victim.getting_sliced = True
+                    return JokerResult(extra={"destroy_joker": victim})
+            return JokerResult()
     if ctx.joker_main:
         x = card.ability.get("x_mult", 1)
         if x > 1:
@@ -2051,10 +2070,12 @@ def _yorick(card: Card, ctx: JokerContext) -> JokerResult | None:
 def _ceremonial(card: Card, ctx: JokerContext) -> JokerResult | None:
     """Ceremonial Dagger: +2× right neighbor's sell_cost as mult when destroyed.
 
-    Source: card.lua:2561. Fires in setting_blind. Returns mult_mod (NOT xMult).
-    Side effect: signals destruction of right neighbor via extra.
+    Source: card.lua:2561-2579. At calc time the neighbour is marked
+    getting_sliced and G.GAME.joker_buffer drops by one (Riff-raff later in
+    the loop counts the freed slot); the event adds 2x its sell value to
+    the mult and dissolves it.
     """
-    if ctx.setting_blind and not ctx.blueprint and ctx.jokers:
+    if ctx.setting_blind and not _sliced(card) and not ctx.blueprint and ctx.jokers:
         my_pos = None
         for i, j in enumerate(ctx.jokers):
             if j is card:
@@ -2062,11 +2083,11 @@ def _ceremonial(card: Card, ctx: JokerContext) -> JokerResult | None:
                 break
         if my_pos is not None and my_pos + 1 < len(ctx.jokers):
             target = ctx.jokers[my_pos + 1]
-            if (
-                not getattr(target, "eternal", False)
-                and not getattr(target, "getting_sliced", False)
-                and not getattr(card, "getting_sliced", False)
-            ):
+            if not getattr(target, "eternal", False) and not _sliced(target):
+                target.getting_sliced = True
+                if ctx.game_state is not None:
+                    gs = ctx.game_state
+                    gs["joker_buffer"] = gs.get("joker_buffer", 0) - 1
                 card.ability["mult"] = card.ability.get("mult", 0) + target.sell_cost * 2
                 return JokerResult(
                     extra={"destroy_joker": target},
@@ -2144,9 +2165,10 @@ def _certificate(card: Card, ctx: JokerContext) -> JokerResult | None:
 def _marble(card: Card, ctx: JokerContext) -> JokerResult | None:
     """Marble Joker: add Stone Card to deck on setting_blind.
 
-    Source: card.lua:2580. Seed: 'marb_fr'.
+    Source: card.lua:2580-2601. Seed: 'marb_fr'.  Skipped while it, or the
+    Blueprint/Brainstorm copying it, is being sliced.
     """
-    if ctx.setting_blind and not getattr(card, "getting_sliced", False):
+    if ctx.setting_blind and not _sliced(card) and not _sliced(ctx.blueprint_card or card):
         return JokerResult(
             extra={
                 "create": {"type": "playing_card", "enhancement": "m_stone", "key": "marble"},
@@ -2181,14 +2203,23 @@ def _dna(card: Card, ctx: JokerContext) -> JokerResult | None:
 def _riff_raff(card: Card, ctx: JokerContext) -> JokerResult | None:
     """Riff-raff: create up to 2 Common jokers on setting_blind.
 
-    Source: card.lua:2529. Checks joker slot availability.
+    Source: card.lua:2529-2544. The room check counts
+    G.GAME.joker_buffer (a Dagger earlier in the loop frees a slot, an
+    earlier Riff-raff reserves its own), and the count is reserved in it.
     """
-    if ctx.setting_blind and not getattr(card, "getting_sliced", False):
-        joker_count = ctx.game.joker_count if ctx.game else 0
-        joker_slots = ctx.game.joker_slots if ctx.game else 5
+    if ctx.setting_blind and not _sliced(card) and not _sliced(ctx.blueprint_card or card):
+        gs = ctx.game_state
+        if gs is not None:
+            joker_count = len(gs.get("jokers", [])) + gs.get("joker_buffer", 0)
+            joker_slots = gs.get("joker_slots", 5)
+        else:
+            joker_count = ctx.game.joker_count if ctx.game else 0
+            joker_slots = ctx.game.joker_slots if ctx.game else 5
         available = joker_slots - joker_count
         if available > 0:
             count = min(card.ability.get("extra", 2), available)
+            if gs is not None:
+                gs["joker_buffer"] = gs.get("joker_buffer", 0) + count
             return JokerResult(
                 extra={
                     "create": {
@@ -2209,7 +2240,12 @@ def _cartomancer(card: Card, ctx: JokerContext) -> JokerResult | None:
     Source: card.lua:2545-2559 — gated on the consumable room including
     G.GAME.consumeable_buffer, which it then increments.
     """
-    if ctx.setting_blind and not getattr(card, "getting_sliced", False) and _consumable_room(ctx):
+    if (
+        ctx.setting_blind
+        and not _sliced(card)
+        and not _sliced(ctx.blueprint_card or card)
+        and _consumable_room(ctx)
+    ):
         _reserve_consumable(ctx)
         return JokerResult(
             extra={
@@ -2407,9 +2443,9 @@ def _cavendish(card: Card, ctx: JokerContext) -> JokerResult | None:
 def _chicot(card: Card, ctx: JokerContext) -> JokerResult | None:
     """Chicot: disable boss blind on setting_blind. Persists (does NOT self-destruct).
 
-    Source: card.lua:2492. Also fires when added to deck (card.lua:596).
+    Source: card.lua:2491-2502. Also fires when added to deck (card.lua:596).
     """
-    if ctx.setting_blind and not ctx.blueprint:
+    if ctx.setting_blind and not _sliced(card) and not ctx.blueprint:
         if ctx.blind and getattr(ctx.blind, "boss", False):
             if not getattr(ctx.blind, "disabled", False):
                 return JokerResult(extra={"disable_blind": True})
@@ -2433,9 +2469,9 @@ def _luchador(card: Card, ctx: JokerContext) -> JokerResult | None:
 def _burglar(card: Card, ctx: JokerContext) -> JokerResult | None:
     """Burglar: on setting_blind, +3 hands, remove all discards.
 
-    Source: card.lua:2522. Returns side-effect descriptor.
+    Source: card.lua:2522-2528. Returns side-effect descriptor.
     """
-    if ctx.setting_blind and not getattr(card, "getting_sliced", False):
+    if ctx.setting_blind and not _sliced(card) and not _sliced(ctx.blueprint_card or card):
         extra_hands = card.ability.get("extra", 3)
         return JokerResult(
             extra={

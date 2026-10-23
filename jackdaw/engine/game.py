@@ -2331,14 +2331,19 @@ def _fire_setting_blind(
         money=gs.get("dollars", 0),
     )
 
+    # new_round's loop (state_events.lua:335-337) over the board as it is
+    # now: every destruction/creation below is a queued event, so the
+    # decisions see the same G.jokers plus the getting_sliced marks and
+    # G.GAME.joker_buffer / consumeable_buffer left by earlier jokers.
     mutations: list[dict[str, Any]] = []
-    for joker in jokers:
+    for joker in list(jokers):
         if getattr(joker, "debuff", False):
             continue
         ctx = JokerContext(
             setting_blind=True,
             blind=blind,
             jokers=jokers,
+            rng=gs.get("rng"),
             game=game_snap,
             game_state=gs,
         )
@@ -2362,8 +2367,12 @@ def _apply_setting_blind_mutations(
     mutations: list[dict[str, Any]],
     jokers: list,
 ) -> None:
-    """Process side-effects from setting_blind jokers."""
+    """Process side-effects from setting_blind jokers, in event order."""
     rng = gs.get("rng")
+    # Cards dissolve over several frames (Card:remove runs after the
+    # creation events of this batch), so the destroyed jokers' keys stay in
+    # used_jokers while Riff-raff's create rolls.
+    released: list = []
 
     for mut in mutations:
         # Chicot / Luchador: disable blind
@@ -2375,39 +2384,15 @@ def _apply_setting_blind_mutations(
                 for card in gs.get("deck", []):
                     card.debuff = False
 
-        # Madness: destroy a random OTHER joker.  Vanilla's pool excludes
-        # SELF, eternals, and getting_sliced cards, in board order
-        # (card.lua Madness branch).  The old jokers[0] exclusion picked
-        # from the wrong pool whenever Madness wasn't first
-        # (live-verified: LS5EUNSF destroyed j_square vs sim's
-        # j_red_card from the same 'madness' roll).
-        if mut.get("destroy_random_joker") and len(jokers) > 1:
-            if rng:
-                source = mut.get("_source_joker")
-                candidates = [
-                    j
-                    for j in jokers
-                    if j is not source
-                    and not getattr(j, "eternal", False)
-                    and not getattr(j, "getting_sliced", False)
-                ]
-                if candidates:
-                    seed_val = rng.seed("madness")
-                    target, _ = rng.element(candidates, seed_val)
-                    jokers.remove(target)
-                    target.remove_from_deck(gs)
-                    _release_used_key(gs, target)
-
-        # Ceremonial Dagger: destroy the joker to its right (the +2x
-        # sell-value mult bump happens in the handler, card.lua:2561).
-        # This mutation was never processed — the dagger gained mult
-        # but its victim survived on the sim (live-verified: LSL9ZZUW,
-        # live destroyed the fresh-bought Flower Pot at blind select).
-        _dagger_target = mut.get("destroy_joker")
-        if _dagger_target is not None and _dagger_target in jokers:
-            jokers.remove(_dagger_target)
-            _dagger_target.remove_from_deck(gs)
-            _release_used_key(gs, _dagger_target)
+        # Madness / Ceremonial Dagger: the victim was picked and marked
+        # getting_sliced when the joker was evaluated (card.lua:2503-2521,
+        # 2561-2579); the event dissolves it.  (Live-verified: LS5EUNSF's
+        # Madness pool, LSL9ZZUW's Dagger victim.)
+        victim = mut.get("destroy_joker")
+        if victim is not None and victim in jokers:
+            jokers.remove(victim)
+            victim.remove_from_deck(gs)
+            released.append(victim)
 
         # Burglar: set hands / remove discards
         if "set_hands" in mut:
@@ -2480,6 +2465,13 @@ def _apply_setting_blind_mutations(
                 # ('8ba'), etc. — roll the real pool with the descriptor's
                 # append key instead of hardcoding a center.
                 _resolve_create_descriptors(gs, [create])
+
+    # The creation events end with G.GAME.joker_buffer = 0 (card.lua:2539,
+    # 2571) and consumeable_buffer = 0; the dissolved jokers leave play.
+    gs["joker_buffer"] = 0
+    gs["consumeable_buffer"] = 0
+    for victim in released:
+        _release_used_key(gs, victim)
 
 
 # ---------------------------------------------------------------------------
