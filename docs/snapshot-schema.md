@@ -132,7 +132,7 @@ Keys: `deck` (index 0 is the bottom; cards are drawn from the end), `hand`
 | `sort_id` | Per-run creation counter (`Card.sort_id`); the card's identity. Sorting and RNG picks use it |
 | `center` | `P_CENTERS` key (`c_base`, `m_glass`, `j_joker`, `c_fool`, `v_hone`, `p_arcana_normal_1`, …) |
 | `front` | `P_CARDS` key for playing cards (`H_A`), else null |
-| `base` | Playing cards only: `{suit, value, id, nominal, suit_nominal, suit_nominal_original, face_nominal, original_value, times_played}`, else null |
+| `base` | Playing cards only: `{suit, value, id, nominal, suit_nominal, suit_nominal_original, face_nominal, original_value, times_played}`, else null. `suit_nominal_original` is the tiebreak of the suit the card was created with (kept across suit changes); `original_value` is the rank at creation and null once a suit or rank change has rebuilt the base (`Card:set_base`, card.lua:97-145) |
 | `ability` | `self.ability`, **minus** the keys derived from the center: `name`, `effect`, `set`, `order`, `consumeable`, `type`. `extra` keeps its Lua shape: null, a number, a string, or an object |
 | `edition` | The Lua edition table, e.g. `{"foil": true, "chips": 50, "type": "foil"}`, or null |
 | `seal` | `Red`, `Blue`, `Gold`, `Purple`, or null |

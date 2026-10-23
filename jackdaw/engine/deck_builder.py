@@ -147,33 +147,17 @@ def build_deck(
 
 
 def _apply_checkered(cards: list[Card]) -> None:
-    """Apply Checkered Deck suit swaps: Clubs→Spades, Diamonds→Hearts."""
+    """Apply Checkered Deck suit swaps: Clubs→Spades, Diamonds→Hearts.
+
+    Vanilla goes through ``Card:change_suit`` (back.lua:239-253), a
+    non-initial ``set_base``: the new front's ``card_key``, the creation
+    suit's ``suit_nominal_original`` kept (card.lua:109-110), no
+    ``original_value`` (card.lua:136).
+    """
     for card in cards:
         if card.base is None:
             continue
         if card.base.suit is Suit.CLUBS:
-            _change_suit(card, Suit.SPADES)
+            card.change_suit(Suit.SPADES.value)
         elif card.base.suit is Suit.DIAMONDS:
-            _change_suit(card, Suit.HEARTS)
-
-
-def _change_suit(card: Card, new_suit: Suit) -> None:
-    """Change a card's suit, updating all base fields.
-
-    Matches ``Card:change_suit`` (card.lua:547).
-    """
-    if card.base is None:
-        return
-
-    # Suit nominal values
-    suit_nominals = {
-        Suit.DIAMONDS: (0.01, 0.001),
-        Suit.CLUBS: (0.02, 0.002),
-        Suit.HEARTS: (0.03, 0.003),
-        Suit.SPADES: (0.04, 0.004),
-    }
-
-    card.base.suit = new_suit
-    nom, nom_orig = suit_nominals[new_suit]
-    card.base.suit_nominal = nom
-    card.base.suit_nominal_original = nom_orig
+            card.change_suit(Suit.HEARTS.value)

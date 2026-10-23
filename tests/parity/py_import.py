@@ -49,7 +49,9 @@ def import_card(cs: dict[str, Any]) -> Card:
             suit_nominal=base["suit_nominal"],
             suit_nominal_original=base["suit_nominal_original"],
             face_nominal=base["face_nominal"],
-            original_value=Rank(base["original_value"]),
+            original_value=(
+                Rank(base["original_value"]) if base["original_value"] is not None else None
+            ),
             times_played=base["times_played"],
         )
     center = _resolve_center(cs["center"])

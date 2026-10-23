@@ -110,9 +110,14 @@ class CardBase:
     id: int  # numeric rank id (2-14, Ace=14)
     nominal: int  # chip value
     suit_nominal: float  # suit tiebreaker (S=0.04, H=0.03, C=0.02, D=0.01)
-    suit_nominal_original: float  # preserved original suit tiebreaker
+    # Tiebreak of the suit the card was CREATED with: a later set_base keeps
+    # it across suit changes (card.lua:109-110, 138-141).
+    suit_nominal_original: float
     face_nominal: float  # 0.0 for non-face, 0.1-0.4 for J/Q/K/A
-    original_value: Rank  # original rank before Strength tarot changes
+    # Rank at creation; only the initial set_base records it (card.lua:136),
+    # so any later suit/rank change leaves it None.  Nothing in the game
+    # reads it (Card:get_original_rank has no callers).
+    original_value: Rank | None
     times_played: int = 0
 
     @staticmethod
@@ -206,10 +211,33 @@ class Card:
     perish_tally: int = 5  # rounds until perish
     rental: bool = False
 
-    def set_base(self, card_key: str, suit: str, value: str) -> None:
-        """Populate base fields from P_CARDS data, matching Card:set_base."""
+    def set_base(
+        self,
+        card_key: str,
+        suit: str,
+        value: str,
+        *,
+        initial: bool | None = None,
+    ) -> None:
+        """Populate base fields from P_CARDS data, matching Card:set_base
+        (card.lua:97-145).
+
+        ``initial`` is Card:init's first call; it defaults to "this card has
+        no base yet".  Every later call (suit and rank changes, Death's copy)
+        rebuilds the base from scratch — ``times_played`` restarts at 0 — but
+        keeps the old ``suit_nominal_original`` (card.lua:109-110, 138-141)
+        and leaves ``original_value`` unset (card.lua:136).
+        """
+        if initial is None:
+            initial = self.base is None
+        old = self.base
         self.card_key = card_key
-        self.base = CardBase.from_card_key(card_key, suit, value)
+        base = CardBase.from_card_key(card_key, suit, value)
+        if old is not None and old.suit_nominal_original:
+            base.suit_nominal_original = old.suit_nominal_original
+        if not initial:
+            base.original_value = None
+        self.base = base
 
     def set_ability(
         self,
@@ -320,8 +348,9 @@ class Card:
     def change_suit(self, new_suit: str) -> None:
         """Change suit while preserving rank. Matches card.lua:547.
 
-        Recalculates suit_nominal and suit_nominal_original. Preserves
-        rank, enhancement, edition, seal.
+        A non-initial set_base: recalculates suit_nominal but keeps the
+        creation suit's suit_nominal_original.  Preserves rank,
+        enhancement, edition, seal.
         """
         if self.base is None:
             return
