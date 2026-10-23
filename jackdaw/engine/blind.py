@@ -469,10 +469,13 @@ class Blind:
         playing_cards: list[Any] | None = None,
         joker_cards: list[Any] | None = None,
     ) -> dict[str, Any]:
-        """Disable this boss blind's effects.
+        """Disable this boss blind's effects — the blind's own part.
 
-        Matches ``Blind:disable`` (blind.lua:356-415).
-        Called by Chicot joker (on boss set) or Luchador (when sold).
+        ``Blind:disable`` (blind.lua:356-415) sets the flag and divides The
+        Wall's (/2) and Violet Vessel's (/3) targets here; the game-state
+        side (discards, hands, hand size and its draws, flips, the forced
+        card, the debuff pass over the board, the round-end check) is
+        :func:`jackdaw.engine.game.disable_blind`, which the engine calls.
 
         Returns side-effect descriptor:
             ``restore_discards``: discards to restore (The Water)

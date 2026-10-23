@@ -43,6 +43,13 @@ def _change_hand_size(game_state: dict, delta: int) -> None:
     change_hand_size(game_state, delta)
 
 
+def _disable_blind(game_state: dict) -> None:
+    """``G.GAME.blind:disable()``: see :func:`jackdaw.engine.game.disable_blind`."""
+    from jackdaw.engine.game import disable_blind
+
+    disable_blind(game_state)
+
+
 def _reapply_blind_debuffs(game_state: dict) -> None:
     """``G.GAME.blind:set_blind(nil, true)``, which add_to_deck and
     remove_from_deck queue (card.lua:641, 698): every playing card's boss
@@ -877,6 +884,12 @@ class Card:
         if name == "Credit Card":
             amount = extra if isinstance(extra, int) else 0
             game_state["bankrupt_at"] = game_state.get("bankrupt_at", 0) - amount
+        if name == "Chicot":
+            # card.lua:596-600: joining the board (or coming back from a
+            # debuff) disables an active boss that is not disabled yet.
+            blind = game_state.get("blind")
+            if blind is not None and blind.boss and not blind.disabled:
+                _disable_blind(game_state)
         if name == "Chaos the Clown":
             # current_round.free_rerolls + immediate cost recalc
             # (card.lua:601-603) — the old top-level key was never read,

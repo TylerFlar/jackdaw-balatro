@@ -22,7 +22,7 @@ from jackdaw.engine.actions import (
 from jackdaw.engine.blind import Blind
 from jackdaw.engine.data.blind_scaling import get_blind_amount, get_blind_target
 from jackdaw.engine.data.enums import Suit
-from jackdaw.engine.game import step
+from jackdaw.engine.game import forced_card_index, step
 from jackdaw.engine.rng import PseudoRandom
 from tests.engine.audit._boards import (
     force_boss,
@@ -36,6 +36,181 @@ from tests.engine.audit._boards import (
 )
 from tests.parity import canon
 from tests.parity.py_export import export_state
+
+# ---------------------------------------------------------------------------
+# G07 — Blind:disable in full; Chicot disables through it
+# ---------------------------------------------------------------------------
+
+
+def _target(boss: str, ante: int = 1) -> float:
+    return Blind.create(boss, ante).chips
+
+
+def test_g07_chicot_halves_the_wall():
+    """Chicot's setting_blind queues G.GAME.blind:disable() (card.lua:2492-2500),
+    which halves The Wall's target (blind.lua:377-380)."""
+    gs = new_run("AUDIT_G07W")
+    give_joker(gs, "j_chicot")
+
+    start_boss(gs, "bl_wall")
+
+    assert gs["blind"].disabled
+    assert gs["blind"].chips == _target("bl_wall") / 2
+
+
+def test_g07_chicot_divides_violet_vessel_by_three():
+    """blind.lua:393-396."""
+    gs = new_run("AUDIT_G07V")
+    give_joker(gs, "j_chicot")
+    gs["round_resets"]["ante"] = 8
+
+    start_boss(gs, "bl_final_vessel")
+
+    assert gs["blind"].chips == _target("bl_final_vessel", 8) / 3
+
+
+def test_g07_chicot_gives_back_what_the_water_and_the_needle_took():
+    """set_blind applies The Water / The Needle first (blind.lua:179-186);
+    the deferred disable eases the discards / hands back (blind.lua:361-376)."""
+    cases = (("bl_water", "discards_left", "discards"), ("bl_needle", "hands_left", "hands"))
+    for boss, key, reset in cases:
+        gs = new_run("AUDIT_G07N")
+        give_joker(gs, "j_chicot")
+        start_boss(gs, boss)
+        assert gs["current_round"][key] == gs["round_resets"][reset], boss
+        assert gs["blind"].disabled
+
+
+def test_g07_chicot_does_not_stop_amber_acorns_shuffles():
+    """Amber Acorn's three 'aajk' shuffles are queued by set_blind before
+    Chicot's disable runs (blind.lua:195-203; card.lua:2492-2500); the disable
+    then turns the jokers face up (blind.lua:358-360)."""
+    seed = "AUDIT_G07A"
+    gs = new_run(seed)
+    board = [give_joker(gs, k) for k in ("j_chicot", "j_joker", "j_greedy_joker")]
+
+    start_boss(gs, "bl_final_acorn")
+
+    ref = PseudoRandom(seed)
+    order = list(board)
+    for _ in range(3):
+        ref.shuffle(order, ref.seed("aajk"))
+    assert ids(gs["jokers"]) == ids(order)
+    assert all(j.facing == "front" for j in gs["jokers"])
+
+
+def test_g07_disabling_the_wall_mid_round_can_end_the_round():
+    """Blind:disable queues a check: a boss whose (halved) target the score
+    already meets ends the round at once (blind.lua:397-406)."""
+    gs = new_run("AUDIT_G07E")
+    give_joker(gs, "j_luchador")
+    start_boss(gs, "bl_wall")
+    gs["chips"] = gs["blind"].chips // 2
+
+    step(gs, SellCard(area="jokers", card_index=0))
+
+    assert gs["phase"] == GamePhase.ROUND_EVAL
+
+
+def test_g07_disabling_the_manacle_draws_two_cards():
+    """Disabling The Manacle changes the hand size by +1 — which, mid-round
+    with cards in hand, draws one card (cardarea.lua:100-105) — and calls
+    draw_from_deck_to_hand(1) for another (blind.lua:386-390)."""
+    gs = new_run("AUDIT_G07M")
+    give_joker(gs, "j_luchador")
+    start_boss(gs, "bl_manacle")
+    assert gs["hand_size"] == 7 and len(gs["hand"]) == 7
+
+    step(gs, SellCard(area="jokers", card_index=0))
+
+    assert gs["hand_size"] == 8
+    assert len(gs["hand"]) == 9
+
+
+def test_g07_disabling_the_house_turns_the_hand_face_up():
+    """blind.lua:364-373: The Wheel, The House, The Mark and The Fish flip
+    the face-down hand cards back up when disabled."""
+    gs = new_run("AUDIT_G07H")
+    give_joker(gs, "j_luchador")
+    start_boss(gs, "bl_house")
+    assert all(c.facing == "back" for c in gs["hand"])
+
+    step(gs, SellCard(area="jokers", card_index=0))
+
+    assert all(c.facing == "front" for c in gs["hand"])
+
+
+def test_g07_disabling_crimson_heart_frees_its_victim_and_passive():
+    """The disable's debuff pass runs debuff_card on every joker
+    (blind.lua:410-412): Crimson Heart's victim comes back with its passive."""
+    gs = new_run("AUDIT_G07C")
+    juggler = give_joker(gs, "j_juggler")
+    give_joker(gs, "j_luchador")
+    gs["jokers"].reverse()  # Juggler last on the board, Luchador first
+    start_boss(gs, "bl_final_heart")
+    assert [j for j in gs["jokers"] if j.debuff] == [juggler]  # this seed's pick
+    assert gs["hand_size"] == 8
+
+    step(gs, SellCard(area="jokers", card_index=0))  # Luchador
+
+    assert not juggler.debuff
+    assert gs["hand_size"] == 9
+
+
+def test_g07_chicot_created_mid_round_disables_the_boss():
+    """Card:add_to_deck disables an active, not yet disabled boss for Chicot
+    (card.lua:596-600) — a Chicot made mid-round by The Soul or Judgement."""
+    gs = start_boss(new_run("AUDIT_G07K"), "bl_wall")
+    target = gs["blind"].chips
+
+    give_joker(gs, "j_chicot")
+
+    assert gs["blind"].disabled
+    assert gs["blind"].chips == target / 2
+
+
+def test_g07_disabling_cerulean_bell_releases_the_forced_card():
+    """blind.lua:381-385: the forced selection is cleared on every card."""
+    gs = new_run("AUDIT_G07B")
+    give_joker(gs, "j_luchador")
+    start_boss(gs, "bl_final_bell")
+    assert forced_card_index(gs["hand"]) is not None
+
+    step(gs, SellCard(area="jokers", card_index=0))
+
+    assert forced_card_index(gs["hand"]) is None
+
+
+# ---------------------------------------------------------------------------
+# G08 — selling any joker disables Verdant Leaf
+# ---------------------------------------------------------------------------
+
+
+def test_g08_selling_any_joker_disables_verdant_leaf():
+    """Card:sell_card queues G.GAME.blind:disable() when a Joker is sold
+    under Verdant Leaf (card.lua:1616-1621); the disable's debuff pass frees
+    every playing card (blind.lua:407-409)."""
+    gs = new_run("AUDIT_G08")
+    give_joker(gs, "j_joker")
+    start_boss(gs, "bl_final_leaf")
+    assert all(c.debuff for c in gs["hand"])
+
+    step(gs, SellCard(area="jokers", card_index=0))
+
+    assert gs["blind"].disabled
+    assert not any(c.debuff for c in gs["hand"] + gs["deck"])
+
+
+def test_g08_selling_a_consumable_keeps_verdant_leaf():
+    """Only a sold Joker counts (``self.ability.set == 'Joker'``)."""
+    gs = new_run("AUDIT_G08C")
+    start_boss(gs, "bl_final_leaf")
+    give_consumable(gs, "c_pluto")
+
+    step(gs, SellCard(area="consumables", card_index=0))
+
+    assert not gs["blind"].disabled
+
 
 # ---------------------------------------------------------------------------
 # G11 — Crimson Heart re-picks only after a play; its debuff toggles passives

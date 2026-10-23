@@ -255,6 +255,13 @@ def _handle_select_blind(gs: dict[str, Any]) -> dict[str, Any]:
     if pending_bottom:
         gs.setdefault("deck", [])[:0] = pending_bottom
 
+    # Chicot: its setting_blind wraps G.GAME.blind:disable() in two nested
+    # events (card.lua:2492-2500), so the disable runs after the set-time
+    # effects above (applied in full) and after the deck shuffle, before the
+    # deal — once per Chicot that fired.
+    for _ in range(sum(1 for m in setting_mutations if m.get("disable_blind"))):
+        disable_blind(gs)
+
     # ------------------------------------------------------------------
     # 6b. round_start_bonus tags (Juggle: +3 hand size for this round).
     #     Vanilla fires these at DRAW_TO_HAND, before the initial draw
@@ -1220,6 +1227,13 @@ def _handle_sell_card(gs: dict[str, Any], area: str, idx: int) -> dict[str, Any]
     card.remove_from_deck(gs)
     _release_used_key(gs, card)
 
+    # Selling any Joker under Verdant Leaf disables it (card.lua:1616-1621;
+    # no disabled check there, and none needed: a second disable of
+    # Verdant Leaf changes nothing).
+    blind = gs.get("blind")
+    if card.ability.get("set") == "Joker" and blind is not None and blind.name == "Verdant Leaf":
+        disable_blind(gs)
+
     # Astronomer leaving the board runs the all-cards set_cost pass
     # (dump card.lua:850) — shop planet prices un-zero, couponed owned
     # costs restore.
@@ -1267,7 +1281,7 @@ def _apply_selling_self_mutations(
     """Apply Luchador, Invisible Joker, and Diet Cola sell effects."""
     for mutation in mutations:
         if mutation.get("disable_blind"):
-            _disable_active_blind(gs)
+            disable_blind(gs)
 
         if mutation.get("duplicate_random_joker"):
             jokers: list = gs.get("jokers", [])
@@ -1298,25 +1312,65 @@ def _apply_selling_self_mutations(
             _check_double_tag(gs, tag_key)
 
 
-def _disable_active_blind(gs: dict[str, Any]) -> None:
-    """Disable the current blind and apply its returned restorations."""
+def disable_blind(gs: dict[str, Any]) -> None:
+    """``G.GAME.blind:disable()`` (blind.lua:356-415).
+
+    Called by Chicot (its setting_blind, deferred past the round's deck
+    shuffle, card.lua:2492-2500; and its add_to_deck mid-round,
+    card.lua:596-600), Luchador's selling_self (card.lua:2355-2359) and any
+    joker sold under Verdant Leaf (card.lua:1616-1621).  Like vanilla it
+    has no guard: a second call applies the restorations again.
+    """
     blind = gs.get("blind")
     if blind is None:
         return
+    # The flag, The Wall's /2 and Violet Vessel's /3 (blind.lua:357, 377-380,
+    # 393-396).
+    blind.disable()
+    name = blind.name
+    cr = gs.setdefault("current_round", {})
+    hand: list = gs.setdefault("hand", [])
 
-    from jackdaw.engine.card_factory import _PLAYING_CARD_AREAS
-
-    playing_cards = []
-    for area in _PLAYING_CARD_AREAS:
-        playing_cards.extend(gs.get(area, []))
-    effects = blind.disable(playing_cards=playing_cards, joker_cards=gs.get("jokers", []))
-
-    cr = gs.get("current_round", {})
-    cr["discards_left"] = cr.get("discards_left", 0) + effects.get("restore_discards", 0)
-    cr["hands_left"] = cr.get("hands_left", 0) + effects.get("restore_hands", 0)
-    change_hand_size(gs, effects.get("restore_hand_size", 0))
-    if effects.get("clear_forced"):
+    for joker in gs.get("jokers", ()):  # blind.lua:358-360
+        joker.facing = "front"
+    if name == "The Water" and blind.discards_sub:  # ease_discard (blind.lua:361-363)
+        cr["discards_left"] = cr.get("discards_left", 0) + blind.discards_sub
+    if name in ("The Wheel", "The House", "The Mark", "The Fish"):  # blind.lua:364-373
+        for card in hand:
+            card.facing = "front"
+    if name == "The Needle" and blind.hands_sub:  # ease_hands_played (blind.lua:374-376)
+        cr["hands_left"] = cr.get("hands_left", 0) + blind.hands_sub
+    if name == "Cerulean Bell":  # blind.lua:381-385
         _clear_forced_selection(gs)
+    game_over = False
+    if name == "The Manacle":
+        # change_size(1) (a mid-round draw of its own, cardarea.lua:100-105)
+        # then draw_from_deck_to_hand(1) (blind.lua:386-390), whose game-over
+        # test runs at once — against the limit the queued change_size has
+        # not raised yet.
+        game_over = gs.get("hand_size", 0) <= 0 and not hand
+        change_hand_size(gs, 1)
+        if not game_over:
+            _draw_from_deck_to_hand(gs, 1)
+
+    # The debuff pass (blind.lua:407-412): disabled, the blind debuffs
+    # nothing, so every playing card and joker is freed (a perished joker
+    # excepted) and a freed joker's passives come back.
+    reapply_blind_debuffs(gs)
+    for joker in list(gs.get("jokers", ())):
+        blind.debuff_card(joker, is_joker_area=True, game_state=gs)
+
+    if game_over:
+        gs["phase"] = GamePhase.GAME_OVER
+        return
+    # Queued check (blind.lua:397-406): a disabled boss whose target the
+    # score already meets ends the round at once (G.STATE = NEW_ROUND).
+    if (
+        blind.boss
+        and gs.get("phase") == GamePhase.SELECTING_HAND
+        and blind.beaten_by(gs.get("chips", 0))
+    ):
+        _end_round(gs)
 
 
 def _handle_use_consumable(
@@ -2485,17 +2539,7 @@ def _apply_setting_blind_mutations(
     rng = gs.get("rng")
 
     for mut in mutations:
-        # Chicot / Luchador: disable blind
-        if mut.get("disable_blind"):
-            blind = gs.get("blind")
-            if blind:
-                blind.disabled = True
-                # Blind:disable turns face-down jokers back up (blind.lua:358-360)
-                for j in jokers:
-                    j.facing = "front"
-                # Un-debuff all playing cards
-                for card in gs.get("deck", []):
-                    card.debuff = False
+        # (Chicot's disable_blind is deferred by _handle_select_blind.)
 
         # Madness: destroy a random OTHER joker.  Vanilla's pool excludes
         # SELF, eternals, and getting_sliced cards, in board order
