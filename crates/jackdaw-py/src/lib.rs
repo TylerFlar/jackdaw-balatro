@@ -6,6 +6,10 @@
 //! one wheel per platform serves CPython 3.12 and newer. Release builds keep `panic = "unwind"`,
 //! so a Rust panic reaches Python as an exception instead of aborting the interpreter.
 
+mod env;
+
+use jackdaw_core::area::AreaId;
+use jackdaw_env::mask::ActionMask;
 use jackdaw_env::observation::{Encoder, Observation};
 use pyo3::prelude::*;
 use pyo3::types::PyByteArray;
@@ -34,6 +38,8 @@ struct Game {
     inner: jackdaw_core::game::Game,
     /// The observation encoder's buffers, reused by every `observation()` call.
     encoder: Encoder,
+    /// The action mask's buffers, reused by every `action_mask()` call.
+    mask: ActionMask,
 }
 
 impl Game {
@@ -41,12 +47,28 @@ impl Game {
         Game {
             inner,
             encoder: Encoder::new(),
+            mask: ActionMask::new(),
         }
     }
 }
 
 fn value_error(e: impl std::fmt::Display) -> PyErr {
     pyo3::exceptions::PyValueError::new_err(e.to_string())
+}
+
+/// A card area by its snapshot name (`"consumables"`, `"pack_cards"`, `"shop_jokers"`, ...).
+fn area_id(name: &str) -> PyResult<AreaId> {
+    AreaId::ALL
+        .into_iter()
+        .find(|a| a.name() == name)
+        .ok_or_else(|| value_error(format!("unknown area {name:?}")))
+}
+
+/// A snapshot (JSON text) imported into a resting game.
+fn game_from_snapshot(text: &str) -> PyResult<jackdaw_core::game::Game> {
+    let value: serde_json::Value =
+        serde_json::from_str(text).map_err(|e| value_error(format!("snapshot: bad JSON: {e}")))?;
+    jackdaw_core::game::Game::from_snapshot(&value).map_err(value_error)
 }
 
 /// Row counts of the five entity arrays (hand, jokers, consumables, shop, pack).
@@ -121,6 +143,74 @@ impl Game {
     ) -> PyResult<(Bound<'py, PyByteArray>, ObservationRows)> {
         let obs = self.encoder.encode(&self.inner.gs);
         observation_to_py(py, obs)
+    }
+
+    /// The action mask (`jackdaw.env.action_space.get_action_mask`) of the current state.
+    ///
+    /// Returns ``(data, n_hand, entities, min_card_select, max_card_select, forced_card)``:
+    /// ``data`` holds booleans as bytes (the 23 type flags, the card mask, then each entity
+    /// mask) and ``entities`` lists ``(action_type, offset, length)`` in key order.
+    /// ``jackdaw.env.rust_env.action_mask`` wraps it as an ``ActionMask``.
+    #[pyo3(signature = (legality="vanilla"))]
+    fn action_mask<'py>(
+        &mut self,
+        py: Python<'py>,
+        legality: &str,
+    ) -> PyResult<env::MaskParts<'py>> {
+        self.mask.compute(&self.inner, env::legality(legality)?);
+        env::mask_to_py(py, &self.mask)
+    }
+
+    /// ``factored_to_engine_action``: the engine action (tape form, JSON text) a factored
+    /// action stands for here. Raises ``ValueError`` when it has none.
+    #[pyo3(signature = (action_type, entity_target=None, card_target=None))]
+    fn factored_to_engine(
+        &self,
+        action_type: i64,
+        entity_target: Option<i64>,
+        card_target: Option<Vec<i64>>,
+    ) -> PyResult<String> {
+        let fa = env::factored_from_py(action_type, entity_target, card_target)?;
+        let action = jackdaw_env::action::to_engine(&fa, &self.inner).map_err(value_error)?;
+        Ok(action.to_json().to_string())
+    }
+
+    /// The Gym wrapper's action table (``BalatroGymnasiumEnv._enumerate_actions``) for the
+    /// current state's vanilla mask, subsampling with the xoshiro256** generator in
+    /// ``rng_state``. Returns ``(actions, rng_state)``: each action as
+    /// ``(action_type, entity_target, card_target)``, and the generator's state after.
+    fn action_table(&mut self, rng_state: [u64; 4]) -> (Vec<env::FactoredParts>, [u64; 4]) {
+        use jackdaw_env::gym::{ActionTable, Xoshiro256};
+        use jackdaw_env::mask::Legality;
+        self.mask.compute(&self.inner, Legality::Vanilla);
+        let mut rng = Xoshiro256::from_state(rng_state);
+        let mut table = ActionTable::new();
+        table.enumerate(&self.mask, &self.inner, &mut rng);
+        let actions = table.actions().iter().map(env::factored_to_py).collect();
+        (actions, rng.state())
+    }
+
+    /// The default hand selection for using the card at ``index`` of ``area``
+    /// (``"consumables"``, ``"pack_cards"`` or ``"shop_jokers"``), or ``None``.
+    fn default_targets(&self, area: &str, index: usize) -> PyResult<Option<Vec<usize>>> {
+        Ok(jackdaw_env::action::default_targets(
+            &self.inner,
+            area_id(area)?,
+            index,
+        ))
+    }
+
+    /// ``get_consumable_target_info`` for the card at ``index`` of ``area``:
+    /// ``(min_cards, max_cards, needs_targets)``.
+    fn consumable_target_info(&self, area: &str, index: usize) -> PyResult<(usize, usize, bool)> {
+        let card = self
+            .inner
+            .gs
+            .areas
+            .get(area_id(area)?)
+            .get(index)
+            .ok_or_else(|| value_error(format!("no card {index} in {area}")))?;
+        Ok(jackdaw_env::action::consumable_target_info(card))
     }
 
     /// Take one action (its tape form, JSON text) and play until the game waits again.
@@ -312,6 +402,83 @@ mod _core {
     fn _observation_layout() -> (usize, [usize; 5]) {
         use jackdaw_env::observation::{D_GLOBAL, ENTITY_WIDTHS};
         (D_GLOBAL, ENTITY_WIDTHS)
+    }
+
+    /// The action mask of a canonical snapshot (JSON text), as ``Game.action_mask()`` returns
+    /// it. Raises ``ValueError`` when the Rust state can't hold the snapshot.
+    #[pyfunction]
+    #[pyo3(signature = (text, legality="vanilla"))]
+    fn _action_mask<'py>(
+        py: Python<'py>,
+        text: &str,
+        legality: &str,
+    ) -> PyResult<super::env::MaskParts<'py>> {
+        let game = super::game_from_snapshot(text)?;
+        let mask = jackdaw_env::mask::ActionMask::of(&game, super::env::legality(legality)?);
+        super::env::mask_to_py(py, &mask)
+    }
+
+    /// ``engine_action_to_factored``: an engine action (tape form, JSON text) as
+    /// ``(action_type, entity_target, card_target)``.
+    #[pyfunction]
+    fn engine_to_factored(action: &str) -> PyResult<super::env::FactoredParts> {
+        use jackdaw_core::action::Action;
+        let value: serde_json::Value = serde_json::from_str(action).map_err(super::value_error)?;
+        let action = Action::from_json(&value).map_err(super::value_error)?;
+        let fa = jackdaw_env::action::from_engine(&action).map_err(super::value_error)?;
+        Ok(super::env::factored_to_py(&fa))
+    }
+
+    /// The number of factored action types.
+    #[allow(non_upper_case_globals)]
+    #[pymodule_export]
+    const NUM_ACTION_TYPES: usize = jackdaw_env::action::NUM_ACTION_TYPES;
+
+    /// The Gym action table for any mask (tests): ``entity_masks`` maps an action type to its
+    /// entity mask, ``target_info`` maps ``(action_type, entity)`` of the consumable and pack
+    /// types to ``(min_cards, max_cards, needs_targets)`` (absent past the end of the source).
+    /// Returns ``(actions, rng_state)`` as ``Game.action_table`` does.
+    #[pyfunction]
+    #[allow(clippy::too_many_arguments)]
+    fn _enumerate_actions(
+        type_mask: Vec<bool>,
+        card_mask: Vec<bool>,
+        entity_masks: std::collections::HashMap<usize, Vec<bool>>,
+        min_card_select: usize,
+        max_card_select: usize,
+        forced_card: Option<usize>,
+        target_info: std::collections::HashMap<(usize, usize), (usize, usize, bool)>,
+        rng_state: [u64; 4],
+    ) -> (Vec<super::env::FactoredParts>, [u64; 4]) {
+        use jackdaw_env::gym::{ActionTable, Xoshiro256};
+        let mut rng = Xoshiro256::from_state(rng_state);
+        let mut table = ActionTable::new();
+        table.enumerate_with(
+            &type_mask,
+            &card_mask,
+            |t| entity_masks.get(&t.index()).map(Vec::as_slice),
+            (min_card_select, max_card_select),
+            forced_card,
+            |t, e| target_info.get(&(t.index(), e)).copied(),
+            &mut rng,
+        );
+        let actions = table
+            .actions()
+            .iter()
+            .map(super::env::factored_to_py)
+            .collect();
+        (actions, rng.state())
+    }
+
+    /// ``k`` of ``range(n)`` subsampled with the xoshiro256** generator in ``rng_state``
+    /// (tests): ``(indices, rng_state)``.
+    #[pyfunction]
+    fn _subsample_indices(n: usize, k: usize, rng_state: [u64; 4]) -> (Vec<usize>, [u64; 4]) {
+        use jackdaw_env::gym::{Xoshiro256, subsample_indices};
+        let mut rng = Xoshiro256::from_state(rng_state);
+        let (mut picked, mut out) = (Vec::new(), Vec::new());
+        subsample_indices(n, k.min(n), &mut rng, &mut picked, &mut out);
+        (out, rng.state())
     }
 
     /// Center keys of the jokers the Rust engine has ported; a step that consults any other

@@ -252,7 +252,7 @@ def _round_eval_state(**overrides: Any) -> dict[str, Any]:
 
 class TestActionType:
     def test_count(self):
-        assert len(ActionType) == NUM_ACTION_TYPES == 21
+        assert len(ActionType) == NUM_ACTION_TYPES == 23
 
     def test_values_sequential(self):
         for i, at in enumerate(ActionType):

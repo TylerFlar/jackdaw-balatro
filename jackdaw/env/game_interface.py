@@ -167,12 +167,11 @@ class DirectAdapter:
         return _snapshot(self._gs)
 
     def get_legal_actions(self) -> list[Action]:
-        from jackdaw.engine.actions import SIM_ONLY_ACTIONS
         from jackdaw.engine.actions import get_legal_actions as engine_legal
 
-        # The factored action space has no type for the sim-only actions
-        # (RerollBoss, ...) yet; offer only what an env action can express.
-        return [a for a in engine_legal(self._gs) if not isinstance(a, SIM_ONLY_ACTIONS)]
+        # Every legal action has a factored form (RerollBoss and BuyAndUse are
+        # action types 21 and 22).
+        return engine_legal(self._gs)
 
     @property
     def raw_state(self) -> dict[str, Any]:
@@ -194,8 +193,9 @@ class DirectAdapter:
 # BridgeAdapter — wraps any Backend (SimBackend or LiveBackend)
 # ---------------------------------------------------------------------------
 
-# The balatrobot endpoint each factored action type is sent to.
-_BOT_METHOD_FOR_ACTION: dict[ActionType, str] = {
+# The balatrobot endpoint each factored action type is sent to; None for the
+# sim-only actions, which have no endpoint.
+_BOT_METHOD_FOR_ACTION: dict[ActionType, str | None] = {
     ActionType.PlayHand: "play",
     ActionType.Discard: "discard",
     ActionType.SelectBlind: "select",
@@ -217,6 +217,8 @@ _BOT_METHOD_FOR_ACTION: dict[ActionType, str] = {
     ActionType.SwapHandRight: "rearrange",
     ActionType.SortHandRank: "rearrange",
     ActionType.SortHandSuit: "rearrange",
+    ActionType.RerollBoss: None,
+    ActionType.BuyAndUse: None,
 }
 
 
@@ -295,7 +297,9 @@ class BridgeAdapter:
         for type_idx in np.nonzero(mask.type_mask)[0]:
             at = ActionType(int(type_idx))
             method = _BOT_METHOD_FOR_ACTION[at]
-            if at == ActionType.UseConsumable:
+            if method is None:
+                usable = False
+            elif at == ActionType.UseConsumable:
                 # Judged per consumable: use.lua refuses card-selecting
                 # ones outside SELECTING_HAND.
                 entity_mask = mask.entity_masks[at]

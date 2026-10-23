@@ -122,7 +122,7 @@ class TestRandomAgent:
             fa = agent.act({}, mask, info)
 
             assert isinstance(fa, FactoredAction)
-            assert 0 <= fa.action_type < 21
+            assert 0 <= fa.action_type < 23
             # Must be convertible without error
             engine_action = factored_to_engine_action(fa, gs)
             adapter.step(engine_action)

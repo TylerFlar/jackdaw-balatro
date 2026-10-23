@@ -351,7 +351,7 @@ class TestBridgeFollowsBalatrobot:
         gs = adapter.raw_state
         gs["phase"] = GamePhase.SHOP
         gs["consumables"] = [create_consumable("c_pluto"), create_consumable("c_magician")]
-        type_mask = np.zeros(21, dtype=bool)
+        type_mask = np.zeros(23, dtype=bool)
         type_mask[ActionType.UseConsumable] = True
         mask = ActionMask(
             type_mask=type_mask,

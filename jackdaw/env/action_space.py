@@ -1,11 +1,11 @@
 """Factored action space for the RL agent.
 
-Converts between a 21-type factored action representation and the engine's
+Converts between a 23-type factored action representation and the engine's
 Action dataclasses.  The factored representation decomposes complex actions
 (arbitrary permutations, combinatorial card subsets) into tractable atomic
 operations that a policy network can learn.
 
-The 21 action types:
+The 23 action types (21 and 22 were appended, so 0-20 keep their indices):
 
 +-----+-------------------+---------------------------------------------------+
 | ID  | Name              | Targets                                           |
@@ -31,13 +31,15 @@ The 21 action types:
 | 18  | SwapHandRight     | entity_target (hand card index to swap right)     |
 | 19  | SortHandRank      | none                                              |
 | 20  | SortHandSuit      | none                                              |
+| 21  | RerollBoss        | none (Director's Cut / Retcon, $10)               |
+| 22  | BuyAndUse         | entity_target (shop card index)                   |
 +-----+-------------------+---------------------------------------------------+
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import IntEnum
+from enum import IntEnum, StrEnum
 from typing import Any
 
 import numpy as np
@@ -45,7 +47,11 @@ import numpy as np
 from jackdaw.engine.actions import (
     Action,
     GamePhase,
+    can_reroll_boss,
     joker_swap_allowed,
+)
+from jackdaw.engine.actions import (
+    BuyAndUse as EngineBuyAndUse,
 )
 from jackdaw.engine.actions import (
     BuyCard as EngineBuyCard,
@@ -73,6 +79,9 @@ from jackdaw.engine.actions import (
 )
 from jackdaw.engine.actions import (
     Reroll as EngineReroll,
+)
+from jackdaw.engine.actions import (
+    RerollBoss as EngineRerollBoss,
 )
 from jackdaw.engine.actions import (
     SelectBlind as EngineSelectBlind,
@@ -118,11 +127,24 @@ from jackdaw.env.game_spec import FactoredAction  # noqa: F401 — re-export
 # ActionType enum
 # ---------------------------------------------------------------------------
 
-NUM_ACTION_TYPES = 21
+NUM_ACTION_TYPES = 23
+
+
+class Legality(StrEnum):
+    """Which actions a mask offers.
+
+    ``VANILLA`` follows the game's own rules (Balatro 1.0.1o).  ``BALATROBOT``
+    narrows them to what the BalatroBot endpoints accept (vanilla and the
+    endpoint's validate step as a dry run); it comes with the BalatroBot layer
+    (``crates/jackdaw-bot``) and is not available yet.
+    """
+
+    VANILLA = "vanilla"
+    BALATROBOT = "balatrobot"
 
 
 class ActionType(IntEnum):
-    """The 21 factored action types for the RL agent."""
+    """The 23 factored action types for the RL agent."""
 
     PlayHand = 0
     Discard = 1
@@ -145,6 +167,8 @@ class ActionType(IntEnum):
     SwapHandRight = 18
     SortHandRank = 19
     SortHandSuit = 20
+    RerollBoss = 21
+    BuyAndUse = 22
 
 
 # ---------------------------------------------------------------------------
@@ -191,7 +215,9 @@ class ActionMask:
 # ---------------------------------------------------------------------------
 
 
-def get_action_mask(game_state: dict[str, Any]) -> ActionMask:
+def get_action_mask(
+    game_state: dict[str, Any], legality: Legality = Legality.VANILLA
+) -> ActionMask:
     """Build the action mask from a game state dict.
 
     Parameters
@@ -199,12 +225,16 @@ def get_action_mask(game_state: dict[str, Any]) -> ActionMask:
     game_state:
         Full engine game state dict (same schema as
         ``get_legal_actions`` expects).
+    legality:
+        Only :attr:`Legality.VANILLA` so far (see :class:`Legality`).
 
     Returns
     -------
     ActionMask
         The complete mask structure for the current state.
     """
+    if Legality(legality) is not Legality.VANILLA:
+        raise NotImplementedError("BALATROBOT legality comes with the BalatroBot layer")
     phase = game_state.get("phase")
     if isinstance(phase, str):
         phase = GamePhase(phase)
@@ -239,6 +269,8 @@ def get_action_mask(game_state: dict[str, Any]) -> ActionMask:
         blind_on_deck = game_state.get("blind_on_deck", "Small")
         if blind_on_deck in ("Small", "Big"):
             type_mask[ActionType.SkipBlind] = True
+        if can_reroll_boss(game_state):
+            type_mask[ActionType.RerollBoss] = True
         _mask_sell_jokers(type_mask, entity_masks, jokers)
         _mask_sell_consumables(type_mask, entity_masks, consumables)
         _mask_consumables(type_mask, entity_masks, game_state)
@@ -268,6 +300,7 @@ def get_action_mask(game_state: dict[str, Any]) -> ActionMask:
     # --- SHOP ---
     elif phase == GamePhase.SHOP:
         _mask_shop_buy(type_mask, entity_masks, game_state)
+        _mask_buy_and_use(type_mask, entity_masks, game_state)
         _mask_sell_jokers(type_mask, entity_masks, jokers)
         _mask_sell_consumables(type_mask, entity_masks, consumables)
         _mask_consumables(type_mask, entity_masks, game_state)
@@ -365,6 +398,31 @@ def _mask_shop_buy(
     if mask.any():
         type_mask[ActionType.BuyCard] = True
         entity_masks[ActionType.BuyCard] = mask
+
+
+def _mask_buy_and_use(
+    type_mask: np.ndarray,
+    entity_masks: dict[int, np.ndarray],
+    gs: dict[str, Any],
+) -> None:
+    """Set BuyAndUse mask: affordable shop consumables usable right now.
+
+    The same gate as the engine's legal actions (``can_buy_and_use``,
+    button_callbacks.lua:77-89): no consumable slot needed, and only
+    ``can_use_consumeable`` is asked, not ``Card:check_use`` (G138).
+    """
+    shop_cards = gs.get("shop_cards", [])
+    if not shop_cards:
+        return
+    mask = np.zeros(len(shop_cards), dtype=bool)
+    for i, card in enumerate(shop_cards):
+        ability = card.ability if isinstance(card.ability, dict) else {}
+        if "consumeable" not in ability or not can_afford(gs, card.cost):
+            continue
+        mask[i] = consumable_block_reason(card, gs, check_use=False) is None
+    if mask.any():
+        type_mask[ActionType.BuyAndUse] = True
+        entity_masks[ActionType.BuyAndUse] = mask
 
 
 def _mask_sell_jokers(
@@ -567,6 +625,15 @@ def _default_use_targets(
     return default_use_targets(consumables[consumable_index], game_state)
 
 
+def _default_buy_targets(game_state: dict[str, Any], shop_index: int) -> tuple[int, ...] | None:
+    """Default hand targets for buying and using a shop consumable (the engine's
+    legal actions use the same default)."""
+    shop_cards = game_state.get("shop_cards", [])
+    if shop_index >= len(shop_cards):
+        return None
+    return default_use_targets(shop_cards[shop_index], game_state)
+
+
 def factored_to_engine_action(
     fa: FactoredAction,
     game_state: dict[str, Any],
@@ -696,6 +763,17 @@ def factored_to_engine_action(
 
     if at == ActionType.SortHandSuit:
         return EngineSortHand(mode="suit")
+
+    if at == ActionType.RerollBoss:
+        return EngineRerollBoss()
+
+    if at == ActionType.BuyAndUse:
+        if fa.entity_target is None:
+            raise ValueError("BuyAndUse requires entity_target")
+        targets = fa.card_target if fa.card_target else None
+        if targets is None:
+            targets = _default_buy_targets(game_state, fa.entity_target)
+        return EngineBuyAndUse(shop_index=fa.entity_target, target_indices=targets)
 
     raise ValueError(f"Unknown action type: {fa.action_type}")
 
@@ -830,6 +908,16 @@ def engine_action_to_factored(
         return FactoredAction(
             action_type=ActionType.SwapHandRight,
             entity_target=action.idx,
+        )
+
+    if isinstance(action, EngineRerollBoss):
+        return FactoredAction(action_type=ActionType.RerollBoss)
+
+    if isinstance(action, EngineBuyAndUse):
+        return FactoredAction(
+            action_type=ActionType.BuyAndUse,
+            entity_target=action.shop_index,
+            card_target=action.target_indices,
         )
 
     raise ValueError(f"Unknown engine action type: {type(action).__name__}")

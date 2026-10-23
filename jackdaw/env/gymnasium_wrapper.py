@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import math
 import operator
+import secrets
 from collections.abc import Callable, Sequence
 from functools import lru_cache
 from itertools import combinations
@@ -34,6 +35,7 @@ from jackdaw.env.balatro_spec import balatro_game_spec
 from jackdaw.env.game_interface import GameAdapter
 from jackdaw.env.game_spec import FactoredAction, GameActionMask, GameObservation
 from jackdaw.env.rewards import RewardFn, ShapedReward, Transition, sparse_reward
+from jackdaw.env.sampler import Xoshiro256, subsample
 
 MAX_ACTIONS: int = 500
 CARD_COMBO_BUDGET: int = 200
@@ -69,13 +71,9 @@ _CARD_ONLY_TYPES: frozenset[int] = frozenset(
 )
 
 
-def _subsample(items: Sequence[Any], budget: int, rng: np.random.Generator) -> Sequence[Any]:
+def _subsample(items: Sequence[Any], budget: int, rng: Xoshiro256) -> Sequence[Any]:
     """Return *items* if within budget, else a random subsample (order kept)."""
-    if len(items) <= budget:
-        return items
-    indices = rng.choice(len(items), size=budget, replace=False)
-    indices.sort()
-    return [items[i] for i in indices.tolist()]
+    return subsample(items, budget, rng)
 
 
 def _selection_sizes(n_cards: int, min_select: Any, max_select: Any) -> tuple[int, int]:
@@ -130,7 +128,7 @@ def _card_actions(
     legal_cards: tuple[int, ...],
     min_select: Any,
     max_select: Any,
-    rng: np.random.Generator,
+    rng: Xoshiro256,
     required: int | None = None,
 ) -> Sequence[FactoredAction]:
     """Card-selecting actions for one action type/entity, subsampled to budget.
@@ -233,9 +231,10 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         # Action space
         self.action_space = spaces.Discrete(MAX_ACTIONS)
 
-        # Internal state
+        # Internal state.  The table's subsampling draws from a seeded xoshiro256**
+        # (jackdaw.env.sampler), the generator the Rust table uses too.
         self._action_table: list[FactoredAction] = []
-        self._rng = np.random.default_rng()
+        self._rng = Xoshiro256(secrets.randbits(64))
         self._episode_max_ante: int = 1
         self._episode_blinds_beaten: int = 0
 
@@ -251,7 +250,7 @@ class BalatroGymnasiumEnv(gymnasium.Env):
     ) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
         super().reset(seed=seed)
         if seed is not None:
-            self._rng = np.random.default_rng(seed)
+            self._rng = Xoshiro256(seed)
 
         kwargs: dict[str, Any] = {}
         if seed is not None:

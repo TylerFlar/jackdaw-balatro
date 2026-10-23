@@ -1,9 +1,11 @@
-//! Reinforcement-learning hot paths on top of the engine.
-//!
-//! Holds the observation encoder (writing into caller-owned buffers). The action masks for both
-//! legality modes, the Gym action enumeration and the batched vector environment come next.
+//! Reinforcement-learning hot paths on top of the engine: the observation encoder, the action
+//! masks and the factored action space, the Gym action enumeration, and the batched vector
+//! environment.
 #![forbid(unsafe_code)]
 
+pub mod action;
+pub mod gym;
+pub mod mask;
 pub mod observation;
 
 #[cfg(test)]

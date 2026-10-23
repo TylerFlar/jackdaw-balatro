@@ -46,7 +46,7 @@ class TestProtocolConformance:
         spec = env.spec
         assert spec.name == "balatro"
         assert spec.num_entity_types == 5
-        assert spec.num_action_types == 21
+        assert spec.num_action_types == 23
 
 
 class TestReset:
@@ -83,7 +83,7 @@ class TestReset:
 
     def test_mask_type_mask_shape(self, env: BalatroEnvironment) -> None:
         _, game_mask, _ = env.reset()
-        assert game_mask.type_mask.shape == (21,)
+        assert game_mask.type_mask.shape == (23,)
 
     def test_episode_tracking_reset(self, env: BalatroEnvironment) -> None:
         env.reset()
