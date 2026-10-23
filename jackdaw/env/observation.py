@@ -277,7 +277,7 @@ D_SHOP: int = 9
 #   [229]      interest_earned (1) — current interest bracket, normalized
 #   [230]      flush_draw_outs (1) — P(drawing suit-completing card) from deck
 #   [231]      straight_draw_outs (1) — P(drawing rank-completing card) from deck
-#   [232]      debuff_hand_fraction (1) — fraction of hand cards debuffed by boss blind
+#   [232]      debuff_hand_fraction (1) — face-up debuffed hand cards / hand size
 #   [233]      spendable_above_interest (1) — money above interest floor, log-scaled
 #   [234]      urgency (1) — blind_remaining / (base_score × hands_left), clamped
 _D_BASE: int = 6 + 4 + 20 + NUM_HAND_TYPES * 5  # 90
@@ -335,6 +335,17 @@ def _edition_idx(edition: dict[str, Any] | None) -> int:
     if edition.get("negative"):
         return 4
     return 0
+
+
+def _face_up(cards: list[Card]) -> list[Card]:
+    """The cards a player can see: face-down cards (``facing == "back"``) removed.
+
+    Hand-level features (best hand, draws, debuff count) are computed from
+    these only, so a face-down card's identity never reaches the observation.
+    """
+    if all(c.facing != "back" for c in cards):
+        return cards
+    return [c for c in cards if c.facing != "back"]
 
 
 def _one_hot(idx: int, n: int) -> list[float]:
@@ -431,8 +442,15 @@ def encode_joker(
        12: ability_chips (log-scaled)
        13: ability_extra (log-scaled — meaning varies per joker)
        14: condition_met (0/1 — simplified: not debuffed)
+
+    A face-down joker (The Amber Acorn) encodes only its position; every
+    other feature is zero, so feature 0 reads as the unknown center id.
     """
     v = np.zeros(D_JOKER, dtype=np.float32)
+
+    if card.facing == "back":
+        v[9] = position / 20.0
+        return v
 
     v[0] = center_key_id(card.center_key) / max(NUM_CENTER_KEYS, 1)
     card.ability.get("extra", {})
@@ -689,8 +707,9 @@ def encode_global_context(
     """Encode the fixed-size global context vector.
 
     ``hand_analysis`` accepts a precomputed ``_compute_hand_analysis``
-    result for the live hand, so a caller that also encodes the hand
-    cards (which need the same analysis) can compute it once.
+    result for the face-up cards of the live hand, so a caller that also
+    encodes the hand cards (which need the same analysis) can compute it
+    once.  Hand-level features ignore face-down cards.
 
     Returns shape ``(D_GLOBAL,)`` float32 array (230 features).
 
@@ -835,7 +854,8 @@ def encode_global_context(
     # --- Strategic features [211:230] — 19 dims ---
     sbase = dbase + D_DISCARD_HISTOGRAM  # 211
 
-    hand: list[Card] = gs.get("hand", [])
+    full_hand: list[Card] = gs.get("hand", [])
+    hand = _face_up(full_hand)
     jokers: list[Card] = gs.get("jokers", [])
     hand_levels: HandLevels | None = gs.get("hand_levels")
 
@@ -914,11 +934,11 @@ def encode_global_context(
         )
         v[outs_base + 1] = matching_in_deck / deck_size
 
-    # Boss blind debuff impact [232] — fraction of hand cards debuffed
+    # Boss blind debuff impact [232] — fraction of hand cards seen debuffed
     debuff_base = outs_base + 2  # 232
-    if hand:
+    if full_hand:
         n_debuffed = sum(1 for c in hand if c.debuff)
-        v[debuff_base] = n_debuffed / len(hand)
+        v[debuff_base] = n_debuffed / len(full_hand)
 
     # Spendable above interest [233] — money that can be spent without losing interest
     spend_base = debuff_base + 1  # 233
@@ -985,8 +1005,9 @@ def encode_playing_cards_batch(
     Uses pre-allocated buffer to avoid per-call allocation.
 
     ``hand_analysis`` accepts a precomputed ``_compute_hand_analysis``
-    result for *these* cards; pass it only when it was computed over the
-    same card list (the live hand), never for other areas (pack cards).
+    result for the face-up subset of *these* cards; pass it only when it
+    was computed over the same card list (the live hand), never for other
+    areas (pack cards).
     """
     n = len(cards)
     if n == 0:
@@ -999,7 +1020,7 @@ def encode_playing_cards_batch(
     _, _, scoring_ids = (
         hand_analysis
         if hand_analysis is not None
-        else _compute_hand_analysis(cards, jokers, gs.get("hand_levels"))
+        else _compute_hand_analysis(_face_up(cards), jokers, gs.get("hand_levels"))
     )
 
     for i, card in enumerate(cards):
@@ -1054,7 +1075,10 @@ def encode_jokers_batch(
     nck = max(NUM_CENTER_KEYS, 1)
 
     for i, card in enumerate(jokers):
-        row = buf[i]
+        row = buf[i]  # already zeroed
+        if card.facing == "back":  # see encode_joker
+            row[9] = i / 20.0
+            continue
         row[0] = center_key_id(card.center_key) / nck
         row[1] = min(card.base_cost / 20.0, 1.0) if card.base_cost else 0.0
         row[2] = _edition_idx(card.edition) / 4.0
@@ -1138,10 +1162,10 @@ def encode_observation(gs: dict[str, Any]) -> Observation:
     # The best-hand analysis over the live hand is needed twice — by the
     # global context (hand-type indicators, base score) and by the hand
     # rows (scoring-card flags) — and it dominates encoding cost; compute
-    # it once and thread it through.
+    # it once and thread it through.  It sees only face-up cards.
     hand: list[Card] = gs.get("hand", [])
     jokers: list[Card] = gs.get("jokers", [])
-    hand_analysis = _compute_hand_analysis(hand, jokers, gs.get("hand_levels"))
+    hand_analysis = _compute_hand_analysis(_face_up(hand), jokers, gs.get("hand_levels"))
 
     # Global context
     global_ctx = encode_global_context(gs, hand_analysis=hand_analysis)
