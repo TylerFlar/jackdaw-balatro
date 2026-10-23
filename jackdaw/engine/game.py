@@ -2304,6 +2304,18 @@ def _round_won(gs: dict[str, Any]) -> None:
     )
     gs["round_earnings"] = earnings
 
+    # evaluate_round runs the back's 'eval' trigger (state_events.lua:1163):
+    # the Anaglyph Deck queues add_tag(Tag('tag_double')) after a boss
+    # (back.lua:111-120; last_blind is the blind just beaten).
+    from jackdaw.engine.back import Back
+
+    back_key = gs.get("selected_back_key") or "b_red"
+    back_effect = Back(back_key).trigger_effect("eval", boss_defeated=blind_on_deck == "Boss")
+    if back_effect and back_effect.get("create_tag"):
+        tag_key = back_effect["create_tag"]
+        _award_tag(gs, tag_key, source=back_key)
+        _check_double_tag(gs, tag_key)
+
     # ------------------------------------------------------------------
     # 11. Phase → ROUND_EVAL
     # ------------------------------------------------------------------

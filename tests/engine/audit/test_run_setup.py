@@ -197,3 +197,36 @@ def test_pinned_joker_stays_leftmost_after_amber_acorn():
     assert jokers[0].center_key == "j_ceremonial" and jokers[0].pinned
     # The Dagger sliced its right neighbour at setting_blind (card.lua:2552).
     assert len(jokers) == len(added) and {j.center_key for j in jokers[1:]} < set(added)
+
+
+# ---------------------------------------------------------------------------
+# G06 — Anaglyph Deck
+# ---------------------------------------------------------------------------
+
+
+def _pending_tags(gs: dict) -> list[str]:
+    from tests.parity.py_export import pending_tags
+
+    return [t["key"] for t in pending_tags(gs.get("awarded_tags", []))]
+
+
+def test_anaglyph_deck_gains_a_double_tag_after_a_boss():
+    """Anaglyph Deck: a Double Tag after every boss blind.
+
+    state_events.lua:1163: evaluate_round calls
+    ``G.GAME.selected_back:trigger_effect({context = 'eval'})``, and
+    back.lua:111-120 queues ``add_tag(Tag('tag_double'))`` when
+    ``G.GAME.last_blind.boss`` (the blind just beaten, blind.lua:97-99).
+    """
+    gs = new_run("b_anaglyph", "AUDIT_G06")
+    step(gs, SelectBlind())
+    win_blind(gs)  # Small Blind: nothing
+    assert "tag_double" not in _pending_tags(gs)
+
+    gs = new_run("b_anaglyph", "AUDIT_G06")
+    gs["blind_on_deck"] = "Boss"
+    step(gs, SelectBlind())
+    win_blind(gs)
+    assert _pending_tags(gs) == ["tag_double"]
+    step(gs, CashOut())
+    assert _pending_tags(gs) == ["tag_double"]  # waits for the next tag
