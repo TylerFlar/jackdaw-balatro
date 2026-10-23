@@ -32,4 +32,4 @@ def test_rust_keeps_step_on_a_random_run(case) -> None:
 def test_fuzz_regression_replays_in_step(spec) -> None:
     out = replay(spec)
     assert out.divergence is None, f"{out.divergence}: " + "; ".join(out.diff[:8])
-    assert out.stop in ("tape end", "game over", "won"), out.stop
+    assert out.stop in ("tape end", "game over", "game over (won)"), out.stop

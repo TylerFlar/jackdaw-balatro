@@ -1,18 +1,20 @@
 """Lockstep fuzzing: random runs played by both engines, compared at every step.
 
 Each case is a random start (back, stake, seed, challenge), an optional setup
-(a forced boss, a joker board added with BalatroBot ``add``, money) and a
-seeded policy over the oracle's legal actions: random choices weighted by
-action kind, mixed with the smart agent so runs get past the early antes.
+(a forced boss, a joker board added with BalatroBot ``add``, money, a later
+ante) and a seeded policy over the oracle's legal actions: random choices
+weighted by action kind, mixed with the smart agent so runs get past the
+early antes.
 
 The Rust engine keeps one ``jackdaw._core.Game`` from the start, with no
 re-import between steps, so state a snapshot doesn't carry is exercised too.
 At every step the legal-action lists, the step outcome and the snapshot
-digests must agree. A case ends at game over, a win, ``max_steps``, or a step
-Rust refuses as not ported yet. A divergence is reported with its first
-snapshot diff and can be saved as a parity spec (start, setup, tape) that
-``tests.parity.test_rust_lockstep.lockstep`` replays. The exit status is 1
-when any case diverged (the nightly workflow runs it)::
+digests must agree. A case ends at game over (a won run plays on into
+endless mode), ``max_steps``, or a step Rust refuses as not ported yet. A
+divergence is reported with its first snapshot diff and can be saved as a
+parity spec (start, setup, tape) that :func:`replay` and
+``tests/parity/test_fuzz.py`` play again. The exit status is 1 when any case
+diverged (the nightly workflow runs it)::
 
     PYTHONPATH=. .venv/Scripts/python.exe -m tests.parity.fuzz --cases 200 [--seed 1] [--save DIR]
 """
@@ -163,8 +165,9 @@ def run_case(case: Case, tape: list[list[Any]] | None = None) -> Outcome:
     for pos in range(case.max_steps):
         snap = plain(py.snapshot())
         out.ante = int(snap["round_resets"]["ante"])
-        if snap["phase"] == GamePhase.GAME_OVER or snap["run"]["won"]:
-            out.stop = "game over" if snap["phase"] == GamePhase.GAME_OVER else "won"
+        # A won run goes on into endless mode, as the game offers.
+        if snap["phase"] == GamePhase.GAME_OVER:
+            out.stop = "game over (won)" if snap["run"]["won"] else "game over"
             return out
         py_legal = py.legal_actions()
         try:

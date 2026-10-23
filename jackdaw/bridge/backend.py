@@ -286,6 +286,10 @@ class SimBackend:
             # take effect on future rounds via round_resets.
             old_hand_size = self._gs.get("hand_size", 8)
             card.add_to_deck(self._gs)
+            from jackdaw.engine.game import run_pending_reprice
+
+            # add waits for the events the new card queued (add.lua:450-490).
+            run_pending_reprice(self._gs)
             # If hand_size increased mid-round, draw cards to fill the new
             # size — matches balatrobot which immediately fills on add.
             if self._gs.get("hand_size", 8) > old_hand_size and phase == GamePhase.SELECTING_HAND:
