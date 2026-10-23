@@ -1,0 +1,11 @@
+[package]
+name = "jackdaw-data"
+description = "Generated Balatro 1.0.1o data tables and enums for the jackdaw engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

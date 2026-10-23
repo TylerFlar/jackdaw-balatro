@@ -5,6 +5,7 @@ description = "Headless Balatro simulator for reinforcement learning research"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
+license-files = ["LICENSE"]
 authors = [{name = "Tyler Flar"}]
 classifiers = [
     "Programming Language :: Python :: 3.12",
@@ -15,14 +16,18 @@ classifiers = [
 dependencies = ["gymnasium>=1.0", "numpy>=1.24"]
 
 [build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.build_meta"
+# maturin >= 1.9.4 sets PYO3_BUILD_EXTENSION_MODULE, which replaces PyO3's deprecated
+# `extension-module` feature.
+requires = ["maturin>=1.9.4,<2"]
+build-backend = "maturin"
 
-[tool.setuptools.packages.find]
-include = ["jackdaw*"]
-
-[tool.setuptools.package-data]
-jackdaw = ["engine/data/*.json"]
+[tool.maturin]
+# Mixed Rust/Python project: the `jackdaw/` package next to this file plus the PyO3 crate,
+# installed as `jackdaw/_core.*`.
+manifest-path = "crates/jackdaw-py/Cargo.toml"
+module-name = "jackdaw._core"
+include = [{ path = "jackdaw/engine/data/*.json", format = ["sdist", "wheel"] }]
+exclude = ["**/__pycache__/**"]
 
 [project.scripts]
 jackdaw = "jackdaw.cli.main:main"
@@ -37,6 +42,18 @@ dev = [
     "pytest>=9.1",
     "pytest-cov>=7.1",
     "ruff>=0.17.2",
+]
+
+[tool.uv]
+# Rebuild the extension on `uv sync` / `uv run` whenever the Rust side changes.
+cache-keys = [
+    { file = "pyproject.toml" },
+    { file = "Cargo.toml" },
+    { file = "Cargo.lock" },
+    { file = "rust-toolchain.toml" },
+    { file = ".cargo/config.toml" },
+    { file = "crates/**/Cargo.toml" },
+    { file = "crates/**/*.rs" },
 ]
 
 [tool.pytest.ini_options]

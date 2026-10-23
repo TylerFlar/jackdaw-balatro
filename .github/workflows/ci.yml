@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main]
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -16,9 +19,42 @@ jobs:
         with:
           enable-cache: true
 
-      - run: uv sync --dev
-      - run: uv run ruff check .
-      - run: uv run ruff format --check .
+      # Ruff needs only the dev tools, so skip building the Rust extension.
+      - run: uv sync --dev --no-install-project
+      - run: uv run --no-sync ruff check .
+      - run: uv run --no-sync ruff format --check .
+
+  lint-rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.98.1"
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  test-rust:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.98.1"
+
+      - uses: Swatinem/rust-cache@v2
+
+      - run: cargo test --workspace --exclude jackdaw-py --locked
 
   test:
     runs-on: ubuntu-latest
@@ -27,6 +63,15 @@ jobs:
         python-version: ["3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v7
+
+      # `uv sync` builds the jackdaw._core extension with maturin.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.98.1"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: py${{ matrix.python-version }}
 
       - uses: astral-sh/setup-uv@v10.3.2
         with:
