@@ -1,0 +1,61 @@
+{
+  "model": "examples/results/maskable_ppo_balatro.zip",
+  "model_timesteps": 44179456,
+  "reward": "shaped:loss=0,score_progress=0.1,blind_beaten=0.5,boss_beaten=0.3",
+  "max_steps": 2000,
+  "seeds": "10000000..10000999",
+  "agents": {
+    "ppo_greedy": {
+      "episodes": 1000.0,
+      "ante_reached": 1.718,
+      "blinds_beaten": 3.323,
+      "win_rate": 0.0,
+      "reward": -0.03802325275249372,
+      "length": 670.911,
+      "truncated": 0.321,
+      "refused": 0.0,
+      "blinds_beaten_sem": 0.09620772800002568,
+      "max_ante": 6.0,
+      "seconds": 19.229908000095747
+    },
+    "ppo_sampled": {
+      "episodes": 1000.0,
+      "ante_reached": 1.933,
+      "blinds_beaten": 4.081,
+      "win_rate": 0.0,
+      "reward": 1.0711286167929301,
+      "length": 53.171,
+      "truncated": 0.0,
+      "refused": 0.0,
+      "blinds_beaten_sem": 0.11051992423836371,
+      "max_ante": 6.0,
+      "seconds": 2.7040963999461383
+    },
+    "random": {
+      "episodes": 1000.0,
+      "ante_reached": 1.0,
+      "blinds_beaten": 0.003,
+      "win_rate": 0.0,
+      "reward": 0.01763711111111111,
+      "length": 9.165,
+      "truncated": 0.0,
+      "refused": 0.0,
+      "blinds_beaten_sem": 0.0017303161543469434,
+      "max_ante": 1.0,
+      "seconds": 0.3468762000557035
+    },
+    "smart": {
+      "episodes": 1000.0,
+      "ante_reached": 2.313,
+      "blinds_beaten": 5.382,
+      "win_rate": 0.0,
+      "reward": 1.4828144713347777,
+      "length": 49.978,
+      "truncated": 0.0,
+      "refused": 0.0,
+      "blinds_beaten_sem": 0.1268233423316077,
+      "max_ante": 7.0,
+      "seconds": 72.45612620003521
+    }
+  }
+}
