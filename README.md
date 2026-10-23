@@ -7,13 +7,13 @@
 
 ---
 
-Jackdaw is a Balatro simulator built for RL research. It features a 1:1 Python reimplementation of the Balatro engine, a Gymnasium-style environment with entity-based observations and a factored action space, and a validation bridge to play against live Balatro via [BalatroBot](https://github.com/coder/balatrobot).
+Jackdaw is a Balatro simulator built for RL research. It features a bit-exact Balatro 1.0.1o engine written in Rust with a Python interface, Gymnasium-style environments (single and vectorized) with entity-based observations and a factored action space, and a bridge that plays live Balatro in lockstep through [BalatroBot](https://github.com/coder/balatrobot). The engine is checked against the game's own Lua source, line by line, in a [parity ledger](docs/parity).
 
 ## Motivation
 
 With [BalatroBot](https://github.com/coder/balatrobot) already existing, why build a separate simulator?
 
-While BalatroBot lets you input actions with no latency (minus network time), this can cause race conditions and actually crash the game. Parallelizing is also important for RL training — you can run multiple instances of BalatroBot, but it's more overhead and complexity than just running multiple simulators in Python. Finally, having a pure Python implementation allows for easier debugging, introspection, and customization of the game logic, which is really helpful for research.
+While BalatroBot lets you input actions with no latency (minus network time), this can cause race conditions and actually crash the game. Parallelizing is also important for RL training: you can run multiple instances of BalatroBot, but a simulator steps hundreds of thousands of times a second (`BalatroVectorEnv` does over 400K steps/s on 8 threads). Finally, the Python API exposes every part of the game, with read-only views, snapshots, exact score previews and a state builder, which helps with debugging and research. See the [Python API](https://tylerflar.github.io/jackdaw-balatro/api).
 
 ## Install
 
@@ -30,6 +30,9 @@ git clone https://github.com/TylerFlar/jackdaw-balatro
 cd jackdaw-balatro
 uv sync --dev
 ```
+
+Building from source compiles the Rust engine, so it needs a Rust toolchain
+([rustup](https://rustup.rs)); `uv sync` builds the `jackdaw._core` extension with maturin.
 
 ## Quick Start
 
@@ -69,16 +72,18 @@ env = BalatroEnvironment(
 ## Architecture
 
 ```
+crates/
+  jackdaw-core/     The engine: Lua numerics and RNG, cards, scoring, every joker,
+                    consumable, tag, voucher, boss, deck and challenge rule, snapshots
+  jackdaw-data/     Generated tables (centers, blinds, tags, hands...) from the game's prototypes
+  jackdaw-env/      Observation encoder, action masks, Gym enumeration, vector env, rewards
+  jackdaw-bot/      BalatroBot v1.5.2's API: view, endpoints, validator, `jackdaw serve`
+  jackdaw-py/       The PyO3 extension, jackdaw._core
+
 jackdaw/
-  engine/           Deterministic game simulator (30 modules)
-    game.py           step() — core state transition function
-    run_init.py       initialize_run() — seeded game setup
-    runner.py         simulate_run() — full game with an agent
-    scoring.py        14-phase scoring pipeline
-    jokers.py         All 150 joker effects
-    rng.py            Bit-exact 3-layer PRNG (matches LuaJIT 2.1)
-    shop.py           Shop population, buy/sell/reroll
-    actions.py        Action types, GamePhase enum
+  core/             The Python API: Game, read-only views, GameBuilder
+  engine/           The Python reference engine (the parity oracle the Rust engine is
+                    checked against) and the action types
 
   env/              RL environment
     balatro_env.py    BalatroEnvironment — factored action interface
@@ -112,7 +117,8 @@ jackdaw serve                             # BalatroBot's API on the simulator
 Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/).
 
 ```bash
-uv sync --dev          # install with dev dependencies
+uv sync --dev          # install with dev dependencies (builds the Rust extension)
+cargo test             # Rust tests
 pytest                 # run tests
 pytest --cov=jackdaw   # with coverage
 pytest -m benchmark    # performance benchmarks
