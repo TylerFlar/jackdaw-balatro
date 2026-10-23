@@ -9,6 +9,7 @@ publish.workspace = true
 
 [dependencies]
 jackdaw-core.workspace = true
+jackdaw-data.workspace = true
 
 [lints]
 workspace = true

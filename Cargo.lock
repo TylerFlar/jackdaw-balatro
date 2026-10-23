@@ -93,6 +93,7 @@ name = "jackdaw-env"
 version = "0.1.0"
 dependencies = [
  "jackdaw-core",
+ "jackdaw-data",
 ]
 
 [[package]]
