@@ -83,6 +83,23 @@ def test_rust_reexports_fuzz_states(i: int) -> None:
     _fuzz(i, 400)
 
 
+def test_rust_keeps_a_queued_negative_removal() -> None:
+    """A debuffed Negative joker keeps its slot and queues the slot's removal
+    (card.lua:686-693, 4733-4739); found by the lockstep fuzzer."""
+    engine = PyEngine(
+        {"back": "b_red", "stake": 1, "seed": "QNEG1", "challenge": None},
+        [
+            {"op": "action", "action": ["SelectBlind"]},
+            {"op": "add", "key": "j_joker", "edition": "negative"},
+        ],
+    )
+    joker = engine.gs["jokers"][0]
+    with engine._ids():
+        joker.set_debuff(True, engine.gs)
+    assert joker.ability.get("queue_negative_removal")
+    _check(engine.snapshot(), "queued negative removal")
+
+
 def _first_tape_snapshot() -> dict[str, Any]:
     spec = _SPECS[0]
     return PyEngine(spec.start, spec.setup).snapshot()

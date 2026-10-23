@@ -348,6 +348,9 @@ fn ability_json(c: &Card) -> Value {
     if a.perma_debuff {
         m.insert("perma_debuff".to_owned(), json!(true));
     }
+    if a.queue_negative_removal {
+        m.insert("queue_negative_removal".to_owned(), json!(true));
+    }
     Value::Object(m)
 }
 
@@ -394,6 +397,10 @@ fn ability_from(v: &Value, center: CenterId, path: &str) -> Result<Ability> {
         .unwrap_or(false);
     a.perma_debuff = o
         .opt("perma_debuff")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    a.queue_negative_removal = o
+        .opt("queue_negative_removal")
         .and_then(Value::as_bool)
         .unwrap_or(false);
     o.done()?;
