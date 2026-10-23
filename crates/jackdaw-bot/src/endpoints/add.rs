@@ -235,8 +235,13 @@ fn run(ctx: &mut Ctx) -> Result<Json, BotError> {
         perishable,
         rental,
     };
-    ctx.game_mut()
+    let game = ctx.game_mut();
+    let id = game
         .debug_add(&spec)
         .map_err(|e| super::step_error("Cannot add the card", e))?;
+    if matches!(parsed, AddKey::Voucher(_)) {
+        // `SMODS.add_card` never calls `create_shop_card_ui`: the voucher has no buy button.
+        game.rt.areas.no_buy_button.push(id);
+    }
     Ok(ctx.session.view())
 }

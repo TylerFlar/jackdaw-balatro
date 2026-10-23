@@ -6,6 +6,12 @@
 //! `count` against its `limit`. That last check has no Negative exception, so a Negative
 //! joker at full slots, which vanilla sells, is refused. Then `G.FUNCS.buy_from_shop` (cards)
 //! or `G.FUNCS.use_card` (vouchers, packs) runs.
+//!
+//! The buy button is read from the card's UI (`children.buy_button.definition`). Every shop
+//! card has one except a voucher that `add` placed (`SMODS.add_card` skips
+//! `create_shop_card_ui`): indexing the missing button raises, and the dispatcher reports the
+//! Lua error as INTERNAL_ERROR. The `if not btn` branch after it ("No buy button found for
+//! card") is unreachable.
 
 use jackdaw_core::action::Action;
 use jackdaw_core::area::AreaId;
@@ -115,6 +121,14 @@ fn run(ctx: &mut Ctx) -> Result<Json, BotError> {
                 tostring(limit)
             )));
         }
+    }
+    // `G.shop_vouchers.cards[pos].children.buy_button.definition` (buy.lua:182): a voucher
+    // that `add` put in the shop has no buy button, and indexing it raises.
+    if what == What::Voucher && game.rt.areas.no_buy_button.contains(&card.sort_id) {
+        return Err(BotError::internal(
+            "[SMODS balatrobot \"src/lua/endpoints/buy.lua\"]:182: attempt to index field \
+             'buy_button' (a nil value)",
+        ));
     }
     if ctx.dry_run {
         return Ok(Json::Null);

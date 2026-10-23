@@ -146,6 +146,9 @@ pub struct AreaMemo {
     /// them, but `G.shop_jokers`, `G.shop_vouchers` and `G.shop_booster` keep pointing at them
     /// until the run is deleted, with the card counts of their last frame.
     pub stale_shop: Option<StaleShop>,
+    /// Shop vouchers with no buy button: BalatroBot's `add` puts a voucher in the shop with
+    /// `SMODS.add_card`, which never calls `create_shop_card_ui` (sort ids).
+    pub no_buy_button: Vec<u32>,
 }
 
 /// Card counts and limits of the removed shop's areas (jokers, vouchers, boosters).
@@ -205,6 +208,7 @@ impl Game {
             deck_limit: playing as f64,
             voucher_limit: (gs.areas.shop_vouchers.len() as f64).max(1.0),
             stale_shop: None,
+            no_buy_button: Vec::new(),
         };
         let rt = Runtime {
             state,
