@@ -159,12 +159,47 @@ def _tw223_step(state: list[int]) -> int:
     return r & M
 
 
+# Seeding runs 10 warm-up steps whose output is discarded, so only each
+# word's own update matters.  Each word's update (shifts, masks, xors) is
+# linear over GF(2), hence so is its 10-fold composition W: for any z,
+# W(z) is the xor of W applied to z's individual bytes.  _WARMUP[w][k][v]
+# holds W_w(v << 8k), turning the 40 big-int updates of the warm-up into
+# 32 table lookups with bit-identical results.
+_WARMUP_STEPS = 10
+
+
+def _build_warmup_tables() -> tuple[tuple[tuple[int, ...], ...], ...]:
+    tables = []
+    for word in range(4):
+        # W of each single bit, then every byte value by linearity.
+        basis = []
+        for bit in range(64):
+            state = [0, 0, 0, 0]
+            state[word] = 1 << bit
+            for _ in range(_WARMUP_STEPS):
+                _tw223_step(state)
+            basis.append(state[word])
+        per_byte = []
+        for k in range(8):
+            row = [0] * 256
+            for v in range(1, 256):
+                low = v & -v
+                row[v] = row[v ^ low] ^ basis[8 * k + low.bit_length() - 1]
+            per_byte.append(tuple(row))
+        tables.append(tuple(per_byte))
+    return tuple(tables)
+
+
+_WARMUP = _build_warmup_tables()
+
+
 def _luajit_seed(seed_double: float) -> list[int]:
     """Initialise a TW223 state from a double, matching ``random_seed()`` in lib_math.c.
 
     The double is iteratively transformed (``d = d*pi + e``), reinterpreted
     as uint64 via IEEE 754 bit pattern, and stored into 4 state words.
-    A minimum-bit threshold is applied per word, then 10 warm-up steps are run.
+    A minimum-bit threshold is applied per word, then the 10 warm-up steps are
+    applied through precomputed lookup tables (see ``_WARMUP``).
     """
     pack_d = _PACK_D.pack
     unpack_q = _PACK_Q.unpack
@@ -191,12 +226,24 @@ def _luajit_seed(seed_double: float) -> list[int]:
     if u3 < _MIN3:
         u3 += _MIN3
 
-    state = [u0, u1, u2, u3]
-
-    # 10 warm-up iterations (lj_prng_u64, discards output)
-    for _ in range(10):
-        _tw223_step(state)
-    return state
+    # 10 warm-up iterations (lj_prng_u64, discards output); see _WARMUP.
+    # Each u is below 2**64 (a <Q unpack, plus at most a small minimum), so
+    # u >> 56 is already a byte.
+    t0, t1, t2, t3 = _WARMUP
+    return [
+        t0[0][u0 & 255] ^ t0[1][(u0 >> 8) & 255] ^ t0[2][(u0 >> 16) & 255]
+        ^ t0[3][(u0 >> 24) & 255] ^ t0[4][(u0 >> 32) & 255] ^ t0[5][(u0 >> 40) & 255]
+        ^ t0[6][(u0 >> 48) & 255] ^ t0[7][u0 >> 56],
+        t1[0][u1 & 255] ^ t1[1][(u1 >> 8) & 255] ^ t1[2][(u1 >> 16) & 255]
+        ^ t1[3][(u1 >> 24) & 255] ^ t1[4][(u1 >> 32) & 255] ^ t1[5][(u1 >> 40) & 255]
+        ^ t1[6][(u1 >> 48) & 255] ^ t1[7][u1 >> 56],
+        t2[0][u2 & 255] ^ t2[1][(u2 >> 8) & 255] ^ t2[2][(u2 >> 16) & 255]
+        ^ t2[3][(u2 >> 24) & 255] ^ t2[4][(u2 >> 32) & 255] ^ t2[5][(u2 >> 40) & 255]
+        ^ t2[6][(u2 >> 48) & 255] ^ t2[7][u2 >> 56],
+        t3[0][u3 & 255] ^ t3[1][(u3 >> 8) & 255] ^ t3[2][(u3 >> 16) & 255]
+        ^ t3[3][(u3 >> 24) & 255] ^ t3[4][(u3 >> 32) & 255] ^ t3[5][(u3 >> 40) & 255]
+        ^ t3[6][(u3 >> 48) & 255] ^ t3[7][u3 >> 56],
+    ]  # fmt: skip
 
 
 def _luajit_random(state: list[int]) -> float:

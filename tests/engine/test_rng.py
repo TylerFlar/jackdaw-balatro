@@ -736,3 +736,69 @@ class TestBuggedSeedNanCollapse:
         identities = {(c.base.suit, c.base.rank) for c in gs["deck"]}
         assert len(gs["deck"]) == 52
         assert len(identities) == 1  # the famous all-one-card deck
+
+
+class TestWarmupTablesMatchReference:
+    """The table-driven seeding warm-up is bit-identical to explicit stepping."""
+
+    @staticmethod
+    def _reference_seed(seed_double: float) -> list[int]:
+        import struct
+
+        from jackdaw.engine.rng import _E, _MIN0, _MIN1, _MIN2, _MIN3, _PI, _tw223_step
+
+        d = seed_double
+        state = []
+        for minimum in (_MIN0, _MIN1, _MIN2, _MIN3):
+            d = d * _PI + _E
+            u = struct.unpack("<Q", struct.pack("<d", d))[0]
+            state.append(u + minimum if u < minimum else u)
+        for _ in range(10):
+            _tw223_step(state)
+        return state
+
+    def test_seed_matches_explicit_warmup(self):
+        import math
+        import random
+        import struct
+
+        from jackdaw.engine.rng import _E, _PI, _luajit_seed
+
+        def from_bits(bits: int) -> float:
+            return struct.unpack("<d", struct.pack("<Q", bits))[0]
+
+        rng = random.Random(0)
+        seeds = [0.0, -0.0, 1.0, -1.0, 5e-324, -5e-324, 2.2250738585072014e-308,
+                 1.7976931348623157e308, -1.7976931348623157e308, math.inf, -math.inf,
+                 from_bits(0x7FF8000000000000), from_bits(0xFFF8000000000000),
+                 from_bits(0x7FF0000000000001), from_bits(0xFFF4000000000123),
+                 -_E / _PI]  # fmt: skip
+        # -e/pi lands the first seeding iterate on (almost) zero: the word-0
+        # minimum adjustment.
+        seeds += [math.nextafter(-_E / _PI, math.inf), math.nextafter(-_E / _PI, -math.inf)]
+        seeds += [rng.random() for _ in range(2000)]
+        seeds += [from_bits(rng.getrandbits(64)) for _ in range(2000)]
+        for s in seeds:
+            assert _luajit_seed(s) == self._reference_seed(s)
+
+    def test_tables_match_stepping_per_word(self):
+        """Every word, including the small values the minimum adjustments produce."""
+        import random
+
+        from jackdaw.engine.rng import _MIN0, _MIN1, _MIN2, _MIN3, _WARMUP, _tw223_step
+
+        rng = random.Random(2)
+        for word, minimum in enumerate((_MIN0, _MIN1, _MIN2, _MIN3)):
+            values = list(range(0, 2 * minimum, max(1, minimum // 256)))
+            values += [2**64 - 1, 2**63, 1 << 56, 255 << 56]
+            values += [rng.getrandbits(64) for _ in range(500)]
+            table = _WARMUP[word]
+            for u in values:
+                state = [0, 0, 0, 0]
+                state[word] = u
+                for _ in range(10):
+                    _tw223_step(state)
+                got = 0
+                for k in range(8):
+                    got ^= table[k][(u >> (8 * k)) & 255]
+                assert got == state[word]
