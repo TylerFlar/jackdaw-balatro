@@ -211,9 +211,13 @@ def calculate_round_earnings(
     effective_money = money - rental_cost
 
     # ------------------------------------------------------------------
-    # Step 2 — Blind reward (state_events.lua:1139)
+    # Step 2 — Blind reward (state_events.lua:1139-1146): paid only when
+    # G.GAME.chips - G.GAME.blind.chips >= 0.  A round that ends because
+    # Mr. Bones saved it shows the blind row with $0.  Direct callers that
+    # pass no round chips get the beaten-blind case this function is for.
     # ------------------------------------------------------------------
-    blind_reward = blind.dollars
+    round_chips = game_state.get("chips", blind.chips)
+    blind_reward = blind.dollars if round_chips - blind.chips >= 0 else 0
 
     # ------------------------------------------------------------------
     # Step 3 — Unused hands bonus (state_events.lua:1165)
