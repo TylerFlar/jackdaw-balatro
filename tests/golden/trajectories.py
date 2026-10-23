@@ -182,6 +182,9 @@ def _mixed_policy(gs: dict[str, Any], legal: list[Any], rng: random.Random, eps:
     return _with_forced_card(smart_agent(gs, legal), gs)
 
 
+_REORDERS = (A.SwapHandLeft, A.SwapHandRight, A.SwapJokersLeft, A.SwapJokersRight)
+
+
 def _explorable(gs: dict[str, Any], legal: list[Any]) -> list[Any]:
     """The legal actions random exploration picks from.
 
@@ -190,10 +193,19 @@ def _explorable(gs: dict[str, Any], legal: list[Any]) -> list[Any]:
     tapes the parity ledger cites, so exploration at round eval keeps to
     cashing out and using consumables; the digests still pin the full legal
     lists and masks.
+
+    Reordering became legal at blind select, on the cash-out screen and in
+    packs with G206. For the same reason exploration keeps to the moves it
+    had there before (the tapes don't change), while the digests pin the
+    new legal lists and masks.
     """
-    if gs.get("phase") == GamePhase.ROUND_EVAL:
-        return [a for a in legal if not isinstance(a, A.SellCard)]
-    return legal
+    phase = gs.get("phase")
+    explorable = legal
+    if phase == GamePhase.ROUND_EVAL:
+        explorable = [a for a in explorable if not isinstance(a, A.SellCard)]
+    if phase in (GamePhase.BLIND_SELECT, GamePhase.ROUND_EVAL, GamePhase.PACK_OPENING):
+        explorable = [a for a in explorable if not isinstance(a, _REORDERS)]
+    return explorable or legal
 
 
 # ---------------------------------------------------------------------------

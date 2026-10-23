@@ -154,6 +154,8 @@ impl ActionMask {
                 self.sell_jokers(game);
                 self.sell_consumables(game);
                 self.consumables(game);
+                // A drag reorders the jokers in every phase (G206).
+                self.joker_swaps(game);
             }
             Phase::SelectingHand => {
                 let n = areas.hand.len();
@@ -168,9 +170,8 @@ impl ActionMask {
                 if n > 1 {
                     self.set(ActionType::SortHandRank);
                     self.set(ActionType::SortHandSuit);
-                    self.entities(ActionType::SwapHandLeft, n, |i| i != 0);
-                    self.entities(ActionType::SwapHandRight, n, |i| i != n - 1);
                 }
+                self.hand_swaps(game);
                 self.joker_swaps(game);
                 self.sell_jokers(game);
                 self.sell_consumables(game);
@@ -182,6 +183,7 @@ impl ActionMask {
                 self.sell_jokers(game);
                 self.sell_consumables(game);
                 self.consumables(game);
+                self.joker_swaps(game);
             }
             Phase::Shop => {
                 self.shop_buy(game);
@@ -218,6 +220,9 @@ impl ActionMask {
                 self.sell_jokers(game);
                 self.sell_consumables(game);
                 self.consumables(game);
+                // An Arcana or Spectral pack's dealt hand can be reordered too (G206).
+                self.hand_swaps(game);
+                self.joker_swaps(game);
             }
         }
         if let Legality::Filtered(filter) = legality {
@@ -246,6 +251,16 @@ impl ActionMask {
         self.entities(ActionType::UseConsumable, cons.len(), |i| {
             game.consumable_use(cons[i].sort_id, true).is_some()
         });
+    }
+
+    /// Neighbour swaps of the hand (two cards or more): any card but the first moves left, any
+    /// but the last moves right.
+    fn hand_swaps(&mut self, game: &Game) {
+        let n = game.gs.areas.hand.len();
+        if n > 1 {
+            self.entities(ActionType::SwapHandLeft, n, |i| i != 0);
+            self.entities(ActionType::SwapHandRight, n, |i| i != n - 1);
+        }
     }
 
     /// Neighbour swaps that move no pinned joker.
