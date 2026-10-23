@@ -79,8 +79,11 @@ builds the release wheels for Linux, macOS and Windows on `v*` tags.
   double. It lists the JSON path of every difference and exits non-zero if there is any. To
   update the committed data instead, run the two scripts without an output directory, then
   `cargo xtask codegen`.
-- `lua-oracles` reruns the LuaJIT oracles behind the `tests/fixtures/*_luajit.json` fixtures
-  (RNG, hand evaluation) and rewrites the hands, challenges and blind-amount JSON.
+- `lua-oracles` reruns the LuaJIT oracles behind the `tests/fixtures/*_luajit*.json` fixtures
+  and rewrites the hands, challenges and blind-amount JSON. `rng_luajit.json` holds exact RNG
+  values; `rng_luajit_bulk.json` holds one digest per run seed of about 10^6 draws, which
+  `crates/jackdaw-core/tests/rng_luajit_bulk.rs` replays. When a run differs, its LuaJIT values
+  come from `luajit scripts/luajit_rng_bulk_oracle.lua --trace N`.
 
 `verify-source` and `lua-oracles` need LuaJIT 2.1 on `PATH` and the game's Lua source in
 `balatro_source/` at the repository root (gitignored: the source is proprietary).

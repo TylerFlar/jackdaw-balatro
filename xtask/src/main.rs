@@ -21,9 +21,9 @@ Commands:
                      LuaJIT into a temporary directory and compare it value by
                      value with the committed JSON; fails on any difference
                      (local only)
-  lua-oracles        Regenerate the LuaJIT-executed fixtures (RNG, hand
-                     evaluation) and the hands, challenges and blind-amount
-                     JSON from a local balatro_source/ (local only)
+  lua-oracles        Regenerate the LuaJIT-executed fixtures (RNG, bulk RNG
+                     digests, hand evaluation) and the hands, challenges and
+                     blind-amount JSON from a local balatro_source/ (local only)
   help               Print this message
 ";
 
@@ -127,6 +127,10 @@ fn lua_oracles() -> Result<(), String> {
         (
             "scripts/luajit_rng_oracle.lua",
             "tests/fixtures/rng_luajit.json",
+        ),
+        (
+            "scripts/luajit_rng_bulk_oracle.lua",
+            "tests/fixtures/rng_luajit_bulk.json",
         ),
         (
             "scripts/luajit_hand_eval_oracle.lua",
