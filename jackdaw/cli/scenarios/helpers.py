@@ -1,23 +1,36 @@
 """Shared helpers for validation scenarios.
 
-Every helper takes ``sim_handle`` and ``live_handle`` callables (the
-``Backend.handle`` method) so scenarios don't depend on concrete backend
-types.
+Every helper takes the lockstep ``ls``, a
+:class:`~jackdaw.bridge.live.LiveAdapter`: each request goes to the shadow run
+(the simulator) first, then to the live game, and every live response is
+compared with the shadow's view on every structural field. "Both" in a helper's
+name means the shadow and the live game. A difference the deviation catalog
+doesn't explain raises :class:`~jackdaw.bridge.live.DivergenceError`, which
+``jackdaw validate`` reports as a failure with its repro bundle.
+
+Parameters are BalatroBot's: ``enhancement="GLASS"``, ``edition="FOIL"``,
+``seal="RED"``, playing cards as ``"H_A"``.
 """
 
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
 from typing import Any
 
+from jackdaw.bridge.live import LiveAdapter
 from jackdaw.cli.scenarios import ScenarioResult
 
-# Type alias for backend handle functions
-Handle = Callable[[str, dict[str, Any] | None], dict[str, Any]]
+#: The lockstep a scenario plays on.
+Lockstep = LiveAdapter
 
 # Default delay between actions (overridden per-run via ``delay`` kwarg)
 _DEFAULT_DELAY = 0.3
+
+
+def pause(delay: float, at_least: float = 0.0) -> None:
+    """Wait between actions to watch the live game (``delay`` 0: never)."""
+    if delay > 0:
+        time.sleep(max(delay, at_least))
 
 
 # ---------------------------------------------------------------------------
@@ -26,56 +39,38 @@ _DEFAULT_DELAY = 0.3
 
 
 def start_both(
-    sim: Handle,
-    live: Handle,
+    ls: Lockstep,
     *,
     seed: str = "SCENARIO",
     deck: str = "RED",
     stake: str = "WHITE",
     delay: float = _DEFAULT_DELAY,
 ) -> None:
-    """Start a new run on both backends with the same params."""
-    sim("menu", None)
-    live("menu", None)
-    time.sleep(delay)
-    params = {"deck": deck, "stake": stake, "seed": seed}
-    sim("start", params)
-    live("start", params)
-    time.sleep(delay)
+    """Start a run on the live game (``menu`` + ``start``) and its shadow."""
+    ls.start(deck, stake, seed)
+    pause(delay)
 
 
-def select_blind(sim: Handle, live: Handle, *, delay: float = _DEFAULT_DELAY) -> None:
-    """Select the current blind on both backends."""
-    sim("select", {})
-    live("select", {})
-    time.sleep(delay)
+def select_blind(ls: Lockstep, *, delay: float = _DEFAULT_DELAY) -> None:
+    """Select the current blind."""
+    ls.request("select")
+    pause(delay)
 
 
-def skip_blind(sim: Handle, live: Handle, *, delay: float = _DEFAULT_DELAY) -> None:
-    """Skip the current blind on both backends."""
-    sim("skip", {})
-    live("skip", {})
-    time.sleep(delay)
+def skip_blind(ls: Lockstep, *, delay: float = _DEFAULT_DELAY) -> None:
+    """Skip the current blind."""
+    ls.request("skip")
+    pause(delay)
 
 
-def add_both(
-    sim: Handle,
-    live: Handle,
-    **params: Any,
-) -> None:
-    """Call ``add`` on both backends with the same params."""
-    sim("add", params)
-    live("add", params)
+def add_both(ls: Lockstep, **params: Any) -> None:
+    """BalatroBot's ``add`` (debug) in lockstep."""
+    ls.request("add", params)
 
 
-def set_both(
-    sim: Handle,
-    live: Handle,
-    **params: Any,
-) -> None:
-    """Call ``set`` on both backends with the same params."""
-    sim("set", params)
-    live("set", params)
+def set_both(ls: Lockstep, **params: Any) -> None:
+    """BalatroBot's ``set`` (debug) in lockstep."""
+    ls.request("set", params)
 
 
 # ---------------------------------------------------------------------------
@@ -83,104 +78,91 @@ def set_both(
 # ---------------------------------------------------------------------------
 
 
-def play_hand(
-    sim: Handle,
-    live: Handle,
-    cards: list[int],
-    *,
-    delay: float = _DEFAULT_DELAY,
-) -> None:
-    """Play a hand on both backends."""
-    params = {"cards": cards}
-    sim("play", params)
-    live("play", params)
-    time.sleep(max(delay, 1.5))  # scoring animation
+def play_hand(ls: Lockstep, cards: list[int], *, delay: float = _DEFAULT_DELAY) -> None:
+    """Play the hand cards at these indices."""
+    ls.request("play", {"cards": cards})
+    pause(delay, 1.5)  # scoring animation
 
 
-def discard(
-    sim: Handle,
-    live: Handle,
-    cards: list[int],
-    *,
-    delay: float = _DEFAULT_DELAY,
-) -> None:
-    """Discard cards on both backends."""
-    params = {"cards": cards}
-    sim("discard", params)
-    live("discard", params)
-    time.sleep(delay)
+def discard(ls: Lockstep, cards: list[int], *, delay: float = _DEFAULT_DELAY) -> None:
+    """Discard the hand cards at these indices."""
+    ls.request("discard", {"cards": cards})
+    pause(delay)
 
 
 def use_consumable(
-    sim: Handle,
-    live: Handle,
+    ls: Lockstep,
     consumable: int,
     cards: list[int] | None = None,
     *,
     delay: float = _DEFAULT_DELAY,
 ) -> None:
-    """Use a consumable on both backends."""
+    """Use a consumable, on these hand cards if given."""
     params: dict[str, Any] = {"consumable": consumable}
     if cards is not None:
         params["cards"] = cards
-    sim("use", params)
-    live("use", params)
-    time.sleep(delay)
+    ls.request("use", params)
+    pause(delay)
 
 
-def cash_out(sim: Handle, live: Handle, *, delay: float = _DEFAULT_DELAY) -> None:
-    """Cash out on both backends."""
-    sim("cash_out", {})
-    live("cash_out", {})
-    time.sleep(max(delay, 1.5))
+def cash_out(ls: Lockstep, *, delay: float = _DEFAULT_DELAY) -> None:
+    ls.request("cash_out")
+    pause(delay, 1.5)
 
 
-def next_round(sim: Handle, live: Handle, *, delay: float = _DEFAULT_DELAY) -> None:
-    """Advance to next round on both backends."""
-    sim("next_round", {})
-    live("next_round", {})
-    time.sleep(delay)
+def next_round(ls: Lockstep, *, delay: float = _DEFAULT_DELAY) -> None:
+    """Leave the shop."""
+    ls.request("next_round")
+    pause(delay)
 
 
-def sell_joker(sim: Handle, live: Handle, index: int, *, delay: float = _DEFAULT_DELAY) -> None:
-    """Sell a joker on both backends."""
-    sim("sell", {"joker": index})
-    live("sell", {"joker": index})
-    time.sleep(delay)
+def sell_joker(ls: Lockstep, index: int, *, delay: float = _DEFAULT_DELAY) -> None:
+    ls.request("sell", {"joker": index})
+    pause(delay)
 
 
-def sell_consumable(
-    sim: Handle, live: Handle, index: int, *, delay: float = _DEFAULT_DELAY
-) -> None:
-    """Sell a consumable on both backends."""
-    sim("sell", {"consumable": index})
-    live("sell", {"consumable": index})
-    time.sleep(delay)
+def sell_consumable(ls: Lockstep, index: int, *, delay: float = _DEFAULT_DELAY) -> None:
+    ls.request("sell", {"consumable": index})
+    pause(delay)
 
 
-def buy_card(sim: Handle, live: Handle, index: int, *, delay: float = _DEFAULT_DELAY) -> None:
-    """Buy a shop card on both backends."""
-    sim("buy", {"card": index})
-    live("buy", {"card": index})
-    time.sleep(delay)
+def buy_card(ls: Lockstep, index: int, *, delay: float = _DEFAULT_DELAY) -> None:
+    """Buy a shop card."""
+    ls.request("buy", {"card": index})
+    pause(delay)
 
 
-def reroll_shop(sim: Handle, live: Handle, *, delay: float = _DEFAULT_DELAY) -> None:
-    """Reroll the shop on both backends."""
-    sim("reroll", {})
-    live("reroll", {})
-    time.sleep(delay)
+def reroll_shop(ls: Lockstep, *, delay: float = _DEFAULT_DELAY) -> None:
+    ls.request("reroll")
+    pause(delay)
 
 
-def get_state(handle: Handle) -> str:
-    """Get the current game state string from a backend."""
-    resp = handle("gamestate", None)
-    return resp.get("state", "")
+def gamestate(ls: Lockstep) -> dict[str, Any]:
+    """The live game's last view (equal to the shadow's, or the step would have
+    raised)."""
+    return ls.view
+
+
+def get_state(ls: Lockstep) -> str:
+    """The game state's name (``SELECTING_HAND``, ``ROUND_EVAL``, ...)."""
+    return str(ls.view.get("state", ""))
+
+
+def get_hand_count(ls: Lockstep) -> int:
+    """The number of cards in hand."""
+    return int((ls.view.get("hand") or {}).get("count", 0))
+
+
+def current_blind_score(ls: Lockstep, default: float = 600) -> float:
+    """The score the current blind needs."""
+    for b in (ls.view.get("blinds") or {}).values():
+        if isinstance(b, dict) and b.get("status") == "CURRENT":
+            return b.get("score", default)
+    return default
 
 
 def play_through_blind(
-    sim: Handle,
-    live: Handle,
+    ls: Lockstep,
     *,
     max_hands: int = 4,
     delay: float = _DEFAULT_DELAY,
@@ -191,30 +173,22 @@ def play_through_blind(
     False if the game ended (GAME_OVER) or hands ran out.
     """
     for _ in range(max_hands):
-        state = get_state(sim)
-        if state != "SELECTING_HAND":
+        if get_state(ls) != "SELECTING_HAND":
             break
-        play_hand(sim, live, [0, 1, 2, 3, 4], delay=delay)
-
-    state = get_state(sim)
-    return state == "ROUND_EVAL"
+        play_hand(ls, [0, 1, 2, 3, 4], delay=delay)
+    return get_state(ls) == "ROUND_EVAL"
 
 
-def advance_past_blind(
-    sim: Handle,
-    live: Handle,
-    *,
-    delay: float = _DEFAULT_DELAY,
-) -> bool:
+def advance_past_blind(ls: Lockstep, *, delay: float = _DEFAULT_DELAY) -> bool:
     """Select blind, play through it, cash out, advance to next round.
 
     Returns True if successful, False if game ended.
     """
-    select_blind(sim, live, delay=delay)
-    if not play_through_blind(sim, live, delay=delay):
+    select_blind(ls, delay=delay)
+    if not play_through_blind(ls, delay=delay):
         return False
-    cash_out(sim, live, delay=delay)
-    next_round(sim, live, delay=delay)
+    cash_out(ls, delay=delay)
+    next_round(ls, delay=delay)
     return True
 
 
@@ -223,74 +197,17 @@ def advance_past_blind(
 # ---------------------------------------------------------------------------
 
 
-def _card_keys(area: dict | list) -> list[str]:
-    """Extract card keys from a serialized area."""
-    if isinstance(area, dict):
-        return [c.get("key", "") for c in area.get("cards", [])]
-    return []
+def compare_state(ls: Lockstep, *, label: str = "", **_: Any) -> list[str]:
+    """Compare the live ``gamestate`` with the shadow once more; the differences the
+    deviation catalog doesn't drop, as strings (each request was compared already)."""
+    return [f"{label}: {d}" if label else str(d) for d in ls.check(raise_on_divergence=False)]
 
 
-def compare_state(
-    sim: Handle,
-    live: Handle,
-    *,
-    label: str = "",
-    check_round: bool = True,
-    check_shop: bool = False,
-) -> list[str]:
-    """Compare gamestate between sim and live, return list of diffs."""
-    sim_resp = sim("gamestate", None)
-    live_resp = live("gamestate", None)
-
-    diffs: list[str] = []
-
-    def cmp(name: str, s: Any, lv: Any) -> None:
-        if s != lv:
-            diffs.append(f"{name}: sim={s} live={lv}")
-
-    cmp("state", sim_resp.get("state", ""), live_resp.get("state", ""))
-    cmp("money", sim_resp.get("money", 0), live_resp.get("money", 0))
-    cmp("ante_num", sim_resp.get("ante_num", 1), live_resp.get("ante_num", 1))
-
-    if check_round:
-        sim_round = sim_resp.get("round", {})
-        live_round = live_resp.get("round", {})
-        state = sim_resp.get("state", "")
-        if state in ("SELECTING_HAND", "ROUND_EVAL"):
-            cmp("chips", sim_round.get("chips", 0), live_round.get("chips", 0))
-            cmp("hands_left", sim_round.get("hands_left", 0), live_round.get("hands_left", 0))
-            cmp(
-                "discards_left",
-                sim_round.get("discards_left", 0),
-                live_round.get("discards_left", 0),
-            )
-
-    # Hand cards (as sets — order may differ)
-    sim_hand = set(_card_keys(sim_resp.get("hand", {})))
-    live_hand = set(_card_keys(live_resp.get("hand", {})))
-    cmp("hand_cards", sim_hand, live_hand)
-
-    # Deck size
-    cmp(
-        "deck_size",
-        sim_resp.get("cards", {}).get("count", 0),
-        live_resp.get("cards", {}).get("count", 0),
+def outcome(name: str, diffs: list[str]) -> ScenarioResult:
+    """A scenario's result from its remaining differences."""
+    return ScenarioResult(
+        passed=not diffs, diffs=diffs, details=f"{name}: {'PASS' if not diffs else 'FAIL'}"
     )
-
-    # Jokers (ordered)
-    cmp("jokers", _card_keys(sim_resp.get("jokers", {})), _card_keys(live_resp.get("jokers", {})))
-
-    # Consumables (as sets)
-    cmp(
-        "consumables",
-        set(_card_keys(sim_resp.get("consumables", {}))),
-        set(_card_keys(live_resp.get("consumables", {}))),
-    )
-
-    if check_shop:
-        cmp("shop", _card_keys(sim_resp.get("shop", {})), _card_keys(live_resp.get("shop", {})))
-
-    return diffs
 
 
 # ---------------------------------------------------------------------------
@@ -299,8 +216,7 @@ def compare_state(
 
 
 def run_joker_scenario(
-    sim: Handle,
-    live: Handle,
+    ls: Lockstep,
     *,
     joker_key: str,
     seed: str = "",
@@ -314,23 +230,18 @@ def run_joker_scenario(
     if not seed:
         seed = f"J_{joker_key.upper()}"
 
-    start_both(sim, live, seed=seed, delay=delay)
-    select_blind(sim, live, delay=delay)
+    start_both(ls, seed=seed, delay=delay)
+    select_blind(ls, delay=delay)
 
     add_kwargs: dict[str, Any] = {"key": joker_key}
     if edition:
         add_kwargs["edition"] = edition
-    add_both(sim, live, **add_kwargs)
+    add_both(ls, **add_kwargs)
 
     # Play the first 5 cards from hand
-    play_hand(sim, live, [0, 1, 2, 3, 4], delay=delay)
+    play_hand(ls, [0, 1, 2, 3, 4], delay=delay)
 
-    diffs = compare_state(sim, live, label=f"after play with {joker_key}")
-    return ScenarioResult(
-        passed=len(diffs) == 0,
-        diffs=diffs,
-        details=f"Joker {joker_key}: {'PASS' if not diffs else 'FAIL'}",
-    )
+    return outcome(f"Joker {joker_key}", compare_state(ls, label=f"after play with {joker_key}"))
 
 
 # ---------------------------------------------------------------------------
@@ -373,15 +284,8 @@ HAND_PRESETS: dict[str, list[str]] = {
 }
 
 
-def get_hand_count(handle: Handle) -> int:
-    """Get the number of cards currently in hand."""
-    resp = handle("gamestate", None)
-    return resp.get("hand", {}).get("count", 0)
-
-
 def run_joker_with_setup(
-    sim: Handle,
-    live: Handle,
+    ls: Lockstep,
     *,
     joker_key: str,
     hand_preset: str | list[str] | None = None,
@@ -401,28 +305,25 @@ def run_joker_with_setup(
         pre_discard: Card keys to inject and discard before the main hand.
         seed: Run seed.
         delay: Action delay.
-        edition: Optional joker edition.
+        edition: Optional joker edition (BalatroBot's name: ``FOIL``, ...).
     """
     if not seed:
         seed = f"J_{joker_key.upper()}"
 
-    start_both(sim, live, seed=seed, delay=delay)
-    select_blind(sim, live, delay=delay)
+    start_both(ls, seed=seed, delay=delay)
+    select_blind(ls, delay=delay)
 
     # Add the joker
     add_kwargs: dict[str, Any] = {"key": joker_key}
     if edition:
         add_kwargs["edition"] = edition
-    add_both(sim, live, **add_kwargs)
+    add_both(ls, **add_kwargs)
 
     # No preset — fall back to standard behavior
     if hand_preset is None:
-        play_hand(sim, live, [0, 1, 2, 3, 4], delay=delay)
-        diffs = compare_state(sim, live, label=f"after play with {joker_key}")
-        return ScenarioResult(
-            passed=len(diffs) == 0,
-            diffs=diffs,
-            details=f"Joker {joker_key}: {'PASS' if not diffs else 'FAIL'}",
+        play_hand(ls, [0, 1, 2, 3, 4], delay=delay)
+        return outcome(
+            f"Joker {joker_key}", compare_state(ls, label=f"after play with {joker_key}")
         )
 
     # Resolve preset
@@ -433,31 +334,23 @@ def run_joker_with_setup(
     # Pre-discard phase (for discard-triggered jokers)
     if pre_discard:
         for card_key in pre_discard:
-            add_both(sim, live, key=card_key)
-        count = get_hand_count(sim)
-        discard_indices = list(range(count - len(pre_discard), count))
-        discard(sim, live, discard_indices, delay=delay)
+            add_both(ls, key=card_key)
+        count = get_hand_count(ls)
+        discard(ls, list(range(count - len(pre_discard), count)), delay=delay)
 
     # Inject hand cards
     for card_key in cards:
-        add_both(sim, live, key=card_key)
+        add_both(ls, key=card_key)
 
     # Play the last N injected cards
-    count = get_hand_count(sim)
-    play_indices = list(range(count - play_count, count))
-    play_hand(sim, live, play_indices, delay=delay)
+    count = get_hand_count(ls)
+    play_hand(ls, list(range(count - play_count, count)), delay=delay)
 
-    diffs = compare_state(sim, live, label=f"after play with {joker_key}")
-    return ScenarioResult(
-        passed=len(diffs) == 0,
-        diffs=diffs,
-        details=f"Joker {joker_key}: {'PASS' if not diffs else 'FAIL'}",
-    )
+    return outcome(f"Joker {joker_key}", compare_state(ls, label=f"after play with {joker_key}"))
 
 
 def run_consumable_scenario(
-    sim: Handle,
-    live: Handle,
+    ls: Lockstep,
     *,
     consumable_key: str,
     targets: list[int] | None = None,
@@ -468,59 +361,58 @@ def run_consumable_scenario(
     if not seed:
         seed = f"C_{consumable_key.upper()}"
 
-    start_both(sim, live, seed=seed, delay=delay)
-    select_blind(sim, live, delay=delay)
-    add_both(sim, live, key=consumable_key)
-    use_consumable(sim, live, 0, cards=targets, delay=delay)
+    start_both(ls, seed=seed, delay=delay)
+    select_blind(ls, delay=delay)
+    add_both(ls, key=consumable_key)
+    use_consumable(ls, 0, cards=targets, delay=delay)
 
-    diffs = compare_state(sim, live, label=f"after using {consumable_key}")
-    return ScenarioResult(
-        passed=len(diffs) == 0,
-        diffs=diffs,
-        details=f"Consumable {consumable_key}: {'PASS' if not diffs else 'FAIL'}",
+    return outcome(
+        f"Consumable {consumable_key}", compare_state(ls, label=f"after using {consumable_key}")
     )
 
 
 def run_modifier_scenario(
-    sim: Handle,
-    live: Handle,
+    ls: Lockstep,
     *,
     card_key: str,
-    enhancement: str = "c_base",
+    enhancement: str | None = None,
     edition: str | None = None,
     seal: str | None = None,
     seed: str = "",
     delay: float = _DEFAULT_DELAY,
 ) -> ScenarioResult:
-    """Standard pattern: start game, select blind, add modified card, play it, compare."""
-    if not seed:
-        seed = f"M_{enhancement}_{card_key}"
+    """Standard pattern: start game, select blind, add modified card, play it, compare.
 
-    start_both(sim, live, seed=seed, delay=delay)
-    select_blind(sim, live, delay=delay)
+    ``enhancement``, ``edition`` and ``seal`` are BalatroBot's names (``GLASS``,
+    ``FOIL``, ``RED``)."""
+    label = enhancement or "BASE"
+    if not seed:
+        # The seeds the scenarios have always used (the enhancement's center key).
+        center = f"m_{enhancement.lower()}" if enhancement else "c_base"
+        seed = f"M_{center}_{card_key}"
+
+    start_both(ls, seed=seed, delay=delay)
+    select_blind(ls, delay=delay)
 
     add_kwargs: dict[str, Any] = {"key": card_key}
-    if enhancement != "c_base":
+    if enhancement:
         add_kwargs["enhancement"] = enhancement
     if edition:
         add_kwargs["edition"] = edition
     if seal:
         add_kwargs["seal"] = seal
-    add_both(sim, live, **add_kwargs)
+    add_both(ls, **add_kwargs)
 
     # Play hand including the added card (it should be at the end of hand)
     # We play indices 0-4 which will include the dealt hand
-    play_hand(sim, live, [0, 1, 2, 3, 4], delay=delay)
+    play_hand(ls, [0, 1, 2, 3, 4], delay=delay)
 
-    label = f"{enhancement}"
     if edition:
         label += f"+{edition}"
     if seal:
         label += f"+{seal}"
 
-    diffs = compare_state(sim, live, label=f"after play with {label} {card_key}")
-    return ScenarioResult(
-        passed=len(diffs) == 0,
-        diffs=diffs,
-        details=f"Modifier {label} on {card_key}: {'PASS' if not diffs else 'FAIL'}",
+    return outcome(
+        f"Modifier {label} on {card_key}",
+        compare_state(ls, label=f"after play with {label} {card_key}"),
     )
