@@ -7,7 +7,15 @@ import pytest
 from jackdaw.engine.actions import UseConsumable, get_legal_actions
 from jackdaw.engine.game import IllegalActionError, step
 
-from ._helpers import give_card, give_consumable, give_joker, indices, new_run, select_blind
+from ._helpers import (
+    give_card,
+    give_consumable,
+    give_joker,
+    indices,
+    new_run,
+    rng_twin,
+    select_blind,
+)
 
 # Card:set_edition fills in the scoring value (card.lua:390-418) and the
 # set_cost surcharge per edition (card.lua:372-373).
@@ -73,6 +81,57 @@ class TestConsumableEditions:
         assert target.edition == _EDITION_TABLES[kind]
         assert target.get_edition()
         assert (target.cost, target.sell_cost) == _expected_costs(1, kind)
+
+
+class TestEctoplasm:
+    def test_hand_size_penalty_grows_each_use(self):
+        """G.GAME.ecto_minus starts at 1 (game.lua:1896); each Ectoplasm costs
+        ecto_minus hand size and then increments it (card.lua:1494-1498)."""
+        gs = select_blind(new_run("AUDIT_ECTO2"))
+        give_joker(gs, "j_joker")
+        give_joker(gs, "j_greedy_joker")
+        size = gs["hand_size"]
+        give_consumable(gs, "c_ectoplasm")
+        step(gs, UseConsumable(card_index=0))
+        assert gs["hand_size"] == size - 1
+        assert gs["ecto_minus"] == 2
+        give_consumable(gs, "c_ectoplasm")
+        step(gs, UseConsumable(card_index=0))
+        assert gs["hand_size"] == size - 1 - 2
+        assert gs["ecto_minus"] == 3
+
+
+class TestDebuffedJokersAreEligible:
+    """The Wheel's eligible_strength_jokers and Ectoplasm/Hex's
+    eligible_editionless_jokers are every editionless G.jokers card, debuffed
+    or not (Card:update, card.lua:4209-4224)."""
+
+    def test_hex_targets_a_debuffed_joker(self):
+        gs = select_blind(new_run("AUDIT_HEX_DEBUFF"))
+        target = give_joker(gs, "j_joker")
+        target.debuff = True
+        give_consumable(gs, "c_hex")
+        assert UseConsumable(card_index=0) in get_legal_actions(gs)
+        step(gs, UseConsumable(card_index=0))
+        assert target.edition == _EDITION_TABLES["polychrome"]
+
+    def test_ectoplasm_pool_includes_debuffed_jokers(self):
+        """With one debuffed and one clean joker the 'ectoplasm' pick draws from
+        both (pseudorandom_element over the sort_id-ordered pool)."""
+        for i in range(50):  # a seed whose pick is the debuffed joker
+            gs = select_blind(new_run(f"AUDIT_ECTO_DEBUFF{i}"))
+            first = give_joker(gs, "j_joker")
+            second = give_joker(gs, "j_greedy_joker")
+            first.debuff = True
+            oracle = rng_twin(gs)
+            expected, _ = oracle.element([first, second], oracle.seed("ectoplasm"))
+            if expected is first:
+                break
+        assert expected is first
+        give_consumable(gs, "c_ectoplasm")
+        step(gs, UseConsumable(card_index=0))
+        assert first.edition == _EDITION_TABLES["negative"]
+        assert second.edition is None
 
 
 class TestAnkhCheckUse:

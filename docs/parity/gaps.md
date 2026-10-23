@@ -44,7 +44,7 @@ oracle with its regression test; Rust pending), `fixed` (both engines, test land
 | G24 | jokers | `getting_sliced` and `joker_buffer` are not modelled (Ceremonial Dagger, Madness, Riff-raff, Burglar, Cartomancer). | ledger: card.lua:2503-2578 |  |  |  | open |
 | G25 | jokers | A Mr. Bones save still pays the blind reward. | state_events.lua:1139 |  |  |  | open |
 | G26 | consumables | The Wheel of Fortune, Aura and Hex set bare edition flags without the bonus or repricing; they must go through `set_edition` + `set_cost`. | card.lua:387-462 | _apply_consumable_result routes add_edition through Card.set_edition (scoring values) and reprices the card (game._reprice = set_cost with the shop kwargs). | | tests/engine/audit/test_consumables.py::TestConsumableEditions | python-fixed |
-| G27 | consumables | Ectoplasm's hand-size penalty grows by one each use (`ecto_minus`). | card.lua:1494 |  |  |  | open |
+| G27 | consumables | Ectoplasm's hand-size penalty grows by one each use (`ecto_minus`). | card.lua:1494 | consumables._ectoplasm costs G.GAME.ecto_minus hand size (gs['ecto_minus'], 1 at run start) and increments it. | | tests/engine/audit/test_consumables.py::TestEctoplasm | python-fixed |
 | G28 | consumables | Ankh refuses to work when joker slots are full (`check_use`). Ankh and Invisible Joker copies drop Negative. | card.lua:1581/1445/2384 | can_use_consumable refuses Ankh while every joker slot is taken (check_use); Ankh and Invisible Joker call copy_card with strip_edition for a Negative source. | | tests/engine/audit/test_consumables.py::TestAnkhCheckUse, tests/engine/audit/test_copies.py::TestCopySemantics::test_ankh_copy_drops_negative, ::test_ankh_copy_keeps_other_editions, ::test_invisible_joker_copy_drops_negative | python-fixed |
 | G29 | consumables | `copy_card` gives copies a fresh `sort_id`; Python deep copies keep the old one, which changes later picks that sort by `sort_id`. | common_events.lua:2157 | card_factory.copy_card mirrors common_events.lua copy_card (new Card, set_ability incl. To Do List's to_do pull, fresh base, deep-copied ability + stickers, edition/seal/debuff/pinned, set_cost); used by Ankh, Invisible Joker, Perkeo, Cryptid. Card is eq=False (identity). | | tests/engine/audit/test_copies.py::TestCardIdentity, ::TestFreshSortId, ::TestCopySemantics | python-fixed |
 | G30 | consumables | Death/DNA copies must carry `perma_bonus`, `played_this_ante` and the debuff state. | common_events.lua:2161 | Death runs copy_card(source, target) onto the target; DNA's copy_card runs in score_hand's before pass and the copy joins the held hand at once (scores as a held card, counts for Erosion). | | tests/engine/audit/test_copies.py::TestCopySemantics::test_death_copies_the_whole_card_onto_the_target, ::test_dna_copy_is_a_held_card_of_the_same_hand | python-fixed |
@@ -70,6 +70,15 @@ oracle with its regression test; Rust pending), `fixed` (both engines, test land
 | G50 | scoring | `set_base` keeps `suit_nominal_original` and `original_value` across suit/rank changes. | card.lua:109-140 |  |  |  | open |
 | G51 | scoring | `get_blind_amount` gives NaN, not inf, at extreme antes. Follow Lua in both engines. | ledger: misc_functions.lua:919-954 |  |  |  | open |
 
+### Related fixes without a gap id
+
+Found while fixing the register; each is covered by a regression test in `tests/engine/audit/`.
+
+- The Wheel of Fortune, Ectoplasm and Hex draw from every editionless Joker, debuffed ones
+  included (`eligible_strength_jokers` / `eligible_editionless_jokers`, card.lua:4209-4224); the
+  oracle skipped debuffed jokers in both the use gate and the pick.
+  Test: `tests/engine/audit/test_consumables.py::TestDebuffedJokersAreEligible`.
+
 ## Not gameplay, but fix them
 
 | id | area | summary | lua | python fix | rust | test | status |
@@ -84,7 +93,7 @@ oracle with its regression test; Rust pending), `fixed` (both engines, test land
 | B08 | docs | The README's `from jackdaw.bridge import BridgeAdapter` fails. | — |  |  |  | open |
 | B09 | tooling | `extract_prototypes.lua` writes `%.15g` (the extracts need `%.17g`). | — |  |  |  | open |
 | B10 | python | Drop the global `sort_id` counter (it should be per run). | — |  |  |  | open |
-| B11 | python | Drop value-equal Cards (Lua cards have reference identity). | — |  |  |  | open |
+| B11 | python | Drop value-equal Cards (Lua cards have reference identity). | — | Card is @dataclass(eq=False): identity equality and hashing (landed with G29). | | tests/engine/audit/test_copies.py::TestCardIdentity | python-fixed |
 | B12 | python | Drop big-int chips (Lua numbers are doubles). | — |  |  |  | open |
 | B13 | python | `pseudohash` iterates code points; Lua iterates bytes. | — |  |  |  | open |
 | B14 | python | `card_area._card_nominal` (used by `get_highest`) breaks ties with the raw `sort_id`. | — |  |  |  | open |

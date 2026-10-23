@@ -452,9 +452,10 @@ def can_use_consumable(
             return True
         return False
 
-    # Need eligible joker (editionless)
+    # Need an eligible joker: next(eligible_*_jokers) (card.lua:1533-1549),
+    # editionless jokers, debuffed ones included (card.lua:4209-4224)
     if key in _NEED_ELIGIBLE_JOKER:
-        return any(not j.edition and not j.debuff for j in jokers)
+        return bool(_eligible_editionless_jokers(jokers))
 
     # Ankh: can_use needs a joker and a joker limit above 1 (card.lua:1536);
     # use_card then aborts while Card:check_use is true — every joker slot
@@ -745,8 +746,8 @@ def _wheel_of_fortune(card: Card, ctx: ConsumableContext) -> ConsumableResult:
     if roll >= prob / extra:
         return ConsumableResult()  # failure — "Nope!"
 
-    # Step 2: pick a random editionless joker (card.lua:1477)
-    editionless = [j for j in (ctx.jokers or []) if not j.edition and not j.debuff]
+    # Step 2: pick a random editionless joker (card.lua:1473-1477)
+    editionless = _eligible_editionless_jokers(ctx.jokers)
     if not editionless:
         return ConsumableResult()
     seed_val = ctx.rng.seed("wheel_of_fortune")
@@ -1121,22 +1122,33 @@ def _aura(_card: Card, ctx: ConsumableContext) -> ConsumableResult:
     return ConsumableResult(add_edition={"target": target, "edition": edition})
 
 
+def _eligible_editionless_jokers(jokers: list[Card] | None) -> list[Card]:
+    """``eligible_strength_jokers`` / ``eligible_editionless_jokers``
+    (Card:update, card.lua:4209-4224): every Joker without an edition,
+    debuffed ones included."""
+    return [j for j in (jokers or []) if j.ability.get("set") == "Joker" and not j.edition]
+
+
 @register_consumable("c_ectoplasm")
 def _ectoplasm(_card: Card, ctx: ConsumableContext) -> ConsumableResult:
-    """Ectoplasm: add Negative edition to a random editionless joker, -1 hand size.
+    """Ectoplasm: add Negative edition to a random editionless joker, lose hand size.
 
-    Source: card.lua:1270.  Seed: 'ectoplasm'.
-    hand_size_mod=-1 is cumulative (each use subtracts 1 permanently).
+    Source: card.lua:1467-1498.  Seed: 'ectoplasm'.  The hand-size cost is
+    G.GAME.ecto_minus (1 at run start, game.lua:1896), which then grows by
+    one, so the n-th Ectoplasm costs n hand size (card.lua:1494-1498).
     """
     if ctx.rng is None:
         return ConsumableResult()
-    editionless = [j for j in (ctx.jokers or []) if not j.edition and not j.debuff]
+    editionless = _eligible_editionless_jokers(ctx.jokers)
     if not editionless:
         return ConsumableResult()
     target, _ = ctx.rng.element(editionless, ctx.rng.seed("ectoplasm"))
+    gs = ctx.game_state if ctx.game_state is not None else {}
+    ecto_minus = gs.get("ecto_minus") or 1
+    gs["ecto_minus"] = ecto_minus + 1
     return ConsumableResult(
         add_edition={"target": target, "edition": {"negative": True}},
-        hand_size_mod=-1,
+        hand_size_mod=-ecto_minus,
     )
 
 
@@ -1144,11 +1156,11 @@ def _ectoplasm(_card: Card, ctx: ConsumableContext) -> ConsumableResult:
 def _hex(_card: Card, ctx: ConsumableContext) -> ConsumableResult:
     """Hex: add Polychrome to a random editionless joker, destroy all other non-eternal jokers.
 
-    Source: card.lua:1278.  Seed: 'hex'.
+    Source: card.lua:1467-1493.  Seed: 'hex'.
     """
     if ctx.rng is None:
         return ConsumableResult()
-    editionless = [j for j in (ctx.jokers or []) if not j.edition and not j.debuff]
+    editionless = _eligible_editionless_jokers(ctx.jokers)
     if not editionless:
         return ConsumableResult()
     target, _ = ctx.rng.element(editionless, ctx.rng.seed("hex"))
