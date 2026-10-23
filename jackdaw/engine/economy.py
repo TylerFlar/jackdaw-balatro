@@ -256,6 +256,7 @@ def calculate_round_earnings(
             # Cloud 9: $ per 9 in the full deck (card.lua:4192 tally).
             nine_tally=sum(1 for c in _all_owned if c.get_id() == 9),
             joker_count=len(jokers),
+            probabilities_normal=game_state.get("probabilities", {}).get("normal", 1),
         )
         end_result = on_end_of_round(
             jokers, game_snap, rng, hand_levels=game_state.get("hand_levels")

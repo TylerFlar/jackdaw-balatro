@@ -736,7 +736,8 @@ def _wheel_of_fortune(card: Card, ctx: ConsumableContext) -> ConsumableResult:
         return ConsumableResult()
 
     gs = ctx.game_state or {}
-    prob = gs.get("probabilities_normal", 1)
+    # G.GAME.probabilities.normal (Oops! All 6s doubles it, card.lua:608-611)
+    prob = gs.get("probabilities", {}).get("normal", 1)
     extra = card.ability.get("extra", 4)
 
     # Step 1: probability check (card.lua:1474)

@@ -1995,6 +1995,9 @@ def _joker_end_of_round_effects(gs: dict[str, Any]) -> dict[str, Any]:
         # Stone cards, matching Card:update's tally (card.lua:4192).
         nine_tally=sum(1 for c in _all_owned if c.get_id() == 9),
         joker_count=len(jokers),
+        # Gros Michel / Cavendish roll against G.GAME.probabilities.normal
+        # (card.lua:3020), which Oops! All 6s doubles.
+        probabilities_normal=gs.get("probabilities", {}).get("normal", 1),
     )
     eor = on_end_of_round(
         jokers,
