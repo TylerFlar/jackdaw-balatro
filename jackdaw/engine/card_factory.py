@@ -145,6 +145,59 @@ def create_joker(
     return card
 
 
+def set_eternal_checked(card: Card, eternal: bool = True) -> None:
+    """``Card:set_eternal`` with vanilla's eligibility rules (card.lua:506-511).
+
+    The sticker is cleared, then set only on an ``eternal_compat`` center
+    that is not Perishable.  Used where a rule makes jokers Eternal
+    wholesale (Non-Perishable, Typecast), which must skip ineligible ones.
+    """
+    from jackdaw.engine.card import _resolve_center
+
+    compat = bool(_resolve_center(card.center_key).get("eternal_compat"))
+    card.eternal = bool(eternal) and compat and not card.perishable
+
+
+def add_joker(
+    key: str,
+    game_state: dict[str, Any],
+    edition: str | None = None,
+    *,
+    eternal: bool = False,
+) -> Card:
+    """Create *key* straight into its owned area, as ``add_joker`` does.
+
+    Mirrors ``add_joker`` (common_events.lua:372-384), the helper behind the
+    challenge starting cards (game.lua:2071/2083): a bare Card for the
+    center — no ``create_card``, so no pool pick, sticker roll or edition
+    poll — then ``add_to_deck``, the optional edition (a Negative set on an
+    added card raises the slot count, card.lua:405-415; Python's
+    ``add_to_deck`` reads the edition instead, same total), and the card
+    joins G.jokers, or G.consumeables for a consumable center.  There is no
+    slot check.  Card:init's set_ability marks the key in used_jokers
+    (card.lua:349-354) and set_cost prices the card.
+    """
+    from jackdaw.engine.card_utils import astronomer_active
+
+    card = Card()
+    card.set_ability(key, hands_played=game_state.get("hands_played", 0))
+    game_state.setdefault("used_jokers", {})[key] = True
+    if edition:
+        card.set_edition({edition: True})
+    if eternal:
+        card.set_eternal(True)
+    card.set_cost(
+        inflation=game_state.get("inflation", 0),
+        discount_percent=game_state.get("discount_percent", 0),
+        ante=game_state.get("round_resets", {}).get("ante", 1),
+        has_astronomer=astronomer_active(game_state),
+    )
+    area = "consumables" if card.ability.get("consumeable") else "jokers"
+    game_state.setdefault(area, []).append(card)
+    card.add_to_deck(game_state)
+    return card
+
+
 # ---------------------------------------------------------------------------
 # Consumable creation (tarots, planets, spectrals)
 # ---------------------------------------------------------------------------
@@ -387,6 +440,7 @@ def create_card(
     if key is None and card_type in ("Base", "PlayingCard"):
         key = "c_base"
 
+    banned = gs.get("banned_keys")
     if key is None and soulable:
         key = check_soul_chance(
             card_type,
@@ -394,7 +448,13 @@ def create_card(
             ante,
             used_jokers=gs.get("used_jokers"),
             has_showman=showman_active(gs),
+            banned_keys=banned,
         )
+
+    # A banned forced key is ignored: the pool is drawn instead
+    # (common_events.lua:2109, ``forced_key and not banned_keys[forced_key]``).
+    if key is not None and banned and key in banned:
+        key = None
 
     if key is None:
         key = pick_card_from_pool(
@@ -473,6 +533,10 @@ def create_card(
     # 3. Joker modifiers
     # ------------------------------------------------------------------
     if card.ability.get("set") == "Joker":
+        # Non-Perishable: every created Joker is Eternal, before the
+        # shop/pack sticker rolls (common_events.lua:2134-2136).
+        if gs.get("modifiers", {}).get("all_eternal"):
+            set_eternal_checked(card)
         # Eternal / Perishable / Rental rolls are SHOP/PACK-area-gated
         # (common_events.lua:2137-2146)...
         if area in ("shop", "pack"):

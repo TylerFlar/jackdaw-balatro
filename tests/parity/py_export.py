@@ -319,6 +319,7 @@ def export_state(gs: dict[str, Any]) -> dict[str, Any]:
             "probabilities_normal": gs.get("probabilities", {}).get("normal", 1),
             "shop_joker_max": gs.get("shop", {}).get("joker_max", 2),
             "first_shop_buffoon": bool(gs.get("first_shop_buffoon", False)),
+            "orbital_choices": plain(gs.get("orbital_choices") or {}),
         },
         "starting_params": plain(gs.get("starting_params", {})),
         "modifiers": plain(gs.get("modifiers", {})),
@@ -347,6 +348,8 @@ def export_state(gs: dict[str, Any]) -> dict[str, Any]:
             "pending_tag_packs": list(gs.get("pending_tag_packs") or []),
             "pending_deck_bottom": [export_card(c) for c in gs.get("pending_deck_bottom") or []],
             "shop_d6ed": bool(gs.get("shop_d6ed", False)),
+            "shop_free": bool(gs.get("shop_free", False)),
+            "hand_last_poll_size": gs.get("hand_last_poll_size", 0),
             "last_blind_was_boss": bool(gs.get("last_blind_was_boss", False)),
             "pending_cashout": earnings.total
             if earnings is not None and phase == GamePhase.ROUND_EVAL

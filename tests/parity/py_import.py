@@ -155,6 +155,9 @@ def import_state(snap: dict[str, Any]) -> dict[str, Any]:
     gs["shop"] = {"joker_max": game["shop_joker_max"]}
     if game["first_shop_buffoon"]:
         gs["first_shop_buffoon"] = True
+    gs["orbital_choices"] = {
+        int(ante): dict(choices) for ante, choices in game["orbital_choices"].items()
+    }
 
     gs["starting_params"] = copy.deepcopy(snap["starting_params"])
     gs["modifiers"] = copy.deepcopy(snap["modifiers"])
@@ -232,6 +235,10 @@ def import_state(snap: dict[str, Any]) -> dict[str, Any]:
         gs["pending_deck_bottom"] = [import_card(cs) for cs in sim["pending_deck_bottom"]]
     if sim["shop_d6ed"]:
         gs["shop_d6ed"] = True
+    if sim["shop_free"]:
+        gs["shop_free"] = True
+    if sim["hand_last_poll_size"]:
+        gs["hand_last_poll_size"] = sim["hand_last_poll_size"]
     if sim["last_blind_was_boss"]:
         gs["last_blind_was_boss"] = True
     if snap["phase"] == GamePhase.ROUND_EVAL.value:

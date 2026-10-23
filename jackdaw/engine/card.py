@@ -205,6 +205,9 @@ class Card:
     perishable: bool = False
     perish_tally: int = 5  # rounds until perish
     rental: bool = False
+    # Challenge pin (game.lua:2073): the joker area sorts pinned cards first
+    # (cardarea.lua:528), so a pinned joker cannot be moved.
+    pinned: bool = False
 
     def set_base(self, card_key: str, suit: str, value: str) -> None:
         """Populate base fields from P_CARDS data, matching Card:set_base."""
@@ -416,7 +419,9 @@ class Card:
         self.rental = rental
 
     def set_debuff(self, should_debuff: bool) -> None:
-        self.debuff = should_debuff
+        # Double or Nothing's perma_debuff: Card:update re-debuffs the card
+        # every frame (card.lua:4158), so nothing can clear it.
+        self.debuff = should_debuff or bool(self.ability.get("perma_debuff"))
 
     def set_cost(
         self,

@@ -544,14 +544,14 @@ def apply_challenge(
 
     Order of operations
     -------------------
-    1. Starting jokers — stored in ``game_state["challenge_jokers"]`` for the
-       caller to instantiate (with eternal/pinned/edition flags).
-    2. Starting consumables — appended to ``game_state["starting_consumables"]``.
-    3. Starting vouchers — marked as used and effects applied via
+    1. Starting jokers and consumeables are not created here: vanilla queues
+       them as events that run after the rest of ``start_run``, so
+       :func:`~jackdaw.engine.run_init.initialize_run` creates them last.
+    2. Starting vouchers — marked as used and effects applied via
        :func:`~jackdaw.engine.vouchers.apply_voucher`.
-    4. Rule modifiers — override ``starting_params`` values directly.
-    5. Custom rules — set ``game_state["modifiers"]`` fields or special flags.
-    6. Restrictions — populate ``game_state["banned_keys"]``.
+    3. Rule modifiers — override ``starting_params`` values directly.
+    4. Custom rules — set ``game_state["modifiers"]`` fields or special flags.
+    5. Restrictions — populate ``game_state["banned_keys"]``.
 
     Parameters
     ----------
@@ -564,22 +564,7 @@ def apply_challenge(
     sp = game_state["starting_params"]
 
     # ------------------------------------------------------------------
-    # 1. Starting jokers — stored for caller to instantiate
-    # ------------------------------------------------------------------
-    jokers = challenge_def.get("jokers", [])
-    if jokers:
-        game_state["challenge_jokers"] = list(jokers)
-
-    # ------------------------------------------------------------------
-    # 2. Starting consumables
-    # ------------------------------------------------------------------
-    consumeables = challenge_def.get("consumeables", [])
-    if consumeables:
-        existing = game_state.get("starting_consumables", [])
-        game_state["starting_consumables"] = existing + [c["id"] for c in consumeables]
-
-    # ------------------------------------------------------------------
-    # 3. Starting vouchers — mark used + apply effects
+    # 2. Starting vouchers — mark used + apply effects
     # ------------------------------------------------------------------
     for v in challenge_def.get("vouchers", []):
         v_key = v["id"]
@@ -587,14 +572,14 @@ def apply_challenge(
         apply_voucher(v_key, game_state)
 
     # ------------------------------------------------------------------
-    # 4. Rule modifiers — override starting_params
+    # 3. Rule modifiers — override starting_params
     # ------------------------------------------------------------------
     rules = challenge_def.get("rules", {})
     for mod in rules.get("modifiers", []):
         sp[mod["id"]] = mod["value"]
 
     # ------------------------------------------------------------------
-    # 5. Custom rules
+    # 4. Custom rules
     # ------------------------------------------------------------------
     mods = game_state.setdefault("modifiers", {})
     for rule in rules.get("custom", []):
@@ -617,7 +602,7 @@ def apply_challenge(
             mods[rid] = True
 
     # ------------------------------------------------------------------
-    # 6. Restrictions — banned keys
+    # 5. Restrictions — banned keys
     # ------------------------------------------------------------------
     banned = game_state.setdefault("banned_keys", {})
     restrictions = challenge_def.get("restrictions", {})

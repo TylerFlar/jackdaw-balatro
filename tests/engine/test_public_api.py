@@ -49,6 +49,46 @@ def test_manual_step_through():
 # Test 3: ``from jackdaw.engine import *`` exports exactly __all__
 # ------------------------------------------------------------------
 
+_EXPECTED_ALL = {
+    # Core functions
+    "initialize_run",
+    "step",
+    "get_legal_actions",
+    "simulate_run",
+    "random_agent",
+    "greedy_play_agent",
+    # Types
+    "Action",
+    "GamePhase",
+    "IllegalActionError",
+    # Action types
+    "BuyAndUse",
+    "BuyCard",
+    "CashOut",
+    "Discard",
+    "NextRound",
+    "OpenBooster",
+    "PickPackCard",
+    "PlayHand",
+    "RedeemVoucher",
+    "Reroll",
+    "RerollBoss",
+    "SelectBlind",
+    "SellCard",
+    "SkipBlind",
+    "SkipPack",
+    "SortHand",
+    "SwapHandLeft",
+    "SwapHandRight",
+    "SwapJokersLeft",
+    "SwapJokersRight",
+    "UseConsumable",
+}
+
+
+def test_all_is_the_expected_surface():
+    assert set(jackdaw.engine.__all__) == _EXPECTED_ALL
+
 
 def test_all_matches_star_import():
     exported = set(jackdaw.engine.__all__)

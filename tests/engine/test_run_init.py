@@ -269,4 +269,4 @@ class TestIntegrationWithInitializeRun:
         gs = initialize_run("b_red", 1, "OMELETTE_TEST", challenge=CHALLENGES["c_omelette_1"])
         assert gs["modifiers"]["no_blind_reward"]["Small"] is True
         assert gs["banned_keys"].get("j_golden") is True
-        assert len(gs["challenge_jokers"]) == 5
+        assert [j.center_key for j in gs["jokers"]] == ["j_egg"] * 5

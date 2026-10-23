@@ -343,20 +343,15 @@ class TestApplyVoucherSlots:
         assert gs["consumable_slots"] == 3
 
 
-class TestApplyVoucherAnteModifiers:
-    def test_directors_cut(self):
-        gs = _voucher_gs()
-        apply_voucher("v_directors_cut", gs)
-        assert gs["boss_blind_rerolls"] == 1
-        assert gs["boss_blind_reroll_cost"] == 10
-
-
 class TestApplyVoucherBossBlindRerolls:
-    def test_retcon_sets_unlimited_free_rerolls(self):
+    @pytest.mark.parametrize("key", ["v_directors_cut", "v_retcon"])
+    def test_reroll_vouchers_have_no_apply_to_run_effect(self, key):
+        # card.lua:1880-1971 has no branch for them: being redeemed is what
+        # enables the $10 boss reroll (actions.can_reroll_boss).
         gs = _voucher_gs()
-        apply_voucher("v_retcon", gs)
-        assert gs["boss_blind_rerolls"] == -1
-        assert gs["boss_blind_reroll_cost"] == 0
+        before = dict(gs)
+        assert apply_voucher(key, gs) == {}
+        assert gs == before
 
 
 class TestApplyVoucherPassive:

@@ -188,6 +188,7 @@ def check_soul_chance(
     soulable: bool = True,
     used_jokers: dict | None = None,
     has_showman: bool = False,
+    banned_keys: dict | set | None = None,
 ) -> str | None:
     """Check for a forced Soul or Black Hole card (0.3% chance per roll).
 
@@ -208,8 +209,11 @@ def check_soul_chance(
       roll when ``c_black_hole`` is already used (no Showman).
     * **Joker and all other types** — no roll is ever made (shop jokers,
       buffoon packs, etc. never produce The Soul in vanilla).
+
+    The whole block is skipped, Black Hole roll included, while ``c_soul``
+    is banned (Jokerless; common_events.lua:2088).
     """
-    if not soulable:
+    if not soulable or (banned_keys and "c_soul" in banned_keys):
         return None
 
     used = used_jokers or {}

@@ -79,6 +79,12 @@ booleans, numbers, strings, arrays and string-keyed objects.
 **Misc:** `pack_size`, `ecto_minus`, `perishable_rounds`, `first_shop_buffoon`
 (whether the first-shop Buffoon pack guarantee has been used).
 
+**Orbital Tag:** `orbital_choices` (`G.GAME.orbital_choices`): ante (as a
+string key) → `{Small, Big, Boss}` → the poker hand an Orbital Tag for that
+blind levels. Each ante's three hands are rolled when its first blind-select
+screen is built (UI_definitions.lua:1506-1516); every ante seen so far keeps
+its entry.
+
 ### `round_resets`
 
 `hands`, `discards`, `reroll_cost`, `temp_reroll_cost` (null or number),
@@ -165,6 +171,8 @@ Stream insertion order is not part of the state.
 | `pending_tag_packs` | Booster keys queued by tags (Double Tag), opened when the current pack closes |
 | `pending_deck_bottom` | Cards (Marble Joker stones) that join the bottom of the deck after the next round-start shuffle |
 | `shop_d6ed` | D6 Tag already applied this shop |
+| `shop_free` | A Coupon Tag already applied this shop (`G.GAME.shop_free`, tag.lua:448); a second one waits for the next shop |
+| `hand_last_poll_size` | Luxury Tax: `floor(dollars / minus_hand_size_per_X_dollar)` when the hand size was last adjusted (`G.hand.config.last_poll_size`, cardarea.lua:245); 0 in every other run |
 | `last_blind_was_boss` | The last defeated blind was a boss (eval-time tags such as Investment) |
 | `pending_cashout` | Dollars `cash_out` will pay; 0 outside `round_eval` |
 | `last_score` | The last played hand: `{hand_type, chips, mult, total, dollars, debuffed}`, or null |

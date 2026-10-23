@@ -85,6 +85,7 @@ def get_next_voucher_key(
     *,
     from_tag: bool = False,
     ante: int = 1,
+    banned_keys: dict[str, bool] | set[str] | None = None,
 ) -> str | None:
     """Select the next voucher key for the shop using the RNG stream.
 
@@ -103,6 +104,9 @@ def get_next_voucher_key(
     ``common_events.lua:2052``.  For tag-triggered vouchers, the key is
     ``'Voucher_fromtag'`` (no ante appended).
 
+    Challenge bans (*banned_keys*) are UNAVAILABLE like everything else
+    the pool culls (common_events.lua:2030).
+
     Returns ``None`` if the eligible pool is empty (shouldn't happen in
     practice due to the ``v_blank`` fallback in ``get_current_pool``).
     """
@@ -116,6 +120,7 @@ def get_next_voucher_key(
         rng,
         ante,
         used_vouchers=used_vouchers_set,
+        banned_keys=banned_keys,
         shop_vouchers=shop_vouchers_set,
     )
 
@@ -317,28 +322,11 @@ def apply_voucher(key: str, game_state: dict[str, Any]) -> dict[str, Any]:
         mutations["round_resets.discards"] = rr["discards"]
 
     # -----------------------------------------------------------------------
-    # Director's Cut — enable 1 boss blind reroll per ante at cost extra ($10)
-    # (not present in extracted apply_to_run; modelled from game behaviour)
-    # -----------------------------------------------------------------------
-    elif name == "Director's Cut":
-        game_state["boss_blind_rerolls"] = game_state.get("boss_blind_rerolls", 0) + 1
-        game_state["boss_blind_reroll_cost"] = extra
-        mutations["boss_blind_rerolls"] = game_state["boss_blind_rerolls"]
-        mutations["boss_blind_reroll_cost"] = game_state["boss_blind_reroll_cost"]
-
-    # -----------------------------------------------------------------------
-    # Retcon — unlimited boss blind rerolls, free
-    # -----------------------------------------------------------------------
-    elif name == "Retcon":
-        game_state["boss_blind_rerolls"] = -1  # -1 = unlimited
-        game_state["boss_blind_reroll_cost"] = 0
-        mutations["boss_blind_rerolls"] = -1
-        mutations["boss_blind_reroll_cost"] = 0
-
-    # -----------------------------------------------------------------------
     # Blank — unlock check only; no gameplay mutation (card.lua:1943)
     # Telescope — passive, read by pack generation (packs.py)
     # Observatory — passive, read by scoring (held Planets, scoring.py)
+    # Director's Cut / Retcon — no apply_to_run branch: being redeemed is
+    # what enables the $10 boss reroll (actions.can_reroll_boss)
     # -----------------------------------------------------------------------
 
     return mutations

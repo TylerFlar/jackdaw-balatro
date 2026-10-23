@@ -12,14 +12,16 @@ Each phase permits a specific subset of actions:
 +---------------------+------------------------------------------------------+
 | Phase               | Valid actions                                         |
 +=====================+======================================================+
-| BLIND_SELECT        | SelectBlind, SkipBlind, SellCard, UseConsumable      |
+| BLIND_SELECT        | SelectBlind, SkipBlind, RerollBoss, SellCard,        |
+|                     | UseConsumable                                        |
 +---------------------+------------------------------------------------------+
 | SELECTING_HAND      | PlayHand, Discard, SortHand, SellCard,               |
 |                     | UseConsumable, SwapHandLeft/Right,                   |
 |                     | SwapJokersLeft/Right                                 |
 +---------------------+------------------------------------------------------+
-| SHOP                | BuyCard, SellCard, UseConsumable, RedeemVoucher,     |
-|                     | OpenBooster, Reroll, SwapJokersLeft/Right, NextRound |
+| SHOP                | BuyCard, BuyAndUse, SellCard, UseConsumable,         |
+|                     | RedeemVoucher, OpenBooster, Reroll,                  |
+|                     | SwapJokersLeft/Right, NextRound                      |
 +---------------------+------------------------------------------------------+
 | PACK_OPENING        | PickPackCard, SkipPack, SellCard, UseConsumable      |
 +---------------------+------------------------------------------------------+
@@ -73,6 +75,16 @@ class SkipBlind:
     """Skip the current blind (Small or Big) and collect the tag reward."""
 
 
+@dataclass(frozen=True)
+class RerollBoss:
+    """Reroll this ante's boss blind for $10 (Director's Cut / Retcon).
+
+    The blind-select screen's reroll button (button_callbacks.lua:2784-2853):
+    Director's Cut allows one reroll per ante, Retcon any number.  Sim-only
+    for now: the env action space does not offer it yet.
+    """
+
+
 # ---------------------------------------------------------------------------
 # Hand play / discard
 # ---------------------------------------------------------------------------
@@ -112,6 +124,21 @@ class BuyCard:
     """
 
     shop_index: int
+
+
+@dataclass(frozen=True)
+class BuyAndUse:
+    """Buy a consumable from the shop and use it at once.
+
+    The shop's "Buy and Use" button (button_callbacks.lua:77-89,
+    2404-2477): needs no consumable slot.  ``target_indices`` is the hand
+    selection, as for :class:`UseConsumable` (in the shop the hand is
+    empty, so cards that need one are never usable).  Sim-only for now:
+    the env action space does not offer it yet.
+    """
+
+    shop_index: int
+    target_indices: tuple[int, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -265,7 +292,9 @@ Action = (
     | Discard
     | SelectBlind
     | SkipBlind
+    | RerollBoss
     | BuyCard
+    | BuyAndUse
     | SellCard
     | UseConsumable
     | RedeemVoucher
@@ -281,6 +310,11 @@ Action = (
     | SwapJokersLeft
     | SwapJokersRight
 )
+
+# Vanilla actions the env's factored action space and BalatroBot's endpoints
+# cannot express yet.  get_legal_actions offers them; the env adapters and
+# the bridge leave them out.
+SIM_ONLY_ACTIONS: tuple[type, ...] = (RerollBoss, BuyAndUse)
 
 
 # ---------------------------------------------------------------------------
@@ -364,11 +398,34 @@ def _legal_blind_select(gs: dict[str, Any]) -> list[Action]:
     if blind_on_deck in ("Small", "Big"):
         actions.append(SkipBlind())
 
+    if can_reroll_boss(gs):
+        actions.append(RerollBoss())
+
     actions.extend(_sell_actions(gs))
 
     # Consumables usable during blind select
     actions.extend(_usable_consumables(gs))
     return actions
+
+
+BOSS_REROLL_COST = 10
+
+
+def can_reroll_boss(gs: dict[str, Any]) -> bool:
+    """Whether the blind-select screen's boss reroll button is live.
+
+    The button exists only with Retcon or Director's Cut
+    (UI_definitions.lua:1427-1428), and reroll_boss_button enables it when
+    ``dollars - bankrupt_at - 10 >= 0`` and (Retcon, or Director's Cut
+    with no reroll yet this ante) (button_callbacks.lua:2784-2798).
+    """
+    used = gs.get("used_vouchers") or {}
+    if not (used.get("v_retcon") or used.get("v_directors_cut")):
+        return False
+    if gs.get("dollars", 0) - gs.get("bankrupt_at", 0) - BOSS_REROLL_COST < 0:
+        return False
+    rerolled = (gs.get("round_resets") or {}).get("boss_rerolled")
+    return bool(used.get("v_retcon")) or not rerolled
 
 
 def _legal_selecting_hand(gs: dict[str, Any]) -> list[Action]:
@@ -399,13 +456,32 @@ def _legal_selecting_hand(gs: dict[str, Any]) -> list[Action]:
     actions.extend(_usable_consumables(gs))
 
     # Swap jokers
-    jokers: list[Card] = gs.get("jokers", [])
-    if len(jokers) > 1:
-        for i in range(1, len(jokers)):
-            actions.append(SwapJokersLeft(idx=i))
-        for i in range(len(jokers) - 1):
-            actions.append(SwapJokersRight(idx=i))
+    actions.extend(_joker_swap_actions(gs.get("jokers", [])))
 
+    return actions
+
+
+def joker_swap_allowed(jokers: list[Card], idx: int, direction: int) -> bool:
+    """Whether ``jokers[idx]`` may swap with its neighbour in *direction* (±1).
+
+    A pinned joker never moves: the joker area sorts pinned cards first
+    every frame (cardarea.lua:528), so swapping one, or swapping another
+    card past it, snaps straight back.  Shared by the executor, the legal
+    actions and the env mask.
+    """
+    other = idx + direction
+    if not (0 <= idx < len(jokers) and 0 <= other < len(jokers)):
+        return False
+    return not (getattr(jokers[idx], "pinned", False) or getattr(jokers[other], "pinned", False))
+
+
+def _joker_swap_actions(jokers: list[Card]) -> list[Action]:
+    actions: list[Action] = [
+        SwapJokersLeft(idx=i) for i in range(1, len(jokers)) if joker_swap_allowed(jokers, i, -1)
+    ]
+    actions.extend(
+        SwapJokersRight(idx=i) for i in range(len(jokers) - 1) if joker_swap_allowed(jokers, i, +1)
+    )
     return actions
 
 
@@ -440,6 +516,17 @@ def _legal_shop(gs: dict[str, Any]) -> list[Action]:
                 continue  # No room — agent must use/sell a consumable first
         actions.append(BuyCard(shop_index=i))
 
+    # Buy and use: affordable shop consumables that can be used right now,
+    # slots full or not (can_buy_and_use, button_callbacks.lua:77-89).
+    from jackdaw.engine.consumables import consumable_block_reason, default_use_targets
+
+    for i, card in enumerate(shop_cards):
+        ability = card.ability if isinstance(card.ability, dict) else {}
+        if not ability.get("consumeable") or not can_afford(gs, card.cost):
+            continue
+        if consumable_block_reason(card, gs) is None:
+            actions.append(BuyAndUse(shop_index=i, target_indices=default_use_targets(card, gs)))
+
     actions.extend(_sell_actions(gs))
 
     # Use owned consumables
@@ -468,11 +555,7 @@ def _legal_shop(gs: dict[str, Any]) -> list[Action]:
     actions.append(NextRound())
 
     # Swap jokers
-    if len(jokers) > 1:
-        for i in range(1, len(jokers)):
-            actions.append(SwapJokersLeft(idx=i))
-        for i in range(len(jokers) - 1):
-            actions.append(SwapJokersRight(idx=i))
+    actions.extend(_joker_swap_actions(jokers))
 
     return actions
 

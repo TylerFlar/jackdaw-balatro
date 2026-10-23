@@ -167,9 +167,12 @@ class DirectAdapter:
         return _snapshot(self._gs)
 
     def get_legal_actions(self) -> list[Action]:
+        from jackdaw.engine.actions import SIM_ONLY_ACTIONS
         from jackdaw.engine.actions import get_legal_actions as engine_legal
 
-        return engine_legal(self._gs)
+        # The factored action space has no type for the sim-only actions
+        # (RerollBoss, ...) yet; offer only what an env action can express.
+        return [a for a in engine_legal(self._gs) if not isinstance(a, SIM_ONLY_ACTIONS)]
 
     @property
     def raw_state(self) -> dict[str, Any]:

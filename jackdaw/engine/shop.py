@@ -323,17 +323,60 @@ def apply_store_joker_create_tag(gs, rng, ante):
     return None
 
 
-def fill_shop_slots(gs: dict[str, Any], count: int) -> list:
-    """Roll ``count`` new cards into the open shop.
+def create_card_for_shop(gs: dict[str, Any], rng: PseudoRandom, ante: int) -> Card:
+    """One shop-joker slot's card, as ``create_card_for_shop`` makes it.
 
-    Used when Overstock/Overstock Plus is redeemed mid-shop: live rolls a
-    card into each NEW slot immediately.  Purchase-emptied slots stay
-    empty (lockstep-confirmed: a non-slot voucher refills nothing), so
-    callers pass exactly the slot-count DELTA, never a top-up-to-max.
-    Uses the identical creation path/streams as reroll's repopulate.
+    UI_definitions.lua:742-800: a pending store_joker_create tag (Rare /
+    Uncommon) makes the card; otherwise one ``'cdt'`` roll over the rate
+    table — whose playing-card entry pulls ``'illusion'`` on every call
+    once Illusion is owned — picks the type, ``create_card(type, ...,
+    'sho')`` makes it (never soulable), and an Illusion playing card may
+    roll an edition.  The edition tags' store_joker_modify runs after,
+    over the new cards (game._fire_shop_tags).  Every shop slot is filled
+    this way: the initial shop, rerolls and Overstock's new slot.
     """
     from jackdaw.engine.card_factory import create_card
 
+    tag_card = apply_store_joker_create_tag(gs, rng, ante)
+    if tag_card is not None:
+        return tag_card
+    has_illusion = bool((gs.get("used_vouchers") or {}).get("v_illusion"))
+    card_type = select_shop_card_type(
+        rng,
+        ante,
+        joker_rate=gs.get("joker_rate", 20.0),
+        tarot_rate=gs.get("tarot_rate", 4.0),
+        planet_rate=gs.get("planet_rate", 4.0),
+        spectral_rate=gs.get("spectral_rate", 0.0),
+        playing_card_rate=gs.get("playing_card_rate", 0.0),
+        has_illusion=has_illusion,
+    )
+    card = create_card(
+        card_type,
+        rng,
+        ante,
+        area="shop",
+        # Shop cards are created non-soulable (UI_definitions.lua:776 passes
+        # soulable=nil): The Soul / Black Hole can never appear in a shop,
+        # and no 'soul_*' stream roll is consumed for them.
+        soulable=False,
+        append=_SHOP_APPEND,
+        game_state=gs,
+    )
+    if card_type in ("Base", "Enhanced") and has_illusion:
+        apply_illusion_shop_edition(rng, card)
+    return card
+
+
+def fill_shop_slots(gs: dict[str, Any], count: int) -> list:
+    """Roll ``count`` new cards into the open shop.
+
+    Used when Overstock/Overstock Plus is redeemed mid-shop:
+    change_shop_size (common_events.lua:1097-1118) fills the shop up to
+    the new joker_max with create_card_for_shop, so callers pass the
+    room left (lockstep-confirmed: purchase-emptied slots refill too).
+    The caller runs the edition tags' store_joker_modify afterwards.
+    """
     rng = gs.get("rng")
     if rng is None or count <= 0:
         return []
@@ -341,24 +384,7 @@ def fill_shop_slots(gs: dict[str, Any], count: int) -> list:
     shop_cards: list = gs.setdefault("shop_cards", [])
     new_cards = []
     for _ in range(count):
-        card_type = select_shop_card_type(
-            rng,
-            ante,
-            joker_rate=gs.get("joker_rate", 20.0),
-            tarot_rate=gs.get("tarot_rate", 4.0),
-            planet_rate=gs.get("planet_rate", 4.0),
-            spectral_rate=gs.get("spectral_rate", 0.0),
-            playing_card_rate=gs.get("playing_card_rate", 0.0),
-        )
-        new_card = create_card(
-            card_type,
-            rng,
-            ante,
-            area="shop",
-            soulable=False,
-            append=_SHOP_APPEND,
-            game_state=gs,
-        )
+        new_card = create_card_for_shop(gs, rng, ante)
         shop_cards.append(new_card)
         new_cards.append(new_card)
     return new_cards
@@ -457,53 +483,16 @@ def populate_shop(
         'boosters': list[Card]}``
     """
     from jackdaw.engine.card import Card as _Card
-    from jackdaw.engine.card_factory import create_card, create_voucher
+    from jackdaw.engine.card_factory import create_voucher
 
     gs = game_state
 
     shop_joker_max: int = gs.get("shop", {}).get("joker_max", 2)
 
-    joker_rate: float = gs.get("joker_rate", 20.0)
-    tarot_rate: float = gs.get("tarot_rate", 4.0)
-    planet_rate: float = gs.get("planet_rate", 4.0)
-    spectral_rate: float = gs.get("spectral_rate", 0.0)
-    playing_card_rate: float = gs.get("playing_card_rate", 0.0)
-
     banned_keys: set[str] = set(gs.get("banned_keys") or {})
 
     # -- 1. Joker slots --
-    has_illusion = bool((gs.get("used_vouchers") or {}).get("v_illusion"))
-    jokers: list[_Card] = []
-    for _ in range(shop_joker_max):
-        tag_card = apply_store_joker_create_tag(gs, rng, ante)
-        if tag_card is not None:
-            jokers.append(tag_card)
-            continue
-        card_type = select_shop_card_type(
-            rng,
-            ante,
-            joker_rate=joker_rate,
-            tarot_rate=tarot_rate,
-            planet_rate=planet_rate,
-            spectral_rate=spectral_rate,
-            playing_card_rate=playing_card_rate,
-            has_illusion=has_illusion,
-        )
-        card = create_card(
-            card_type,
-            rng,
-            ante,
-            area="shop",
-            # Shop cards are created non-soulable (UI_definitions.lua:776
-            # passes soulable=nil): The Soul / Black Hole can never appear
-            # in a shop, and no 'soul_*' stream roll is consumed for them.
-            soulable=False,
-            append=_SHOP_APPEND,
-            game_state=gs,
-        )
-        if card_type in ("Base", "Enhanced") and has_illusion:
-            apply_illusion_shop_edition(rng, card)
-        jokers.append(card)
+    jokers: list[_Card] = [create_card_for_shop(gs, rng, ante) for _ in range(shop_joker_max)]
 
     # -- 2. Voucher --
     voucher: _Card | None = None

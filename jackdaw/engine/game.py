@@ -19,10 +19,12 @@ Usage::
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from jackdaw.engine.actions import (
     Action,
+    BuyAndUse,
     BuyCard,
     CashOut,
     Discard,
@@ -33,6 +35,7 @@ from jackdaw.engine.actions import (
     PlayHand,
     RedeemVoucher,
     Reroll,
+    RerollBoss,
     SelectBlind,
     SellCard,
     SkipBlind,
@@ -62,6 +65,11 @@ def step(game_state: dict[str, Any], action: Action) -> dict[str, Any]:
     if the action is not valid in the current phase.
     """
     result = _dispatch(game_state, action)
+    # The joker area re-sorts pinned cards to the left every frame
+    # (cardarea.lua:528), and Luxury Tax re-checks the hand size against
+    # the dollars every frame (cardarea.lua:245).
+    _align_pinned_jokers(result.get("jokers") or [])
+    _sync_hand_size_to_dollars(result)
     # Vanilla recomputes shop prices continuously while shopping
     # (Card:update → set_cost each frame), so cost-relevant changes —
     # buying/selling Astronomer, coupon tags — reflect immediately.
@@ -78,6 +86,8 @@ def _dispatch(game_state: dict[str, Any], action: Action) -> dict[str, Any]:
             return _handle_select_blind(game_state)
         case SkipBlind():
             return _handle_skip_blind(game_state)
+        case RerollBoss():
+            return _handle_reroll_boss(game_state)
         case PlayHand(card_indices=indices):
             return _handle_play_hand(game_state, indices)
         case Discard(card_indices=indices):
@@ -86,6 +96,8 @@ def _dispatch(game_state: dict[str, Any], action: Action) -> dict[str, Any]:
             return _handle_cash_out(game_state)
         case BuyCard(shop_index=idx):
             return _handle_buy_card(game_state, idx)
+        case BuyAndUse(shop_index=idx, target_indices=targets):
+            return _handle_buy_and_use(game_state, idx, targets)
         case SellCard(area=area, card_index=idx):
             return _handle_sell_card(game_state, area, idx)
         case UseConsumable(card_index=idx, target_indices=targets):
@@ -335,7 +347,6 @@ def _fire_new_blind_choice_tags(gs: dict[str, Any]) -> None:
 
     awarded: list[dict] = gs.get("awarded_tags", [])
     rng = gs.get("rng")
-    rr = gs.get("round_resets", {})
 
     for entry in awarded:
         tag_key = entry.get("key", "")
@@ -351,15 +362,54 @@ def _fire_new_blind_choice_tags(gs: dict[str, Any]) -> None:
             continue
 
         if result.reroll_boss:
-            from jackdaw.engine.blind import get_new_boss
-
-            bosses_used = gs.setdefault("bosses_used", {})
-            ante = rr.get("ante", 1)
-            new_boss = get_new_boss(ante, bosses_used, rng)
-            rr.setdefault("blind_choices", {})["Boss"] = new_boss
+            # Boss Tag: G.from_boss_tag + G.FUNCS.reroll_boss (tag.lua:284-300).
+            # The loop goes on to the next pending tag, as reroll_boss's own
+            # new_blind_choice pass would.
+            _reroll_boss(gs, from_tag=True)
 
         if result.create_pack:
             _open_tag_pack(gs, result.create_pack)
+
+
+def _reroll_boss(gs: dict[str, Any], *, from_tag: bool) -> None:
+    """``G.FUNCS.reroll_boss`` (button_callbacks.lua:2800-2853).
+
+    Marks the ante rerolled (Director's Cut's once-per-ante gate) even when
+    a Boss Tag does it, charges $10 unless it is the Boss Tag
+    (``G.from_boss_tag``), and draws a new boss from the ante's pool — bans
+    and the win ante included (get_new_boss, common_events.lua:2338-2383).
+    The rebuilt boss UI finds its Orbital hand set, so nothing else rolls.
+    """
+    from jackdaw.engine.actions import BOSS_REROLL_COST
+    from jackdaw.engine.blind import get_new_boss
+
+    rr = gs["round_resets"]
+    rr["boss_rerolled"] = True
+    if not from_tag:
+        gs["dollars"] = gs.get("dollars", 0) - BOSS_REROLL_COST
+    rr.setdefault("blind_choices", {})["Boss"] = get_new_boss(
+        rr.get("ante", 1),
+        gs.setdefault("bosses_used", {}),
+        gs.get("rng"),
+        win_ante=gs.get("win_ante", 8),
+        banned_keys=gs.get("banned_keys"),
+    )
+
+
+def _handle_reroll_boss(gs: dict[str, Any]) -> dict[str, Any]:
+    """Reroll the boss blind with Director's Cut or Retcon (G.FUNCS.reroll_boss).
+
+    After the new boss, reroll_boss's event gives pending new_blind_choice
+    tags their turn (button_callbacks.lua:2847-2849).
+    """
+    _require_phase(gs, GamePhase.BLIND_SELECT)
+    from jackdaw.engine.actions import can_reroll_boss
+
+    if not can_reroll_boss(gs):
+        raise IllegalActionError("Boss reroll not available")
+    _reroll_boss(gs, from_tag=False)
+    _fire_new_blind_choice_tags(gs)
+    return gs
 
 
 def _open_tag_pack(gs: dict[str, Any], pack_key: str, force: bool = False) -> None:
@@ -368,10 +418,11 @@ def _open_tag_pack(gs: dict[str, Any], pack_key: str, force: bool = False) -> No
     The caller (or agent) must then pick from the pack or skip it.
     For the engine-only path (no interactive player), we store the pack
     state so that get_legal_actions returns PickPackCard/SkipPack options.
-    """
-    from jackdaw.engine.data.prototypes import BOOSTERS
-    from jackdaw.engine.packs import generate_pack_cards
 
+    A pack tag makes a free booster Card and opens it through
+    ``G.FUNCS.use_card`` (tag.lua:209-282), i.e. the same ``Card:open`` as
+    a shop pack: see :func:`_open_pack`.
+    """
     # A pack is already open (e.g. Double Tag duplicated a pack tag):
     # queue this one.  Vanilla stacks pack opens — the next pack opens
     # when the current one closes, and its contents roll AT THAT TIME
@@ -380,56 +431,102 @@ def _open_tag_pack(gs: dict[str, Any], pack_key: str, force: bool = False) -> No
         gs.setdefault("pending_tag_packs", []).append(pack_key)
         return
 
-    rng = gs.get("rng")
-    ante = gs.get("round_resets", {}).get("ante", 1)
-
-    pack_cards, choices = generate_pack_cards(pack_key, rng, ante, gs)
-    gs["pack_cards"] = pack_cards
-    gs["pack_choices_remaining"] = choices
-
-    # Determine pack kind from prototype
-    proto = BOOSTERS.get(pack_key)
-    pack_kind = proto.kind if proto else ""
-    gs["pack_type"] = pack_kind
-
     # Save current phase and switch to pack opening
     gs["shop_return_phase"] = gs.get("phase", GamePhase.BLIND_SELECT)
+    _open_pack(gs, pack_key)
+
+
+def _open_pack(gs: dict[str, Any], pack_key: str) -> None:
+    """``Card:open`` (card.lua:1681-1811) for a shop or tag pack, once paid for.
+
+    Card:open queues one event (after 0.4s) that, in order: queues the
+    contents' creation as a non-blocking event 1.3s later (card.lua:1725),
+    runs every joker's ``open_booster`` context (card.lua:1796-1798) and,
+    under Inflation, raises ``G.GAME.inflation`` (card.lua:1800-1807).
+    Hallucination's Tarot is created by a blocking event its context
+    queues (card.lua:2339-2348), which runs on the next frame — long before
+    the contents event — so the Tarot exists, and is in used_jokers, when
+    the pack draws its cards.  An Arcana/Spectral pack then deals the hand
+    its picks target (update_arcana_pack / update_spectral_pack).
+    """
+    from jackdaw.engine.data.prototypes import BOOSTERS
+    from jackdaw.engine.packs import generate_pack_cards
+
+    # open_booster (Hallucination's 'halu' roll), then the inflation; the
+    # Tarot itself comes from the queued event, after both.
+    mutations = _fire_shop_joker_context(gs, open_booster=True)
+    _inflate(gs)
+    for mut in mutations:
+        desc = mut.get("create")
+        if desc and (
+            desc.get("type") not in ("Tarot", "Planet", "Spectral")
+            or len(gs.get("consumables", [])) < gs.get("consumable_slots", 2)
+        ):
+            _resolve_create_descriptors(gs, [desc])
+
+    rng = gs.get("rng")
+    ante = gs.get("round_resets", {}).get("ante", 1)
+    if rng and pack_key in BOOSTERS:
+        cards, choose = generate_pack_cards(pack_key, rng, ante, gs)
+        gs["pack_cards"] = cards
+        gs["pack_choices_remaining"] = choose
+        gs["pack_type"] = BOOSTERS[pack_key].kind
+    else:
+        gs["pack_cards"] = []
+        gs["pack_choices_remaining"] = 1
+        gs["pack_type"] = "Unknown"
 
     # For Arcana/Spectral packs: deal hand from deck for targeting
-    # Matches _handle_open_booster behavior
-    if pack_kind in ("Arcana", "Spectral"):
-        deck: list = gs.get("deck", [])
-        hand: list = gs.get("hand", [])
-        hand_size = gs.get("hand_size", 8)
-        to_deal = min(len(deck), hand_size - len(hand))
-        pack_hand: list = []
-        for _ in range(to_deal):
-            if deck:
-                card = deck.pop()
-                pack_hand.append(card)
-        gs["pack_hand"] = pack_hand
-        combined_hand = hand + pack_hand
-        _sort_hand_desc(combined_hand)
-        gs["hand"] = combined_hand
+    if gs["pack_type"] in ("Arcana", "Spectral"):
+        _deal_pack_hand(gs)
 
     gs["phase"] = GamePhase.PACK_OPENING
 
 
-def _award_tag(gs: dict[str, Any], tag_key: str, source: str) -> None:
+def _deal_pack_hand(gs: dict[str, Any]) -> None:
+    """Deal the hand an Arcana or Spectral pack's picks target.
+
+    update_arcana_pack / update_spectral_pack (game.lua:3374/3425) call
+    draw_from_deck_to_hand: up to the hand size, each card drawn from the
+    END of the deck through draw_card_from, so X-ray Vision's roll applies
+    (cardarea.lua:601-605).  Between rounds the blind is the reset one, so
+    no boss flip applies.  The dealt cards go back to the deck when the
+    pack closes (_close_pack).
+    """
+    _sync_hand_size_to_dollars(gs)
+    deck: list = gs.get("deck", [])
+    hand: list = gs.get("hand", [])
+    to_deal = min(len(deck), gs.get("hand_size", 8) - len(hand))
+    pack_hand: list = []
+    for _ in range(to_deal):
+        card = deck.pop()
+        card.facing = "back" if _x_ray_flip(gs) else "front"
+        pack_hand.append(card)
+    gs["pack_hand"] = pack_hand
+    combined_hand = hand + pack_hand
+    _sort_hand_desc(combined_hand)
+    gs["hand"] = combined_hand
+
+
+def _award_tag(
+    gs: dict[str, Any], tag_key: str, source: str, orbital_hand: str | None = None
+) -> None:
     """Grant one tag, mirroring live ``add_tag`` (UI_definitions.lua:1252).
 
     Tags live in ``awarded_tags`` as ``{"key", "result", "blind"}`` records;
     ``gs["tags"]`` is a phantom key nothing reads.  Every grant runs the
     ``immediate`` hook and applies its result, so callers never rebuild the
     record shape by hand.  ``source`` labels the provenance ("Small"/"Big"
-    for skips, otherwise the granting card).
+    for skips, otherwise the granting card).  *orbital_hand* is the tag's
+    ``ability.orbital_hand`` (the Orbital Tag levels it).
 
     Callers own the ``_check_double_tag`` call: the skip path defers it until
     after ``blind_on_deck`` advances (button_callbacks.lua:2740-2775).
     """
     from jackdaw.engine.tags import Tag
 
-    tag_result = Tag(tag_key).apply("immediate", gs, rng=gs.get("rng"))
+    tag = Tag(tag_key, orbital_hand=orbital_hand)
+    tag_result = tag.apply("immediate", gs, rng=gs.get("rng"))
     gs.setdefault("awarded_tags", []).append(
         {"key": tag_key, "result": tag_result, "blind": source}
     )
@@ -515,8 +612,13 @@ def _handle_skip_blind(gs: dict[str, Any]) -> dict[str, Any]:
     # for get_state/load_state); _award_tag setdefaults it again when it does.
     gs.setdefault("awarded_tags", [])
 
+    # The skip tag was made with the blind-select screen and took this
+    # blind's Orbital hand then (tag.lua:107-110).
+    from jackdaw.engine.tags import ensure_orbital_choices
+
+    orbital_hand = ensure_orbital_choices(gs)[blind_on_deck]
     if tag_key:
-        _award_tag(gs, tag_key, source=blind_on_deck)
+        _award_tag(gs, tag_key, source=blind_on_deck, orbital_hand=orbital_hand)
 
     # ------------------------------------------------------------------
     # 4. Fire joker skip_blind context
@@ -552,7 +654,7 @@ def _handle_skip_blind(gs: dict[str, Any]) -> dict[str, Any]:
     # 6. Double Tag check
     # ------------------------------------------------------------------
     if tag_key:
-        _check_double_tag(gs, tag_key)
+        _check_double_tag(gs, tag_key, orbital_hand=orbital_hand)
 
     # ------------------------------------------------------------------
     # 7. Fire new_blind_choice tags from awarded (deferred) tags
@@ -709,6 +811,15 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
     gs["hands_played"] = gs.get("hands_played", 0) + 1
     gs["current_round_hands_played"] = cr["hands_played"]
 
+    # Double or Nothing: every card of the scoring hand is debuffed for the
+    # rest of the run (state_events.lua:1077-1084 — past the debuffed-hand
+    # branch, so a blocked hand counts too); Card:update applies
+    # perma_debuff on the next frame (card.lua:4158).
+    if (gs.get("modifiers") or {}).get("debuff_played_cards"):
+        for c in result.scoring_cards:
+            c.ability["perma_debuff"] = True
+            c.debuff = True
+
     # ------------------------------------------------------------------
     # 7. Process scoring side-effects
     # ------------------------------------------------------------------
@@ -788,7 +899,8 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
             # GAME_OVER.
             _joker_end_of_round_effects(gs)
             gs["phase"] = GamePhase.GAME_OVER
-            gs["won"] = False
+            # G.GAME.won is never cleared: losing in endless mode after a
+            # win keeps it (state_events.lua:111-122).
         else:
             _round_won(gs)
     else:
@@ -799,15 +911,7 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
         serpent_play = getattr(blind, "name", "") == "The Serpent" and not getattr(
             blind, "disabled", False
         )
-        if serpent_play:
-            deck: list = gs.get("deck", [])
-            hand_out: list = gs.get("hand", [])
-            for _ in range(min(3, len(deck))):
-                if deck:
-                    hand_out.append(deck.pop())
-            _sort_hand_desc(hand_out)
-        else:
-            _draw_hand(gs)
+        _draw_hand(gs, count=3 if serpent_play else None)
 
         # Re-debuff hand cards for boss blind (new cards from deck)
         if blind.boss and not blind.disabled:
@@ -1075,17 +1179,8 @@ def _handle_discard(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str, A
         and not getattr(blind, "disabled", False)
         and (cr.get("hands_played", 0) > 0 or cr.get("discards_used", 0) > 0)
     )
-    if serpent:
-        # The Serpent: draw only 3 after first action
-        # Lua's draw_card(G.deck, G.hand) pops LAST card from deck
-        deck: list = gs.get("deck", [])
-        hand_out: list = gs.get("hand", [])
-        for _ in range(min(3, len(deck))):
-            if deck:
-                hand_out.append(deck.pop())
-        _sort_hand_desc(hand_out)
-    else:
-        _draw_hand(gs)
+    # The Serpent: draw only 3 after the first action
+    _draw_hand(gs, count=3 if serpent else None)
 
     # ------------------------------------------------------------------
     # 11. Re-debuff drawn cards for boss blind
@@ -1147,8 +1242,9 @@ def _handle_cash_out(gs: dict[str, Any]) -> dict[str, Any]:
     """
     _require_phase(gs, GamePhase.ROUND_EVAL)
 
-    # The D6 Tag's once-per-shop guard resets at cash-out
-    # (button_callbacks.lua:2933: G.GAME.shop_d6ed = nil).
+    # The Coupon and D6 Tags' once-per-shop guards reset at cash-out
+    # (button_callbacks.lua:2932-2933: shop_free = nil, shop_d6ed = nil).
+    gs.pop("shop_free", None)
     gs.pop("shop_d6ed", None)
 
     # End-of-round targeting-card re-roll (state_events.lua:273-276):
@@ -1275,6 +1371,45 @@ def _handle_buy_card(gs: dict[str, Any], idx: int) -> dict[str, Any]:
     if added_playing_card:
         _fire_shop_joker_context(gs, playing_card_added=True, cards=[card])
 
+    _inflate(gs)
+    return gs
+
+
+def _handle_buy_and_use(
+    gs: dict[str, Any], idx: int, targets: tuple[int, ...] | None
+) -> dict[str, Any]:
+    """Buy a shop consumable and use it straight away (the "Buy and Use" button).
+
+    can_buy_and_use (button_callbacks.lua:77-89) needs the card affordable
+    (``cost <= dollars - bankrupt_at`` or free) and usable
+    (Card:can_use_consumeable, in the shop's state).  buy_from_shop with
+    the 'buy_and_use' id (:2404-2477) skips check_for_buy_space, never
+    emplaces the card in G.consumeables, runs the buying_card context and
+    the Inflation increment, charges the cost and hands the card to
+    use_card, which uses it with no source area; the card then dissolves.
+    """
+    _require_phase(gs, GamePhase.SHOP)
+
+    from jackdaw.engine.consumables import consumable_block_reason
+    from jackdaw.engine.economy import can_afford
+
+    shop_cards: list = gs.get("shop_cards", [])
+    if idx < 0 or idx >= len(shop_cards):
+        raise IllegalActionError(f"Invalid shop index {idx}")
+    card = shop_cards[idx]
+    if not card.ability.get("consumeable"):
+        raise IllegalActionError("Only consumables can be bought and used")
+    if not can_afford(gs, card.cost):
+        raise IllegalActionError("Cannot afford card")
+    if (reason := consumable_block_reason(card, gs, targets)) is not None:
+        raise IllegalActionError(reason)
+
+    gs["dollars"] -= card.cost
+    shop_cards.pop(idx)
+    _fire_shop_joker_context(gs, buying_card=True)
+    _inflate(gs)
+    _use_consumable_card(gs, card, targets)
+    _release_used_key(gs, card)
     return gs
 
 
@@ -1521,6 +1656,9 @@ def _handle_redeem_voucher(gs: dict[str, Any], idx: int) -> dict[str, Any]:
     gs["used_vouchers"][card.center_key] = True
     _slots_before = gs.get("shop", {}).get("joker_max", 2)
     apply_voucher(card.center_key, gs)
+    # Inflation goes up in Card:redeem itself (card.lua:1858), before the
+    # queued Overstock refill below creates its card.
+    _inflate(gs)
 
     # ONLY Clearance Sale / Liquidation run vanilla's ALL-cards set_cost
     # pass (card.lua:1917-1923) — that pass also restores couponed OWNED
@@ -1535,12 +1673,16 @@ def _handle_redeem_voucher(gs: dict[str, Any], idx: int) -> dict[str, Any]:
     # Overstock / Overstock Plus trigger a FULL shop refill to the new
     # limit (purchase-emptied slots refill too — live rolled two cards
     # when one slot was empty); non-slot vouchers refill nothing.
-    # All three behaviors lockstep-confirmed on live.
+    # All three behaviors lockstep-confirmed on live.  Each new slot is a
+    # create_card_for_shop (change_shop_size, common_events.lua:1112-1115):
+    # store_joker_create tags, Illusion, then the edition tags.
     _new_max = gs.get("shop", {}).get("joker_max", 2)
     if _new_max > _slots_before:
         from jackdaw.engine.shop import fill_shop_slots
 
+        _sync_played_hand_types(gs)
         fill_shop_slots(gs, _new_max - len(gs.get("shop_cards", [])))
+        _fire_shop_tags(gs, rerolled=True)
 
     # Clear the voucher slot so the next shop doesn't re-offer it.
     # Matches card.lua:1850: G.GAME.current_round.voucher = nil
@@ -1550,14 +1692,11 @@ def _handle_redeem_voucher(gs: dict[str, Any], idx: int) -> dict[str, Any]:
 
 
 def _handle_open_booster(gs: dict[str, Any], idx: int) -> dict[str, Any]:
-    """Open a booster pack — generate cards and transition to PACK_OPENING.
+    """Open a booster pack from the shop and transition to PACK_OPENING.
 
-    1. Deduct cost, remove pack from shop
-    2. Generate pack cards via :func:`generate_pack_cards`
-    3. Set ``pack_cards``, ``pack_choices_remaining``, ``pack_type``
-    4. For Arcana/Spectral: deal hand from deck for targeting
-    5. Fire ``open_booster`` joker context (Hallucination)
-    6. Phase → PACK_OPENING
+    Pays (Card:open's ease_dollars, card.lua:1711-1716), removes the pack
+    from the shop and opens it (:func:`_open_pack`: open_booster jokers,
+    inflation, contents, dealt hand).
     """
     _require_phase(gs, GamePhase.SHOP)
 
@@ -1574,61 +1713,8 @@ def _handle_open_booster(gs: dict[str, Any], idx: int) -> dict[str, Any]:
     gs["dollars"] -= pack.cost
     boosters.pop(idx)
     _release_used_key(gs, pack)
-
-    # Generate pack cards
-    from jackdaw.engine.data.prototypes import BOOSTERS
-    from jackdaw.engine.packs import generate_pack_cards
-
-    pack_key = pack.center_key
-    rng = gs.get("rng")
-    ante = gs.get("round_resets", {}).get("ante", 1)
-
-    if rng and pack_key in BOOSTERS:
-        cards, choose = generate_pack_cards(pack_key, rng, ante, gs)
-        gs["pack_cards"] = cards
-        gs["pack_choices_remaining"] = choose
-        gs["pack_type"] = BOOSTERS[pack_key].kind
-    else:
-        gs["pack_cards"] = []
-        gs["pack_choices_remaining"] = 1
-        gs["pack_type"] = "Unknown"
-
     gs["shop_return_phase"] = GamePhase.SHOP
-
-    # For Arcana/Spectral packs: deal hand from deck for targeting
-    # Cards are drawn from the END of deck (top of visual stack),
-    # matching Lua's draw_card(G.deck, G.hand) which pops last card.
-    pack_kind = gs.get("pack_type", "")
-    if pack_kind in ("Arcana", "Spectral"):
-        deck: list = gs.get("deck", [])
-        hand: list = gs.get("hand", [])
-        hand_size = gs.get("hand_size", 8)
-        to_deal = min(len(deck), hand_size - len(hand))
-        pack_hand: list = []
-        for _ in range(to_deal):
-            if deck:
-                card = deck.pop()
-                pack_hand.append(card)
-        gs["pack_hand"] = pack_hand
-        # These cards serve as targets for Tarot/Spectral use
-        combined_hand = hand + pack_hand
-        _sort_hand_desc(combined_hand)
-        gs["hand"] = combined_hand
-
-    # Fire open_booster joker context (Hallucination creates Tarot).
-    # Vanilla gates the creation on consumable room INSIDE the same
-    # condition chain (card.lua:2335) — the 'halu' roll is consumed
-    # either way (handler side), but at full slots no create fires and
-    # the Tarot pool streams stay untouched.
-    for mut in _fire_shop_joker_context(gs, open_booster=True):
-        desc = mut.get("create")
-        if desc and (
-            desc.get("type") not in ("Tarot", "Planet", "Spectral")
-            or len(gs.get("consumables", [])) < gs.get("consumable_slots", 2)
-        ):
-            _resolve_create_descriptors(gs, [desc])
-
-    gs["phase"] = GamePhase.PACK_OPENING
+    _open_pack(gs, pack.center_key)
     return gs
 
 
@@ -1827,6 +1913,11 @@ def _handle_next_round(gs: dict[str, Any]) -> dict[str, Any]:
         rr["blind_states"]["Boss"] = "Select"
 
     gs["phase"] = GamePhase.BLIND_SELECT
+    # The blind-select screen is built again (game.lua:3258-3298), rolling
+    # this ante's Orbital hands if it has none yet.
+    from jackdaw.engine.tags import ensure_orbital_choices
+
+    ensure_orbital_choices(gs)
     return gs
 
 
@@ -1876,13 +1967,29 @@ def _handle_swap_jokers(gs: dict[str, Any], idx: int, direction: int) -> dict[st
     """
     _require_phase(gs, GamePhase.SELECTING_HAND, GamePhase.SHOP)
 
+    from jackdaw.engine.actions import joker_swap_allowed
+
     jokers: list = gs.get("jokers", [])
     other = idx + direction
     if not (0 <= idx < len(jokers) and 0 <= other < len(jokers)):
         raise IllegalActionError("Swap index out of range")
+    if not joker_swap_allowed(jokers, idx, direction):
+        raise IllegalActionError("A pinned joker cannot be moved")
 
     jokers[idx], jokers[other] = jokers[other], jokers[idx]
     return gs
+
+
+def _align_pinned_jokers(jokers: list) -> None:
+    """Sort pinned jokers to the left, as the joker area does every frame.
+
+    cardarea.lua:528 orders G.jokers by ``T.x - 100*(pinned and sort_id or
+    0)``: pinned cards first (the newest pin leftmost), the rest in their
+    current order.  Only something that reorders the area (Amber Acorn's
+    shuffle) or copies a pinned joker can disturb it.
+    """
+    if any(getattr(j, "pinned", False) for j in jokers):
+        jokers.sort(key=lambda j: -j.sort_id if j.pinned else 0)
 
 
 # ---------------------------------------------------------------------------
@@ -1904,21 +2011,23 @@ def _sort_hand_desc(hand: list) -> None:
     hand.sort(key=lambda c: c.get_nominal() if hasattr(c, "get_nominal") else -1e9, reverse=True)
 
 
-def _draw_hand(gs: dict[str, Any]) -> None:
+def _draw_hand(gs: dict[str, Any], count: int | None = None) -> None:
     """Draw cards from deck to fill the hand up to hand_size.
 
     Cards are drawn from the END of the deck list (top of the visual
     stack), matching Lua's ``draw_card(G.deck, G.hand, ...)`` which
-    pops from the last position.
+    pops from the last position.  *count* overrides the number drawn
+    (The Serpent's 3, state_events.lua:363-368).
 
     After drawing, the hand is sorted descending by nominal value
     (matching Lua's ``draw_from_deck_to_hand`` which passes ``sort=true``
     to ``draw_card``, triggering ``CardArea:sort()`` with default 'desc').
     """
+    _sync_hand_size_to_dollars(gs)
     deck: list = gs.get("deck", [])
     hand: list = gs.setdefault("hand", [])
     hand_size: int = gs.get("hand_size", 8)
-    to_draw = min(len(deck), hand_size - len(hand))
+    to_draw = min(len(deck), hand_size - len(hand) if count is None else count)
 
     # Boss face-down draws (Blind:stay_flipped, blind.lua:605-622): The
     # Wheel (seeded 'wheel' roll per drawn card), The House (first hand of
@@ -1939,18 +2048,51 @@ def _draw_hand(gs: dict[str, Any]) -> None:
     for _ in range(to_draw):
         if deck:
             card = deck.pop()
-            if check_flip and blind.stay_flipped(
+            flip = bool(check_flip) and blind.stay_flipped(
                 card,
                 rng=gs.get("rng"),
                 probabilities_normal=gs.get("probabilities", {}).get("normal", 1.0),
                 hands_played=gs.get("current_round", {}).get("hands_played", 0),
                 discards_used=gs.get("current_round", {}).get("discards_used", 0),
                 pareidolia=pareidolia,
-            ):
-                card.facing = "back"
+            )
+            flip = _x_ray_flip(gs) or flip
+            # CardArea:emplace (cardarea.lua:38) turns a face-down card face
+            # up unless it stays flipped.
+            card.facing = "back" if flip else "front"
             hand.append(card)
     # Sort hand descending by nominal (matches Lua CardArea:sort 'desc')
     _sort_hand_desc(hand)
+
+
+def _x_ray_flip(gs: dict[str, Any]) -> bool:
+    """X-ray Vision's roll for one card drawn into the hand.
+
+    cardarea.lua:601-605 (and common_events.lua:403-407 for a named card):
+    after the boss's stay_flipped check, under ``modifiers.flipped_cards``
+    every card drawn to G.hand rolls ``'flipped_card'`` and stays face down
+    below ``1/flipped_cards``.
+    """
+    n = (gs.get("modifiers") or {}).get("flipped_cards")
+    return bool(n) and gs["rng"].random("flipped_card") < 1 / n
+
+
+def _sync_hand_size_to_dollars(gs: dict[str, Any]) -> None:
+    """Luxury Tax: -1 hand size per ``minus_hand_size_per_X_dollar`` dollars.
+
+    cardarea.lua:245-251: G.hand's update compares ``floor(dollars/X)``
+    with ``config.last_poll_size`` (nil = 0) every frame and changes the
+    hand size by the difference.  The sim checks after every action and
+    before every draw, which is where vanilla's frames would have caught up.
+    """
+    x = (gs.get("modifiers") or {}).get("minus_hand_size_per_X_dollar")
+    if not x:
+        return
+    poll = math.floor(gs.get("dollars", 0) / x)
+    last = gs.get("hand_last_poll_size", 0)
+    if poll != last:
+        gs["hand_size"] = gs.get("hand_size", 8) + (last - poll)
+        gs["hand_last_poll_size"] = poll
 
 
 def _joker_end_of_round_effects(gs: dict[str, Any]) -> dict[str, Any]:
@@ -2160,9 +2302,13 @@ def _round_won(gs: dict[str, Any]) -> None:
     #    Bell's forced flag goes too (state_events.lua:279).
     # ------------------------------------------------------------------
     for card in deck:
-        # Only clear blind-applied debuffs; perishable debuffs are permanent
+        # Only clear blind-applied debuffs; perishable and Double or
+        # Nothing (perma_debuff, card.lua:4158) debuffs are permanent
         if getattr(card, "debuff", False):
-            if not (getattr(card, "perishable", False) and getattr(card, "perish_tally", 1) <= 0):
+            if not (
+                (getattr(card, "perishable", False) and getattr(card, "perish_tally", 1) <= 0)
+                or card.ability.get("perma_debuff")
+            ):
                 card.debuff = False
         card.facing = "front"
     for j in jokers:
@@ -2208,6 +2354,17 @@ def _round_won(gs: dict[str, Any]) -> None:
             ability = getattr(card, "ability", None)
             if isinstance(ability, dict):
                 ability.pop("played_this_ante", None)
+        # Typecast (state_events.lua:240-247), before the ante goes up: at
+        # the boss of set_eternal_ante every joker turns Eternal (if it can,
+        # card.lua:506), and at set_joker_slots_ante the slots drop to 0.
+        mods = gs.get("modifiers") or {}
+        if mods.get("set_eternal_ante") == rr["ante"]:
+            from jackdaw.engine.card_factory import set_eternal_checked
+
+            for j in jokers:
+                set_eternal_checked(j)
+        if mods.get("set_joker_slots_ante") == rr["ante"]:
+            gs["joker_slots"] = 0
         _advance_ante(gs)
         gs["blind_on_deck"] = "Small"
 
@@ -2230,6 +2387,18 @@ def _round_won(gs: dict[str, Any]) -> None:
         joker_dollars=eor.get("dollars_earned", 0),
     )
     gs["round_earnings"] = earnings
+
+    # evaluate_round runs the back's 'eval' trigger (state_events.lua:1163):
+    # the Anaglyph Deck queues add_tag(Tag('tag_double')) after a boss
+    # (back.lua:111-120; last_blind is the blind just beaten).
+    from jackdaw.engine.back import Back
+
+    back_key = gs.get("selected_back_key") or "b_red"
+    back_effect = Back(back_key).trigger_effect("eval", boss_defeated=blind_on_deck == "Boss")
+    if back_effect and back_effect.get("create_tag"):
+        tag_key = back_effect["create_tag"]
+        _award_tag(gs, tag_key, source=back_key)
+        _check_double_tag(gs, tag_key)
 
     # ------------------------------------------------------------------
     # 11. Phase → ROUND_EVAL
@@ -2312,9 +2481,9 @@ def _apply_setting_blind_mutations(
             blind = gs.get("blind")
             if blind:
                 blind.disabled = True
-                # Un-debuff all playing cards
+                # Un-debuff all playing cards (a perma_debuff stays)
                 for card in gs.get("deck", []):
-                    card.debuff = False
+                    card.set_debuff(False)
 
         # Madness: destroy a random OTHER joker.  Vanilla's pool excludes
         # SELF, eternals, and getting_sliced cards, in board order
@@ -2924,7 +3093,14 @@ def _fire_shop_tags(gs: dict[str, Any], rerolled: bool) -> None:
             ]
             used_v = {k: True for k in gs.get("used_vouchers", [])}
             ante = gs.get("round_resets", {}).get("ante", 1)
-            v_key = get_next_voucher_key(rng, used_v, in_shop, from_tag=True, ante=ante)
+            v_key = get_next_voucher_key(
+                rng,
+                used_v,
+                in_shop,
+                from_tag=True,
+                ante=ante,
+                banned_keys=gs.get("banned_keys"),
+            )
             if v_key:
                 voucher = create_voucher(v_key)
                 voucher.set_cost(
@@ -2938,6 +3114,12 @@ def _fire_shop_tags(gs: dict[str, Any], rerolled: bool) -> None:
 
         result = tag.apply("shop_final_pass", gs, rng=rng)
         if result is not None and result.coupon:
+            # One Coupon Tag per shop: it applies only while
+            # G.GAME.shop_free is unset and sets it (tag.lua:448-449);
+            # cash_out clears it.  Otherwise it waits for the next shop.
+            if gs.get("shop_free"):
+                continue
+            gs["shop_free"] = True
             for c in gs.get("shop_cards", []) + gs.get("shop_boosters", []):
                 # couponed flag (not a bare cost=0) so reprice_shop keeps it.
                 c.ability["couponed"] = True
@@ -2971,12 +3153,7 @@ def _reroll_shop_cards(gs: dict[str, Any]) -> None:
     Matches the repopulate step of ``reroll_shop``
     (``button_callbacks.lua:2855``).
     """
-    from jackdaw.engine.card_factory import create_card
-    from jackdaw.engine.shop import (
-        apply_illusion_shop_edition,
-        apply_store_joker_create_tag,
-        select_shop_card_type,
-    )
+    from jackdaw.engine.shop import create_card_for_shop
 
     rng = gs.get("rng")
     if rng is None:
@@ -2989,45 +3166,10 @@ def _reroll_shop_cards(gs: dict[str, Any]) -> None:
 
     ante = gs.get("round_resets", {}).get("ante", 1)
     shop_joker_max: int = gs.get("shop", {}).get("joker_max", 2)
-    has_illusion = bool((gs.get("used_vouchers") or {}).get("v_illusion"))
-
-    new_cards = []
-    for _ in range(shop_joker_max):
-        tag_card = apply_store_joker_create_tag(gs, rng, ante)
-        if tag_card is not None:
-            new_cards.append(tag_card)
-            continue
-        card_type = select_shop_card_type(
-            rng,
-            ante,
-            joker_rate=gs.get("joker_rate", 20.0),
-            tarot_rate=gs.get("tarot_rate", 4.0),
-            planet_rate=gs.get("planet_rate", 4.0),
-            spectral_rate=gs.get("spectral_rate", 0.0),
-            playing_card_rate=gs.get("playing_card_rate", 0.0),
-            has_illusion=has_illusion,
-        )
-        card = create_card(
-            card_type,
-            rng,
-            ante,
-            area="shop",
-            # Shop cards are never soulable (UI_definitions.lua:776
-            # passes nil): The Soul / Black Hole cannot appear in a
-            # shop and no 'soul_*' roll is consumed.  This reroll loop
-            # missed the populate_shop fix and left the True default —
-            # every reroll slot burned a phantom soul roll, and
-            # LSMORS4J's hit 0.99963 > 0.997, forcing a c_black_hole
-            # into the rerolled shop (live: c_venus).
-            soulable=False,
-            append="sho",
-            game_state=gs,
-        )
-        if card_type in ("Base", "Enhanced") and has_illusion:
-            apply_illusion_shop_edition(rng, card)
-        new_cards.append(card)
-
-    gs["shop_cards"] = new_cards
+    # Shop cards are never soulable (UI_definitions.lua:776 passes nil);
+    # this loop once missed that and burned a phantom soul roll per slot
+    # (LSMORS4J: a c_black_hole where live showed c_venus).
+    gs["shop_cards"] = [create_card_for_shop(gs, rng, ante) for _ in range(shop_joker_max)]
     # Pending edition tags also claim rerolled jokers (vanilla behavior).
     _fire_shop_tags(gs, rerolled=True)
 
@@ -3045,6 +3187,19 @@ def _all_cards_set_cost_pass(gs: dict[str, Any]) -> None:
     from jackdaw.engine.shop import reprice_shop
 
     reprice_shop(gs)
+
+
+def _inflate(gs: dict[str, Any]) -> None:
+    """Inflation challenge: every purchase raises all prices by $1.
+
+    buy_from_shop (button_callbacks.lua:2455-2462), Card:open (card.lua:1800,
+    tag packs included) and Card:redeem (card.lua:1858): under
+    ``modifiers.inflation``, ``G.GAME.inflation`` goes up by 1 and every
+    card re-runs set_cost (card.lua:370 adds the inflation to extra_cost).
+    """
+    if (gs.get("modifiers") or {}).get("inflation"):
+        gs["inflation"] = gs.get("inflation", 0) + 1
+        _all_cards_set_cost_pass(gs)
 
 
 def _get_card_set(card: Any) -> str:
@@ -3356,11 +3511,15 @@ def _press_play(
 # ---------------------------------------------------------------------------
 
 
-def _check_double_tag(gs: dict[str, Any], awarded_tag_key: str) -> None:
+def _check_double_tag(
+    gs: dict[str, Any], awarded_tag_key: str, orbital_hand: str | None = None
+) -> None:
     """Each held Double Tag converts into a copy of the next tag acquired.
 
     tag.lua 'tag_added' context: the Double is consumed and a duplicate of
-    the new tag is added; a Double never duplicates another Double.
+    the new tag is added; a Double never duplicates another Double.  The
+    copy keeps the original's Orbital hand (``G.orbital_hand``,
+    tag.lua:324-328).
 
     BUG HISTORY: this used to read ``gs["tags"]`` — a key nothing writes
     (tags live in ``awarded_tags``) — so Double Tag NEVER duplicated
@@ -3376,7 +3535,8 @@ def _check_double_tag(gs: dict[str, Any], awarded_tag_key: str) -> None:
     awarded: list = gs.setdefault("awarded_tags", [])
     doubles = [e for e in awarded if e.get("key") == "tag_double"]
     for dbl in doubles:
-        dup_result = Tag(awarded_tag_key).apply("immediate", gs, rng=gs.get("rng"))
+        dup = Tag(awarded_tag_key, orbital_hand=orbital_hand)
+        dup_result = dup.apply("immediate", gs, rng=gs.get("rng"))
         awarded.append(
             {
                 "key": awarded_tag_key,

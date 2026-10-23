@@ -45,6 +45,7 @@ import numpy as np
 from jackdaw.engine.actions import (
     Action,
     GamePhase,
+    joker_swap_allowed,
 )
 from jackdaw.engine.actions import (
     BuyCard as EngineBuyCard,
@@ -455,21 +456,23 @@ def _mask_joker_swaps(
     entity_masks: dict[int, np.ndarray],
     jokers: list,
 ) -> None:
-    """Set SwapJokersLeft/Right masks."""
+    """Set SwapJokersLeft/Right masks.
+
+    Every neighbour swap except past the ends, and none that would move a
+    pinned joker (:func:`~jackdaw.engine.actions.joker_swap_allowed`, the
+    executor's own check).
+    """
     n = len(jokers)
     if n <= 1:
         return
-    # SwapJokersLeft: all except index 0 (can't swap leftward from first position)
-    left_mask = np.ones(n, dtype=bool)
-    left_mask[0] = False
-    type_mask[ActionType.SwapJokersLeft] = True
-    entity_masks[ActionType.SwapJokersLeft] = left_mask
-
-    # SwapJokersRight: all except last index
-    right_mask = np.ones(n, dtype=bool)
-    right_mask[n - 1] = False
-    type_mask[ActionType.SwapJokersRight] = True
-    entity_masks[ActionType.SwapJokersRight] = right_mask
+    for action_type, direction in (
+        (ActionType.SwapJokersLeft, -1),
+        (ActionType.SwapJokersRight, +1),
+    ):
+        mask = np.array([joker_swap_allowed(jokers, i, direction) for i in range(n)], dtype=bool)
+        if mask.any():
+            type_mask[action_type] = True
+            entity_masks[action_type] = mask
 
 
 def _mask_hand_swaps(

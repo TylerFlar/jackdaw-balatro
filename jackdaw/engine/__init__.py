@@ -10,6 +10,7 @@ Public API:
 
 from jackdaw.engine.actions import (
     Action,
+    BuyAndUse,
     BuyCard,
     CashOut,
     Discard,
@@ -20,6 +21,7 @@ from jackdaw.engine.actions import (
     PlayHand,
     RedeemVoucher,
     Reroll,
+    RerollBoss,
     SelectBlind,
     SellCard,
     SkipBlind,
@@ -49,6 +51,7 @@ __all__ = [
     "GamePhase",
     "IllegalActionError",
     # Action types
+    "BuyAndUse",
     "BuyCard",
     "CashOut",
     "Discard",
@@ -58,6 +61,7 @@ __all__ = [
     "PlayHand",
     "RedeemVoucher",
     "Reroll",
+    "RerollBoss",
     "SelectBlind",
     "SellCard",
     "SkipBlind",

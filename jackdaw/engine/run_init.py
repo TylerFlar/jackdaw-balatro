@@ -28,7 +28,7 @@ from jackdaw.engine.hand_levels import HandLevels
 from jackdaw.engine.rng import PseudoRandom
 from jackdaw.engine.round_lifecycle import reset_round_targets
 from jackdaw.engine.stakes import apply_stake_modifiers
-from jackdaw.engine.tags import assign_ante_blinds
+from jackdaw.engine.tags import assign_ante_blinds, ensure_orbital_choices
 from jackdaw.engine.vouchers import apply_voucher
 
 # ---------------------------------------------------------------------------
@@ -254,12 +254,15 @@ def initialize_run(
         sp["dollars"] += mutations["dollars_delta"]
     if "ante_scaling" in mutations:
         sp["ante_scaling"] = mutations["ante_scaling"]
+    # Green Deck: back.lua:269-277 writes these into G.GAME.modifiers, where
+    # evaluate_round reads them (state_events.lua:1165-1191).
+    mods = gs["modifiers"]
     if "money_per_hand" in mutations:
-        gs["money_per_hand"] = mutations["money_per_hand"]
+        mods["money_per_hand"] = mutations["money_per_hand"]
     if "money_per_discard" in mutations:
-        gs["money_per_discard"] = mutations["money_per_discard"]
+        mods["money_per_discard"] = mutations["money_per_discard"]
     if "no_interest" in mutations:
-        gs["no_interest"] = True
+        mods["no_interest"] = True
     if "spectral_rate" in mutations:
         gs["spectral_rate"] = mutations["spectral_rate"]
     if "reroll_discount" in mutations:
@@ -273,9 +276,9 @@ def initialize_run(
     if back_config.get("randomize_rank_suit"):
         sp["erratic_suits_and_ranks"] = True
 
-    # Starting consumables (Magic Deck, Ghost Deck) — stored for caller to add
-    starting_consumables: list[str] = mutations.get("starting_consumables", [])
-    gs["starting_consumables"] = starting_consumables
+    # Starting consumables (Magic Deck, Ghost Deck): created at the end, see
+    # _create_starting_cards.
+    back_consumables: list[str] = mutations.get("starting_consumables", [])
 
     # -----------------------------------------------------------------------
     # 5. Apply challenge overrides
@@ -360,12 +363,69 @@ def initialize_run(
     gs.setdefault("discard_pile", [])
 
     # -----------------------------------------------------------------------
+    # 13. Starting cards (back consumables, challenge jokers/consumeables)
+    # -----------------------------------------------------------------------
+    _create_starting_cards(gs, back_consumables, challenge)
+
+    # -----------------------------------------------------------------------
     # Phase — the run starts at blind selection for Small blind
     # -----------------------------------------------------------------------
     gs["phase"] = GamePhase.BLIND_SELECT
     gs["blind_on_deck"] = "Small"
 
+    # Building the first blind-select screen rolls the ante's Orbital Tag
+    # hands (UI_definitions.lua:1506-1516), after the queued start events.
+    ensure_orbital_choices(gs)
+
     return gs
+
+
+def _create_starting_cards(
+    gs: dict[str, Any],
+    back_consumables: list[str],
+    challenge: dict[str, Any] | None,
+) -> None:
+    """Create the cards a back or challenge starts the run with.
+
+    Vanilla creates them in events that Back:apply_to_run and Game:start_run
+    queue, so they run after start_run's synchronous setup (first ante,
+    deck, shuffle, round targets) and their sort_ids follow the deck's.  The
+    queue order is the back's consumables first (back.lua:184-196, queued
+    before the challenge block), then each challenge joker, then each
+    challenge consumeable (game.lua:2067-2088).  Every key is forced, so no
+    RNG is drawn and there is no slot check.
+    """
+    from jackdaw.engine.card_factory import add_joker, create_card
+
+    rng = gs["rng"]
+    ante = gs["round_resets"]["ante"]
+    for key in back_consumables:
+        # create_card('Tarot', G.consumeables, nil, nil, nil, nil, key, 'deck'),
+        # then add_to_deck + emplace (back.lua:189-191).
+        card = create_card(
+            "Tarot",
+            rng,
+            ante,
+            area="",
+            soulable=False,
+            forced_key=key,
+            append="deck",
+            game_state=gs,
+        )
+        gs["consumables"].append(card)
+        card.add_to_deck(gs)
+
+    if not challenge:
+        return
+    for entry in challenge.get("jokers", []):
+        # add_joker(v.id, v.edition, k ~= 1); set_eternal; pinned (game.lua:2071-2073).
+        card = add_joker(entry["id"], gs, entry.get("edition"))
+        if entry.get("eternal"):
+            card.set_eternal(True)
+        if entry.get("pinned"):
+            card.pinned = True
+    for entry in challenge.get("consumeables", []):
+        add_joker(entry["id"], gs)  # game.lua:2083
 
 
 # ---------------------------------------------------------------------------
