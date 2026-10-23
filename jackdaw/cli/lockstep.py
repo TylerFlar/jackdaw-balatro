@@ -49,7 +49,13 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--decks", default="RED", help="Decks to cycle through (RED,BLUE,...)")
     parser.add_argument("--stakes", default="WHITE", help="Stakes to cycle through (WHITE,...)")
     parser.add_argument("--steps", type=int, default=1000, help="Actions per game at most")
-    parser.add_argument("--policy", choices=("smart", "random"), default="smart")
+    parser.add_argument(
+        "--policy",
+        choices=("smart", "random"),
+        default="smart",
+        help="smart (default): plays to get deep, with some random moves; random: a random "
+        "kind of move each step",
+    )
     parser.add_argument("--rng-seed", type=int, default=0, help="Seed for generated run seeds")
     parser.add_argument(
         "--out",
