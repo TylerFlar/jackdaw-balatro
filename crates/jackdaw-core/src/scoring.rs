@@ -520,7 +520,8 @@ impl Game {
             chips: hand_chips,
             mult,
             total,
-            dollars: 0.0,
+            // Every payout of the hand fed `G.GAME.dollar_buffer`; its clearing events run later.
+            dollars: self.rt.dollar_buffer,
             debuffed,
         });
     }

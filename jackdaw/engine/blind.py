@@ -286,6 +286,11 @@ class Blind:
         # only when its demote actually fires (level > 1 — Matador reads it
         # during joker_main, live-verified LS7N21KX).  The old conservative
         # always-True Arm flag here would over-pay Matador on level-1 hands.
+        # A preview (parse_highlighted) runs the same test without the
+        # demote (blind.lua:550-559): selecting a hand above level 1 leaves
+        # `triggered` set, which a discard keeps.
+        if self.name == "The Arm" and check and game_state is not None:
+            self.triggered = game_state["hand_levels"][handname].level > 1
 
         # The Ox (blind.lua:560-569): the hand most played as of the last
         # boss defeat (current_round.most_played_poker_hand, frozen by

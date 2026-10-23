@@ -310,7 +310,7 @@ def _export_pack(gs: dict[str, Any]) -> dict[str, Any] | None:
     return {
         "kind": gs.get("pack_type", ""),
         "choices_remaining": gs.get("pack_choices_remaining", 0),
-        "dealt": [c.sort_id for c in gs.get("pack_hand", []) or [] if id(c) in in_hand],
+        "dealt": sorted(c.sort_id for c in gs.get("pack_hand", []) or [] if id(c) in in_hand),
         "return_phase": plain(gs.get("shop_return_phase", GamePhase.SHOP)),
     }
 

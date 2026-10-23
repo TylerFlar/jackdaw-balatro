@@ -1227,16 +1227,18 @@ def _stencil(card: Card, ctx: JokerContext) -> JokerResult | None:
 
     Card:update keeps ``x_mult = (card_limit - #G.jokers.cards)`` plus one
     per 'Joker Stencil' in G.jokers, debuffed ones included
-    (card.lua:4203-4208); calculate_joker returns it only while a slot is
-    empty (card.lua:3966-3972), however many Stencils there are.
+    (card.lua:4203-4208).  The main step's shared rule scores any joker
+    whose x_mult is above 1 (card.lua:3653-3659), so two Stencils on a full
+    board still give X2 each (G58); the Stencil's own branch returns the
+    same x_mult while a slot is empty (card.lua:3966-3972).
     """
     if ctx.joker_main:
-        empty = ctx.game.joker_slots - ctx.game.joker_count
-        if empty > 0:
-            stencils = sum(
-                1 for j in (ctx.jokers or []) if getattr(j, "center_key", None) == "j_stencil"
-            )
-            return JokerResult(Xmult_mod=empty + stencils)
+        jokers = ctx.jokers or []
+        empty = ctx.game.joker_slots - len(jokers)
+        stencils = sum(1 for j in jokers if getattr(j, "center_key", None) == "j_stencil")
+        x_mult = empty + stencils
+        if x_mult > 1 or empty > 0:
+            return JokerResult(Xmult_mod=x_mult)
     return None
 
 
@@ -1940,7 +1942,9 @@ def _vampire(card: Card, ctx: JokerContext) -> JokerResult | None:
             ):
                 enhanced_count += 1
                 c.vampired = True
-                c.set_ability("c_base")
+                # set_ability stamps hands_played_at_create = G.GAME.hands_played
+                # (card.lua:337), pre-increment during evaluate_play.
+                c.set_ability("c_base", hands_played=ctx.game.hands_played_run)
                 # set_ability re-checks the boss debuff (card.lua:365): a
                 # Stone card stripped under a suit boss is debuffed now.
                 if ctx.blind is not None:
@@ -2503,7 +2507,9 @@ def _midas_mask(card: Card, ctx: JokerContext) -> JokerResult | None:
                 faces.append(c)
         if faces:
             for c in faces:
-                c.set_ability("m_gold")
+                # set_ability stamps hands_played_at_create = G.GAME.hands_played
+                # (card.lua:337), pre-increment during evaluate_play.
+                c.set_ability("m_gold", hands_played=ctx.game.hands_played_run)
                 # set_ability re-checks the boss debuff (card.lua:365)
                 if ctx.blind is not None:
                     ctx.blind.debuff_card(c, pareidolia=ctx.pareidolia, smeared=ctx.smeared)

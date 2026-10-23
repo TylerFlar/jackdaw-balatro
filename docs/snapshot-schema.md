@@ -168,7 +168,7 @@ leaves them out; whether a card is in `G.playing_cards` follows from its area.
 - `kind`: `Arcana`, `Celestial`, `Spectral`, `Standard`, `Buffoon`.
 - `choices_remaining`.
 - `dealt`: `sort_id`s of the cards an Arcana/Spectral pack dealt into the hand
-  that are still held. They return to the deck when the pack closes.
+  that are still held, ascending. They return to the deck when the pack closes.
 - `return_phase`: the phase to return to when the pack closes.
 
 ### `rng`

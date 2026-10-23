@@ -76,7 +76,7 @@ Source: `balatro_source/blind.lua` (Balatro 1.0.1o). 94 rows: 25 function, 42 br
 | blind/branch/Blind:debuff_hand/debuff-h_size_ge | blind.lua:527-529 | branch | debuff.h_size_ge — `self.debuff.h_size_ge and #cards < self.debuff.h_size_ge` | `self.debuff` | unreviewed |  |  |  |  |
 | blind/branch/Blind:debuff_hand/the-eye | blind.lua:535-540 | branch | The Eye — `self.name == "The Eye"` | `self.debuff` | unreviewed |  |  |  |  |
 | blind/branch/Blind:debuff_hand/the-mouth | blind.lua:542-547 | branch | The Mouth — `self.name == "The Mouth"` | `self.debuff` | unreviewed |  |  |  |  |
-| blind/branch/Blind:debuff_hand/the-arm | blind.lua:550-558 | branch | The Arm — `self.name == 'The Arm'` |  | unreviewed |  |  |  |  |
+| blind/branch/Blind:debuff_hand/the-arm | blind.lua:550-558 | branch | The Arm — `self.name == 'The Arm'` |  | verified | crates/jackdaw-core/src/blind.rs::blind_debuff_hand | tests/parity/test_jokers_batch_b.py::test_the_arm_preview_sets_triggered_on_a_discard | G64 |  |
 | blind/branch/Blind:debuff_hand/the-ox | blind.lua:560-568 | branch | The Ox — `self.name == 'The Ox'` |  | gap |  |  | G09 |  |
 | blind/fn/Blind:drawn_to_hand | blind.lua:572-603 | function | `Blind:drawn_to_hand()` |  | unreviewed |  |  |  |  |
 | blind/branch/Blind:drawn_to_hand/cerulean-bell | blind.lua:574-586 | branch | Cerulean Bell — `self.name == 'Cerulean Bell'` | `not self.disabled` | unreviewed |  |  |  |  |

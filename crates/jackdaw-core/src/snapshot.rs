@@ -708,11 +708,18 @@ pub fn export(gs: &GameState) -> Value {
             .collect(),
     );
     let pack = gs.pack.as_ref().map_or(Value::Null, |p| {
+        // The dealt cards still held (a consumable may have destroyed some), ascending.
+        let mut held: Vec<u32> = p
+            .dealt
+            .iter()
+            .copied()
+            .filter(|&id| gs.areas.hand.iter().any(|c| c.sort_id == id))
+            .collect();
+        held.sort_unstable();
         json!({
             "kind": p.kind,
             "choices_remaining": num(p.choices_remaining),
-            // The dealt cards still held: a consumable may have destroyed some.
-            "dealt": p.dealt.iter().filter(|&&id| gs.areas.hand.iter().any(|c| c.sort_id == id)).collect::<Vec<_>>(),
+            "dealt": held,
             "return_phase": p.return_phase.name(),
         })
     });

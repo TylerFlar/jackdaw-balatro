@@ -174,11 +174,13 @@ impl Game {
         for &id in start {
             let v = id.get();
             let mut add = false;
+            // Lua also needs `v.unlocked ~= false or v.rarity == 4`, where `unlocked` comes from
+            // the profile (game.lua:741-751). The engines assume a fully unlocked profile, as the
+            // oracle does (pools.py), so every center passes; the prototypes' flags are a fresh
+            // profile's.
             if ty == PoolType::Enhanced {
                 add = true;
             } else if !(self.gs.sets.used_jokers.contains(v.key) && !showman) {
-                // Lua also requires `v.unlocked ~= false or v.rarity == 4`: profile state. The
-                // sim plays with a fully unlocked profile, so every center passes.
                 if v.set == CenterSet::Voucher {
                     if !self.gs.sets.used_vouchers.contains(v.key) {
                         let requires_met = v

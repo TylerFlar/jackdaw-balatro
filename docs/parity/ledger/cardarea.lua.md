@@ -14,7 +14,7 @@ Source: `balatro_source/cardarea.lua` (Balatro 1.0.1o). 31 rows: 23 function, 4 
 | cardarea/event/CardArea:change_size/immediate:sort | cardarea.lua:104 | event | `Event{}` → :sort | `delta ~= 0` & [event] & `delta > 0 and self.config.real_card_limit > 1 and self == G.hand and se…` | unreviewed |  |  |  |  |
 | cardarea/fn/CardArea:can_highlight | cardarea.lua:113-129 | function | `CardArea:can_highlight(card)` |  | unreviewed |  |  |  |  |
 | cardarea/fn/CardArea:add_to_highlighted | cardarea.lua:131-160 | function | `CardArea:add_to_highlighted(card, silent)` |  | unreviewed |  |  |  |  |
-| cardarea/fn/CardArea:parse_highlighted | cardarea.lua:162-185 | function | `CardArea:parse_highlighted()` |  | gap |  |  | G56 |  |
+| cardarea/fn/CardArea:parse_highlighted | cardarea.lua:162-185 | function | `CardArea:parse_highlighted()` |  | gap |  |  | G56, G64 |  |
 | cardarea/fn/CardArea:remove_from_highlighted | cardarea.lua:187-199 | function | `CardArea:remove_from_highlighted(card, force)` |  | unreviewed |  |  |  |  |
 | cardarea/fn/CardArea:unhighlight_all | cardarea.lua:201-212 | function | `CardArea:unhighlight_all()` |  | unreviewed |  |  |  |  |
 | cardarea/fn/CardArea:set_ranks | cardarea.lua:214-227 | function | `CardArea:set_ranks()` |  | unreviewed |  |  |  |  |

@@ -6,7 +6,7 @@ Source: `balatro_source/game.lua` (Balatro 1.0.1o). 436 rows: 20 function, 11 rn
 
 | id | lua | kind | subject | context | status | rust | test | gap | notes |
 |---|---|---|---|---|---|---|---|---|---|
-| game/fn/Game:init_item_prototypes | game.lua:216-843 | function | `Game:init_item_prototypes()` |  | unreviewed |  |  |  |  |
+| game/fn/Game:init_item_prototypes | game.lua:216-843 | function | `Game:init_item_prototypes()` |  | unreviewed |  |  | G65 | profile unlocks (741-751): both engines assume a fully unlocked profile |
 | game/entity/seal/Gold | game.lua:219 | entity | Seal: `Gold` | named in Card:set_ability, Card:set_seal, Card:add_to_deck, Card:get_p_dollars | unreviewed |  |  |  |  |
 | game/entity/seal/Red | game.lua:220 | entity | Seal: `Red` | named in Card:calculate_seal | unreviewed |  |  |  |  |
 | game/entity/seal/Blue | game.lua:221 | entity | Seal: `Blue` | named in Card:get_end_of_round_effect | unreviewed |  |  |  |  |
