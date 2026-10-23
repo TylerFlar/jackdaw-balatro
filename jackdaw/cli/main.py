@@ -6,6 +6,8 @@ Usage::
     jackdaw validate --category jokers        # run only joker scenarios
     jackdaw validate --scenario joker_joker   # run one scenario
     jackdaw validate --host 127.0.0.1 --port 12346
+    jackdaw lockstep --instances 4 --seeds 200  # organic games against BalatroBot
+    jackdaw lockstep replay BUNDLE            # rerun a divergence bundle on the sim
     jackdaw serve                             # BalatroBot's API on the simulator
     jackdaw serve --port 12346 --fs-root runs/
 """
@@ -27,6 +29,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p_validate = sub.add_parser(
         "validate",
         help="Validate engine against live Balatro via scenario-based testing",
+        description=(
+            "Run the validation scenarios on the live game in lockstep with a shadow "
+            "simulator run; every response is compared with the shadow. See docs/live.md."
+        ),
     )
     p_validate.add_argument(
         "--category",
@@ -54,8 +60,41 @@ def _build_parser() -> argparse.ArgumentParser:
         "--delay",
         type=float,
         default=0.3,
-        help="Seconds between actions for animation watching (default: 0.3)",
+        help="Seconds between actions for animation watching (default: 0.3; 0: none)",
     )
+    p_validate.add_argument("--url", default=None, help="BalatroBot URL (instead of --host/--port)")
+    p_validate.add_argument(
+        "--bundles", default=None, help="Directory for divergence repro bundles"
+    )
+    p_validate.add_argument(
+        "--timeout", type=float, default=30.0, help="Seconds to wait for each live response"
+    )
+    p_validate.add_argument(
+        "--sim",
+        action="store_true",
+        help="Play against the in-process simulator instead (a self-check)",
+    )
+    p_validate.add_argument(
+        "--settle",
+        type=float,
+        default=0.0,
+        help="Seconds to wait after each live answer and compare a fresh gamestate instead",
+    )
+
+    # -- lockstep ------------------------------------------------------------
+    from jackdaw.cli.lockstep import add_arguments as lockstep_arguments
+
+    p_lockstep = sub.add_parser(
+        "lockstep",
+        help="Play organic games against BalatroBot, checking every step against the sim",
+        description=(
+            "Play organic games against one or more BalatroBot instances, each step "
+            "taken by a shadow simulator run first and the live view compared with it; "
+            "divergences are written as repro bundles. 'jackdaw lockstep replay BUNDLE' "
+            "reruns one on the simulator. See docs/live.md."
+        ),
+    )
+    lockstep_arguments(p_lockstep)
 
     # -- serve ---------------------------------------------------------------
     p_serve = sub.add_parser(
@@ -117,8 +156,17 @@ def main(argv: list[str] | None = None) -> None:
                 host=args.host,
                 port=args.port,
                 delay=args.delay,
+                url=args.url,
+                bundle_dir=args.bundles,
+                timeout=args.timeout,
+                sim=args.sim,
+                settle=args.settle,
             )
         )
+    elif args.command == "lockstep":
+        from jackdaw.cli.lockstep import main as lockstep_main
+
+        sys.exit(lockstep_main(args))
     elif args.command == "serve":
         sys.exit(run_serve(args.host, args.port, args.fs_root, args.debug))
 

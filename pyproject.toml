@@ -62,11 +62,12 @@ cache-keys = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = ["-v", "--tb=short", "-m", "not benchmark and not live"]
+addopts = ["-v", "--tb=short", "-m", "not benchmark and not live and not lockstep"]
 markers = [
     "benchmark: performance benchmarks (deselect with -m 'not benchmark')",
     "live: requires a running balatrobot instance (deselect with -m 'not live')",
     "slow: tests that take >10s (run with -m slow or include via -m 'not benchmark and not live')",
+    "lockstep: long sim-against-sim lockstep runs over jackdaw serve (run with -m lockstep)",
 ]
 
 [tool.ruff]

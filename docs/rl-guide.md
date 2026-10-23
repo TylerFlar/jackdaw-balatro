@@ -417,15 +417,15 @@ for _ in range(1000):
 To validate your agent against real Balatro, swap the adapter:
 
 ```python
-from jackdaw.bridge import LiveBackend
-from jackdaw.env import BalatroEnvironment, BridgeAdapter
+from jackdaw.bridge import LiveAdapter, LiveBackend
+from jackdaw.env import BalatroEnvironment
 
 env = BalatroEnvironment(
-    adapter_factory=lambda: BridgeAdapter(LiveBackend("127.0.0.1", 12346))
+    adapter_factory=lambda: LiveAdapter(LiveBackend("127.0.0.1", 12346), bundle_dir="bundles")
 )
 # Same observations and actions; the mask is narrowed to what BalatroBot executes
 ```
 
-You must have Balatro running with BalatroBot configured to listen on the same host and port.
+You must have Balatro running with BalatroBot configured to listen on the same host and port. `LiveAdapter` (also what `BridgeAdapter(LiveBackend(...))` gives) keeps a shadow run in the Rust engine: every action is taken by the shadow first, then by the game, and the game's answer is compared with the shadow. `info["game"]` is the shadow, and the observation and mask come from it, exactly as in training. An unexplained difference raises `DivergenceError` and writes a repro bundle; see [Lockstep against the live game](live).
 
-The simulator follows vanilla, which allows a few things BalatroBot's endpoints refuse: using a consumable at blind select, on the cash-out screen or while a pack is open, selling while a pack is open or at blind select, and using a card-targeting consumable in the shop. Over a `BridgeAdapter` those actions are masked out (and `SimBackend`, which runs BalatroBot's endpoints on the simulator, refuses them the same way), so an agent is never offered a move the bot can't make. `Game.legal_actions(Legality.BALATROBOT)` gives the same list from the Rust engine. See [BalatroBot on the simulator](balatrobot) for the full policy and `jackdaw serve`.
+The simulator follows vanilla, which allows a few things BalatroBot's endpoints refuse: using a consumable at blind select, on the cash-out screen or while a pack is open, selling while a pack is open or at blind select, and using a card-targeting consumable in the shop. Over a `LiveAdapter` (and a `BridgeAdapter`) those actions are masked out (and `SimBackend`, which runs BalatroBot's endpoints on the simulator, refuses them the same way), so an agent is never offered a move the bot can't make. `Game.legal_actions(Legality.BALATROBOT)` gives the same list from the Rust engine. See [BalatroBot on the simulator](balatrobot) for the full policy and `jackdaw serve`.

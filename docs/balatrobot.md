@@ -65,6 +65,12 @@ in and out) behind all of these.
 requests, the mask and legal actions follow BALATROBOT legality, and a shadow run in the Python
 engine supplies `raw_state` and is checked against every response (`DivergenceError`).
 
+**`LiveAdapter`** (`jackdaw.bridge`; also what `BridgeAdapter(LiveBackend(...))` gives) plays the
+live game the same way, with a shadow run in the Rust engine: each request is taken by the
+shadow through this layer first, then sent to the game, and the game's view is compared with the
+shadow's `bot_view()`. Known Steamodded and BalatroBot differences are handled by a deviation
+catalog; `jackdaw lockstep` runs it at scale. See [Lockstep against the live game](live).
+
 ## Command-space policy
 
 The engine's action set and BalatroBot's endpoints don't line up one to one.

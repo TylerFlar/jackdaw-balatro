@@ -52,17 +52,19 @@ See the [RL Project Guide](https://tylerflar.github.io/jackdaw-balatro/rl-guide)
 
 ## Live Validation
 
-Swap the adapter to play against real Balatro via [BalatroBot](https://github.com/townofdon/balatrobot) — the interface is identical:
+Swap the adapter to play against real Balatro via [BalatroBot](https://github.com/coder/balatrobot) — the interface is identical. `LiveAdapter` keeps a shadow run in the simulator, checks every live answer against it, and takes observations and masks from it, so an agent sees exactly what it saw in training:
 
 ```python
-from jackdaw.bridge import LiveBackend
-from jackdaw.env import BalatroEnvironment, BridgeAdapter
+from jackdaw.bridge import LiveAdapter, LiveBackend
+from jackdaw.env import BalatroEnvironment
 
 env = BalatroEnvironment(
-    adapter_factory=lambda: BridgeAdapter(LiveBackend("127.0.0.1", 12346))
+    adapter_factory=lambda: LiveAdapter(LiveBackend("127.0.0.1", 12346))
 )
 # Same obs and actions; the mask only offers what BalatroBot can execute
 ```
+
+`jackdaw lockstep` plays organic games on one or more BalatroBot instances this way and writes a repro bundle for every divergence; `jackdaw lockstep replay` reruns one on the simulator. See [Lockstep against the live game](https://tylerflar.github.io/jackdaw-balatro/live).
 
 ## Architecture
 
@@ -87,7 +89,7 @@ jackdaw/
     game_interface.py GameAdapter protocol (DirectAdapter, OracleAdapter, BridgeAdapter)
     agents.py         Agent protocol + RandomAgent baseline
 
-  bridge/           Validation bridge to live Balatro via BalatroBot
+  bridge/           BalatroBot backends; LiveAdapter, the deviation catalog, lockstep
   cli/              CLI tools & 250+ validation scenarios
 ```
 
@@ -98,6 +100,9 @@ jackdaw validate                          # Run all ~250 validation scenarios
 jackdaw validate --category jokers        # Joker scenarios only
 jackdaw validate --scenario joker_jolly   # Single scenario
 jackdaw validate --host 127.0.0.1 --port 12346
+jackdaw lockstep --instances 4 --seeds 200  # Organic games on 4 BalatroBot instances
+jackdaw lockstep replay BUNDLE            # Rerun a divergence on the simulator
+jackdaw serve                             # BalatroBot's API on the simulator
 ```
 
 > One of the biggest ways to contribute is by writing custom validation scenarios! See the [validation docs](https://tylerflar.github.io/jackdaw-balatro/validation) to get started.
@@ -112,6 +117,7 @@ pytest                 # run tests
 pytest --cov=jackdaw   # with coverage
 pytest -m benchmark    # performance benchmarks
 pytest -m live         # live validation (needs BalatroBot)
+pytest -m lockstep     # long sim-against-sim lockstep runs over jackdaw serve
 ruff check .           # lint
 ruff format .          # format
 ```

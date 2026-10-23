@@ -218,3 +218,6 @@ checkpoints/
 jackdaw/_core*.pyd
 jackdaw/_core*.so
 jackdaw/_core*.dll
+
+# jackdaw lockstep output (bundles, summaries)
+lockstep-out/

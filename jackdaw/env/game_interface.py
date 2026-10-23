@@ -8,13 +8,16 @@ they never touch raw ``game_state`` dicts or JSON-RPC directly.
 Architecture::
 
                     ┌─ DirectAdapter(Rust engine, jackdaw.core.Game)   ← training
-    [Agent/Model] → ├─ OracleAdapter(Python engine, raw_state dict)    ← parity checks
-                    └─ BridgeAdapter(SimBackend or LiveBackend)        ← validation
+                    ├─ OracleAdapter(Python engine, raw_state dict)    ← parity checks
+    [Agent/Model] → ├─ BridgeAdapter(SimBackend)                       ← bot protocol vs oracle
+                    └─ LiveAdapter(LiveBackend), Rust shadow run       ← the live game
 
-:class:`DirectAdapter` exposes its run as ``game`` (a live
-:class:`jackdaw.core.Game`); the Python-engine adapters expose the engine's
-dict as ``raw_state``.  The Python engine is the reference the Rust one is
-checked against until it is retired.
+:class:`DirectAdapter` and :class:`~jackdaw.bridge.live.LiveAdapter` expose
+their run as ``game`` (a live :class:`jackdaw.core.Game`; for the live game,
+its shadow); the Python-engine adapters expose the engine's dict as
+``raw_state``.  The Python engine is the reference the Rust one is checked
+against until it is retired.  ``BridgeAdapter(LiveBackend(...))`` is a
+``LiveAdapter``.
 """
 
 from __future__ import annotations
@@ -25,6 +28,7 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 import numpy as np
 
+from jackdaw.bridge.live import DivergenceError
 from jackdaw.engine.actions import Action, GamePhase
 from jackdaw.env.action_space import ActionMask, ActionType
 
@@ -308,36 +312,8 @@ class OracleAdapter:
 
 
 # ---------------------------------------------------------------------------
-# BridgeAdapter — wraps any Backend (SimBackend or LiveBackend)
+# BridgeAdapter — BalatroBot's API on the simulator, checked against the oracle
 # ---------------------------------------------------------------------------
-
-# The balatrobot endpoint each factored action type is sent to; None for the
-# sim-only actions, which have no endpoint.
-_BOT_METHOD_FOR_ACTION: dict[ActionType, str | None] = {
-    ActionType.PlayHand: "play",
-    ActionType.Discard: "discard",
-    ActionType.SelectBlind: "select",
-    ActionType.SkipBlind: "skip",
-    ActionType.CashOut: "cash_out",
-    ActionType.Reroll: "reroll",
-    ActionType.NextRound: "next_round",
-    ActionType.SkipPack: "pack",
-    ActionType.BuyCard: "buy",
-    ActionType.SellJoker: "sell",
-    ActionType.SellConsumable: "sell",
-    ActionType.UseConsumable: "use",
-    ActionType.RedeemVoucher: "buy",
-    ActionType.OpenBooster: "buy",
-    ActionType.PickPackCard: "pack",
-    ActionType.SwapJokersLeft: "rearrange",
-    ActionType.SwapJokersRight: "rearrange",
-    ActionType.SwapHandLeft: "rearrange",
-    ActionType.SwapHandRight: "rearrange",
-    ActionType.SortHandRank: "rearrange",
-    ActionType.SortHandSuit: "rearrange",
-    ActionType.RerollBoss: None,
-    ActionType.BuyAndUse: None,
-}
 
 # The bot view's ``state`` for each engine phase.
 _BOT_STATE: dict[GamePhase, str] = {
@@ -350,44 +326,39 @@ _BOT_STATE: dict[GamePhase, str] = {
 }
 
 
-class DivergenceError(RuntimeError):
-    """The simulator behind the bot protocol and the adapter's shadow run no
-    longer agree on the game state."""
-
-
 class BridgeAdapter:
     """Adapter that plays through BalatroBot's JSON-RPC API.
 
-    Works with both :class:`~jackdaw.bridge.backend.SimBackend` (BalatroBot's
-    API on the Rust simulator, in-process) and
-    :class:`~jackdaw.bridge.backend.LiveBackend` (HTTP proxy to real Balatro).
+    **SimBackend** (:class:`~jackdaw.bridge.backend.SimBackend`, BalatroBot's
+    API on the Rust simulator, in-process).  Each action goes out as the
+    request the bot layer translates it to (``SortHand`` and the swaps as
+    ``rearrange`` permutations).  The adapter also keeps a *shadow* run in the
+    Python engine, stepped with the same moves; ``raw_state`` is the shadow's
+    state dict (what the observation and mask code reads), and after every step
+    the shadow is checked against the bot's view (:class:`DivergenceError` on a
+    difference).  Legal actions and the mask follow BALATROBOT legality,
+    computed by the simulator: only what the live bot executes.
 
-    **SimBackend.**  Each action goes out as the request the bot layer
-    translates it to (``SortHand`` and the swaps as ``rearrange``
-    permutations).  The adapter also keeps a *shadow* run in the Python engine,
-    stepped with the same moves; ``raw_state`` is the shadow's state dict (what
-    the observation and mask code reads), and after every step the shadow is
-    checked against the bot's view (:class:`DivergenceError` on a difference).
-    Legal actions and the mask follow BALATROBOT legality, computed by the
-    simulator: only what the live bot executes.
-
-    **LiveBackend.**  ``raw_state`` is the last response converted by
-    :func:`~jackdaw.bridge.balatrobot_adapter.bot_state_to_game_state`, and
-    legality is the Python approximation in
-    :mod:`jackdaw.bridge.balatrobot_adapter`.
+    **Any other backend** (:class:`~jackdaw.bridge.backend.LiveBackend`, the
+    live game): ``BridgeAdapter(backend)`` is a
+    :class:`~jackdaw.bridge.live.LiveAdapter`, which shadows the live run in the
+    Rust engine, checks every response against it and takes observations,
+    masks and legal actions from the shadow (``docs/live.md``).
     """
+
+    def __new__(cls, backend: Any, *args: Any, **kwargs: Any) -> Any:
+        from jackdaw.bridge.backend import SimBackend
+
+        if not isinstance(backend, SimBackend):
+            from jackdaw.bridge.live import LiveAdapter
+
+            return LiveAdapter(backend, *args, **kwargs)
+        return super().__new__(cls)
 
     def __init__(self, backend: Any) -> None:
         self._backend = backend
         self._last_response: dict[str, Any] = {}
-        self._last_gs: dict[str, Any] = {}
         self._shadow: dict[str, Any] | None = None
-
-    def _sim(self) -> Any:
-        """The SimBackend, or None for any other backend."""
-        from jackdaw.bridge.backend import SimBackend
-
-        return self._backend if isinstance(self._backend, SimBackend) else None
 
     def reset(
         self,
@@ -400,6 +371,7 @@ class BridgeAdapter:
         """Start a run. BalatroBot's ``start`` has no challenge argument, so
         ``challenge`` is ignored, and a back the bot can't name plays as Red."""
         from jackdaw.bridge.backend import DECK_FROM_BOT, STAKE_FROM_BOT
+        from jackdaw.engine.run_init import initialize_run
 
         # Reverse-map engine keys to balatrobot enum strings
         deck_to_bot = {v: k for k, v in DECK_FROM_BOT.items()}
@@ -413,41 +385,28 @@ class BridgeAdapter:
         # ``start`` needs the main menu.
         self._backend.handle("menu", {})
         self._last_response = self._backend.handle("start", params)
-        if self._sim() is not None:
-            from jackdaw.engine.run_init import initialize_run
-
-            gs = initialize_run(
-                DECK_FROM_BOT[params["deck"]], STAKE_FROM_BOT[params["stake"]], seed
-            )
-            gs["phase"] = GamePhase.BLIND_SELECT
-            gs["blind_on_deck"] = "Small"
-            self._shadow = gs
-            self._check_shadow("start")
-        else:
-            self._shadow = None
-        self._last_gs = self._build_gs()
-        return _snapshot(self._last_gs)
+        gs = initialize_run(DECK_FROM_BOT[params["deck"]], STAKE_FROM_BOT[params["stake"]], seed)
+        gs["phase"] = GamePhase.BLIND_SELECT
+        gs["blind_on_deck"] = "Small"
+        self._shadow = gs
+        self._check_shadow("start")
+        return _snapshot(gs)
 
     def step(self, action: Action) -> GameState:
-        sim = self._sim()
-        if sim is not None and self._shadow is not None:
-            request = sim.request_for(action)
-            if request is None:
-                raise ValueError(f"{type(action).__name__} has no BalatroBot request")
-            method, params = request
-            refusal = sim.check(method, params)
-            if refusal is not None:
-                raise refusal
-            self._step_shadow(action, method, params)
-            self._last_response = sim.handle(method, params)
-            self._check_shadow(method)
-        else:
-            from jackdaw.bridge.balatrobot_adapter import action_to_rpc
-
-            rpc = action_to_rpc(action, self._last_gs)
-            self._last_response = self._backend.handle(rpc["method"], rpc["params"])
-        self._last_gs = self._build_gs()
-        return _snapshot(self._last_gs)
+        if self._shadow is None:
+            raise RuntimeError("BridgeAdapter: call reset() first")
+        sim = self._backend
+        request = sim.request_for(action)
+        if request is None:
+            raise ValueError(f"{type(action).__name__} has no BalatroBot request")
+        method, params = request
+        refusal = sim.check(method, params)
+        if refusal is not None:
+            raise refusal
+        self._step_shadow(action, method, params)
+        self._last_response = sim.handle(method, params)
+        self._check_shadow(method)
+        return _snapshot(self._shadow)
 
     def get_legal_actions(self) -> list[Action]:
         """Legal actions the balatrobot protocol will execute.
@@ -455,15 +414,7 @@ class BridgeAdapter:
         The engine follows vanilla, which allows more than balatrobot's
         endpoints accept (e.g. using a consumable while a pack is open).
         """
-        sim = self._sim()
-        if sim is not None and self._shadow is not None:
-            return sim.legal_actions("balatrobot")
-
-        from jackdaw.bridge.balatrobot_adapter import bot_accepts
-        from jackdaw.engine.actions import get_legal_actions as engine_legal
-
-        gs = self.raw_state
-        return [a for a in engine_legal(gs) if bot_accepts(a, gs)]
+        return self._backend.legal_actions("balatrobot")
 
     def restrict_mask(self, mask: ActionMask) -> ActionMask:
         """Narrow an action mask to what the balatrobot protocol will
@@ -473,39 +424,12 @@ class BridgeAdapter:
         adapters that define it, so agents playing over the bridge are never
         offered an action the bot refuses.
         """
-        if self._sim() is not None and self._shadow is not None:
-            return self._restrict_to_legal(mask)
-
-        from jackdaw.bridge.balatrobot_adapter import bot_refusal
-
-        gs = self.raw_state
-        for type_idx in np.nonzero(mask.type_mask)[0]:
-            at = ActionType(int(type_idx))
-            method = _BOT_METHOD_FOR_ACTION[at]
-            if method is None:
-                usable = False
-            elif at == ActionType.UseConsumable:
-                # Judged per consumable: use.lua refuses card-selecting
-                # ones outside SELECTING_HAND.
-                entity_mask = mask.entity_masks[at]
-                for i in np.nonzero(entity_mask)[0]:
-                    if bot_refusal(method, {"consumable": int(i)}, gs) is not None:
-                        entity_mask[i] = False
-                usable = bool(entity_mask.any())
-            else:
-                usable = bot_refusal(method, {}, gs) is None
-            if not usable:
-                mask.type_mask[at] = False
-                mask.entity_masks.pop(at, None)
-        return mask
+        return self._restrict_to_legal(mask)
 
     @property
     def raw_state(self) -> dict[str, Any]:
-        # SimBackend: the shadow run's live engine dict
-        if self._shadow is not None:
-            return self._shadow
-        # LiveBackend / fallback: return converted state
-        return self._last_gs
+        """The shadow run's live engine dict."""
+        return self._shadow if self._shadow is not None else {}
 
     @property
     def done(self) -> bool:
@@ -514,22 +438,9 @@ class BridgeAdapter:
 
     @property
     def won(self) -> bool:
-        return run_won(self._last_gs)
+        return run_won(self.raw_state)
 
     # -- internal -----------------------------------------------------------
-
-    def _build_gs(self) -> dict[str, Any]:
-        """Build a game_state dict from the last bridge response.
-
-        For SimBackend, the shadow run's engine dict.
-        For LiveBackend, converts the JSON response.
-        """
-        if self._shadow is not None:
-            return self._shadow
-
-        from jackdaw.bridge.balatrobot_adapter import bot_state_to_game_state
-
-        return bot_state_to_game_state(self._last_response)
 
     def _restrict_to_legal(self, mask: ActionMask) -> ActionMask:
         """Keep the action types, and the entities of entity-targeted types,

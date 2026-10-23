@@ -92,7 +92,8 @@ branch.step(Discard(card_indices=(5, 6, 7)))
 
 `preview_play` runs the actual step on a copy, so it includes every joker, enhancement, edition,
 seal, the boss and the RNG. The run itself is unchanged. `clone()` is cheap enough for tree
-search.
+search. `scoring_cards(positions)` gives the hand those cards make and which of them would score
+(`("Pair", [1, 3])`), without playing them.
 
 ## Building a state
 
@@ -120,6 +121,9 @@ The additions go through the same operations as BalatroBot's debug commands `add
   [schema](snapshot-schema)). It is plain JSON-compatible data and is also the save format;
   `Game.from_dict(snapshot)` restores it exactly.
 - `state_hash()` is the SHA-256 digest of the canonical snapshot. Equal states have equal hashes.
+- `replace_state(snapshot)` loads an edited snapshot into the run at the same decision point,
+  keeping what a snapshot doesn't carry (the card-area settings BalatroBot's view reports, the
+  hand's highlights). The live lockstep uses it to copy live values into its shadow run.
 
 ## BalatroBot
 
@@ -128,6 +132,8 @@ The additions go through the same operations as BalatroBot's debug commands `add
 - `bot_request(action)` returns the `(method, params)` request that performs an action live, or
   `None` for a sim-only action.
 - `jackdaw serve` runs a BalatroBot-compatible JSON-RPC server on the simulator.
+- `jackdaw.bridge.LiveAdapter` plays the live game in lockstep with a `Game` as its shadow, and
+  `jackdaw lockstep` does it at scale: see [Lockstep against the live game](live).
 
 See [BalatroBot on the simulator](balatrobot).
 

@@ -145,6 +145,88 @@ impl Game {
         self.inner.snapshot().to_string()
     }
 
+    /// Replace the run's state with a canonical snapshot (JSON text) at the same decision point,
+    /// keeping the runtime a snapshot doesn't carry: the card-area memo BalatroBot's view reads
+    /// (the deck's limit, the shop's voucher slots, a removed shop's areas) and the hand's
+    /// highlights, except that Cerulean Bell's forced cards follow the snapshot. The live
+    /// lockstep (`jackdaw.bridge.live`) copies values the live game reports into its shadow run
+    /// this way; `from_snapshot` would restart that memo (as `load` does).
+    fn replace_state(&mut self, text: &str) -> PyResult<()> {
+        let fresh = game_from_snapshot(text)?;
+        let old = &self.inner;
+        if fresh.gs.phase != old.gs.phase {
+            return Err(value_error(format!(
+                "replace_state: the snapshot is at {}, the run at {}",
+                fresh.gs.phase.name(),
+                old.gs.phase.name()
+            )));
+        }
+        let was_forced = |id: u32| {
+            old.gs
+                .areas
+                .hand
+                .iter()
+                .any(|c| c.sort_id == id && c.ability.forced_selection)
+        };
+        let hand = &fresh.gs.areas.hand;
+        let mut highlighted: Vec<u32> = old
+            .rt
+            .highlighted
+            .iter()
+            .copied()
+            .filter(|&id| {
+                hand.iter()
+                    .find(|c| c.sort_id == id)
+                    .is_some_and(|c| c.ability.forced_selection || !was_forced(id))
+            })
+            .collect();
+        for c in hand {
+            if c.ability.forced_selection && !highlighted.contains(&c.sort_id) {
+                highlighted.push(c.sort_id);
+            }
+        }
+        let mut rt = old.rt.clone();
+        rt.highlighted = highlighted;
+        // `from_state` already ran a frame of `Card:update` on the new cards.
+        self.inner = jackdaw_core::game::Game { gs: fresh.gs, rt };
+        Ok(())
+    }
+
+    /// The poker hand the hand cards at ``positions`` make and the hand positions of the cards
+    /// that would score, as ``G.FUNCS.evaluate_play`` builds its scoring hand
+    /// (state_events.lua:571-600): the best hand's cards plus every Stone Card, or every card
+    /// with Splash. ``None`` for no cards, too many, or a position past the hand.
+    fn scoring_cards(&self, positions: Vec<usize>) -> Option<(String, Vec<usize>)> {
+        use jackdaw_core::hand_eval::{MAX_CARDS, get_poker_hand_info};
+        let hand = &self.inner.gs.areas.hand;
+        let mut pos = positions;
+        pos.sort_unstable();
+        pos.dedup();
+        if pos.is_empty() || pos.len() > MAX_CARDS || pos.iter().any(|&p| p >= hand.len()) {
+            return None;
+        }
+        let cards: Vec<jackdaw_core::card::Card> = pos.iter().map(|&p| hand[p].clone()).collect();
+        let info = get_poker_hand_info(&self.inner.eval_cards(&cards), self.inner.eval_flags());
+        let text = info.hand?;
+        let mut scoring: Vec<usize> = info
+            .scoring
+            .as_slice()
+            .iter()
+            .map(|&i| pos[i as usize])
+            .collect();
+        if self.inner.has_joker("Splash") {
+            scoring.clone_from(&pos);
+        } else {
+            for (k, c) in cards.iter().enumerate() {
+                if c.is_stone() && !scoring.contains(&pos[k]) {
+                    scoring.push(pos[k]);
+                }
+            }
+        }
+        scoring.sort_unstable();
+        Some((text.name().to_owned(), scoring))
+    }
+
     /// One section of the snapshot (JSON text) without exporting the rest: an area (`"hand"`,
     /// `"jokers"`, `"consumables"`, `"deck"`, `"discard"`, `"play"`, `"shop_jokers"`,
     /// `"shop_vouchers"`, `"shop_booster"`, `"pack_cards"`), `"blind"`, `"hands"`, `"pack"`,

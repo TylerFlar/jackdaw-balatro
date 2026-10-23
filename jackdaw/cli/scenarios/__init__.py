@@ -1,8 +1,10 @@
 """Scenario-based validation — compare jackdaw engine against live Balatro.
 
-Each scenario sets up a specific game state on both the sim and live backends
-(using ``add``/``set`` debug commands), executes actions, and compares the
-resulting game state.
+Each scenario plays on a lockstep (:class:`~jackdaw.bridge.live.LiveAdapter`):
+it sets up a game state with BalatroBot's ``add``/``set`` debug commands and
+executes actions, each of which goes to the shadow run (the simulator) and to
+the live game, with the live view compared against the shadow's after every
+request. A scenario is ``fn(ls, *, delay) -> ScenarioResult``.
 """
 
 from __future__ import annotations
@@ -23,6 +25,12 @@ class ScenarioResult:
     diffs: list[str] = field(default_factory=list)
     details: str = ""
     sub_results: list[tuple[str, ScenarioResult]] = field(default_factory=list)
+    #: Not run to the end (a request the deviation catalog vetoes); not a failure.
+    skipped: bool = False
+    #: The repro bundle of a divergence.
+    bundle: str = ""
+    #: Differences the deviation catalog explained, by entry id.
+    explained: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass

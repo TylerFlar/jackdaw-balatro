@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from jackdaw.cli.scenarios import ScenarioResult, register
 from jackdaw.cli.scenarios.helpers import (
-    Handle,
+    Lockstep,
     add_both,
     compare_state,
     play_hand,
@@ -41,15 +41,15 @@ _PLANETS: list[tuple[str, str, str]] = [
 for _key, _name, _hand in _PLANETS:
 
     def _make_fn(key: str = _key, name: str = _name):  # noqa: B023
-        def fn(sim: Handle, live: Handle, *, delay: float = 0.3) -> ScenarioResult:
+        def fn(ls: Lockstep, *, delay: float = 0.3) -> ScenarioResult:
             seed = f"P_{key.upper()}"
-            start_both(sim, live, seed=seed, delay=delay)
-            select_blind(sim, live, delay=delay)
-            add_both(sim, live, key=key)
-            use_consumable(sim, live, 0, delay=delay)
+            start_both(ls, seed=seed, delay=delay)
+            select_blind(ls, delay=delay)
+            add_both(ls, key=key)
+            use_consumable(ls, 0, delay=delay)
             # Play a hand to verify leveled scoring
-            play_hand(sim, live, [0, 1, 2, 3, 4], delay=delay)
-            diffs = compare_state(sim, live, label=f"after {name} use + play")
+            play_hand(ls, [0, 1, 2, 3, 4], delay=delay)
+            diffs = compare_state(ls, label=f"after {name} use + play")
             return ScenarioResult(
                 passed=not diffs,
                 diffs=diffs,
@@ -75,13 +75,13 @@ for _key, _name, _hand in _PLANETS:
     category="planets",
     description="Black Hole: level up all hand types by 1",
 )
-def _planet_black_hole(sim: Handle, live: Handle, *, delay: float = 0.3) -> ScenarioResult:
-    start_both(sim, live, seed="P_BLACK_HOLE", delay=delay)
-    select_blind(sim, live, delay=delay)
-    add_both(sim, live, key="c_black_hole")
-    use_consumable(sim, live, 0, delay=delay)
-    play_hand(sim, live, [0, 1, 2, 3, 4], delay=delay)
-    diffs = compare_state(sim, live, label="after Black Hole use + play")
+def _planet_black_hole(ls: Lockstep, *, delay: float = 0.3) -> ScenarioResult:
+    start_both(ls, seed="P_BLACK_HOLE", delay=delay)
+    select_blind(ls, delay=delay)
+    add_both(ls, key="c_black_hole")
+    use_consumable(ls, 0, delay=delay)
+    play_hand(ls, [0, 1, 2, 3, 4], delay=delay)
+    diffs = compare_state(ls, label="after Black Hole use + play")
     return ScenarioResult(
         passed=not diffs,
         diffs=diffs,
