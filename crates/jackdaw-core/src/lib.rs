@@ -15,6 +15,7 @@
 pub mod action;
 pub mod area;
 mod blind;
+pub mod canon;
 pub mod card;
 mod cards;
 mod consumables;
