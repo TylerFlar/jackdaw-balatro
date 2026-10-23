@@ -19,7 +19,7 @@ Source: `balatro_source/back.lua` (Balatro 1.0.1o). 38 rows: 8 function, 21 bran
 | back/event/Back:trigger_effect/plasma-deck/immediate:localize | back.lua:131-167 | event | `Event{}` → localize, play_sound, ease_colour, attention_text +1 | `self.name == 'Plasma Deck' and args.context == 'final_scoring_step'` | unreviewed |  |  |  |  |
 | back/event/Back:trigger_effect/plasma-deck/after:ease_colour | back.lua:142-152 | event | `Event{trigger='after', blockable=false, blocking=false}` → ease_colour | `self.name == 'Plasma Deck' and args.context == 'final_scoring_step'` & [event] | n/a-ui |  |  |  | auto: event only animates, plays sound or waits |
 | back/event/Back:trigger_effect/plasma-deck/after | back.lua:153-164 | event | `Event{trigger='after', blockable=false, blocking=false}` | `self.name == 'Plasma Deck' and args.context == 'final_scoring_step'` & [event] | unreviewed |  |  |  |  |
-| back/fn/Back:apply_to_run | back.lua:174-278 | function | `Back:apply_to_run()` |  | unreviewed |  |  |  |  |
+| back/fn/Back:apply_to_run | back.lua:174-278 | function | `Back:apply_to_run()` |  | verified | crates/jackdaw-core/src/run.rs::back_apply_to_run | tests/parity/test_rust_new_run.py | G129 |  |
 | back/branch/Back:apply_to_run/config-voucher | back.lua:176-179 | branch | config.voucher — `self.effect.config.voucher` |  | unreviewed |  |  |  |  |
 | back/branch/Back:apply_to_run/config-hands | back.lua:181-182 | branch | config.hands — `self.effect.config.hands` |  | unreviewed |  |  |  |  |
 | back/branch/Back:apply_to_run/config-consumables | back.lua:184-195 | branch | config.consumables — `self.effect.config.consumables` |  | gap |  |  | G02 |  |

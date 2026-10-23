@@ -370,8 +370,8 @@ Source: `balatro_source/game.lua` (Balatro 1.0.1o). 436 rows: 20 function, 11 rn
 | game/entity/booster/p_buffoon_jumbo_1 | game.lua:695 | entity | Booster: Jumbo Buffoon Pack (`p_buffoon_jumbo_1`) | named in Card:open | unreviewed |  |  |  |  |
 | game/entity/booster/p_buffoon_mega_1 | game.lua:696 | entity | Booster: Mega Buffoon Pack (`p_buffoon_mega_1`) | named in Card:open | unreviewed |  |  |  |  |
 | game/fn/Game:delete_run | game.lua:1142-1189 | function | `Game:delete_run()` |  | unreviewed |  |  |  |  |
-| game/fn/Game:init_game_object | game.lua:1862-2016 | function | `Game:init_game_object()` |  | unreviewed |  |  |  |  |
-| game/fn/Game:start_run | game.lua:2018-2447 | function | `Game:start_run(args)` |  | gap |  |  | G03 |  |
+| game/fn/Game:init_game_object | game.lua:1862-2016 | function | `Game:init_game_object()` |  | verified | crates/jackdaw-core/src/run.rs::init_game_object | tests/parity/test_rust_new_run.py |  |  |
+| game/fn/Game:start_run | game.lua:2018-2447 | function | `Game:start_run(args)` |  | verified | crates/jackdaw-core/src/run.rs::Game::new_run | tests/parity/test_rust_new_run.py | G03, G129 |  |
 | game/event/Game:start_run/immediate:add_joker | game.lua:2069-2076 | event | `Event{}` → add_joker, :set_eternal | `not saveTable` & `args.challenge` & `_ch.jokers` | unreviewed |  |  |  |  |
 | game/event/Game:start_run/immediate:add_joker#2 | game.lua:2081-2086 | event | `Event{}` → add_joker | `not saveTable` & `args.challenge` & `_ch.consumeables` | unreviewed |  |  |  |  |
 | game/event/Game:start_run/immediate:card-apply_to_run | game.lua:2092-2098 | event | `Event{}` → Card.apply_to_run | `not saveTable` & `args.challenge` & `_ch.vouchers` | unreviewed |  |  |  |  |

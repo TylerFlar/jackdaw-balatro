@@ -29,6 +29,7 @@ pub mod pools;
 pub mod rng;
 mod round;
 pub mod rules;
+pub mod run;
 pub mod scoring;
 mod select;
 mod shop;

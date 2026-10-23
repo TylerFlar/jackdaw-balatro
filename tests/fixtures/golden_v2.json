@@ -645,559 +645,559 @@
   "challenge_c_blast_off_1": {
    "actions": 6,
    "checkpoints": [
-    "33152d9f8f4913c8"
+    "11301461a3ceeaeb"
    ],
    "checks": {},
-   "digest": "c8a74da2e0a10fd15870b4c6b1f143813a4c33223ed6fd3468e44d8ef0a807f2",
+   "digest": "b8a80ae0f273ae649c0a67e7479fffb3a599c729f6e7e1dc7750985506c374a8",
    "records": 15
   },
   "challenge_c_bram_poker_1": {
    "actions": 58,
    "checkpoints": [
-    "4aef11c6c747dc1d",
-    "1d074b1ffad1f8fb",
-    "bbc1c0e1245257a9",
-    "80c1e00b6ffb7f55",
-    "cc67da99f9a0ee21",
-    "8f5f76de710b3159",
-    "3d3bde785406e52d",
-    "f7425430fc6cd55d",
-    "f818d85bacc1a61e",
-    "64788dbd3f747278",
-    "d02f91761162212c"
+    "effa8914e41de5d7",
+    "16ce730fa50e648a",
+    "ebbf50e44bf0ed3c",
+    "e057b12b9c6c03a9",
+    "1159246d922b68aa",
+    "dde13f3fad5cca0e",
+    "46651352c0b987a1",
+    "a806ecb6b03477a9",
+    "cc306b44b40ed1c4",
+    "4d16b56d5c00af0d",
+    "ba8c7d4df62d206c"
    ],
    "checks": {},
-   "digest": "54b8456e13f1362cb213812318d7ce62efb54f060ecf1337ef889fd954e13e0b",
+   "digest": "be80a0734399ad90e37bddc1d0b729494b74ce342ca89e770270d2d4cb733f59",
    "records": 119
   },
   "challenge_c_city_1": {
    "actions": 77,
    "checkpoints": [
-    "8075f8cfe4531061",
-    "fb67c4fbb59fd39e",
-    "e415205a5c3a3d16",
-    "e1d302ae11ca26ee",
-    "88ecad5f29dc7fff",
-    "49bcd99071ec51bd",
-    "55be4b17cbb61e0d",
-    "a265bad72573d5bc",
-    "76df077b2a79a3f5",
-    "716709943437d746",
-    "12ac46bbf95b7373",
-    "ffed5195427d3adf",
-    "6e2a0b40cb7274b6",
-    "751e6068d32950e6",
-    "662e6077ea293bf6"
+    "1ca90cb1a7383ad1",
+    "8f4675c1bfa7953e",
+    "c8286996759913c4",
+    "56f2cfa32929c622",
+    "a0725d7f011152c0",
+    "94f644370372390f",
+    "53ee66d75a0ec3eb",
+    "861042acce483d2b",
+    "63ecb4d6673ce16e",
+    "e7d750a3f86a13b2",
+    "75e25d2a6416e4cc",
+    "a8dd3f6b3d1da4fe",
+    "4edb2e66a09afa1b",
+    "27d9e292316205d4",
+    "6c6c76454a849fee"
    ],
    "checks": {},
-   "digest": "165496001d7f125170b4a7191918d985e6ca89cfcf8acc3ca307b608e365f661",
+   "digest": "b2495dcad30b6ba86bfeadc69ed0f17c24e91676409445be3157805d5d6a7ffa",
    "records": 157
   },
   "challenge_c_cruelty_1": {
    "actions": 15,
    "checkpoints": [
-    "748c8987c93f1f81",
-    "a1ccfcf47582a70a",
-    "3f3a8186118af467"
+    "932a7f67274fbef1",
+    "cc6864f651ae0d1f",
+    "ceabe7f16a684a69"
    ],
    "checks": {},
-   "digest": "42beee7775a181c708c626a6f9d36b9572d28e4721bf01d4e99a834d08e7d621",
+   "digest": "d7b75a8568e4eaf76f1ebd607f19c737e4c0cabdcd13617613aaee201dae9230",
    "records": 33
   },
   "challenge_c_double_nothing_1": {
    "actions": 43,
    "checkpoints": [
-    "f375df777b09353b",
-    "2cdebcce52f56bd7",
-    "92b3d943ba09b409",
-    "b28a8291c87e39de",
-    "6f8218dd1c935c72",
-    "a6043a5862aa28dd",
-    "dc32c609dec87937",
-    "c6c9eeac2c070481"
+    "e2a4831848055332",
+    "a8bb7913d3d287b0",
+    "2e4d94e4e3609119",
+    "55be6f77a384aea1",
+    "85adce6bb1020d30",
+    "006105d7fa361e1e",
+    "d97985eef995bd2a",
+    "56f38b69030f32a9"
    ],
    "checks": {},
-   "digest": "260943fc7cd01a53f8830a22b5ba351e458c0059a14b4d980f5912912c56a53b",
+   "digest": "1fd8e5923b9452f1ceadd01dbed02636b30728466a2bd4513c45dabe0c477c5c",
    "records": 89
   },
   "challenge_c_five_card_1": {
    "actions": 65,
    "checkpoints": [
-    "5fb0ec109610af3d",
-    "0f347fc80cf2a25c",
-    "1de991b600b45e07",
-    "5b8a890926a0b840",
-    "ebbd83dfad7ab967",
-    "f0cda50aa89f1ea7",
-    "7786667b00099e2b",
-    "88000de882dfc35d",
-    "dc603f97c5113392",
-    "1a37507c7588a208",
-    "d0000322513904d7",
-    "dec57020e09d1589",
-    "3a261172208a0c1a"
+    "81242c0bd0cfd0c0",
+    "5bd2abb47679d7a0",
+    "9ed14386cfb3183f",
+    "8b6acb562ff8b139",
+    "c2e6527c9d2f0637",
+    "f5e26a45e7015b4b",
+    "9aa3c4ca8f57982c",
+    "6987030b837919b2",
+    "4c8f0a885f9374d5",
+    "29de48d3b8562a76",
+    "fd40875e8f02bed3",
+    "5eeed705bbc2fb4a",
+    "b14105c45b3df710"
    ],
    "checks": {},
-   "digest": "ada50740269d094a0763cf9b1720ef0304f5b3dac48329608aef8d6ff77f3325",
+   "digest": "941e86a31abf75d7a030c7f376db10167f102c135ef6dc07d190b1f32144266a",
    "records": 133
   },
   "challenge_c_fragile_1": {
    "actions": 24,
    "checkpoints": [
-    "0595abad1f238161",
-    "95d65faf61ea5927",
-    "32147b7027f6b18a",
-    "6ccd306ea1fb00e3",
-    "019469d238318308"
+    "62393e6787aa871b",
+    "d80b29940f48bde3",
+    "f2ebcdd5912dfcd0",
+    "c1fef4fc02ab4067",
+    "84b01a3d8286f1bc"
    ],
    "checks": {},
-   "digest": "08f2117d3e57e2a6937166eb03d6221b920e2f269c1aa24d77e43c923e654b7f",
+   "digest": "15ed13f13dd779056234791c1c3140973ad59ed5f436574ee20f2a010e995a72",
    "records": 51
   },
   "challenge_c_golden_needle_1": {
    "actions": 2,
    "checkpoints": [],
    "checks": {},
-   "digest": "4e736db70950cf7f3be76ff5e9541e26b16e9b6ec3b9f15b1b270bc88bdb67bd",
+   "digest": "670fa8ed5c4e8916d067342c81b48484fa124c3df4857f4df7a926c5efa2e758",
    "records": 7
   },
   "challenge_c_inflation_1": {
    "actions": 49,
    "checkpoints": [
-    "d462fdd5934dde74",
-    "6432b2a08a2e4d64",
-    "d264cdbcf6f77279",
-    "d9fd80204c8c22a4",
-    "951aa20dd6603aeb",
-    "75a1afbe1a94f608",
-    "9ddb324b5eb70d2c",
-    "c9146aa852c95bf7",
-    "c061b07cb094d423",
-    "08ae26ea59e6bd91"
+    "4a6d22804c37632f",
+    "d70a29cf2ce6173b",
+    "f4f7544cc99cd553",
+    "d6fc88e722ec3853",
+    "87aead0f89a2ae95",
+    "cf1d1eb5c2dda7e9",
+    "8686e00838f5b229",
+    "ae160b307d733742",
+    "e2001c85990bf6b1",
+    "7fd550d71a4ccb81"
    ],
    "checks": {},
-   "digest": "184ff5ca516d31e111243c220fb157d340d2dc3515992a646822eaff0c20220b",
+   "digest": "509e951cee9c20e0f64d13930d8803b4ca3676d84feb18cb7d75fec2583024d2",
    "records": 101
   },
   "challenge_c_jokerless_1": {
    "actions": 36,
    "checkpoints": [
-    "d5c3dfaee468875e",
-    "80e4c50dd4cc57eb",
-    "56b7c80f01bcb578",
-    "f1444834afaa7659",
-    "70b9abdf301682c8",
-    "5b5573b613f0c09d",
-    "db6670955b853a2d"
+    "8ba4defe9dcb7de7",
+    "066b9456d2e98c54",
+    "51a4934d2c7c0e77",
+    "e587bf3ba0af041b",
+    "64dea29558c00611",
+    "5e18dbb481e1e0f6",
+    "da3c045c4d9c346e"
    ],
    "checks": {},
-   "digest": "2360fc57e48fed7acbd2e4c3dfc277bf1925d4ddfd4608ccf0d10ce59d872fa0",
+   "digest": "b1051787c780783e73ce2d70d93d6fce6e8b2a3f61864b1d767f362845bb5ac7",
    "records": 75
   },
   "challenge_c_knife_1": {
    "actions": 107,
    "checkpoints": [
-    "2892c6b29334054f",
-    "f2ffcb51bea6e0c2",
-    "1aeee2c7a3ea6469",
-    "81334192dff0a6bc",
-    "852c62888b6a54b9",
-    "a7bb8cc0831f1fda",
-    "ec961496294284e6",
-    "7172102a07862163",
-    "f56423a76953e176",
-    "e7480b1fa574e03b",
-    "39aef002edfb5ef2",
-    "07deeeee30a0d752",
-    "bd733635b6d8c501",
-    "2c74c61da26e0c5d",
-    "d3628e1f42d8ea39",
-    "8cf4ccf030c1b147",
-    "523f6c094d7cd21a",
-    "9a3fd60f1ec18cf5",
-    "a43d81da43e3803b",
-    "d3c22545f0c3e118",
-    "9a124f0b2937e368"
+    "272c5e1c3221c7fc",
+    "b2332c53278a3915",
+    "f210ed7636ae1f9a",
+    "187e7aac54bc1cc8",
+    "5f414d9ef4f989ca",
+    "76c9a625d7fc22cd",
+    "42e787e5fbf72389",
+    "c0f437445a9186ba",
+    "311e0fba99f6a4ab",
+    "1af1b4ebe1b141f2",
+    "6dea40c3bc13f2c6",
+    "f56b373912f87379",
+    "75566d151ad6e9ef",
+    "db6cd4fdb6a01c25",
+    "88db715403b582af",
+    "fff8f2eee39a3e77",
+    "aac4461eb0921415",
+    "564afecb4a329d24",
+    "12c5cc5039a19c85",
+    "58757dfdaf3d04b3",
+    "1773952a56d81d28"
    ],
    "checks": {},
-   "digest": "f385ffb51d7af028132a00b42a6a375c077ddc538cdef1d53d7f5e798acaf069",
+   "digest": "2f1a23e9fe12c087c32fc65fdce6b4b5b5188a9f45c00e71136ae4ec1484da3a",
    "records": 217
   },
   "challenge_c_luxury_1": {
    "actions": 53,
    "checkpoints": [
-    "f577b3da43269bc1",
-    "c50f8830822b7d03",
-    "bf85451a7a5ea529",
-    "b5c8df70a14348cc",
-    "c21cf2c5bde29452",
-    "f81cba2fb1e54a3a",
-    "7e2938aa5f26cdab",
-    "c31d03347991be9b",
-    "76387a1f9d67bde1",
-    "651617228dd8b440"
+    "c3955984bac08483",
+    "df021859778123fb",
+    "7c10759b44091786",
+    "56828e9e5d88df64",
+    "830e0a9b64a41d44",
+    "686747e37df4a76d",
+    "05ee6c7599e7e105",
+    "efa55534585fba0f",
+    "a1a779aac4673b4d",
+    "c95eeaff3fdca12d"
    ],
    "checks": {},
-   "digest": "694ac640f6f0e97b2ce4e107261e6533a1d47ca728196796422d7d03b744e55d",
+   "digest": "013f08ef3c0585c7be0bcdc443de09b541242733c585eb05ddb7358085997799",
    "records": 109
   },
   "challenge_c_mad_world_1": {
    "actions": 61,
    "checkpoints": [
-    "c808aa6c25df6f65",
-    "ccc783eda3777605",
-    "9531c4d565d4eaed",
-    "c49ea5f98e1ffbd8",
-    "e8eb7e041c27124d",
-    "f6925628382782c6",
-    "35a1f7c9a838e0ec",
-    "498cb338ddefea61",
-    "742e773ea0a66272",
-    "e032c0c8ff943f32",
-    "93c8847ec5636080",
-    "bc342a9d9b929de0"
+    "932a8afe4d34a658",
+    "57570d5cf9d7ca52",
+    "04060f570e2d98a7",
+    "98064ea4d4cd92f0",
+    "08f9ff2e6db44efd",
+    "16ef2739a55eb4d8",
+    "794e745c6f8b59f1",
+    "a7169cc2eb7bfe90",
+    "fdeb88598f625ab9",
+    "726a82a089f08441",
+    "1a2342ad94a6447b",
+    "59707145c753ffc9"
    ],
    "checks": {},
-   "digest": "e60ca700aebf06f1ad6deaeca58e76639a501745579ab39056510d3c535909b3",
+   "digest": "ba90b03f62e41c2418a1eb5813021631c2cdfa2537db31299b5a8590643d348a",
    "records": 125
   },
   "challenge_c_medusa_1": {
    "actions": 39,
    "checkpoints": [
-    "7eaa069a0db0360c",
-    "3414943e07dcdb24",
-    "9673f5f5fd69bce8",
-    "f5b5730fc0fd8c7b",
-    "9d6fed4563b79843",
-    "67d99744faaea376",
-    "c0efa8e28fbc86b9",
-    "78a6790a73f7893e"
+    "ccaa6044ed8ff437",
+    "e3734ce011336417",
+    "c8e28bbd36282f14",
+    "3bfc8d6d27948bd4",
+    "9fe2cbbcb79b11ca",
+    "8c71205c341db52a",
+    "f39c457739508a59",
+    "d7a93cfa938225c2"
    ],
    "checks": {},
-   "digest": "bc4d4ecb2ac44afbe1e20e582598cd95e8546ba0e5794ad49df429be83d5a3ee",
+   "digest": "8576cc2fc035b7203fb625acecd9cb9aadc30bab238cf60706dbbca64e0dc8cf",
    "records": 81
   },
   "challenge_c_monolith_1": {
    "actions": 111,
    "checkpoints": [
-    "29079682ae761d75",
-    "de68c3ac2b1621d1",
-    "34d8a97aaae287ac",
-    "5c6171c8a50400d9",
-    "f8c9881a13cafd42",
-    "affe69710bdafdaf",
-    "41cb4cfd4c84afa8",
-    "2df61489bee2ae18",
-    "5082e116331dab16",
-    "e2a2d6fa39e23b13",
-    "37c4bedab38c100c",
-    "889408e21f74239d",
-    "5d7519687e07859f",
-    "116a39e038338fc8",
-    "440795cd6970d4ad",
-    "bc6d96764abc4105",
-    "2b04c39f54535feb",
-    "5d9012e0a1829689",
-    "8f8ce9cf3f564e94",
-    "b5310648de6011a4",
-    "4744d83cfb179f98",
-    "ab46b43b3a82160c"
+    "7a3bf20bef92c8d5",
+    "6c446b42caa05fd1",
+    "152aa84b081e798f",
+    "b2055543e17c9894",
+    "1db7d326850e6aba",
+    "7df0de6186c31f51",
+    "31074fdc5369c502",
+    "a0b3fa21fa66167b",
+    "bf86a8c993786abf",
+    "329bb507c09960fa",
+    "83df40728bcd9220",
+    "ca4d24f71e539d55",
+    "674671f669584d42",
+    "e391f18fde52b8d6",
+    "4c7b1e8001cb5b01",
+    "34e7194b509193b0",
+    "788c6afaac79151c",
+    "9b2dee7ebeea1305",
+    "5a6ea2e9de4801ec",
+    "4e717fbdfcd4e252",
+    "fd3f4f23d71b38ae",
+    "49a69c20f99cac07"
    ],
    "checks": {},
-   "digest": "bea1a9b8972b9a5906a080b74a2143b7e34117eb2ecdf77e8a07df027d4a9edd",
+   "digest": "85e0163d276322784cb2788513346cc4a01e0072cab107b55fce62cae95e5775",
    "records": 225
   },
   "challenge_c_non_perishable_1": {
    "actions": 13,
    "checkpoints": [
-    "c007f2f6f8bc01df",
-    "eecbcf21001d0d38"
+    "af7c77ecf354fa80",
+    "b14d6140ba513878"
    ],
    "checks": {},
-   "digest": "173ffb79c6afd55c3c4076f9f098772bab81e2ac29eddb3ae06e403a28721d22",
+   "digest": "10e968374ac34b3f26fa48e76f6bba2f3c80526ed760ccfa189673a8f8b8af67",
    "records": 29
   },
   "challenge_c_omelette_1": {
    "actions": 22,
    "checkpoints": [
-    "c51e6bef2fc3f204",
-    "17dfc738c25c0d11",
-    "8134063afef53e9b",
-    "7e6199a0d72f40ab"
+    "88b29a3375f8f34c",
+    "86b544fa35e15314",
+    "e2e6c7b80dba8575",
+    "b68371809e51b882"
    ],
    "checks": {},
-   "digest": "6534ac0e63a3d905c1a2e187e66abb7e614bb649459d3280d4bf7c360b204650",
+   "digest": "22954d7dbc7bae97f01a9ccfc7c785aaafd56966f541dd28d6944276cd8fbacf",
    "records": 47
   },
   "challenge_c_rich_1": {
    "actions": 115,
    "checkpoints": [
-    "0cb0030bb83d0df5",
-    "20ced4eb93427a6c",
-    "4d8abb6887c8627d",
-    "2a055c55233a12e6",
-    "a673200e83f26365",
-    "efd0a667260e8438",
-    "69607a3a8361843a",
-    "51f4afdbb7bbaa7f",
-    "7941c368ec65ba6b",
-    "e80469abb17ccbe0",
-    "ba67b47a2a53217a",
-    "dc827ba0df389540",
-    "5ec128f994bd81bd",
-    "8988c59e714c6bf3",
-    "f02247c2ea1180aa",
-    "164c64469a46056d",
-    "6cf0b560f9054c8a",
-    "e1315cd4d4827a0e",
-    "84fe3277176d0afc",
-    "ac144b0f8350217d",
-    "663781ef3340eb13",
-    "967746f5f3c14a1d",
-    "51e96ca51fcdf229"
+    "ffa64f75155ffadc",
+    "22a2078d5e944c34",
+    "715b3f01cd0ed44e",
+    "ed821a2ffe706623",
+    "28b7e978da9b15ff",
+    "beadfee9f3b83e3f",
+    "4b405e4d77f128bc",
+    "5d5eb5b9741fd508",
+    "36fb39fa06e63c1f",
+    "9a5a7b9db447a6bc",
+    "e07f0094f4758251",
+    "d55b4f9fafffb43c",
+    "2d2c3e968335ecff",
+    "68cf023820e5e646",
+    "048e79da1f64f5ee",
+    "bf373d458622fcfb",
+    "c855743d2e497691",
+    "e461c0ae561ee30c",
+    "72bcec2b19307fb6",
+    "29ce740968a62a4d",
+    "a22798d08f858c45",
+    "aeb963f8baec93aa",
+    "80622a27b0ff2661"
    ],
    "checks": {},
-   "digest": "1294792b3df95d346c281a71b8b32970f59bbc74028dc6a0db0ccdc2586b5c81",
+   "digest": "a774eb536f65b238262d138cf8cecfba69025cc265aa2424b80ea988f3ac532f",
    "records": 233
   },
   "challenge_c_typecast_1": {
    "actions": 9,
    "checkpoints": [
-    "8d1b26c16c613b9a",
-    "7eb07f88599e4bae"
+    "a92a4a8c8e200f02",
+    "0fe16e9370cc5147"
    ],
    "checks": {},
-   "digest": "233bec93f7fdf4d8d1cfa2870b13f8d86876eaac7a96c438a3404d9765bc7fd8",
+   "digest": "94ab81354823c4957bd9e5cb2b7b12dc0772a196ff21c63499c71e7b9e7aaa2c",
    "records": 21
   },
   "challenge_c_xray_1": {
    "actions": 27,
    "checkpoints": [
-    "9daed50c60c00aa1",
-    "d802663afe5e1cb7",
-    "cc9f36920d8b90ba",
-    "5c2ab6201d8468b5",
-    "ffc30de70e5c1e3a"
+    "dd52fc5369f9c020",
+    "0a55ceed800ae274",
+    "715f63ffa29641e0",
+    "7daf7074166400da",
+    "368b1f243f2c8939"
    ],
    "checks": {},
-   "digest": "305334392e984f02e44764aa575c852f4220fdded991a3a89405a06657988d6f",
+   "digest": "4bce83fee804933596fce0c9d7c17a25ad720a72c3e6a54d01a19fd5cac84f75",
    "records": 57
   },
   "deck_b_abandoned": {
    "actions": 27,
    "checkpoints": [
-    "ab41a61fdc1d4840",
-    "902e53a0ebc88276",
-    "d9bd71d448cdedfa",
-    "d7aa510efd18e27b",
-    "5bed69101a90d6ef"
+    "a5dc5bc99cadfa56",
+    "fc7c36df584f775d",
+    "eb853beccbb98448",
+    "11a7e1ba5cfec652",
+    "ab2e149855205a16"
    ],
    "checks": {},
-   "digest": "60b3ef56e5be5de1ecf39f393a3ba6e4abf58a5feeaee340f1033916d7eb7d1f",
+   "digest": "77e12b314200c53b2817258b90e394c18982988008fc041532f186c63012e798",
    "records": 57
   },
   "deck_b_anaglyph": {
    "actions": 7,
    "checkpoints": [
-    "a6bc9683ea63db2a"
+    "30c6d5f3bd498530"
    ],
    "checks": {},
-   "digest": "c8e3791e776e28b32175f50c3ab8ce6ae237723c2fbd88bdecc4d0a463c8d8e4",
+   "digest": "61e1a8c262e4c65902eb9c997058fecda190b621ca98ebe11bfb561ab2e4d914",
    "records": 17
   },
   "deck_b_black": {
    "actions": 29,
    "checkpoints": [
-    "80419af822fa8a09",
-    "b018375284e724af",
-    "886e3ced6f9c25c6",
-    "cec3cf5e240844eb",
-    "cd37531ea8c793e2",
-    "3653c344e0ed79ae"
+    "6e8cc6eeccc07710",
+    "f054c7530fcfc980",
+    "a3c3b2846185d7d7",
+    "2d42191214b380b4",
+    "3df969f0a9ad2fb9",
+    "c7eca8308b6e9fda"
    ],
    "checks": {},
-   "digest": "d2b9ffc62ceef89552e200a9e499eeea2b7c8540a5bf96bdbbca621a34d69125",
+   "digest": "3dbd4c495433094f55ab93a05c06fa88834778c4b2fb718bc57fcc5d36774b8f",
    "records": 61
   },
   "deck_b_blue": {
    "actions": 20,
    "checkpoints": [
-    "8468df4dcc12e5f8",
-    "1bd01114698565c6",
-    "2a6f3d92051df0d1",
-    "3f73d5238f3be5a0"
+    "e0d22474b4e5bd1f",
+    "5d5c4d4668658833",
+    "69c3efef7e31ffbc",
+    "f6628ce406db1fc7"
    ],
    "checks": {},
-   "digest": "74857812675e37fdaebdc1af914a3d6afbe7864bf7e7ea5d9c50a45a606f9a6e",
+   "digest": "ea59ec89e519df15eb4f3cf0a9dc37071b93db61fd66e8c9d76b90a552859b41",
    "records": 43
   },
   "deck_b_checkered": {
    "actions": 18,
    "checkpoints": [
-    "94ec7352644f4a71",
-    "ac41b327f0d9756b",
-    "6c4d70a5afc856e6"
+    "7013541683524742",
+    "cb88a581a192007f",
+    "4385582f42f7c890"
    ],
    "checks": {},
-   "digest": "11c9e64ba0df95bdc35b8e2f2862bf484de3367b0b54b9ff78cf04759ca8b228",
+   "digest": "e158a37c6485eb914584dbb3b50849dd75a75685c40c8ad9b1fc49ed3a247478",
    "records": 39
   },
   "deck_b_erratic": {
    "actions": 18,
    "checkpoints": [
-    "faef7e5208fc507f",
-    "3bd0264a00f172ab",
-    "66e7b0216e202492"
+    "7c05857014d417a7",
+    "9cd3b4ab56439d00",
+    "180dee5a41aa265d"
    ],
    "checks": {},
-   "digest": "9dcd8e5e686490c0e0b2eedfe0170ea1f30565ac3d93c3e08c433bb2124623f9",
+   "digest": "fa93984ca17e35c02d5dbc4ce2e1217d3593c443d7bf36d68b972a9f3aa63f23",
    "records": 39
   },
   "deck_b_ghost": {
    "actions": 45,
    "checkpoints": [
-    "f9aeca3b1846abec",
-    "405b48244567a956",
-    "ade4fa77abab307c",
-    "58d46000c4ab36b8",
-    "0e952606297f0be2",
-    "64a3c3dd12fb56c4",
-    "b949b1021ae73270",
-    "a87b6a067638e249",
-    "76ed3ac927f91738"
+    "100170e4c0693916",
+    "a9190599ed6723cf",
+    "59300549125106d4",
+    "8266f05e93121869",
+    "b5e918930faa11ba",
+    "3ba1dc40c8c59005",
+    "76f99ab0defd643d",
+    "7d228e6fa208ac71",
+    "2b91030100efc23b"
    ],
    "checks": {},
-   "digest": "db266076f0129ad309311e3ce5715449e8b1bb641c09a647793eeef387837ed5",
+   "digest": "a8c5b6940f097902681cdd4994998ba793fa0d5432b19fed7c90539e1f72f733",
    "records": 93
   },
   "deck_b_green": {
    "actions": 38,
    "checkpoints": [
-    "d4046eb631579f68",
-    "4f818012e7d28455",
-    "13c3d04bc68a0aaf",
-    "427152d1f4eb4bae",
-    "76bc539df275b404",
-    "58b58f52cc7491f2",
-    "c2964d688e2358d3"
+    "10df44ed491211a3",
+    "b26620e3c1184513",
+    "cf099b4ec7e0e2f1",
+    "dd208487829b1aa5",
+    "1f9ee798dd177343",
+    "5dbeb9c9099972d4",
+    "672332353c44f6a0"
    ],
    "checks": {},
-   "digest": "6fd930f749f38695a48d06e1214933123adc9e45364af78c39671728d618b4e1",
+   "digest": "3824eca10bf93cf52157154b7e64ceaf0ef0e26d70f6a57c65ff0b7dbfed72f9",
    "records": 79
   },
   "deck_b_magic": {
    "actions": 30,
    "checkpoints": [
-    "96dba64175beb916",
-    "465dd6362ecc96fc",
-    "14f8bfeb1fd77666",
-    "46590310f26f1300",
-    "1c769482988abb63",
-    "2c9b3881c89e183d"
+    "7a1f392ba714e773",
+    "5cbe2bfc7895fac0",
+    "cc0d1bf8bbb84380",
+    "eb08a8ec0a0906ee",
+    "00e0536f6cac4c3d",
+    "50b0316e2a64c082"
    ],
    "checks": {},
-   "digest": "0d38cdf0085b8756d5a307876715cdcc62ec9cc49b9006c8349355de14a03cf2",
+   "digest": "bc9d084c22a037592633a454a8b0ed6a9ce48b6718181677a552018461c7eb03",
    "records": 63
   },
   "deck_b_nebula": {
    "actions": 31,
    "checkpoints": [
-    "cde00fae9ac219cd",
-    "97e489d5fa82f8aa",
-    "32b9db5f7dd7f53b",
-    "d581f639d7c2b4c1",
-    "378df86a43efd2e1",
-    "2b7e614257cc09c2"
+    "6fee5e7328f7665d",
+    "d43050249d50c438",
+    "d52e9979eb4f64d9",
+    "d0cbb9fd90d0488a",
+    "5e6f37c02416a3a2",
+    "fa82e4f7539fbf60"
    ],
    "checks": {},
-   "digest": "294b92f6b3cacdc9b0a51754b8a6048305c353f1de903770dffdd1744676320d",
+   "digest": "cf8f57036427aaa3f00189456d7eab69f8560e8caa6228d07a34fd6731c69c3a",
    "records": 65
   },
   "deck_b_painted": {
    "actions": 63,
    "checkpoints": [
-    "b4868c521cfd171e",
-    "37421cb2ade46079",
-    "650f357e57352131",
-    "ca5ab10ed8409822",
-    "948f067e1a825105",
-    "19677b434e6d792a",
-    "e98de7371c7300d3",
-    "3b925f516f16b196",
-    "3d0a8a36d90a9e6c",
-    "906bc701d2ae413e",
-    "03cc2a18e61bb7a8",
-    "3766db9328627049"
+    "8528639b745c1586",
+    "f75143abcc862c79",
+    "5df902e8adcb2f02",
+    "4f0caec3f358cb6f",
+    "3589186ef3c9bc28",
+    "f3621ee643514d46",
+    "2f9487efa39760e5",
+    "2f6b50b0cb2348a3",
+    "455dd2718ce8d9db",
+    "82c1205da9409180",
+    "7191898f037dd6f0",
+    "5e49f5216a0b8ffe"
    ],
    "checks": {},
-   "digest": "8de94c8905a6a280deb6bb2bb82f04907b58625dea70f9c4bdc5af4f358cc8b8",
+   "digest": "1174a21231a08db8faa122e3e91f83a47130b9674f5938913973ded09f984f1c",
    "records": 129
   },
   "deck_b_plasma": {
    "actions": 49,
    "checkpoints": [
-    "b92fce82ba5be01b",
-    "ea5c2ada0bb77b93",
-    "29adbd4f4bb7e4ee",
-    "1aedadae2d842462",
-    "f8695aed5fdeddff",
-    "efefc6453fa3ad26",
-    "685e320d553a7dc4",
-    "ac26f92cdf8e01cb",
-    "762660ad3ad354c4",
-    "e992430cb0b644ab"
+    "e3f034b971261dc9",
+    "a3f01d5466984b71",
+    "94373a83e5abcdfc",
+    "e2fed353aeaee711",
+    "9dd4a778310488fa",
+    "4b1baa29f2e51e43",
+    "bd71663b1c8f9be3",
+    "775fe8e2e8015217",
+    "0e432bf0baaa1e13",
+    "03beb8b82060220e"
    ],
    "checks": {},
-   "digest": "07065fdb30e6bccfc6dad61f7a783701e8fe7bd388b8c47062e635b5a86cca35",
+   "digest": "2861084c949af633af5f735573fc2994a40f2c9530494abb7f48ce419a1ec93c",
    "records": 101
   },
   "deck_b_red": {
    "actions": 68,
    "checkpoints": [
-    "b10367e07903895d",
-    "8cb1f82de21d24db",
-    "895c5f13366478ea",
-    "7bf257f7e9322eed",
-    "1c2b385ae6f7a27a",
-    "efe0f7d64ee4b7bb",
-    "e7cfa66823fd8a1f",
-    "2e24e6fef3fb3d27",
-    "d9a4b4f9ef3fc970",
-    "1a96131688898fcd",
-    "d4279c17ad3289e0",
-    "6854765432c46c7f",
-    "7a738f68d0e0dfd1"
+    "f7c9ca64f7e8c0d0",
+    "452109384376673b",
+    "8de7a3db4c560bc8",
+    "6801f57cad3e39b8",
+    "32290d78a9b0a708",
+    "17347ad9e27c9c8f",
+    "f37a87ce00822278",
+    "cb99567547f2ceeb",
+    "5b1d158c3f34b99c",
+    "51f85a800a75befb",
+    "87f96949eae6248e",
+    "fb72ff81d05c1ac4",
+    "3d61806f5f3eedcb"
    ],
    "checks": {},
-   "digest": "0e9380314c08c53229911e42a628e5242f57bae8e423cdafd1b7cb043d1b2122",
+   "digest": "5e031de0a71a4ed06efa53b8f59b35501b826acd78ec8d66f03754839cfd171a",
    "records": 139
   },
   "deck_b_yellow": {
    "actions": 25,
    "checkpoints": [
-    "4b0901b3cc13c85b",
-    "4f095dec13e5f2a7",
-    "a4714bc8def00856",
-    "a4ea006d6b4c66ec",
-    "37042c259ac51c36"
+    "5be6c4c4dc0e9170",
+    "84d8cbac5fd630bf",
+    "2234f8b85fc62846",
+    "5af0ce8d4d47478d",
+    "ff46208fdea0238e"
    ],
    "checks": {},
-   "digest": "e70b5e4d250bdf46e50fa9b9ba77307948dd04f30779254c9a6aaab0ceea4e6d",
+   "digest": "3a8c2f413b3d4613f0c94d560c39dfec892ca77776581ab4ac942b547650da5f",
    "records": 53
   },
   "deck_b_zodiac": {
    "actions": 35,
    "checkpoints": [
-    "42f379443f8bbef1",
-    "9c1bba49fa19dabb",
-    "6b65848eb2e4fd68",
-    "11bf8dc023ded252",
-    "aa9d498071fb57c7",
-    "6f3d7b6a95a91c55",
-    "81a8cc2aad60ae3b"
+    "e6100915bd6398c7",
+    "04946ab0f28e2c55",
+    "d6c96ee1a1154edc",
+    "f4aa9709302ced75",
+    "75da8a9ffba0aa38",
+    "3695ed5bcfb8dc13",
+    "d55bf980004a7308"
    ],
    "checks": {},
-   "digest": "2a6a93b22ac1898e5993c0b8157761d91e11b7c792ea17a691dcb7315ea6349f",
+   "digest": "5adff3d6d24ed2133d6965498cfcf95aba355d391ac382cbd955ecc1e13abaa4",
    "records": 73
   },
   "jokers_0": {
@@ -2158,18 +2158,18 @@
   "jokers_9": {
    "actions": 45,
    "checkpoints": [
-    "e912e4ae47078508",
-    "eabc695e39b4aa16",
-    "60694cae573fd5d8",
-    "cd9ab3d47e8ae93f",
-    "cc5b5e36d5fdcd7c",
-    "8aeb51c50e71f53e",
-    "47537c00248b4154",
-    "c96d9f8dc486da74",
-    "c7804d8ad8103f68"
+    "0bfde9b8d23a2488",
+    "a26356c25d73f257",
+    "08ebdad06c3354e6",
+    "325fe1ff88d20688",
+    "1ecf0d9d96c5d07a",
+    "410416abe0474d0c",
+    "051e59a7d723d1c3",
+    "eee7beee4977c7cb",
+    "dcd2f22c80b684e6"
    ],
    "checks": {},
-   "digest": "5faf3717ae01913b03b40eb59765de2c2c6f87e081e03501a725ca2f90a52cbe",
+   "digest": "1d3e607c6a87f92d60dc1d880e4d1b4536090dce7a7b17323ab71641dca87d5e",
    "records": 93
   },
   "scenario_bones_save": {
@@ -2329,130 +2329,130 @@
   "stake_1": {
    "actions": 30,
    "checkpoints": [
-    "3c8f3d81f73379a5",
-    "9e8a5b0175b2585a",
-    "049e7bc6368a833a",
-    "12ff6eb07ddbb3d7",
-    "795247cd9bb0d987",
-    "cadef5f2b1265d9e"
+    "f106912d8f011f13",
+    "3314db73f41c85c5",
+    "bf1e59d58758708f",
+    "100753b0914c4392",
+    "b71f07a34c26e34a",
+    "0034f843a3d34b67"
    ],
    "checks": {},
-   "digest": "86ffcb8b8819e1874f1b0a798d51a503a6b0fa915115e09200b8859b3fb12a42",
+   "digest": "367b3797124cb2115a0d0c481b4b1afe3c7121207994d713bb8d7b2e3e0f367e",
    "records": 63
   },
   "stake_2": {
    "actions": 55,
    "checkpoints": [
-    "3ef2c6765b7f636e",
-    "26d3536f2969da71",
-    "80e0ea28761a4f5e",
-    "827b18f3fee9ec2a",
-    "7ae0f582e80ae77b",
-    "af40f2ae560d9795",
-    "214daf6e80d1fd6a",
-    "f32059df2bd33511",
-    "46f065f526f331a9",
-    "375c128351fc321f",
-    "539a8e7307075e8c"
+    "699bb91ba70afc3e",
+    "9d6cf297f02299b0",
+    "bc480f24aa709787",
+    "514c92b68e709e8b",
+    "da0656ba382a2915",
+    "f59ddeacd3e91a89",
+    "aa6b738591ead807",
+    "0555ca05cedb8295",
+    "913879576bf21d52",
+    "29f28254a3a749f8",
+    "e3a2c4485d5a14a3"
    ],
    "checks": {},
-   "digest": "31197749d95f70f14773e25f5c8eb105dfc364aa0b28a2a0127606bc1d6577cf",
+   "digest": "fe18bd32c49841b921c9704ac90cd940e242590ca8f4f5592c4c5f0bd0ef3608",
    "records": 113
   },
   "stake_3": {
    "actions": 72,
    "checkpoints": [
-    "5cd75346e537fe22",
-    "52e44a8f8dda943b",
-    "63a2a13fef75c8db",
-    "9547ecd06cbd8819",
-    "d10017989f2dc9c4",
-    "6c975463e1b81837",
-    "674efd74bef53cb4",
-    "d96c76fee658eecb",
-    "da16ec988251dece",
-    "2c1def71396650c5",
-    "12ea805051ad3786",
-    "67588d7c3ee265f8",
-    "4f8f9603deade77f",
-    "9b2f04177fd7ef51"
+    "f17080611fc5e19f",
+    "bd35eefe5551eae4",
+    "09beb1d7eecd7137",
+    "7a9252321c3a5f9f",
+    "dc2ae0b33a7797e5",
+    "a36dd3464ef1cfe0",
+    "5a82a8f3ecedcda3",
+    "ad90398e86eb0b4a",
+    "057b153605cb9c4d",
+    "068e50708a58f284",
+    "e3f0561723d158c9",
+    "0e9ac048088553b0",
+    "cb93395a7a3e304d",
+    "3f4ea6431a88e1f7"
    ],
    "checks": {},
-   "digest": "63e537015ba0a0aa2182018d3e5df5460a9b2372c07f7da9b71d0126b4dcf3e8",
+   "digest": "babf1499c946bb02e14a41d8bbadfcad6bb9fd19a0c46c204e547ec1fd91fb36",
    "records": 147
   },
   "stake_4": {
    "actions": 11,
    "checkpoints": [
-    "d1ad3a8f056cc0bf",
-    "82fde8fdcb0972ed"
+    "194ec8bf9abe7601",
+    "caec55fd183b5291"
    ],
    "checks": {},
-   "digest": "700fd6ad413ff62c8b64044c6e9419b0e65fc94bdb2ae80eab48c0224ad07877",
+   "digest": "3d09b914052f2adbf2d5e93be9529fbc76a2d0e0b63e448ddecb576268d07455",
    "records": 25
   },
   "stake_5": {
    "actions": 38,
    "checkpoints": [
-    "8286682ddb8a963b",
-    "efb726013a2248b6",
-    "26c14375566dc46a",
-    "89580f5fe54ce9a6",
-    "e4ba7fa1c19417ac",
-    "c91ef4852d8637e2",
-    "e2a9686bbb97a7bf"
+    "74df439f86d147de",
+    "0bed25074c7a2818",
+    "41dee578db7eb651",
+    "d21e1bc1b98e7da8",
+    "e30a07d199a7c3d1",
+    "0e4e3551726c996a",
+    "df5d42dd51a81161"
    ],
    "checks": {},
-   "digest": "6a1b2d1776019b26039ae965ae10362608c6ac8d198d1735beae282422cbd3eb",
+   "digest": "eca73bee43078d99f21e54ec37ca64bfc9d0629caad1b78bcdd41a3c66c169ee",
    "records": 79
   },
   "stake_6": {
    "actions": 39,
    "checkpoints": [
-    "d3c2f0b0b6bc8da6",
-    "cf53a9b0294e2202",
-    "1931239ce4f842e5",
-    "b5eca3456280d5ad",
-    "ef02b43e44017fe3",
-    "e7d9bda067caf395",
-    "96d7e2db55171f1b",
-    "60ff766bbdad5fbe"
+    "7cd9e9f9459451c8",
+    "c52766f0a8e563db",
+    "c56d027fa2b8122c",
+    "67c9520465483053",
+    "5a4be6840cd2280a",
+    "535a80cebc368746",
+    "08997b5fa678d129",
+    "ed4cb58e56b2db54"
    ],
    "checks": {},
-   "digest": "7c68110f0492c9bf7c04a38181c168ccf1afcf2a7ce17a2e9245912835f24863",
+   "digest": "02b7cc7d2c021eb98fcb9090c5996afefbbcadd50167d2e9d7d1c5696e1a11fb",
    "records": 81
   },
   "stake_7": {
    "actions": 33,
    "checkpoints": [
-    "cf34971058cc2c8b",
-    "9aaa65c2cbe0bcd6",
-    "7217d0d4a719b505",
-    "6bdc7821b5d15c39",
-    "f501e242cf8226bd",
-    "1794402fdf463667"
+    "bf0ee81b0a99ea4a",
+    "50f1b36e1f63a74d",
+    "b5daf416b5ace9eb",
+    "83c7dcc423d25b88",
+    "1d31eb188b6144f7",
+    "d172c62d3b6f37c8"
    ],
    "checks": {},
-   "digest": "3c88787c1bbd62dc24cdc3447a59e9ae2c0ee8126764db1a5fcd24d4ce5366b5",
+   "digest": "5fcf93567bac1b6619905290d74e6fd5c6f225bd791133c26915331511c0c9f9",
    "records": 69
   },
   "stake_8": {
    "actions": 57,
    "checkpoints": [
-    "84db2a5e9f886dfb",
-    "21db473bd5263703",
-    "fde8d0a485f90a6c",
-    "e7b72460d201e98e",
-    "24c739d7b086bf06",
-    "305dbb33c714f66f",
-    "6f4bbe3a2a361696",
-    "43db34d9d6b6c431",
-    "108b6687b790acf8",
-    "2e7853868299eaf2",
-    "e646c4388613b300"
+    "58fec0fef8009924",
+    "54f1a7219ab51979",
+    "0c037a5d45e84f80",
+    "4df39aae697daedf",
+    "1eba715011c3eb59",
+    "238d8b4ca4d644be",
+    "0d8afd9299dbdae9",
+    "75d2facd3f0a9ed5",
+    "bc21848cae6bb8ac",
+    "a8e248dcd0f7bef5",
+    "7c1e1db9f4991f22"
    ],
    "checks": {},
-   "digest": "3036c530cb72cc644b8d1f07d929ef1914e365bb6ac0479a43984bb7fea9547d",
+   "digest": "87c780e2f1d6e811c531a3252a80602d31a866bc75d499427a208e1174967179",
    "records": 117
   }
  }
