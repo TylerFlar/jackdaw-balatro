@@ -7,19 +7,35 @@ writes the few values play would take long to reach straight into the oracle's s
 checks every action against the Rust engine: the oracle's snapshot goes into Rust, both
 engines take the action, and the snapshots must match.
 
-Every step must be checked (none refused as unported); the assertions after a step confirm
-that the branch under test was taken.
+Every step must be checked (none refused as unported), and after it both engines must list
+the same legal actions (these jokers change slot counts, sell values and pack and shop
+options); the assertions after a step confirm that the branch under test was taken.
 """
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
-from jackdaw.engine.actions import GamePhase
+from jackdaw import _core
+from jackdaw.engine.actions import GamePhase, get_legal_actions
 from jackdaw.engine.card_utils import astronomer_active
 from jackdaw.engine.game import blind_debuff_card
+from tests.golden.trajectories import encode_action
+from tests.parity import canon
 from tests.parity.pyengine import PyEngine
-from tests.parity.rust_step import Report, check_step
+from tests.parity.rust_step import Report, check_step, plain
+
+
+def legal_actions_differ(engine: PyEngine) -> bool:
+    """Rust's legal actions for the oracle's state differ from the oracle's own list."""
+    snap = plain(engine.snapshot())
+    if snap["phase"] == "game_over":
+        return False
+    with engine._ids():
+        py = [encode_action(a) for a in get_legal_actions(engine.gs)]
+    game = _core.Game.from_snapshot(json.dumps(canon.to_json_compatible(snap)))
+    return json.loads(game.legal_actions()) != py
 
 
 class Board:
@@ -95,6 +111,7 @@ class Board:
         assert not self.report.unported, f"{where}: unported {dict(self.report.unported)}"
         assert ok, f"{where}: the oracle refused {action}"
         assert self.report.matched[kind] == checked + 1, f"{where}: step not checked"
+        assert not legal_actions_differ(self.engine), f"{where}: the legal actions differ"
 
     # -- actions ------------------------------------------------------------
 
