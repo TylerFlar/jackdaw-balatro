@@ -2692,21 +2692,25 @@ def _apply_consumable_result(
 
     # ---- Joker effects ----
 
-    # l. Add edition (Wheel of Fortune, Aura, Ectoplasm)
+    # l. Add edition (Wheel of Fortune, Aura, Ectoplasm, Hex): all call
+    #    card:set_edition(edition, true) (card.lua:1197, 1486), which builds
+    #    the edition table with its scoring value (card.lua:390-418) and
+    #    ends in set_cost (card.lua:461) — the edition surcharge reprices it.
     if getattr(result, "add_edition", None):
         ae = result.add_edition
         target = ae.get("target")
         edition = ae.get("edition")
         if target and edition:
             was_negative = bool(target.edition and target.edition.get("negative"))
-            target.edition = edition
-            # card.lua:set_edition — going Negative while in play raises
-            # the owning area's slot cap.
+            target.set_edition(edition)
+            # Going Negative while already added to the deck raises the
+            # owning area's limit (card.lua:405-415).
             if edition.get("negative") and not was_negative:
                 if target in gs.get("jokers", []):
                     gs["joker_slots"] = gs.get("joker_slots", 5) + 1
                 elif target in gs.get("consumables", []):
                     gs["consumable_slots"] = gs.get("consumable_slots", 2) + 1
+            _reprice(gs, target)
 
     # m. Destroy jokers (Ankh: destroy all except one)
     if getattr(result, "destroy_jokers", None):
