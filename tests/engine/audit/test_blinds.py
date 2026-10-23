@@ -31,6 +31,7 @@ from tests.engine.audit._boards import (
     ids,
     index_of,
     new_run,
+    playing_card,
     start_boss,
     win_round,
 )
@@ -526,21 +527,33 @@ def test_g13_adding_pareidolia_rechecks_every_card():
 
 def test_g13_cards_created_mid_round_are_not_debuffed_by_a_draw():
     """Debuffs come from set_blind's pass over G.playing_cards (blind.lua:207-210)
-    and the re-checks above — never from a draw.  Familiar's new face cards
-    (create_playing_card, no debuff_card call, card.lua:1320-1335) stay
-    playable under The Plant through the next draw."""
+    and the re-checks above — never from a draw.  A face card made mid-round with
+    no debuff_card call stays playable under The Plant through the next draw.
+    (Familiar's cards are made that way, card.lua:1320-1335, but the used
+    Familiar's Card:remove re-checks every playing card, G140.)"""
     gs = start_boss(new_run("AUDIT_G13F"), "bl_plant")
-    give_consumable(gs, "c_familiar")
-    before = list(gs["hand"])
-    step(gs, UseConsumable(card_index=0))
-    made = [c for c in gs["hand"] if all(c is not b for b in before)]
-    assert len(made) == 3 and not any(c.debuff for c in made)
+    made = [playing_card(s, r) for s, r in (("Hearts", "King"), ("Spades", "Queen"))]
+    gs["hand"].extend(made)
+    assert not any(c.debuff for c in made)
     keep = {id(c) for c in made}
 
     discard = tuple(i for i, c in enumerate(gs["hand"]) if id(c) not in keep)[:1]
     step(gs, Discard(card_indices=discard))
 
     assert not any(c.debuff for c in made)
+
+
+def test_g13_familiar_cards_meet_the_boss_when_the_familiar_goes():
+    """Familiar's new face cards skip debuff_card (create_playing_card,
+    card.lua:1320-1335), but the used Familiar's Card:remove runs remove_from_deck,
+    whose set_blind(nil, true) re-checks every playing card (card.lua:696-698;
+    G140): under The Plant they end debuffed."""
+    gs = start_boss(new_run("AUDIT_G13F"), "bl_plant")
+    give_consumable(gs, "c_familiar")
+    before = list(gs["hand"])
+    step(gs, UseConsumable(card_index=0))
+    made = [c for c in gs["hand"] if all(c is not b for b in before)]
+    assert len(made) == 3 and all(c.debuff for c in made)
 
 
 def test_g13_vampire_rechecks_the_card_it_strips():
