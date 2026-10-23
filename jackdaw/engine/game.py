@@ -70,6 +70,10 @@ def step(game_state: dict[str, Any], action: Action) -> dict[str, Any]:
     # the dollars every frame (cardarea.lua:245).
     _align_pinned_jokers(result.get("jokers") or [])
     _sync_hand_size_to_dollars(result)
+    # Game:update checks SELECTING_HAND every frame: an emptied hand is
+    # redrawn, and a round out of cards ends (game.lua:2544-2550, 3056-3069).
+    if result.get("phase") == GamePhase.SELECTING_HAND:
+        _update_selecting_hand(result)
     # Vanilla recomputes shop prices continuously while shopping
     # (Card:update → set_cost each frame), so cost-relevant changes —
     # buying/selling Astronomer, coupon tags — reflect immediately.
@@ -203,16 +207,39 @@ def _handle_select_blind(gs: dict[str, Any]) -> dict[str, Any]:
     # ------------------------------------------------------------------
     start_round(gs)
 
+    # set_blind's debuff pass over every playing card and joker
+    # (blind.lua:207-213) runs inside set_blind, before the jokers'
+    # setting_blind context: a card a setting_blind effect creates (Marble
+    # Joker's stone) is not checked here.
+    _set_blind_debuff_pass(gs)
+
     # ------------------------------------------------------------------
     # 3. Fire joker setting_blind context
     # ------------------------------------------------------------------
     jokers: list = gs.get("jokers", [])
+    # Amber Acorn's set_blind flips the board face down BEFORE the jokers'
+    # setting_blind context (blind.lua:190-194; state_events.lua:333-337),
+    # so jokers that setting_blind effects create stay face up.  Its three
+    # shuffles are queued events that run after those effects (below).
+    amber_shuffles = blind.name == "Amber Acorn" and len(jokers) > 1
+    if blind.name == "Amber Acorn":
+        for j in jokers:
+            j.facing = "back"
     setting_mutations = _fire_setting_blind(gs, jokers, blind)
 
     # ------------------------------------------------------------------
     # 4. Process setting_blind side-effects
     # ------------------------------------------------------------------
     _apply_setting_blind_mutations(gs, setting_mutations, jokers)
+
+    # Amber Acorn: three queued G.jokers:shuffle('aajk') events
+    # (blind.lua:195-203), each advancing the 'aajk' stream.  They shuffle
+    # the board as it stands once the setting_blind effects have resolved
+    # (Riff-raff's new jokers included), and a disable does not cancel them.
+    if amber_shuffles and gs.get("rng") is not None:
+        rng = gs["rng"]
+        for _ in range(3):
+            rng.shuffle(jokers, rng.seed("aajk"))
 
     # ------------------------------------------------------------------
     # 5. Boss blind set-time effects (blind.lua:157-209)
@@ -221,19 +248,6 @@ def _handle_select_blind(gs: dict[str, Any]) -> dict[str, Any]:
     # ------------------------------------------------------------------
     if blind.boss and not blind.disabled:
         _apply_boss_blind_effects(gs, blind)
-
-    # Debuff playing cards based on boss blind
-    deck: list = gs.get("deck", [])
-    pareidolia = any(
-        getattr(j, "center_key", None) == "j_pareidolia" and not getattr(j, "debuff", False)
-        for j in jokers
-    )
-    smeared = any(
-        getattr(j, "center_key", None) == "j_smeared" and not getattr(j, "debuff", False)
-        for j in jokers
-    )
-    for card in deck:
-        blind.debuff_card(card, pareidolia=pareidolia, smeared=smeared)
 
     # ------------------------------------------------------------------
     # 6. Per-round deck shuffle (state_events.lua:344)
@@ -253,6 +267,13 @@ def _handle_select_blind(gs: dict[str, Any]) -> dict[str, Any]:
     if pending_bottom:
         gs.setdefault("deck", [])[:0] = pending_bottom
 
+    # Chicot: its setting_blind wraps G.GAME.blind:disable() in two nested
+    # events (card.lua:2492-2500), so the disable runs after the set-time
+    # effects above (applied in full) and after the deck shuffle, before the
+    # deal — once per Chicot that fired.
+    for _ in range(sum(1 for m in setting_mutations if m.get("disable_blind"))):
+        disable_blind(gs)
+
     # ------------------------------------------------------------------
     # 6b. round_start_bonus tags (Juggle: +3 hand size for this round).
     #     Vanilla fires these at DRAW_TO_HAND, before the initial draw
@@ -266,68 +287,18 @@ def _handle_select_blind(gs: dict[str, Any]) -> dict[str, Any]:
             continue
         rsb = Tag(entry.get("key", "")).apply("round_start_bonus", gs, rng=rng)
         if rsb is not None and rsb.hand_size_delta:
-            gs["hand_size"] = gs.get("hand_size", 8) + rsb.hand_size_delta
+            change_hand_size(gs, rsb.hand_size_delta)
             # run_init seeds temp_handsize as None — `or 0`, not a default.
             rr["temp_handsize"] = (rr.get("temp_handsize") or 0) + rsb.hand_size_delta
             entry["rsb_fired"] = True
 
     # ------------------------------------------------------------------
-    # 7. Draw hand from deck
+    # 7-9. Draw to hand: the deal (debuffs were set by set_blind's pass; a
+    #      draw never re-checks them), the first_hand_drawn context
+    #      (Certificate), then SELECTING_HAND and the boss's drawn_to_hand
+    #      (Cerulean Bell, Crimson Heart) — game.lua:3208-3245.
     # ------------------------------------------------------------------
-    _draw_hand(gs)
-    # Debuff hand cards too (they were drawn from the deck)
-    for card in gs.get("hand", []):
-        blind.debuff_card(card, pareidolia=pareidolia, smeared=smeared)
-
-    # ------------------------------------------------------------------
-    # 7b. Boss drawn_to_hand effects (Cerulean Bell, Crimson Heart)
-    # ------------------------------------------------------------------
-    if blind.boss and not blind.disabled:
-        dth = blind.drawn_to_hand(
-            hand_cards=gs.get("hand", []),
-            joker_cards=gs.get("jokers"),
-            rng=rng,
-        )
-        if dth.get("forced_card_index") is not None:
-            hand = gs.get("hand", [])
-            idx = dth["forced_card_index"]
-            if 0 <= idx < len(hand):
-                hand[idx].ability["forced_selection"] = True
-
-    # ------------------------------------------------------------------
-    # 8. Phase → SELECTING_HAND
-    # ------------------------------------------------------------------
-    gs["phase"] = GamePhase.SELECTING_HAND
-
-    # ------------------------------------------------------------------
-    # 9. first_hand_drawn joker context (game.lua:3226-3231): fires once
-    #    per round after the initial deal.  Certificate creates a sealed
-    #    playing card INTO THE HAND ('cert_fr' front + 'certsl' seal,
-    #    card.lua:2462-2476; live-verified: LSI5EB7T dealt 8 + red-seal
-    #    H_K appeared as the 9th hand card).  Handlers were registered
-    #    but nothing ever fired this context before.
-    # ------------------------------------------------------------------
-    from jackdaw.engine.jokers import GameSnapshot as _GS2
-
-    fhd_snap = _GS2(joker_count=len(jokers), money=gs.get("dollars", 0))
-    fhd_muts: list[dict[str, Any]] = []
-    for joker in jokers:
-        if getattr(joker, "debuff", False):
-            continue
-        from jackdaw.engine.jokers import JokerContext as _JC2
-        from jackdaw.engine.jokers import calculate_joker as _cj2
-
-        res = _cj2(joker, _JC2(first_hand_drawn=True, jokers=jokers, game=fhd_snap))
-        if res and res.extra:
-            fhd_muts.append(dict(res.extra))
-    if fhd_muts:
-        _hand_before = list(gs.get("hand", []))
-        _apply_setting_blind_mutations(gs, fhd_muts, jokers)
-        # Blind-debuff any card the mutations added to the hand
-        # (vanilla debuff_cards the created cert card, card.lua:2475).
-        for c in gs.get("hand", []):
-            if c not in _hand_before:
-                blind.debuff_card(c, pareidolia=pareidolia, smeared=smeared)
+    _draw_to_hand(gs)
     return gs
 
 
@@ -504,7 +475,7 @@ def _deal_pack_hand(gs: dict[str, Any]) -> None:
         pack_hand.append(card)
     gs["pack_hand"] = pack_hand
     combined_hand = hand + pack_hand
-    _sort_hand_desc(combined_hand)
+    _sort_hand(gs, combined_hand)
     gs["hand"] = combined_hand
 
 
@@ -708,11 +679,12 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
     # ------------------------------------------------------------------
     # 2. Move cards from hand to play area
     # ------------------------------------------------------------------
-    # Preserve SELECTION ORDER (not hand position order).
-    # In Balatro, cards are placed left-to-right in click order.
-    # The first index in card_indices is the leftmost scored card.
+    # Hand order, not click order: play_cards_from_highlighted sorts
+    # G.hand.highlighted by T.x (the hand position) before drawing the
+    # cards into G.play (state_events.lua:463), and evaluate_play scores
+    # them in play-area order (state_events.lua:600).
     idx_set = set(indices)
-    played = [hand[i] for i in indices]
+    played = [hand[i] for i in sorted(idx_set)]
     held = [c for i, c in enumerate(hand) if i not in idx_set]
     gs["hand"] = held
     # Played cards are revealed (face-down draws from The House / The
@@ -850,23 +822,8 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
             gs, [{"type": c.get("type", "Tarot"), **c} for c in result.joker_creates]
         )
 
-    # The Ox: set money to $0 if most-played hand type is played
-    # (blind.lua:debuff_hand fires during scoring in Lua)
-    if (
-        getattr(blind, "name", "") == "The Ox"
-        and not getattr(blind, "disabled", False)
-        and hand_levels is not None
-        and result.hand_type != "NULL"
-    ):
-        from jackdaw.engine.data.hands import HandType as _HT
-
-        try:
-            played_ht = _HT(result.hand_type)
-            if played_ht == hand_levels.most_played():
-                blind.triggered = True
-                gs["dollars"] = 0
-        except ValueError:
-            pass
+    # (The Ox takes the money inside Blind.debuff_hand, before the hand
+    # scores — blind.lua:560-569.)
 
     # ------------------------------------------------------------------
     # 8. Move surviving played cards to discard pile
@@ -896,53 +853,25 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
             # LOSSES too (state_events.lua:96-110, game_over flag in the
             # context): Turtle Bean decays, rentals charge, perishables
             # tick as you die.  Found by lockstep: hand size differed at
-            # GAME_OVER.
-            _joker_end_of_round_effects(gs)
+            # GAME_OVER.  end_round runs out of SELECTING_HAND (vanilla's
+            # NEW_ROUND), so a hand-size change there draws nothing.
             gs["phase"] = GamePhase.GAME_OVER
+            _joker_end_of_round_effects(gs)
             # G.GAME.won is never cleared: losing in endless mode after a
             # win keeps it (state_events.lua:111-122).
         else:
             _round_won(gs)
     else:
         # ------------------------------------------------------------------
-        # 11. More hands — draw cards and stay in SELECTING_HAND
+        # 11. More hands — draw to hand and stay in SELECTING_HAND
+        #     (update_hand_played -> DRAW_TO_HAND, game.lua:3196-3200).
+        #     The Serpent caps the draw at 3; The Fish flips only the newly
+        #     drawn cards, per card through Blind.stay_flipped
+        #     (blind.lua:617) — the old whole-hand flip here hid cards the
+        #     live game left face up (found by lockstep).  No debuff
+        #     re-check: a draw never runs debuff_card.
         # ------------------------------------------------------------------
-        # The Serpent: draw only 3 cards instead of filling to hand_size
-        serpent_play = getattr(blind, "name", "") == "The Serpent" and not getattr(
-            blind, "disabled", False
-        )
-        _draw_hand(gs, count=3 if serpent_play else None)
-
-        # Re-debuff hand cards for boss blind (new cards from deck)
-        if blind.boss and not blind.disabled:
-            pareidolia = any(
-                getattr(j, "center_key", None) == "j_pareidolia" and not getattr(j, "debuff", False)
-                for j in jokers
-            )
-            smeared = any(
-                getattr(j, "center_key", None) == "j_smeared" and not getattr(j, "debuff", False)
-                for j in jokers
-            )
-            for card in gs.get("hand", []):
-                blind.debuff_card(card, pareidolia=pareidolia, smeared=smeared)
-
-        # The Fish flips ONLY the newly drawn replacements, handled
-        # per-drawn-card by Blind.stay_flipped inside _draw_hand
-        # (blind.lua:611) — the old whole-hand flip here hid cards the
-        # live game left face up (found by lockstep).
-
-        # Boss drawn_to_hand effects on redraw (Cerulean Bell, Crimson Heart)
-        if blind.boss and not blind.disabled:
-            dth = blind.drawn_to_hand(
-                hand_cards=gs.get("hand", []),
-                joker_cards=jokers,
-                rng=rng,
-            )
-            if dth.get("forced_card_index") is not None:
-                hand = gs.get("hand", [])
-                idx = dth["forced_card_index"]
-                if 0 <= idx < len(hand):
-                    hand[idx].ability["forced_selection"] = True
+        _draw_to_hand(gs)
 
     return gs
 
@@ -1170,45 +1099,12 @@ def _handle_discard(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str, A
     )
 
     # ------------------------------------------------------------------
-    # 9-10. Draw replacements from deck
+    # 9-11. Draw to hand (DRAW_TO_HAND, state_events.lua:438): the
+    #       replacements (The Serpent caps them at 3), then the boss's
+    #       drawn_to_hand.  No debuff re-check: a draw never runs
+    #       debuff_card.
     # ------------------------------------------------------------------
-    blind = gs.get("blind")
-    serpent = (
-        blind is not None
-        and getattr(blind, "name", "") == "The Serpent"
-        and not getattr(blind, "disabled", False)
-        and (cr.get("hands_played", 0) > 0 or cr.get("discards_used", 0) > 0)
-    )
-    # The Serpent: draw only 3 after the first action
-    _draw_hand(gs, count=3 if serpent else None)
-
-    # ------------------------------------------------------------------
-    # 11. Re-debuff drawn cards for boss blind
-    # ------------------------------------------------------------------
-    if blind and getattr(blind, "boss", False) and not getattr(blind, "disabled", False):
-        pareidolia = any(
-            getattr(j, "center_key", None) == "j_pareidolia" and not getattr(j, "debuff", False)
-            for j in jokers
-        )
-        smeared = any(
-            getattr(j, "center_key", None) == "j_smeared" and not getattr(j, "debuff", False)
-            for j in jokers
-        )
-        for card in gs.get("hand", []):
-            blind.debuff_card(card, pareidolia=pareidolia, smeared=smeared)
-
-        # Boss drawn_to_hand effects on discard redraw
-        rng = gs.get("rng")
-        dth = blind.drawn_to_hand(
-            hand_cards=gs.get("hand", []),
-            joker_cards=jokers,
-            rng=rng,
-        )
-        if dth.get("forced_card_index") is not None:
-            hand = gs.get("hand", [])
-            idx = dth["forced_card_index"]
-            if 0 <= idx < len(hand):
-                hand[idx].ability["forced_selection"] = True
+    _draw_to_hand(gs)
 
     return gs
 
@@ -1356,7 +1252,8 @@ def _handle_buy_card(gs: dict[str, Any], idx: int) -> dict[str, Any]:
         gs.setdefault("consumables", []).append(card)
         card.add_to_deck(gs)
     else:
-        gs.setdefault("deck", []).append(card)
+        # G.deck:emplace (button_callbacks.lua:2427): bottom of the deck.
+        _emplace_in_deck(gs, card)
         added_playing_card = True
 
     # Astronomer joining the board runs the all-cards set_cost pass
@@ -1467,6 +1364,13 @@ def _handle_sell_card(gs: dict[str, Any], area: str, idx: int) -> dict[str, Any]
     card.remove_from_deck(gs)
     _release_used_key(gs, card)
 
+    # Selling any Joker under Verdant Leaf disables it (card.lua:1616-1621;
+    # no disabled check there, and none needed: a second disable of
+    # Verdant Leaf changes nothing).
+    blind = gs.get("blind")
+    if card.ability.get("set") == "Joker" and blind is not None and blind.name == "Verdant Leaf":
+        disable_blind(gs)
+
     # Astronomer leaving the board runs the all-cards set_cost pass
     # (dump card.lua:850) — shop planet prices un-zero, couponed owned
     # costs restore.
@@ -1514,7 +1418,7 @@ def _apply_selling_self_mutations(
     """Apply Luchador, Invisible Joker, and Diet Cola sell effects."""
     for mutation in mutations:
         if mutation.get("disable_blind"):
-            _disable_active_blind(gs)
+            disable_blind(gs)
 
         if mutation.get("duplicate_random_joker"):
             jokers: list = gs.get("jokers", [])
@@ -1525,6 +1429,8 @@ def _apply_selling_self_mutations(
 
                 chosen, _ = rng.element(candidates, rng.seed("invisible"))
                 duplicate = copy.deepcopy(chosen)
+                # copy_card builds a fresh Card: its add_to_deck runs anew
+                duplicate.added_to_deck = False
                 if "invis_rounds" in duplicate.ability:
                     duplicate.ability["invis_rounds"] = 0
                 duplicate.add_to_deck(gs)
@@ -1543,25 +1449,65 @@ def _apply_selling_self_mutations(
             _check_double_tag(gs, tag_key)
 
 
-def _disable_active_blind(gs: dict[str, Any]) -> None:
-    """Disable the current blind and apply its returned restorations."""
+def disable_blind(gs: dict[str, Any]) -> None:
+    """``G.GAME.blind:disable()`` (blind.lua:356-415).
+
+    Called by Chicot (its setting_blind, deferred past the round's deck
+    shuffle, card.lua:2492-2500; and its add_to_deck mid-round,
+    card.lua:596-600), Luchador's selling_self (card.lua:2355-2359) and any
+    joker sold under Verdant Leaf (card.lua:1616-1621).  Like vanilla it
+    has no guard: a second call applies the restorations again.
+    """
     blind = gs.get("blind")
     if blind is None:
         return
+    # The flag, The Wall's /2 and Violet Vessel's /3 (blind.lua:357, 377-380,
+    # 393-396).
+    blind.disable()
+    name = blind.name
+    cr = gs.setdefault("current_round", {})
+    hand: list = gs.setdefault("hand", [])
 
-    from jackdaw.engine.card_factory import _PLAYING_CARD_AREAS
-
-    playing_cards = []
-    for area in _PLAYING_CARD_AREAS:
-        playing_cards.extend(gs.get(area, []))
-    effects = blind.disable(playing_cards=playing_cards, joker_cards=gs.get("jokers", []))
-
-    cr = gs.get("current_round", {})
-    cr["discards_left"] = cr.get("discards_left", 0) + effects.get("restore_discards", 0)
-    cr["hands_left"] = cr.get("hands_left", 0) + effects.get("restore_hands", 0)
-    gs["hand_size"] = gs.get("hand_size", 0) + effects.get("restore_hand_size", 0)
-    if effects.get("clear_forced"):
+    for joker in gs.get("jokers", ()):  # blind.lua:358-360
+        joker.facing = "front"
+    if name == "The Water" and blind.discards_sub:  # ease_discard (blind.lua:361-363)
+        cr["discards_left"] = cr.get("discards_left", 0) + blind.discards_sub
+    if name in ("The Wheel", "The House", "The Mark", "The Fish"):  # blind.lua:364-373
+        for card in hand:
+            card.facing = "front"
+    if name == "The Needle" and blind.hands_sub:  # ease_hands_played (blind.lua:374-376)
+        cr["hands_left"] = cr.get("hands_left", 0) + blind.hands_sub
+    if name == "Cerulean Bell":  # blind.lua:381-385
         _clear_forced_selection(gs)
+    game_over = False
+    if name == "The Manacle":
+        # change_size(1) (a mid-round draw of its own, cardarea.lua:100-105)
+        # then draw_from_deck_to_hand(1) (blind.lua:386-390), whose game-over
+        # test runs at once — against the limit the queued change_size has
+        # not raised yet.
+        game_over = gs.get("hand_size", 0) <= 0 and not hand
+        change_hand_size(gs, 1)
+        if not game_over:
+            _draw_from_deck_to_hand(gs, 1)
+
+    # The debuff pass (blind.lua:407-412): disabled, the blind debuffs
+    # nothing, so every playing card and joker is freed (a perished joker
+    # excepted) and a freed joker's passives come back.
+    reapply_blind_debuffs(gs)
+    for joker in list(gs.get("jokers", ())):
+        blind.debuff_card(joker, is_joker_area=True, game_state=gs)
+
+    if game_over:
+        gs["phase"] = GamePhase.GAME_OVER
+        return
+    # Queued check (blind.lua:397-406): a disabled boss whose target the
+    # score already meets ends the round at once (G.STATE = NEW_ROUND).
+    if (
+        blind.boss
+        and gs.get("phase") == GamePhase.SELECTING_HAND
+        and blind.beaten_by(gs.get("chips", 0))
+    ):
+        _end_round(gs)
 
 
 def _handle_use_consumable(
@@ -1808,8 +1754,9 @@ def _handle_pick_pack_card(
             _all_cards_set_cost_pass(gs)
 
     else:
-        # Standard pack: playing card → add to deck
-        gs.setdefault("deck", []).append(card)
+        # Standard pack: playing card → G.deck:emplace, the bottom of the
+        # deck (button_callbacks.lua:2222-2224).
+        _emplace_in_deck(gs, card)
         # Fire playing_card_added joker context (Hologram)
         _fire_shop_joker_context(gs, playing_card_added=True, cards=[card])
 
@@ -1921,25 +1868,23 @@ def _handle_next_round(gs: dict[str, Any]) -> dict[str, Any]:
     return gs
 
 
+# SortHand.mode -> the CardArea:sort method its button uses
+# (button_callbacks.lua:36-48).
+_SORT_BUTTON_MODES = {"rank": "desc", "suit": "suit desc"}
+
+
 def _handle_sort_hand(gs: dict[str, Any], mode: str) -> dict[str, Any]:
-    """Sort the hand by rank or suit."""
+    """Press a sort button: ``G.hand:sort('desc')`` (rank) or
+    ``G.hand:sort('suit desc')`` (suit).  CardArea:sort stores the method in
+    ``G.hand.config.sort`` (cardarea.lua:578), so every later auto-sort of the
+    hand uses it too."""
     _require_phase(gs, GamePhase.SELECTING_HAND)
 
-    hand: list = gs.get("hand", [])
-    if mode == "rank":
-        hand.sort(
-            key=lambda c: (
-                getattr(c.base, "id", 0) if c.base else 0,
-                getattr(c.base, "suit_nominal", 0) if c.base else 0,
-            )
-        )
-    elif mode == "suit":
-        hand.sort(
-            key=lambda c: (
-                getattr(c.base, "suit_nominal", 0) if c.base else 0,
-                getattr(c.base, "id", 0) if c.base else 0,
-            )
-        )
+    method = _SORT_BUTTON_MODES.get(mode)
+    if method is None:
+        raise IllegalActionError(f"Unknown sort mode {mode!r}")
+    gs["hand_sort"] = method
+    _sort_hand(gs, gs.get("hand", []))
     return gs
 
 
@@ -1997,18 +1942,29 @@ def _align_pinned_jokers(jokers: list) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _sort_hand_desc(hand: list) -> None:
-    """Sort hand in place, descending by nominal value.
+def _emplace_in_deck(gs: dict[str, Any], card: Any) -> None:
+    """``G.deck:emplace(card)``: a 'deck' CardArea inserts at index 1
+    (cardarea.lua:33-34) — the bottom, drawn last.  The deck list's index 0
+    is the bottom; draws pop from the end."""
+    gs.setdefault("deck", []).insert(0, card)
 
-    Matches Lua ``CardArea:sort()`` with default config ``sort='desc'``
-    (cardarea.lua:577-580).  Uses ``Card.get_nominal()`` as the sort key,
-    which combines rank, suit tiebreaker, face nominal, and a unique
-    micro-value so every card gets a distinct position.
 
-    Only sorts cards that have a ``get_nominal`` method (playing cards);
-    non-playing-card entries are left at the end.
+def _sort_hand(gs: dict[str, Any], hand: list) -> None:
+    """``G.hand:sort()``: sort the hand in place with its stored mode.
+
+    CardArea:sort with no argument uses ``G.hand.config.sort``
+    (cardarea.lua:577-590): ``'desc'`` (the default) sorts by
+    ``get_nominal()`` descending, ``'suit desc'`` by ``get_nominal('suit')``
+    descending.  The keys combine rank, suit tiebreaks, face nominal and a
+    unique micro-value, so every card gets a distinct position.
+
+    Vanilla sorts the hand when cards are drawn into it
+    (``draw_card(..., sort=true)``, common_events.lua:418-420), after a
+    hand-size draw (cardarea.lua:104) and after Certificate's card
+    (card.lua:2474) — not when cards are created into it.
     """
-    hand.sort(key=lambda c: c.get_nominal() if hasattr(c, "get_nominal") else -1e9, reverse=True)
+    nominal_mod = "suit" if gs.get("hand_sort", "desc") == "suit desc" else None
+    hand.sort(key=lambda c: c.get_nominal(nominal_mod), reverse=True)
 
 
 def _draw_hand(gs: dict[str, Any], count: int | None = None) -> None:
@@ -2019,15 +1975,255 @@ def _draw_hand(gs: dict[str, Any], count: int | None = None) -> None:
     pops from the last position.  *count* overrides the number drawn
     (The Serpent's 3, state_events.lua:363-368).
 
-    After drawing, the hand is sorted descending by nominal value
-    (matching Lua's ``draw_from_deck_to_hand`` which passes ``sort=true``
-    to ``draw_card``, triggering ``CardArea:sort()`` with default 'desc').
+    After drawing, the hand is sorted with its stored mode (matching Lua's
+    ``draw_from_deck_to_hand`` which passes ``sort=true`` to ``draw_card``,
+    triggering ``CardArea:sort()``).  Its ``hand_space`` is
+    ``min(#deck, limit - #hand)`` (state_events.lua:362): with nothing to
+    draw there is no draw_card call, so no sort either.
     """
     _sync_hand_size_to_dollars(gs)
+    hand: list = gs.setdefault("hand", [])
+    _draw_cards(gs, min(len(gs.get("deck", [])), gs.get("hand_size", 8) - len(hand)))
+
+
+def _draw_from_deck_to_hand(gs: dict[str, Any], count: int | None = None) -> bool:
+    """``G.FUNCS.draw_from_deck_to_hand(e)`` (state_events.lua:355-377).
+
+    With a hand limit of 0 or less and an empty hand the game is over
+    (outside a pack; the engine's packs deal their own hand) — returns True.
+    Otherwise it draws *count* cards, by default ``min(#deck, limit - #hand)``;
+    under an active Serpent, once the round's first play or discard is done,
+    at most 3.
+    """
+    _sync_hand_size_to_dollars(gs)
+    hand: list = gs.setdefault("hand", [])
+    hand_size = gs.get("hand_size", 8)
+    if hand_size <= 0 and not hand:
+        gs["phase"] = GamePhase.GAME_OVER
+        return True
+    deck: list = gs.get("deck", [])
+    hand_space = count if count is not None else min(len(deck), hand_size - len(hand))
+    blind = gs.get("blind")
+    cr = gs.get("current_round", {})
+    if (
+        blind is not None
+        and blind.name == "The Serpent"
+        and not blind.disabled
+        and (cr.get("hands_played", 0) > 0 or cr.get("discards_used", 0) > 0)
+    ):
+        hand_space = min(len(deck), 3)
+    _draw_cards(gs, hand_space)
+    return False
+
+
+def _fire_first_hand_drawn(gs: dict[str, Any]) -> None:
+    """The first_hand_drawn joker context (game.lua:3226-3231): Certificate
+    deals a sealed card into the hand ('cert_fr' front, 'certsl' seal,
+    card.lua:2462-2479; live-verified: LSI5EB7T dealt 8 + a red-seal H_K as
+    the 9th card) and runs ``G.GAME.blind:debuff_card`` on it."""
+    from jackdaw.engine.jokers import GameSnapshot, JokerContext, calculate_joker
+
+    jokers: list = gs.get("jokers", [])
+    snap = GameSnapshot(joker_count=len(jokers), money=gs.get("dollars", 0))
+    mutations: list[dict[str, Any]] = []
+    for joker in jokers:
+        if joker.debuff:
+            continue
+        res = calculate_joker(joker, JokerContext(first_hand_drawn=True, jokers=jokers, game=snap))
+        if res and res.extra:
+            mutations.append(dict(res.extra))
+    if mutations:
+        before = list(gs.get("hand", []))
+        _apply_setting_blind_mutations(gs, mutations, jokers)
+        for c in gs.get("hand", []):
+            if all(c is not b for b in before):
+                blind_debuff_card(gs, c)
+
+
+def _blind_drawn_to_hand(gs: dict[str, Any]) -> None:
+    """``G.GAME.blind:drawn_to_hand()`` — for every blind, so the prepped
+    flag clears after each draw (blind.lua:572-603)."""
+    blind = gs.get("blind")
+    if blind is None:
+        return
+    hand: list = gs.get("hand", [])
+    dth = blind.drawn_to_hand(
+        hand_cards=hand,
+        joker_cards=gs.get("jokers", []),
+        rng=gs.get("rng"),
+        game_state=gs,
+    )
+    idx = dth.get("forced_card_index")
+    if idx is not None and 0 <= idx < len(hand):
+        hand[idx].ability["forced_selection"] = True
+
+
+def _draw_to_hand(gs: dict[str, Any]) -> None:
+    """Game:update_draw_to_hand (game.lua:3208-3245), after the
+    round_start_bonus tags: draw from the deck (which may end the game),
+    fire first_hand_drawn on the round's first draw, then — in a later
+    event — enter SELECTING_HAND and call Blind:drawn_to_hand.  Certificate's
+    card is therefore in the hand when Cerulean Bell picks its forced card.
+    """
+    if _draw_from_deck_to_hand(gs):
+        return
+    cr = gs.get("current_round", {})
+    if cr.get("hands_played", 0) == 0 and cr.get("discards_used", 0) == 0:
+        _fire_first_hand_drawn(gs)
+    gs["phase"] = GamePhase.SELECTING_HAND
+    _blind_drawn_to_hand(gs)
+
+
+def _update_selecting_hand(gs: dict[str, Any]) -> None:
+    """The SELECTING_HAND branch of Game:update.  An empty hand with cards
+    left in the deck goes back to DRAW_TO_HAND (game.lua:2544-2548); with the
+    deck (and the play area) empty too, update_selecting_hand calls
+    end_round (game.lua:3056-3069)."""
+    if gs.get("phase") != GamePhase.SELECTING_HAND or gs.get("hand"):
+        return
+    if gs.get("deck"):
+        _draw_to_hand(gs)
+    else:
+        # Vanilla calls end_round() from every frame of that state, queueing
+        # one end_round event per frame until the first one leaves it; how
+        # many run depends on the frame rate.  The engine runs it once.
+        _end_round(gs)
+
+
+def _mr_bones_saver(gs: dict[str, Any]) -> Any:
+    """The joker whose game_over end_of_round pass saves the run (Mr. Bones
+    at 25% of the target, card.lua:3047-3055), or None."""
+    import math
+
+    from jackdaw.engine.jokers import JokerContext, calculate_joker
+
+    blind_chips = gs["blind"].chips
+    if not 0 < blind_chips < math.inf:  # NaN / inf targets: no ratio
+        return None
+    ratio = gs.get("chips", 0) / blind_chips
+    jokers: list = gs.get("jokers", [])
+    for joker in jokers:
+        if joker.debuff:
+            continue
+        ctx = JokerContext(jokers=jokers, rng=gs.get("rng"), blind=gs["blind"])
+        ctx.game_over = True  # type: ignore[attr-defined]
+        ctx.chips_ratio = ratio  # type: ignore[attr-defined]
+        res = calculate_joker(joker, ctx)
+        if res and res.saved:
+            return joker
+    return None
+
+
+def _end_round(gs: dict[str, Any]) -> None:
+    """end_round() for a round left without a play (state_events.lua:87-120):
+    won if the score already meets the target, saved by Mr. Bones, else lost
+    — the end_of_round pass runs either way."""
+    if gs["blind"].beaten_by(gs.get("chips", 0)):
+        _round_won(gs)
+        return
+    saver = _mr_bones_saver(gs)
+    if saver is not None:
+        jokers: list = gs.get("jokers", [])
+        if saver in jokers:
+            jokers.remove(saver)
+            saver.remove_from_deck(gs)
+            _release_used_key(gs, saver)
+        _round_won(gs)
+        return
+    gs["phase"] = GamePhase.GAME_OVER
+    _joker_end_of_round_effects(gs)
+    # G.GAME.won is never cleared (state_events.lua:111-122).
+
+
+def _boss_flags(gs: dict[str, Any]) -> tuple[bool, bool]:
+    """(Pareidolia, Smeared Joker) for debuff checks: ``find_joker`` skips
+    debuffed jokers (misc_functions.lua:903-917)."""
+    pareidolia = smeared = False
+    for j in gs.get("jokers", ()):
+        if not j.debuff:
+            key = j.center_key
+            pareidolia = pareidolia or key == "j_pareidolia"
+            smeared = smeared or key == "j_smeared"
+    return pareidolia, smeared
+
+
+def blind_debuff_card(gs: dict[str, Any], card: Any) -> None:
+    """``G.GAME.blind:debuff_card(card)`` (blind.lua:624-652) on one card."""
+    blind = gs.get("blind")
+    if blind is None:
+        return
+    pareidolia, smeared = _boss_flags(gs)
+    blind.debuff_card(
+        card,
+        is_joker_area=any(j is card for j in gs.get("jokers", ())),
+        pareidolia=pareidolia,
+        smeared=smeared,
+        game_state=gs,
+    )
+
+
+def reapply_blind_debuffs(gs: dict[str, Any]) -> None:
+    """``G.GAME.blind:set_blind(nil, true)``: the reset re-runs debuff_card
+    over every playing card (blind.lua:207-210) and leaves the jokers alone
+    (blind.lua:211-213); none of set_blind's set-time effects run.  Queued
+    by every joker or consumable's add_to_deck / remove_from_deck
+    (card.lua:641, 698), and also set_blind's own pass at round start."""
+    blind = gs.get("blind")
+    if blind is None:
+        return
+    from jackdaw.engine.card_factory import _PLAYING_CARD_AREAS
+
+    pareidolia, smeared = _boss_flags(gs)
+    for area in (*_PLAYING_CARD_AREAS, "pending_deck_bottom"):
+        for card in gs.get(area) or ():
+            blind.debuff_card(card, pareidolia=pareidolia, smeared=smeared)
+
+
+def _set_blind_debuff_pass(gs: dict[str, Any]) -> None:
+    """set_blind's own debuff pass (not a reset, blind.lua:207-213): every
+    playing card, then every joker — which un-debuffs a joker unless the
+    blind is an active Crimson Heart (blind.lua:647-649)."""
+    reapply_blind_debuffs(gs)
+    blind = gs.get("blind")
+    if blind is None:
+        return
+    for joker in list(gs.get("jokers", ())):
+        blind.debuff_card(joker, is_joker_area=True, game_state=gs)
+
+
+def change_hand_size(gs: dict[str, Any], delta: int) -> None:
+    """``G.hand:change_size(delta)`` (cardarea.lua:94-111).
+
+    The limit moves by *delta* (``gs["hand_size"]`` is the unclamped
+    ``real_card_limit``).  When it grows to more than 1 while the hand holds
+    cards in SELECTING_HAND, *delta* cards are drawn from the deck at once
+    and the hand is sorted.  Vanilla also draws in DRAW_TO_HAND, which the
+    engine folds into its draw steps; every hand-size change that happens
+    there finds the hand empty.  Round-end processing runs outside
+    SELECTING_HAND, as vanilla's end_round runs in NEW_ROUND.
+    """
+    if not delta:
+        return
+    gs["hand_size"] = gs.get("hand_size", 0) + delta
+    if (
+        delta > 0
+        and gs["hand_size"] > 1
+        and gs.get("hand")
+        and gs.get("phase") == GamePhase.SELECTING_HAND
+    ):
+        _draw_cards(gs, delta)
+
+
+def _draw_cards(gs: dict[str, Any], count: int) -> None:
+    """*count* ``draw_card(G.deck, G.hand, ...)`` calls: each takes the top
+    card of the deck if there is one, through ``draw_card_from``'s boss
+    face-down check (cardarea.lua:592-610), and the hand is sorted after
+    (common_events.lua:418-420) — even when the deck had run dry."""
+    if count <= 0:
+        return
     deck: list = gs.get("deck", [])
     hand: list = gs.setdefault("hand", [])
-    hand_size: int = gs.get("hand_size", 8)
-    to_draw = min(len(deck), hand_size - len(hand) if count is None else count)
+    to_draw = min(len(deck), count)
 
     # Boss face-down draws (Blind:stay_flipped, blind.lua:605-622): The
     # Wheel (seeded 'wheel' roll per drawn card), The House (first hand of
@@ -2061,8 +2257,8 @@ def _draw_hand(gs: dict[str, Any], count: int | None = None) -> None:
             # up unless it stays flipped.
             card.facing = "back" if flip else "front"
             hand.append(card)
-    # Sort hand descending by nominal (matches Lua CardArea:sort 'desc')
-    _sort_hand_desc(hand)
+    # draw_card(..., sort=true) sorts with the hand's stored mode
+    _sort_hand(gs, hand)
 
 
 def _x_ray_flip(gs: dict[str, Any]) -> bool:
@@ -2104,8 +2300,13 @@ def _joker_end_of_round_effects(gs: dict[str, Any]) -> dict[str, Any]:
     Dollars returned here are only ever banked via the cash-out screen,
     which a lost run never reaches.
     """
-    from jackdaw.engine.jokers import GameSnapshot, on_end_of_round
-    from jackdaw.engine.round_lifecycle import process_round_end_cards
+    from jackdaw.engine.jokers import (
+        GameSnapshot,
+        JokerContext,
+        calc_dollar_bonus,
+        calculate_joker,
+    )
+    from jackdaw.engine.round_lifecycle import calculate_perishable, calculate_rental
 
     cr = gs.get("current_round", {})
     jokers = gs.get("jokers", [])
@@ -2131,18 +2332,35 @@ def _joker_end_of_round_effects(gs: dict[str, Any]) -> dict[str, Any]:
         nine_tally=sum(1 for c in _all_owned if c.get_id() == 9),
         joker_count=len(jokers),
     )
-    eor = on_end_of_round(
-        jokers,
-        game_snap,
-        rng,
+    # end_round's joker loop (state_events.lua:99-110): each joker in turn
+    # gets its end_of_round context, then calculate_rental, then
+    # calculate_perishable.  A joker that destroys itself is only removed
+    # by a later event, so it still pays its rent in the same pass; one
+    # that perishes is debuffed through set_debuff and loses its passives.
+    ctx = JokerContext(
+        end_of_round=True,
+        jokers=jokers,
+        rng=rng,
+        game=game_snap,
         hand_levels=gs.get("hand_levels"),
         # Rocket's boss bump reads the just-finished blind
         # (card.lua:2896); fires on losses too (bug #15 semantics).
         blind=gs.get("blind"),
     )
-    # Dollars are NOT banked here: vanilla pays the whole round total in
-    # one ease_dollars at the cash-out press, with interest computed on
-    # pre-payout money.  The value flows to calculate_round_earnings.
+    removed: list = []
+    mutations: list[dict[str, Any]] = []
+    for joker in list(jokers):
+        if not joker.debuff:
+            result = calculate_joker(joker, ctx)
+            if result:
+                if result.remove:
+                    removed.append(joker)
+                if result.extra:
+                    mutations.append(result.extra)
+        calculate_rental(joker, gs)
+        calculate_perishable(joker, gs)
+    eor: dict[str, Any] = {"jokers_removed": removed, "mutations": mutations}
+
     for removed_joker in eor.get("jokers_removed", []):
         if removed_joker in jokers:
             jokers.remove(removed_joker)
@@ -2151,7 +2369,7 @@ def _joker_end_of_round_effects(gs: dict[str, Any]) -> dict[str, Any]:
     # End-of-round joker mutations (Turtle Bean's per-round hand-size decay)
     for mut in eor.get("mutations", []):
         if mut.get("hand_size_delta"):
-            gs["hand_size"] = gs.get("hand_size", 8) + mut["hand_size_delta"]
+            change_hand_size(gs, mut["hand_size_delta"])
         # Gros Michel's self-destruct marks the species extinct
         # (card.lua:3037): its no_pool_flag drops it from the Joker pool
         # and Cavendish's yes_pool_flag admits Cavendish.
@@ -2183,7 +2401,14 @@ def _joker_end_of_round_effects(gs: dict[str, Any]) -> dict[str, Any]:
                         ante=gs.get("round_resets", {}).get("ante", 1),
                     )
 
-    process_round_end_cards(jokers, gs)
+    # calculate_dollar_bonus runs later, in evaluate_round
+    # (state_events.lua:1175-1182): after the perishable ticks — a joker
+    # that perished this round is debuffed and pays nothing
+    # (card.lua:1655-1656) — and after the self-destructions.  Dollars are
+    # NOT banked here: vanilla pays the whole round total in one
+    # ease_dollars at the cash-out press, with interest computed on
+    # pre-payout money; the value flows to calculate_round_earnings.
+    eor["dollars_earned"] = sum(calc_dollar_bonus(j, game_snap) for j in jokers)
     return eor
 
 
@@ -2205,12 +2430,17 @@ def _round_won(gs: dict[str, Any]) -> None:
     10. Calculate round earnings
     11. Phase → ROUND_EVAL
     """
+    from jackdaw.engine.blind import Blind
     from jackdaw.engine.economy import calculate_round_earnings
 
     cr = gs["current_round"]
     blind = gs["blind"]
     jokers = gs.get("jokers", [])
     rng = gs.get("rng")
+    # end_round runs in NEW_ROUND, not SELECTING_HAND: a hand-size change
+    # from here on (a perishing Merry Andy, The Manacle's restore) draws
+    # nothing (cardarea.lua:100).
+    gs["phase"] = GamePhase.ROUND_EVAL
 
     # ------------------------------------------------------------------
     # 1-2. Joker end_of_round effects + perishable/rental — shared with
@@ -2296,20 +2526,12 @@ def _round_won(gs: dict[str, Any]) -> None:
     gs["discard_pile"] = []
 
     # ------------------------------------------------------------------
-    # 5. Un-debuff all playing cards (blind debuffs don't persist)
-    #    and flip everything face up (The Fish/House/Wheel/Mark flips and
-    #    Amber Acorn's joker flip last only for the blind).  Cerulean
-    #    Bell's forced flag goes too (state_events.lua:279).
+    # 5. Flip everything face up (The Fish/House/Wheel/Mark flips and
+    #    Amber Acorn's joker flip, blind.lua:338-340, last only for the
+    #    blind).  Cerulean Bell's forced flag goes too
+    #    (state_events.lua:279).  The debuffs go at the defeat, below.
     # ------------------------------------------------------------------
     for card in deck:
-        # Only clear blind-applied debuffs; perishable and Double or
-        # Nothing (perma_debuff, card.lua:4158) debuffs are permanent
-        if getattr(card, "debuff", False):
-            if not (
-                (getattr(card, "perishable", False) and getattr(card, "perish_tally", 1) <= 0)
-                or card.ability.get("perma_debuff")
-            ):
-                card.debuff = False
         card.facing = "front"
     for j in jokers:
         j.facing = "front"
@@ -2323,6 +2545,13 @@ def _round_won(gs: dict[str, Any]) -> None:
     # ------------------------------------------------------------------
     gs["unused_discards"] = gs.get("unused_discards", 0) + cr.get("discards_left", 0)
 
+    # 6b. After a boss, end_round re-tallies the most played hand — the one
+    #     The Ox reads until the next boss falls (state_events.lua:129-138).
+    if blind.get_type() == "Boss" and gs.get("hand_levels") is not None:
+        from jackdaw.engine.hand_levels import most_played_poker_hand
+
+        cr["most_played_poker_hand"] = most_played_poker_hand(gs["hand_levels"])
+
     # ------------------------------------------------------------------
     # 7. Mark blind as Defeated
     # ------------------------------------------------------------------
@@ -2330,7 +2559,7 @@ def _round_won(gs: dict[str, Any]) -> None:
     # Revert Juggle Tag's one-round hand-size bonus
     # (state_events.lua:270 — temp_handsize cleared at round end).
     if rr.get("temp_handsize"):
-        gs["hand_size"] = gs.get("hand_size", 8) - rr.pop("temp_handsize")
+        change_hand_size(gs, -rr.pop("temp_handsize"))
     blind_on_deck = gs.get("blind_on_deck", "Small")
     rr["blind_states"][blind_on_deck] = "Defeated"
     # Remembered for cash-out tag hooks (Investment Tag pays after a boss).
@@ -2368,11 +2597,6 @@ def _round_won(gs: dict[str, Any]) -> None:
         _advance_ante(gs)
         gs["blind_on_deck"] = "Small"
 
-    # The Manacle: restore hand size after boss defeat
-    if blind_on_deck == "Boss" and getattr(blind, "name", "") == "The Manacle":
-        if not getattr(blind, "disabled", False):
-            gs["hand_size"] = gs.get("hand_size", 7) + 1
-
     # ------------------------------------------------------------------
     # 10. Calculate round earnings (for cash-out screen)
     # ------------------------------------------------------------------
@@ -2399,6 +2623,20 @@ def _round_won(gs: dict[str, Any]) -> None:
         tag_key = back_effect["create_tag"]
         _award_tag(gs, tag_key, source=back_key)
         _check_double_tag(gs, tag_key)
+
+    # ------------------------------------------------------------------
+    # 10b. Blind:defeat (blind.lua:276-344), run by evaluate_round after
+    #      its dollar rows (state_events.lua:1148-1155).  The Manacle
+    #      gives its hand size back; the queued set_blind(nil, nil, true)
+    #      leaves the empty blind for the cash-out screen and the shop,
+    #      and its debuff pass frees every playing card and joker
+    #      (Crimson Heart's victim included) — a perished joker stays
+    #      debuffed (card.lua:527-533).
+    # ------------------------------------------------------------------
+    if getattr(blind, "name", "") == "The Manacle" and not getattr(blind, "disabled", False):
+        change_hand_size(gs, 1)
+    gs["blind"] = Blind.empty()
+    _set_blind_debuff_pass(gs)
 
     # ------------------------------------------------------------------
     # 11. Phase → ROUND_EVAL
@@ -2476,14 +2714,7 @@ def _apply_setting_blind_mutations(
     rng = gs.get("rng")
 
     for mut in mutations:
-        # Chicot / Luchador: disable blind
-        if mut.get("disable_blind"):
-            blind = gs.get("blind")
-            if blind:
-                blind.disabled = True
-                # Un-debuff all playing cards (a perma_debuff stays)
-                for card in gs.get("deck", []):
-                    card.set_debuff(False)
+        # (Chicot's disable_blind is deferred by _handle_select_blind.)
 
         # Madness: destroy a random OTHER joker.  Vanilla's pool excludes
         # SELF, eternals, and getting_sliced cards, in board order
@@ -2572,9 +2803,12 @@ def _apply_setting_blind_mutations(
                         seal=seal,
                         hands_played=gs.get("hands_played", 0),
                     )
-                    if ckey == "cert" and gs.get("phase") == GamePhase.SELECTING_HAND:
+                    if ckey == "cert":
+                        # create_playing_card(..., G.hand) — Certificate
+                        # deals into the hand (first_hand_drawn is in-round)
                         gs.setdefault("hand", []).append(c)
-                        _sort_hand_desc(gs.get("hand", []))
+                        # Certificate's event ends with G.hand:sort() (card.lua:2474)
+                        _sort_hand(gs, gs.get("hand", []))
                     elif ckey == "marble":
                         # Marble's stone is emplaced by a queued event that
                         # runs AFTER new_round's 'nr' shuffle — it must not
@@ -2584,7 +2818,7 @@ def _apply_setting_blind_mutations(
                         # stone-less 52-card shuffle).
                         gs.setdefault("pending_deck_bottom", []).append(c)
                     else:
-                        gs.setdefault("deck", []).append(c)
+                        _emplace_in_deck(gs, c)
             elif ctype in ("Joker", "Tarot", "Planet", "Spectral"):
                 # Riff-raff ('rif', Common), Cartomancer ('car'), 8 Ball
                 # ('8ba'), etc. — roll the real pool with the descriptor's
@@ -2621,18 +2855,10 @@ def _apply_boss_blind_effects(gs: dict[str, Any], blind: Any) -> None:
 
     # The Manacle: -1 hand size
     elif name == "The Manacle":
-        gs["hand_size"] = gs.get("hand_size", 8) - 1
+        change_hand_size(gs, -1)
 
-    # Amber Acorn: shuffle jokers (flip + randomize order)
-    elif name == "Amber Acorn":
-        jokers: list = gs.get("jokers", [])
-        if jokers:
-            for j in jokers:
-                j.facing = "back"
-            rng = gs.get("rng")
-            if rng and len(jokers) > 1:
-                seed_val = rng.seed("aajk")
-                rng.shuffle(jokers, seed_val)
+    # Amber Acorn's flip and shuffles are applied around the setting_blind
+    # context in _handle_select_blind (blind.lua:190-205).
 
     # The Eye: reset hand tracking
     elif name == "The Eye":
@@ -2746,24 +2972,30 @@ def _apply_consumable_result(
             gs["last_tarot_planet"] = card_key
 
     # ---- Card modifications ----
+    # A non-initial set_ability / set_base ends with
+    # G.GAME.blind:debuff_card(self) (card.lua:143, 365), and change_suit
+    # runs it again (card.lua:561): the boss debuff is re-checked at once.
 
     # a. Enhancement
     if getattr(result, "enhance", None):
         for target, enh_key in result.enhance:
             if hasattr(target, "set_ability"):
                 target.set_ability(enh_key)
+                blind_debuff_card(gs, target)
 
     # b. Suit changes
     if getattr(result, "change_suit", None):
         for target, suit in result.change_suit:
             if hasattr(target, "change_suit"):
                 target.change_suit(suit)
+                blind_debuff_card(gs, target)
 
     # c. Rank changes
     if getattr(result, "change_rank", None):
         for target, delta in result.change_rank:
             if hasattr(target, "change_rank"):
                 target.change_rank(delta)
+                blind_debuff_card(gs, target)
 
     # d. Copy card (Death)
     if getattr(result, "copy_card", None):
@@ -2782,6 +3014,9 @@ def _apply_consumable_result(
             target.seal = source.seal
             if hasattr(source, "center_key") and hasattr(target, "set_ability"):
                 target.set_ability(source.center_key)
+        # copy_card's set_ability / set_base re-check the debuff
+        # (card.lua:143, 365; common_events.lua:2158-2160).
+        blind_debuff_card(gs, target)
 
     # e. Destroy playing cards
     if getattr(result, "destroy", None):
@@ -2835,7 +3070,6 @@ def _apply_consumable_result(
         from jackdaw.engine.card import Card as _Card
         from jackdaw.engine.card import _next_sort_id
 
-        deck_list: list = gs.setdefault("deck", [])
         for card_spec in result.add_to_deck:
             # Cryptid: copy an existing card — copies are emplaced into the
             # HAND, not the draw pile (card.lua:1206-1213: copy_card +
@@ -2844,11 +3078,13 @@ def _apply_consumable_result(
             if copy_source is not None:
                 new_card = _copy.deepcopy(copy_source)
                 new_card.sort_id = _next_sort_id()
+                new_card.added_to_deck = False
                 if gs.get("phase") == GamePhase.SELECTING_HAND:
+                    # Emplaced at the right end; nothing sorts the hand
+                    # until the next draw (cardarea.lua:32-37).
                     gs.setdefault("hand", []).append(new_card)
-                    _sort_hand_desc(gs.get("hand", []))
                 else:
-                    deck_list.append(new_card)
+                    _emplace_in_deck(gs, new_card)
                 continue
             new_card = _Card()
             if "suit" in card_spec and "rank" in card_spec:
@@ -2859,7 +3095,7 @@ def _apply_consumable_result(
                 )
             if "enhancement" in card_spec:
                 new_card.set_ability(card_spec["enhancement"])
-            deck_list.append(new_card)
+            _emplace_in_deck(gs, new_card)
 
     # ---- Joker effects ----
 
@@ -2892,7 +3128,7 @@ def _apply_consumable_result(
 
     # n. Hand size modification (Ectoplasm -1, Ouija -1)
     if getattr(result, "hand_size_mod", 0):
-        gs["hand_size"] = gs.get("hand_size", 8) + result.hand_size_mod
+        change_hand_size(gs, result.hand_size_mod)
 
 
 def _resolve_create_descriptors(gs: dict[str, Any], descriptors: list[dict[str, Any]]) -> None:
@@ -2916,7 +3152,6 @@ def _resolve_create_descriptors(gs: dict[str, Any], descriptors: list[dict[str, 
     consumable_limit = gs.get("consumable_slots", 2)
     jokers: list = gs.setdefault("jokers", [])
     joker_slots = gs.get("joker_slots", 5)
-    deck: list = gs.setdefault("deck", [])
 
     for desc in descriptors:
         count = desc.get("count", 1)
@@ -2958,15 +3193,13 @@ def _resolve_create_descriptors(gs: dict[str, Any], descriptors: list[dict[str, 
             elif card_set in ("Default", "Enhanced", ""):
                 # Playing card — add to hand if mid-round, otherwise deck.
                 # Matches Balatro which routes spectral-created cards to
-                # the hand area during SELECTING_HAND.
+                # the hand area during SELECTING_HAND.  G.hand:emplace
+                # appends (cardarea.lua:32-37) and nothing sorts the hand
+                # until the next draw.
                 if gs.get("phase") == GamePhase.SELECTING_HAND:
                     gs.setdefault("hand", []).append(card)
                 else:
-                    deck.append(card)
-
-    # Re-sort hand if any cards were added during SELECTING_HAND
-    if gs.get("phase") == GamePhase.SELECTING_HAND:
-        _sort_hand_desc(gs.get("hand", []))
+                    _emplace_in_deck(gs, card)
 
 
 # ---------------------------------------------------------------------------
@@ -3287,6 +3520,8 @@ def _apply_shop_mutations(
                         seed_val = rng.seed("perkeo")
                         original, _ = rng.element(consumables, seed_val)
                         duplicate = copy.deepcopy(original)
+                        # copy_card builds a fresh Card: add_to_deck runs anew
+                        duplicate.added_to_deck = False
                         duplicate.set_edition({"negative": True})
                         duplicate.set_cost(
                             inflation=gs.get("inflation", 0),

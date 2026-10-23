@@ -532,17 +532,17 @@ class TestEndlessAntes:
 
     @pytest.mark.parametrize("scaling", [1, 2, 3])
     @pytest.mark.parametrize("ante", [39, 40, 50, 100])
-    def test_overflow_is_inf(self, scaling: int, ante: int):
-        # Vanilla's double overflows here (its rounding then yields NaN);
-        # the blind can never be beaten either way.
-        assert get_blind_amount(ante, scaling) == math.inf
-        assert get_blind_target(ante, "Boss", scaling) == math.inf
-        assert Blind.create("bl_small", ante, scaling).chips == math.inf
+    def test_overflow_is_nan(self, scaling: int, ante: int):
+        # Vanilla's double overflows here and its rounding (inf % inf)
+        # yields NaN; the blind can never be beaten.
+        assert math.isnan(get_blind_amount(ante, scaling))
+        assert math.isnan(get_blind_target(ante, "Boss", scaling))
+        assert math.isnan(Blind.create("bl_small", ante, scaling).chips)
 
     def test_overflowed_blind_cannot_be_beaten(self):
         blind = Blind.create("bl_small", 39)
         assert not blind.beaten_by(10**300)
-        assert not blind.beaten_by(math.inf)  # vanilla: inf - inf is NaN
+        assert not blind.beaten_by(math.inf)  # vanilla: inf - NaN is NaN
 
     def test_finite_blind_is_beaten_by_overflowed_score(self):
         blind = Blind.create("bl_small", 1)

@@ -700,7 +700,10 @@ def resolve_create_descriptor(
     # ------------------------------------------------------------------
     copy_source: Card | None = descriptor.get("copy_of")
     if copy_source is not None:
-        return copy.deepcopy(copy_source)
+        duplicate = copy.deepcopy(copy_source)
+        # copy_card builds a fresh Card, so the caller's add_to_deck runs anew
+        duplicate.added_to_deck = False
+        return duplicate
 
     # ------------------------------------------------------------------
     # DNA: copy of a played playing card (card.lua:3505 copy_card).

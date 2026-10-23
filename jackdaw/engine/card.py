@@ -35,6 +35,31 @@ def reset_sort_id_counter() -> None:
     _sort_id_counter = 0
 
 
+def _change_hand_size(game_state: dict, delta: int) -> None:
+    """``G.hand:change_size(delta)``: see :func:`jackdaw.engine.game.change_hand_size`
+    (a hand that grows mid-round draws at once)."""
+    from jackdaw.engine.game import change_hand_size
+
+    change_hand_size(game_state, delta)
+
+
+def _disable_blind(game_state: dict) -> None:
+    """``G.GAME.blind:disable()``: see :func:`jackdaw.engine.game.disable_blind`."""
+    from jackdaw.engine.game import disable_blind
+
+    disable_blind(game_state)
+
+
+def _reapply_blind_debuffs(game_state: dict) -> None:
+    """``G.GAME.blind:set_blind(nil, true)``, which add_to_deck and
+    remove_from_deck queue (card.lua:641, 698): every playing card's boss
+    debuff is re-checked against the new joker set (Pareidolia, Smeared).
+    See :func:`jackdaw.engine.game.reapply_blind_debuffs`."""
+    from jackdaw.engine.game import reapply_blind_debuffs
+
+    reapply_blind_debuffs(game_state)
+
+
 # ---------------------------------------------------------------------------
 # Face nominal values (from Card:set_base, card.lua:131-134)
 # ---------------------------------------------------------------------------
@@ -110,9 +135,14 @@ class CardBase:
     id: int  # numeric rank id (2-14, Ace=14)
     nominal: int  # chip value
     suit_nominal: float  # suit tiebreaker (S=0.04, H=0.03, C=0.02, D=0.01)
-    suit_nominal_original: float  # preserved original suit tiebreaker
+    # Tiebreak of the suit the card was CREATED with: a later set_base keeps
+    # it across suit changes (card.lua:109-110, 138-141).
+    suit_nominal_original: float
     face_nominal: float  # 0.0 for non-face, 0.1-0.4 for J/Q/K/A
-    original_value: Rank  # original rank before Strength tarot changes
+    # Rank at creation; only the initial set_base records it (card.lua:136),
+    # so any later suit/rank change leaves it None.  Nothing in the game
+    # reads it (Card:get_original_rank has no callers).
+    original_value: Rank | None
     times_played: int = 0
 
     @staticmethod
@@ -209,10 +239,38 @@ class Card:
     # (cardarea.lua:528), so a pinned joker cannot be moved.
     pinned: bool = False
 
-    def set_base(self, card_key: str, suit: str, value: str) -> None:
-        """Populate base fields from P_CARDS data, matching Card:set_base."""
+    # Card.added_to_deck (card.lua:62): whether add_to_deck's effects are
+    # currently applied.  add_to_deck / remove_from_deck run once each way
+    # (card.lua:568, 646), and a joker's debuff removes them meanwhile.
+    added_to_deck: bool = field(default=False, compare=False)
+
+    def set_base(
+        self,
+        card_key: str,
+        suit: str,
+        value: str,
+        *,
+        initial: bool | None = None,
+    ) -> None:
+        """Populate base fields from P_CARDS data, matching Card:set_base
+        (card.lua:97-145).
+
+        ``initial`` is Card:init's first call; it defaults to "this card has
+        no base yet".  Every later call (suit and rank changes, Death's copy)
+        rebuilds the base from scratch — ``times_played`` restarts at 0 — but
+        keeps the old ``suit_nominal_original`` (card.lua:109-110, 138-141)
+        and leaves ``original_value`` unset (card.lua:136).
+        """
+        if initial is None:
+            initial = self.base is None
+        old = self.base
         self.card_key = card_key
-        self.base = CardBase.from_card_key(card_key, suit, value)
+        base = CardBase.from_card_key(card_key, suit, value)
+        if old is not None and old.suit_nominal_original:
+            base.suit_nominal_original = old.suit_nominal_original
+        if not initial:
+            base.original_value = None
+        self.base = base
 
     def set_ability(
         self,
@@ -323,8 +381,9 @@ class Card:
     def change_suit(self, new_suit: str) -> None:
         """Change suit while preserving rank. Matches card.lua:547.
 
-        Recalculates suit_nominal and suit_nominal_original. Preserves
-        rank, enhancement, edition, seal.
+        A non-initial set_base: recalculates suit_nominal but keeps the
+        creation suit's suit_nominal_original.  Preserves rank,
+        enhancement, edition, seal.
         """
         if self.base is None:
             return
@@ -418,10 +477,40 @@ class Card:
     def set_rental(self, rental: bool) -> None:
         self.rental = rental
 
-    def set_debuff(self, should_debuff: bool) -> None:
+    def _perished(self) -> bool:
+        """``ability.perishable and ability.perish_tally <= 0`` (card.lua:527)."""
+        if not (self.perishable or self.ability.get("perishable")):
+            return False
+        tally = self.ability.get("perish_tally", self.perish_tally)
+        return tally is not None and tally <= 0
+
+    def set_debuff(self, should_debuff: bool, game_state: dict | None = None) -> None:
+        """Card:set_debuff (card.lua:526-538).
+
+        A perished card (perish_tally 0) is debuffed for good, whatever is
+        asked.  Otherwise a change of state on a joker in the joker area
+        also removes or restores its passives: remove_from_deck(true) on
+        debuff, add_to_deck(true) on un-debuff.  Pass *game_state* whenever
+        the card may be a joker; without it only the flag changes (playing
+        cards have no passives).
+        """
+        in_jokers = game_state is not None and any(j is self for j in game_state.get("jokers", ()))
+        if self._perished():
+            if not self.debuff:
+                self.debuff = True
+                if in_jokers:
+                    self.remove_from_deck(game_state, from_debuff=True)
+            return
         # Double or Nothing's perma_debuff: Card:update re-debuffs the card
         # every frame (card.lua:4158), so nothing can clear it.
-        self.debuff = should_debuff or bool(self.ability.get("perma_debuff"))
+        should_debuff = bool(should_debuff) or bool(self.ability.get("perma_debuff"))
+        if should_debuff != bool(self.debuff):
+            if in_jokers:
+                if should_debuff:
+                    self.remove_from_deck(game_state, from_debuff=True)
+                else:
+                    self.add_to_deck(game_state, from_debuff=True)
+            self.debuff = should_debuff
 
     def set_cost(
         self,
@@ -754,19 +843,38 @@ class Card:
                 return {"repetitions": 1, "card": self}
         return None
 
-    def add_to_deck(self, game_state: dict) -> None:
+    def _negative_slot_key(self) -> str:
+        """The area limit a Negative edition raises (card.lua:568 routing):
+        consumables raise the consumable limit, everything else jokers."""
+        if self.ability.get("consumeable") or self.ability.get("set") in (
+            "Tarot",
+            "Planet",
+            "Spectral",
+        ):
+            return "consumable_slots"
+        return "joker_slots"
+
+    def add_to_deck(self, game_state: dict, from_debuff: bool = False) -> None:
         """Apply joker's passive effects when added to deck (card.lua:Card:add_to_deck).
 
-        Mutates *game_state* in-place.  Matches card.lua:564 exactly.
+        Mutates *game_state* in-place.  Matches card.lua:564-643: it runs
+        once (``added_to_deck``), does nothing more for a playing card, and
+        ``from_debuff`` (a joker coming back from a debuff, card.lua:535)
+        keeps a Negative's slot, which its debuff never took away.
         game_state keys: hand_size, discards, joker_slots, probabilities_normal,
         bankrupt_at, free_rerolls, hands_per_round, interest_amount.
         """
+        if self.added_to_deck:
+            return
+        self.added_to_deck = True
+        if self.ability.get("set") in ("Enhanced", "Default"):
+            return
         name = self.ability.get("name", "")
         extra = self.ability.get("extra")
 
         # Top-level h_size / d_size (Juggler, Merry Andy, Drunkard, etc.)
         if self.ability.get("h_size", 0) != 0:
-            game_state["hand_size"] = game_state.get("hand_size", 0) + self.ability["h_size"]
+            _change_hand_size(game_state, self.ability["h_size"])
         if self.ability.get("d_size", 0) > 0:
             rr = game_state.get("round_resets")
             if rr is not None:
@@ -782,6 +890,12 @@ class Card:
         if name == "Credit Card":
             amount = extra if isinstance(extra, int) else 0
             game_state["bankrupt_at"] = game_state.get("bankrupt_at", 0) - amount
+        if name == "Chicot":
+            # card.lua:596-600: joining the board (or coming back from a
+            # debuff) disables an active boss that is not disabled yet.
+            blind = game_state.get("blind")
+            if blind is not None and blind.boss and not blind.disabled:
+                _disable_blind(game_state)
         if name == "Chaos the Clown":
             # current_round.free_rerolls + immediate cost recalc
             # (card.lua:601-603) — the old top-level key was never read,
@@ -793,7 +907,7 @@ class Card:
 
             calculate_reroll_cost(game_state)
         if name == "Turtle Bean" and isinstance(extra, dict):
-            game_state["hand_size"] = game_state.get("hand_size", 0) + extra.get("h_size", 0)
+            _change_hand_size(game_state, extra.get("h_size", 0))
         if name == "Oops! All 6s":
             # Vanilla doubles EVERY key of the NESTED G.GAME.probabilities
             # table (card.lua:608-11).  The old top-level
@@ -808,35 +922,45 @@ class Card:
             amount = extra if isinstance(extra, int) else 0
             game_state["interest_amount"] = game_state.get("interest_amount", 0) + amount
         if name == "Troubadour" and isinstance(extra, dict):
-            game_state["hand_size"] = game_state.get("hand_size", 0) + extra.get("h_size", 0)
+            _change_hand_size(game_state, extra.get("h_size", 0))
             rr = game_state.get("round_resets")
             if rr is not None:
                 rr["hands"] = rr.get("hands", 0) + extra.get("h_plays", 0)
         if name == "Stuntman" and isinstance(extra, dict):
-            game_state["hand_size"] = game_state.get("hand_size", 0) - extra.get("h_size", 0)
+            _change_hand_size(game_state, -extra.get("h_size", 0))
 
         if self.edition and self.edition.get("negative"):
-            # card.lua:568 routes the Negative slot bonus by card type:
-            # consumables raise the consumable limit, everything else jokers.
-            if self.ability.get("consumeable") or self.ability.get("set") in (
-                "Tarot",
-                "Planet",
-                "Spectral",
-            ):
-                game_state["consumable_slots"] = game_state.get("consumable_slots", 0) + 1
+            if from_debuff:
+                # card.lua:631-632: the slot was never given back
+                self.ability.pop("queue_negative_removal", None)
             else:
-                game_state["joker_slots"] = game_state.get("joker_slots", 0) + 1
+                key = self._negative_slot_key()
+                game_state[key] = game_state.get(key, 0) + 1
+        _reapply_blind_debuffs(game_state)
 
-    def remove_from_deck(self, game_state: dict) -> None:
+    def remove_from_deck(self, game_state: dict, from_debuff: bool = False) -> None:
         """Reverse joker's passive effects when removed from deck (card.lua:Card:remove_from_deck).
 
-        Mirrors :meth:`add_to_deck` — each effect is undone.  Matches card.lua:648.
+        Mirrors :meth:`add_to_deck` — each effect is undone, once
+        (``added_to_deck``, card.lua:646-647).  A debuff (``from_debuff``,
+        card.lua:535) keeps a Negative's slot and queues its removal instead
+        (card.lua:687-690); any other call is the card leaving play
+        (Card:remove), which then gives back such a queued slot
+        (card.lua:4733-4739).
         """
+        if self.added_to_deck:
+            self._remove_passives(game_state, from_debuff)
+        if not from_debuff and self.ability.get("queue_negative_removal"):
+            key = self._negative_slot_key()
+            game_state[key] = game_state.get(key, 0) - 1
+
+    def _remove_passives(self, game_state: dict, from_debuff: bool) -> None:
+        self.added_to_deck = False
         name = self.ability.get("name", "")
         extra = self.ability.get("extra")
 
         if self.ability.get("h_size", 0) != 0:
-            game_state["hand_size"] = game_state.get("hand_size", 0) - self.ability["h_size"]
+            _change_hand_size(game_state, -self.ability["h_size"])
         if self.ability.get("d_size", 0) > 0:
             rr = game_state.get("round_resets")
             if rr is not None:
@@ -858,7 +982,7 @@ class Card:
 
             calculate_reroll_cost(game_state)
         if name == "Turtle Bean" and isinstance(extra, dict):
-            game_state["hand_size"] = game_state.get("hand_size", 0) - extra.get("h_size", 0)
+            _change_hand_size(game_state, -extra.get("h_size", 0))
         if name == "Oops! All 6s":
             # Vanilla halves every nested probabilities key, float
             # division, no clamp (card.lua:665-68).
@@ -869,22 +993,20 @@ class Card:
             amount = extra if isinstance(extra, int) else 0
             game_state["interest_amount"] = game_state.get("interest_amount", 0) - amount
         if name == "Troubadour" and isinstance(extra, dict):
-            game_state["hand_size"] = game_state.get("hand_size", 0) - extra.get("h_size", 0)
+            _change_hand_size(game_state, -extra.get("h_size", 0))
             rr = game_state.get("round_resets")
             if rr is not None:
                 rr["hands"] = rr.get("hands", 0) - extra.get("h_plays", 0)
         if name == "Stuntman" and isinstance(extra, dict):
-            game_state["hand_size"] = game_state.get("hand_size", 0) + extra.get("h_size", 0)
+            _change_hand_size(game_state, extra.get("h_size", 0))
 
         if self.edition and self.edition.get("negative"):
-            if self.ability.get("consumeable") or self.ability.get("set") in (
-                "Tarot",
-                "Planet",
-                "Spectral",
-            ):
-                game_state["consumable_slots"] = game_state.get("consumable_slots", 0) - 1
+            if from_debuff:
+                self.ability["queue_negative_removal"] = True
             else:
-                game_state["joker_slots"] = game_state.get("joker_slots", 0) - 1
+                key = self._negative_slot_key()
+                game_state[key] = game_state.get(key, 0) - 1
+        _reapply_blind_debuffs(game_state)
 
     def __repr__(self) -> str:
         if self.base:

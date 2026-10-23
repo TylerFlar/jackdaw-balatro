@@ -1812,6 +1812,10 @@ def _vampire(card: Card, ctx: JokerContext) -> JokerResult | None:
                 enhanced_count += 1
                 c.vampired = True
                 c.set_ability("c_base")
+                # set_ability re-checks the boss debuff (card.lua:365): a
+                # Stone card stripped under a suit boss is debuffed now.
+                if ctx.blind is not None:
+                    ctx.blind.debuff_card(c, pareidolia=ctx.pareidolia, smeared=ctx.smeared)
         if enhanced_count > 0:
             card.ability["x_mult"] = (
                 card.ability.get("x_mult", 1) + card.ability.get("extra", 0.1) * enhanced_count
@@ -2321,6 +2325,9 @@ def _midas_mask(card: Card, ctx: JokerContext) -> JokerResult | None:
         if faces:
             for c in faces:
                 c.set_ability("m_gold")
+                # set_ability re-checks the boss debuff (card.lua:365)
+                if ctx.blind is not None:
+                    ctx.blind.debuff_card(c, pareidolia=ctx.pareidolia, smeared=ctx.smeared)
             return JokerResult()
     return None
 

@@ -49,7 +49,9 @@ def import_card(cs: dict[str, Any]) -> Card:
             suit_nominal=base["suit_nominal"],
             suit_nominal_original=base["suit_nominal_original"],
             face_nominal=base["face_nominal"],
-            original_value=Rank(base["original_value"]),
+            original_value=(
+                Rank(base["original_value"]) if base["original_value"] is not None else None
+            ),
             times_played=base["times_played"],
         )
     center = _resolve_center(cs["center"])
@@ -70,6 +72,7 @@ def import_card(cs: dict[str, Any]) -> Card:
     c.edition = copy.deepcopy(cs["edition"]) if cs["edition"] else None
     c.seal = cs["seal"]
     c.debuff = cs["debuff"]
+    c.added_to_deck = cs["added_to_deck"]
     c.facing = cs["facing"]
     c.playing_card = cs["playing_card"]
     costs = cs["costs"]
@@ -107,9 +110,8 @@ def _import_blind(bs: dict[str, Any] | None) -> Blind | None:
         only_hand=bs["mouth_hand"],
         discards_sub=bs["discards_sub"],
         hands_sub=bs["hands_sub"],
+        prepped=bs["prepped"],
     )
-    if bs["prepped"]:
-        blind.prepped = True  # type: ignore[attr-defined]
     blind.hands_used = {h: True for h in bs["eye_hands"]}
     return blind
 

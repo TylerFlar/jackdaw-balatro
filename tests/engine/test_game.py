@@ -490,7 +490,8 @@ class TestSortHand:
         step(gs, SelectBlind())
         step(gs, SortHand(mode="rank"))
         ids = [c.base.id for c in gs["hand"] if c.base]
-        assert ids == sorted(ids)
+        # G.hand:sort('desc') (button_callbacks.lua:44-47): high to low
+        assert ids == sorted(ids, reverse=True)
 
 
 # ---------------------------------------------------------------------------
@@ -2388,7 +2389,7 @@ class TestEndlessOverflow:
 
     def test_ante_39_round_plays(self):
         gs = self._round_at_ante(39)
-        assert gs["blind"].chips == math.inf
+        assert math.isnan(gs["blind"].chips)
         step(gs, PlayHand(card_indices=(0, 1, 2, 3, 4)))
         assert gs["phase"] == GamePhase.SELECTING_HAND
 
@@ -2411,4 +2412,4 @@ class TestEndlessOverflow:
     def test_disabling_an_overflowed_wall(self):
         wall = Blind.create("bl_wall", 39)
         wall.disable()
-        assert wall.chips == math.inf
+        assert math.isnan(wall.chips)

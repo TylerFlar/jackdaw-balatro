@@ -547,7 +547,14 @@ def score_hand(
     # Lua passes G.play.cards (all played cards, not just scoring subset)
     # to debuff_hand (state_events.lua:614).  Matters for The Psychic
     # which checks #cards >= h_size_ge against the full played hand.
-    debuffed = blind.debuff_hand(played_cards, poker_hands, hand_type)
+    debuffed = blind.debuff_hand(played_cards, poker_hands, hand_type, game_state=gs)
+    if getattr(blind, "name", "") == "The Ox" and blind.triggered and "dollars" in gs:
+        # The Ox emptied the bank before the hand scores (blind.lua:565):
+        # every joker from here on reads G.GAME.dollars = 0.
+        from dataclasses import replace
+
+        gs["money"] = gs["dollars"]
+        snapshot = replace(snapshot, money=gs["dollars"])
     if debuffed:
         _debuffed_shared = dict(
             full_hand=played_cards,
@@ -1020,8 +1027,8 @@ def score_hand(
     # >= 25% ratio (card.lua:3047-48: G.GAME.chips/G.GAME.blind.chips,
     # both cumulative — live-verified: LSWPWW38 died at <25% with
     # Bones on board while the old unconditional save advanced).
-    # An overflowed (inf) target is skipped: vanilla's ratio is 0 or NaN
-    # there, never >= 0.25, and a huge int / inf would raise here.
+    # An overflowed (NaN) target is skipped: vanilla's ratio is NaN there,
+    # never >= 0.25 (and every comparison below is false for NaN anyway).
     saved = False
     _round_chips_after = gs.get("chips", 0) + total
     if (

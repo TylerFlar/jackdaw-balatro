@@ -21,6 +21,7 @@ from typing import Any
 
 from jackdaw.engine.actions import GamePhase
 from jackdaw.engine.back import Back
+from jackdaw.engine.blind import Blind
 from jackdaw.engine.card import reset_sort_id_counter
 from jackdaw.engine.challenges import apply_challenge
 from jackdaw.engine.data.prototypes import BLINDS
@@ -121,6 +122,10 @@ def init_game_object() -> dict[str, Any]:
         "base_reroll_cost": 5,
         "blind_on_deck": None,
         "sort": "desc",
+        # G.hand.config.sort (cardarea.lua:23): the hand's sort mode, set by
+        # the sort buttons ('desc' / 'suit desc', button_callbacks.lua:36-48)
+        # and used by every later auto-sort.  G.GAME.sort above is never read.
+        "hand_sort": "desc",
         "previous_round": {"dollars": 4},
         "tags": {},
         "tag_tally": 0,
@@ -353,6 +358,10 @@ def initialize_run(
     # HandLevels (not in Lua start_run but needed for scoring)
     # -----------------------------------------------------------------------
     gs["hand_levels"] = HandLevels()
+
+    # G.GAME.blind starts as the empty blind: start_run creates it and calls
+    # set_blind(nil, nil, true) (game.lua:2392, 2431).
+    gs["blind"] = Blind.empty()
 
     # -----------------------------------------------------------------------
     # Card areas — initialize empty lists so callers don't have to

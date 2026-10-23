@@ -70,6 +70,11 @@ booleans, numbers, strings, arrays and string-keyed objects.
 **Area limits:** `hand_size`, `joker_slots`, `consumable_slots`, plus
 `shop_joker_max` (`G.GAME.shop.joker_max`).
 
+**Hand sort:** `hand_sort` is `G.hand.config.sort`, the sort mode every
+automatic hand sort uses: `"desc"` (by rank, the default) or `"suit desc"`.
+The sort buttons set it (button_callbacks.lua:36-48) and it lasts for the
+rest of the run.
+
 **Progress:** `round`, `skips`, `hands_played` (whole run), `unused_discards`,
 `starting_deck_size`, `blind_on_deck` (`Small`/`Big`/`Boss`/null).
 
@@ -115,10 +120,16 @@ Shared fields:
 - `boss`, `disabled`, `triggered`
 
 Boss-specific state:
-- `prepped`: The Fish / Crimson Heart one-shot flag.
-- `eye_hands`: The Eye's hands already played this round, sorted.
+- `prepped`: The Fish / Crimson Heart one-shot flag. `set_blind` sets it (The
+  Fish clears it), `press_play` sets it and every `drawn_to_hand` clears it.
+- `eye_hands`: The Eye's hands already played this round, sorted (empty for
+  any other blind).
 - `mouth_hand`: The Mouth's locked hand, or null.
 - `discards_sub` / `hands_sub`: what The Water / The Needle removed.
+
+Before the first blind of a run and from each defeat on (`Blind:defeat` runs
+`set_blind(nil)`, blind.lua:336), the blind is the **empty blind**: `key` `""`,
+`chips`, `mult` and `dollars` 0, not a boss, not disabled, `prepped` true.
 
 ### `hands`
 
@@ -138,11 +149,12 @@ Keys: `deck` (index 0 is the bottom; cards are drawn from the end), `hand`
 | `sort_id` | Per-run creation counter (`Card.sort_id`); the card's identity. Sorting and RNG picks use it |
 | `center` | `P_CENTERS` key (`c_base`, `m_glass`, `j_joker`, `c_fool`, `v_hone`, `p_arcana_normal_1`, …) |
 | `front` | `P_CARDS` key for playing cards (`H_A`), else null |
-| `base` | Playing cards only: `{suit, value, id, nominal, suit_nominal, suit_nominal_original, face_nominal, original_value, times_played}`, else null |
+| `base` | Playing cards only: `{suit, value, id, nominal, suit_nominal, suit_nominal_original, face_nominal, original_value, times_played}`, else null. `suit_nominal_original` is the tiebreak of the suit the card was created with (kept across suit changes); `original_value` is the rank at creation and null once a suit or rank change has rebuilt the base (`Card:set_base`, card.lua:97-145) |
 | `ability` | `self.ability`, **minus** the keys derived from the center (`name`, `effect`, `set`, `order`, `consumeable`, `type`) and the sticker fields, which live under `stickers`. `extra` keeps its Lua shape: null, a number, a string, or an object |
 | `edition` | The Lua edition table, e.g. `{"foil": true, "chips": 50, "type": "foil"}`, or null |
 | `seal` | `Red`, `Blue`, `Gold`, `Purple`, or null |
 | `debuff`, `facing` | Boolean; `front`/`back` |
+| `added_to_deck` | `Card.added_to_deck`: whether the card's `add_to_deck` effects (passives, a Negative's slot) are applied. True for owned jokers and consumables; false while a joker is debuffed (its passives are off), for shop and pack cards, and for playing cards (the sim never runs their no-op `add_to_deck`) |
 | `playing_card` | `self.playing_card` index, or null |
 | `costs` | `{base_cost, extra_cost, cost, sell_cost}` |
 | `stickers` | `{eternal, perishable, perish_tally (null unless perishable), rental, pinned}`. Lua keeps the first four in `self.ability` |

@@ -332,21 +332,24 @@ class TestLevelUp:
         # chips=10+15*2=40, mult=2+1*2=4
         assert levels.get(HandType.PAIR) == (40, 4)
 
-    def test_level_up_makes_secret_visible(self):
-        """Leveling a secret hand makes it visible."""
+    def test_level_up_keeps_secret_hidden(self):
+        """Leveling never reveals a hand (common_events.lua:464-468); playing
+        it does (state_events.lua:578)."""
         levels = HandLevels()
         assert levels[HandType.FLUSH_FIVE].visible is False
         levels.level_up(HandType.FLUSH_FIVE)
+        assert levels[HandType.FLUSH_FIVE].visible is False
+        levels.record_play(HandType.FLUSH_FIVE)
         assert levels[HandType.FLUSH_FIVE].visible is True
 
 
 class TestBlackHole:
-    def test_secret_hands_become_visible(self):
+    def test_secret_hands_stay_hidden(self):
         levels = HandLevels()
         levels.level_up_all()
-        assert levels[HandType.FLUSH_FIVE].visible is True
-        assert levels[HandType.FLUSH_HOUSE].visible is True
-        assert levels[HandType.FIVE_OF_A_KIND].visible is True
+        assert levels[HandType.FLUSH_FIVE].visible is False
+        assert levels[HandType.FLUSH_HOUSE].visible is False
+        assert levels[HandType.FIVE_OF_A_KIND].visible is False
 
 
 class TestPlayRecording:

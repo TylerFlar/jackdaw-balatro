@@ -18,7 +18,7 @@ from jackdaw.engine.data.prototypes import BLINDS
 
 
 def _truncate_chips(chips: float) -> int | float:
-    """``int()`` for a chip target, passing an overflowed (inf) one through."""
+    """``int()`` for a chip target, passing an overflowed (NaN) one through."""
     return int(chips) if math.isfinite(chips) else chips
 
 
@@ -37,8 +37,8 @@ class Blind:
     """Display name (e.g. ``"Small Blind"``, ``"The Hook"``)."""
 
     chips: int | float
-    """Chip target to beat this blind (``math.inf`` from ante 39 in endless
-    mode, where the target overflows a double)."""
+    """Chip target to beat this blind (NaN from ante 39 in endless mode,
+    where vanilla's get_blind_amount overflows, see blind_scaling)."""
 
     mult: float
     """Blind multiplier (Small=1, Big=1.5, Boss=2+)."""
@@ -70,6 +70,12 @@ class Blind:
 
     hands_sub: int | None = None
     """Hands subtracted by The Needle."""
+
+    prepped: bool = True
+    """One-shot flag read by drawn_to_hand (Crimson Heart) and stay_flipped
+    (The Fish).  set_blind sets it (blind.lua:94) — except The Fish, which
+    clears it (blind.lua:176-178) — press_play sets it, and every
+    drawn_to_hand clears it (blind.lua:602)."""
 
     @classmethod
     def create(
@@ -108,11 +114,17 @@ class Blind:
             dollars=dollars,
             boss=proto.boss is not None,
             debuff_config=debuff,
+            prepped=proto.name != "The Fish",
         )
 
     @classmethod
     def empty(cls) -> Blind:
-        """Create an empty/null blind (between rounds)."""
+        """The empty blind: ``set_blind(nil)`` (blind.lua:79-110).
+
+        G.GAME.blind holds it before the first blind of a run (start_run,
+        game.lua:2392, 2431) and from each defeat on (Blind:defeat,
+        blind.lua:330-337): no name, no boss, 0 chips, mult and dollars.
+        """
         return cls(
             key="",
             name="",
@@ -129,6 +141,7 @@ class Blind:
         is_joker_area: bool = False,
         pareidolia: bool = False,
         smeared: bool = False,
+        game_state: dict[str, Any] | None = None,
     ) -> None:
         """Set card.debuff based on boss blind effect.
 
@@ -142,6 +155,8 @@ class Blind:
             is_joker_area: If True, the card is in the joker area (not a
                 playing card).  Most debuffs only apply to playing cards.
             pareidolia: If True, all cards count as face cards (for The Plant).
+            game_state: Passed on to ``Card.set_debuff`` so a joker's
+                passives follow its debuff (card.lua:535).
         """
         # Check prototype-driven debuffs (suit, face, pillar, value, nominal)
         # Note: in Lua, empty table {} is truthy.  All boss blinds have a
@@ -157,31 +172,31 @@ class Blind:
             # debuffed too (live-verified: LSDYY84R, all 12 clubs).
             if "suit" in cfg:
                 if card.is_suit(cfg["suit"], bypass_debuff=True, smeared=smeared):
-                    card.set_debuff(True)
+                    card.set_debuff(True, game_state)
                     return
 
             # Face card debuff: The Plant
             if cfg.get("is_face") == "face":
                 if card.is_face(from_boss=True, pareidolia=pareidolia):
-                    card.set_debuff(True)
+                    card.set_debuff(True, game_state)
                     return
 
             # The Pillar: debuffs cards played in previous hands this ante
             if self.name == "The Pillar":
                 if card.ability.get("played_this_ante"):
-                    card.set_debuff(True)
+                    card.set_debuff(True, game_state)
                     return
 
             # Value-based debuff (not used by vanilla blinds, but supported)
             if "value" in cfg and card.base is not None:
                 if cfg["value"] == card.base.rank.value:
-                    card.set_debuff(True)
+                    card.set_debuff(True, game_state)
                     return
 
             # Nominal-based debuff (not used by vanilla blinds, but supported)
             if "nominal" in cfg and card.base is not None:
                 if cfg["nominal"] == card.base.nominal:
-                    card.set_debuff(True)
+                    card.set_debuff(True, game_state)
                     return
 
         # Crimson Heart: debuffs a random joker (handled elsewhere, not here)
@@ -190,11 +205,11 @@ class Blind:
 
         # Verdant Leaf: debuffs ALL non-joker cards unconditionally
         if self.name == "Verdant Leaf" and not self.disabled and not is_joker_area:
-            card.set_debuff(True)
+            card.set_debuff(True, game_state)
             return
 
         # No debuff applies
-        card.set_debuff(False)
+        card.set_debuff(False, game_state)
 
     def debuff_hand(
         self,
@@ -203,6 +218,7 @@ class Blind:
         handname: str,
         *,
         check: bool = False,
+        game_state: dict[str, Any] | None = None,
     ) -> bool:
         """Check whether the entire hand is blocked by the boss blind.
 
@@ -219,7 +235,9 @@ class Blind:
             handname: Detected hand type name (e.g. ``"Full House"``).
             check: If True, don't mutate state (preview mode for
                 ``parse_highlighted``).  The Eye won't register the hand,
-                The Mouth won't lock.
+                The Mouth won't lock, The Ox takes no money.
+            game_state: Read for The Ox (``current_round
+                .most_played_poker_hand``) and changed by it (``dollars``).
         """
         if self.disabled:
             return False
@@ -264,12 +282,25 @@ class Blind:
                 if not check:
                     self.only_hand = handname
 
-        # The Arm / The Ox don't block; `triggered` is set by the
-        # scoring pipeline / play handler only when the effect actually
-        # fires (Arm: level > 1 demote — Matador reads it during
-        # joker_main, live-verified LS7N21KX; Ox: money drain).  The
-        # old conservative always-True Arm flag here would over-pay
-        # Matador on level-1 hands.
+        # The Arm doesn't block; `triggered` is set by the scoring pipeline
+        # only when its demote actually fires (level > 1 — Matador reads it
+        # during joker_main, live-verified LS7N21KX).  The old conservative
+        # always-True Arm flag here would over-pay Matador on level-1 hands.
+
+        # The Ox (blind.lua:560-569): the hand most played as of the last
+        # boss defeat (current_round.most_played_poker_hand, frozen by
+        # end_round, state_events.lua:129-138) triggers it and, unless
+        # previewing, ease_dollars(-G.GAME.dollars, true) takes all the
+        # money at once — before the hand scores.
+        if self.name == "The Ox" and game_state is not None:
+            self.triggered = False
+            most_played = game_state.get("current_round", {}).get(
+                "most_played_poker_hand", "High Card"
+            )
+            if handname == most_played:
+                self.triggered = True
+                if not check:
+                    game_state["dollars"] = 0
 
         return False
 
@@ -357,10 +388,14 @@ class Blind:
         hand_cards: list[Any],
         joker_cards: list[Any] | None = None,
         rng: Any | None = None,
+        *,
+        game_state: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Boss effect when cards are drawn to hand.
 
-        Matches ``Blind:drawn_to_hand`` (blind.lua:572-603).
+        Matches ``Blind:drawn_to_hand`` (blind.lua:572-603), which vanilla
+        calls for every blind after each draw-to-hand.  *game_state* goes to
+        ``Card.set_debuff`` so Crimson Heart's victim loses its passives.
 
         Returns side-effect descriptor:
             ``forced_card_index``: index in hand_cards to force-select (Cerulean Bell)
@@ -386,20 +421,24 @@ class Blind:
                 )
                 result["forced_card_index"] = idx
 
-        if self.name == "Crimson Heart" and rng and joker_cards:
-            # Clear all joker debuffs, then debuff one random
-            eligible = []
-            for i, j in enumerate(joker_cards):
-                if not j.debuff or len(joker_cards) < 2:
-                    eligible.append(i)
-                j.set_debuff(False)
+        if self.name == "Crimson Heart" and self.prepped and rng and joker_cards:
+            # Re-pick only when prepped (blind.lua:588): set_blind and a
+            # play's press_play prep it, so a discard's redraw keeps the
+            # victim.  The candidates are the jokers not already debuffed
+            # (all of them with fewer than 2); every joker is un-debuffed,
+            # then one candidate is debuffed — picked from the list sorted
+            # by sort_id like any pseudorandom_element over cards
+            # (blind.lua:589-599, misc_functions.lua:253-264).
+            board = list(joker_cards)
+            eligible = [j for j in board if not j.debuff or len(board) < 2]
+            for j in board:
+                j.set_debuff(False, game_state)
             if eligible:
-                _, idx = rng.element(
-                    {i: i for i in eligible},
-                    rng.seed("crimson_heart"),
+                chosen, _ = rng.element(eligible, rng.seed("crimson_heart"))
+                chosen.set_debuff(True, game_state)
+                result["debuffed_joker_index"] = next(
+                    (i for i, j in enumerate(joker_cards) if j is chosen), None
                 )
-                joker_cards[idx].set_debuff(True)
-                result["debuffed_joker_index"] = idx
 
         self.prepped = False
         return result
@@ -446,10 +485,13 @@ class Blind:
         playing_cards: list[Any] | None = None,
         joker_cards: list[Any] | None = None,
     ) -> dict[str, Any]:
-        """Disable this boss blind's effects.
+        """Disable this boss blind's effects — the blind's own part.
 
-        Matches ``Blind:disable`` (blind.lua:356-415).
-        Called by Chicot joker (on boss set) or Luchador (when sold).
+        ``Blind:disable`` (blind.lua:356-415) sets the flag and divides The
+        Wall's (/2) and Violet Vessel's (/3) targets here; the game-state
+        side (discards, hands, hand size and its draws, flips, the forced
+        card, the debuff pass over the board, the round-end check) is
+        :func:`jackdaw.engine.game.disable_blind`, which the engine calls.
 
         Returns side-effect descriptor:
             ``restore_discards``: discards to restore (The Water)
@@ -500,13 +542,12 @@ class Blind:
 
     def beaten_by(self, chips: float) -> bool:
         """Vanilla's win check, ``G.GAME.chips - G.GAME.blind.chips >= 0``
-        (state_events.lua:96, game.lua:3196).
+        (state_events.lua:96, game.lua:3196), as the same subtraction.
 
-        Written as a subtraction, an overflowed target can never be met:
-        ``inf - inf`` is NaN, so even an infinite score fails.  A plain
-        ``chips >= self.chips`` would let an inf score beat an inf blind.
+        An overflowed (NaN) target can never be met: the difference is NaN
+        and every comparison with NaN is false, an infinite score included.
         """
-        return math.isfinite(self.chips) and chips >= self.chips
+        return chips - self.chips >= 0
 
     def __repr__(self) -> str:
         return (
