@@ -218,7 +218,9 @@ Besides the policy above:
   face-down jokers, the cards the boss debuffed, and Crimson Heart's joker still debuffed,
   without its passive (Juggler's hand size, Drunkard's discard, Chaos the Clown's free
   reroll); the next answer has them undone (BB-BOSS-DEFEAT). The simulator's answer has them
-  undone already.
+  undone already. When that boss wins the run, `win_game` pauses the game at the win screen
+  (`G.SETTINGS.paused = true`) before the defeat's events run: until the player goes on in
+  endless mode, the live game keeps showing the boss's debuffs.
 - **`play` can answer before the round's total is set.** `play` waits for the round
   evaluation's first row and a `cash_out_button`. But `cash_out` leaves the button's UIBox in
   `G.I.UIBOX` (it is a minor of `G.round_eval`, not a child), so from a run's second round on

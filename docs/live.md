@@ -264,7 +264,7 @@ repair is a *classified* divergence.
 | BB-NONFINITE | veto | a step whose view would hold NaN or infinity: the live server sends nothing |
 | BB-TEXT | ignore | text fields (never compared) |
 | BB-SHOP-AREAS | ignore | the shop's areas after leaving the shop (gaps.md B21, read from the code; the count settles it) |
-| BB-BOSS-DEFEAT | ignore | the `play` that beats a boss answers before `Blind:defeat` has undone the boss ([timing](balatrobot#differences-from-the-live-game)): the cards it debuffed, Crimson Heart's joker and its passive, The Manacle's hand size, Amber Acorn's face-down jokers |
+| BB-BOSS-DEFEAT | ignore | the `play` that beats a boss answers before `Blind:defeat` has undone the boss ([timing](balatrobot#differences-from-the-live-game)): the cards it debuffed, Crimson Heart's joker and its passive, The Manacle's hand size, Amber Acorn's face-down jokers; at the win screen, which pauses the game, a later `gamestate` check too |
 | BB-CASHOUT-RACE | reconcile | a `cash_out` sent as soon as `play` answers can pay the previous round's total ([timing](balatrobot#differences-from-the-live-game)); `LiveBackend` waits before `cash_out` so it doesn't, and the shadow takes the live money if it does |
 | BB-REARRANGE-ORDER | ignore | `rearrange` writes `ability.order` (not in the view) |
 | BB-SORT-MODE | ignore | `SortHand` goes out as a permutation; the shadow takes the same move |

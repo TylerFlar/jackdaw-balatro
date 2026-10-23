@@ -407,7 +407,9 @@ class LiveAdapter:
         """Compare the live ``gamestate`` with the shadow now. Returns the differences
         the catalog doesn't drop (raising :class:`DivergenceError` for them, unless
         ``raise_on_divergence`` is False). Nothing is reconciled here: every request
-        was compared (and reconciled) as it was made, so any difference left is new."""
+        was compared (and reconciled) as it was made, so any difference left is new.
+        A reading that differs is read again within :attr:`recheck`, as for a request:
+        right after a request the game may still be running its events."""
         self._require_run()
         live = self._backend.handle("gamestate", {})
         ctx = StepContext(
@@ -419,6 +421,7 @@ class LiveAdapter:
             post_view=self._shadow_view,
             memory=self._memory,
         )
+        live = self._settled(ctx, live)
         diff = diff_views(self._shadow_view, live, self._ids)
         cls = classify(diff.diffs, ctx, self._catalog)
         left = cls.unclassified + [d for ds in cls.classified.values() for d in ds]
