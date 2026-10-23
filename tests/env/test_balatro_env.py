@@ -18,7 +18,7 @@ import pytest
 from jackdaw.engine.actions import GamePhase
 from jackdaw.env.action_space import ActionMask, ActionType, FactoredAction
 from jackdaw.env.balatro_env import BalatroEnvironment
-from jackdaw.env.game_interface import DirectAdapter, GameState
+from jackdaw.env.game_interface import GameState, OracleAdapter
 from jackdaw.env.game_spec import GameActionMask, GameEnvironment, GameObservation
 from jackdaw.env.observation import Observation
 
@@ -28,7 +28,7 @@ SEED = "TEST_BALATRO_ENV_42"
 @pytest.fixture()
 def env() -> BalatroEnvironment:
     return BalatroEnvironment(
-        adapter_factory=DirectAdapter,
+        adapter_factory=OracleAdapter,
         back_keys=["b_red"],
         stakes=[1],
         max_steps=500,
@@ -46,7 +46,7 @@ class TestProtocolConformance:
         spec = env.spec
         assert spec.name == "balatro"
         assert spec.num_entity_types == 5
-        assert spec.num_action_types == 21
+        assert spec.num_action_types == 23
 
 
 class TestReset:
@@ -83,7 +83,7 @@ class TestReset:
 
     def test_mask_type_mask_shape(self, env: BalatroEnvironment) -> None:
         _, game_mask, _ = env.reset()
-        assert game_mask.type_mask.shape == (21,)
+        assert game_mask.type_mask.shape == (23,)
 
     def test_episode_tracking_reset(self, env: BalatroEnvironment) -> None:
         env.reset()
@@ -146,14 +146,14 @@ class TestEndOnWin:
         return terminated, info
 
     def test_won_run_ends_the_episode(self) -> None:
-        env = BalatroEnvironment(adapter_factory=DirectAdapter)
+        env = BalatroEnvironment(adapter_factory=OracleAdapter)
         terminated, info = self._win_run(env)
         assert info["state"].won
         assert env.episode_won
         assert terminated
 
     def test_end_on_win_false_continues_into_endless(self) -> None:
-        env = BalatroEnvironment(adapter_factory=DirectAdapter, end_on_win=False)
+        env = BalatroEnvironment(adapter_factory=OracleAdapter, end_on_win=False)
         terminated, info = self._win_run(env)
         assert info["state"].won
         assert not terminated

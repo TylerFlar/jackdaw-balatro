@@ -199,6 +199,11 @@ impl Game {
 
     /// `card:can_use_consumeable()` at rest (no card in play, nothing locked).
     pub(crate) fn can_use_consumeable(&self, id: u32) -> bool {
+        self.can_use_consumeable_with(id, &self.rt.highlighted)
+    }
+
+    /// [`Game::can_use_consumeable`] with `highlighted` (sort ids) as `G.hand.highlighted`.
+    pub fn can_use_consumeable_with(&self, id: u32, highlighted: &[u32]) -> bool {
         if !self.gs.areas.play.is_empty() {
             return false;
         }
@@ -233,7 +238,6 @@ impl Game {
         {
             return true;
         }
-        let highlighted: Vec<u32> = self.rt.highlighted.clone();
         if name == "Aura"
             && highlighted.len() == 1
             && self

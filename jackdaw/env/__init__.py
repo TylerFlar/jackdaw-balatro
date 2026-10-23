@@ -7,6 +7,10 @@ Canonical usage::
     spec = balatro_game_spec()
     env = BalatroEnvironment(adapter_factory=DirectAdapter)
     obs, mask, info = env.reset()
+
+``DirectAdapter`` runs the Rust engine (``jackdaw.core.Game``);
+``OracleAdapter`` runs the Python engine it is checked against.
+``BalatroVectorEnv`` steps many environments in parallel in Rust.
 """
 
 from jackdaw.env.action_space import (
@@ -14,6 +18,7 @@ from jackdaw.env.action_space import (
     ActionMask,
     ActionType,
     FactoredAction,
+    Legality,
     engine_action_to_factored,
     factored_to_engine_action,
     get_action_mask,
@@ -33,6 +38,7 @@ from jackdaw.env.game_interface import (
     DirectAdapter,
     GameAdapter,
     GameState,
+    OracleAdapter,
 )
 from jackdaw.env.game_spec import (
     GameActionMask,
@@ -57,6 +63,7 @@ from jackdaw.env.rewards import (
     blind_progress_reward,
     sparse_reward,
 )
+from jackdaw.env.vector_env import BalatroVectorEnv
 
 __all__ = [
     "ActionMask",
@@ -64,6 +71,7 @@ __all__ = [
     "Agent",
     "BalatroEnvironment",
     "BalatroGymnasiumEnv",
+    "BalatroVectorEnv",
     "BridgeAdapter",
     "ConsumableTargetSpec",
     "D_CONSUMABLE",
@@ -78,9 +86,11 @@ __all__ = [
     "GameObservation",
     "GameSpec",
     "GameState",
+    "Legality",
     "NUM_ACTION_TYPES",
     "NUM_CENTER_KEYS",
     "Observation",
+    "OracleAdapter",
     "RandomAgent",
     "RewardFn",
     "ShapedReward",

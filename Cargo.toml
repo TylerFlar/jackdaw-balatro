@@ -35,6 +35,8 @@ jackdaw-env = { path = "crates/jackdaw-env" }
 serde_json = { version = "1.0.154", features = ["float_roundtrip"] }
 # The canonical snapshot digest (`jackdaw_core::canon`).
 sha2 = "0.10"
+# The vector env's worker threads (`jackdaw_env::vector`).
+rayon = "1.12"
 
 # `unsafe_code` is forbidden per crate (`#![forbid(unsafe_code)]`) rather than here, because the
 # PyO3 macros in jackdaw-py expand to unsafe code.

@@ -30,7 +30,7 @@ from jackdaw.engine.actions import (
     SwapJokersLeft,
     SwapJokersRight,
 )
-from jackdaw.env.game_interface import DirectAdapter
+from jackdaw.env.game_interface import OracleAdapter
 from jackdaw.env.observation import (
     _CENTER_KEY_TO_ID,
     D_CONSUMABLE,
@@ -51,13 +51,13 @@ BACK = "b_red"
 STAKE = 1
 
 
-def _make_adapter() -> DirectAdapter:
-    adapter = DirectAdapter()
+def _make_adapter() -> OracleAdapter:
+    adapter = OracleAdapter()
     adapter.reset(BACK, STAKE, SEED)
     return adapter
 
 
-def _step_to_hand(adapter: DirectAdapter) -> None:
+def _step_to_hand(adapter: OracleAdapter) -> None:
     """Advance to SELECTING_HAND phase."""
     adapter.step(SelectBlind())
 
@@ -239,7 +239,7 @@ def _identities():
 
 
 def _dealt_state(seed: str) -> dict:
-    adapter = DirectAdapter()
+    adapter = OracleAdapter()
     adapter.reset(BACK, STAKE, seed)
     adapter.step(SelectBlind())
     gs = adapter.raw_state
@@ -361,7 +361,7 @@ class TestFaceDownHidesIdentity:
         from jackdaw.engine.actions import SkipBlind
         from jackdaw.engine.card import Card
 
-        adapter = DirectAdapter()
+        adapter = OracleAdapter()
         adapter.reset(BACK, STAKE, "ACORN")
         gs = adapter.raw_state
         for key in ("j_joker", "j_greedy_joker", "j_blueprint"):

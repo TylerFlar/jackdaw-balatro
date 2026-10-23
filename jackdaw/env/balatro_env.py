@@ -11,6 +11,7 @@ import random
 from collections.abc import Callable
 from typing import Any
 
+from jackdaw.core.game import NotPortedError
 from jackdaw.env.action_space import (
     ActionMask,
     FactoredAction,
@@ -18,9 +19,19 @@ from jackdaw.env.action_space import (
     get_action_mask,
 )
 from jackdaw.env.balatro_spec import balatro_game_spec
-from jackdaw.env.game_interface import DirectAdapter, GameAdapter, GameState, _snapshot
+from jackdaw.env.game_interface import (
+    DirectAdapter,
+    GameAdapter,
+    GameState,
+    OracleAdapter,
+    _snapshot,
+    game_state_from_parts,
+)
 from jackdaw.env.game_spec import GameActionMask, GameObservation, GameSpec
-from jackdaw.env.observation import encode_observation
+from jackdaw.env.observation import Observation, encode_observation
+from jackdaw.env.rust_env import action_mask_from_parts
+from jackdaw.env.rust_env import factored_to_engine_action as rust_factored_to_engine
+from jackdaw.env.rust_observation import observation_from_buffer
 
 
 def _compute_shop_splits(gs: dict[str, Any]) -> tuple[int, int, int]:
@@ -32,6 +43,19 @@ def _compute_shop_splits(gs: dict[str, Any]) -> tuple[int, int, int]:
     )
 
 
+def _rust_view(
+    parts: tuple[Any, ...],
+) -> tuple[Observation, ActionMask, GameState, tuple[int, int, int]]:
+    """``jackdaw._core``'s ``env_view`` as the env's Python objects."""
+    obs_data, rows, mask_parts, state_parts, splits = parts
+    return (
+        observation_from_buffer(obs_data, rows),
+        action_mask_from_parts(mask_parts),
+        game_state_from_parts(state_parts),
+        splits,
+    )
+
+
 class BalatroEnvironment:
     """Game-agnostic environment wrapper for Balatro.
 
@@ -39,10 +63,20 @@ class BalatroEnvironment:
     so the generic RL pipeline can interact with Balatro without importing
     any Balatro-specific modules.
 
-    ``info["raw_state"]`` is the adapter's live engine dict, which the next
-    step mutates in place.  For before/after comparisons (rewards), use the
+    With :class:`~jackdaw.env.game_interface.DirectAdapter` (the default
+    choice for training) the run is the Rust engine's: ``info["game"]`` is the
+    live :class:`jackdaw.core.Game`, which the next step moves on (read it, or
+    ``.freeze()`` a copy).  With the Python engine's adapters
+    (:class:`~jackdaw.env.game_interface.OracleAdapter`,
+    :class:`~jackdaw.env.game_interface.BridgeAdapter`) ``info["raw_state"]``
+    is the engine's live dict instead, mutated in place by the next step.
+    For before/after comparisons (rewards), use the
     :class:`~jackdaw.env.game_interface.GameState` snapshots in
     ``info["prev_state"]`` and ``info["state"]``.
+
+    A step the Rust engine can't take yet (``NotPortedError``) leaves the run
+    unchanged and ends the episode as truncated, with the reason in
+    ``info["not_ported"]``.
 
     Parameters
     ----------
@@ -82,6 +116,8 @@ class BalatroEnvironment:
 
         self._episode_count = 0
         self._step_count = 0
+        # The Rust engine's summary of the last state (the next step's prev_state).
+        self._state: GameState | None = None
 
         # Episode tracking
         self.episode_length: int = 0
@@ -111,12 +147,26 @@ class BalatroEnvironment:
         stake = random.choice(self._stakes) if len(self._stakes) > 1 else self._stakes[0]
         reset_state = self._adapter.reset(back_key, stake, seed)
 
+        game = getattr(self._adapter, "game", None)
+        if game is not None:
+            obs, mask, state, splits = _rust_view(game._g.env_view())
+            self._state = state
+            info: dict[str, object] = {
+                "game": game,
+                "state": state,
+                "shop_splits": splits,
+                "observation": obs,
+                "action_mask": mask,
+            }
+            return obs.to_game_observation(), _action_mask_to_game(mask), info
+
+        self._state = None
         gs = self._adapter.raw_state
         obs = encode_observation(gs)
         mask = self._action_mask(gs)
         game_obs = obs.to_game_observation()
         game_mask = _action_mask_to_game(mask)
-        info: dict[str, object] = {
+        info = {
             "raw_state": gs,
             "state": self._reuse_snapshot(reset_state, gs),
             "shop_splits": _compute_shop_splits(gs),
@@ -130,6 +180,9 @@ class BalatroEnvironment:
         action: FactoredAction,
     ) -> tuple[GameObservation, bool, bool, GameActionMask, dict[str, object]]:
         """Execute an action and return (obs, terminated, truncated, mask, info)."""
+        if self._state is not None:
+            return self._rust_step(action)
+
         gs_prev = self._adapter.raw_state
         # Snapshot BEFORE stepping: in-process adapters mutate raw_state in
         # place, so gs_prev is about to become the post-step state.
@@ -163,14 +216,55 @@ class BalatroEnvironment:
         }
         return game_obs, terminated, truncated, game_mask, info
 
+    def _rust_step(
+        self, action: FactoredAction
+    ) -> tuple[GameObservation, bool, bool, GameActionMask, dict[str, object]]:
+        """:meth:`step` on the Rust engine: convert, step, encode, mask and summarise in one
+        call into ``jackdaw._core`` (or through a custom adapter's ``step``)."""
+        adapter = self._adapter
+        game = adapter.game  # type: ignore[attr-defined]
+        g = game._g
+        prev_state = self._state
+        not_ported: str | None = None
+        try:
+            if type(adapter) is DirectAdapter:
+                parts = g.env_step(action.action_type, action.entity_target, action.card_target)
+            else:
+                adapter.step(rust_factored_to_engine(action, game))
+                parts = g.env_view()
+        except NotPortedError as exc:
+            not_ported = str(exc)
+            parts = g.env_view()
+        obs, mask, state, splits = _rust_view(parts)
+        self._state = state
+        self.episode_length += 1
+        self._step_count += 1
+
+        terminated = state.done or (self._end_on_win and state.won)
+        truncated = self._step_count >= self._max_steps or not_ported is not None
+        self.episode_ante = state.ante
+        self.episode_won = state.won
+
+        info: dict[str, object] = {
+            "game": game,
+            "prev_state": prev_state,
+            "state": state,
+            "shop_splits": splits,
+            "observation": obs,
+            "action_mask": mask,
+        }
+        if not_ported is not None:
+            info["not_ported"] = not_ported
+        return obs.to_game_observation(), terminated, truncated, _action_mask_to_game(mask), info
+
     def _reuse_snapshot(self, returned: GameState, gs: dict[str, Any]) -> GameState:
         """The post-step snapshot of *gs*.
 
-        DirectAdapter returns exactly ``_snapshot(raw_state)`` from
-        reset/step and nothing touches the state in between, so its result
-        is reused; any other adapter is snapshotted afresh, as before.
+        The Python engine's adapter returns exactly ``_snapshot(raw_state)``
+        from reset/step and nothing touches the state in between, so its
+        result is reused; any other adapter is snapshotted afresh, as before.
         """
-        if type(self._adapter) is DirectAdapter:
+        if type(self._adapter) is OracleAdapter:
             return returned
         return _snapshot(gs)
 

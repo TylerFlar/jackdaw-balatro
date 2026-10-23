@@ -7,14 +7,14 @@ import pytest
 from gymnasium import spaces
 
 from jackdaw.env.action_space import ActionType
-from jackdaw.env.game_interface import DirectAdapter
+from jackdaw.env.game_interface import OracleAdapter
 from jackdaw.env.gymnasium_wrapper import MAX_ACTIONS, BalatroGymnasiumEnv
 from jackdaw.env.rewards import ShapedReward, Transition, sparse_reward
 
 
 @pytest.fixture()
 def env() -> BalatroGymnasiumEnv:
-    return BalatroGymnasiumEnv(adapter_factory=DirectAdapter, max_steps=200)
+    return BalatroGymnasiumEnv(adapter_factory=OracleAdapter, max_steps=200)
 
 
 # ------------------------------------------------------------------
@@ -136,7 +136,7 @@ class TestActionMasks:
 class TestRandomEpisodes:
     @pytest.mark.slow
     def test_ten_random_episodes(self) -> None:
-        env = BalatroGymnasiumEnv(adapter_factory=DirectAdapter, max_steps=500)
+        env = BalatroGymnasiumEnv(adapter_factory=OracleAdapter, max_steps=500)
         rng = np.random.default_rng(123)
 
         for ep in range(10):
@@ -179,7 +179,7 @@ class TestPackPickTargets:
         from jackdaw.engine.game import step
         from jackdaw.env.action_space import get_action_mask
 
-        env = BalatroGymnasiumEnv(adapter_factory=DirectAdapter)
+        env = BalatroGymnasiumEnv(adapter_factory=OracleAdapter)
         env.reset(seed=5)
         gs = env._inner._adapter.raw_state
         step(gs, SelectBlind())  # deal a hand to target
@@ -207,7 +207,7 @@ class TestCeruleanBell:
         from jackdaw.engine.game import step
         from jackdaw.env.action_space import get_action_mask
 
-        env = BalatroGymnasiumEnv(adapter_factory=DirectAdapter)
+        env = BalatroGymnasiumEnv(adapter_factory=OracleAdapter)
         env.reset(seed=seed)
         gs = env._inner._adapter.raw_state
         gs["blind_on_deck"] = "Boss"
@@ -280,17 +280,17 @@ def _step_beating_every_blind(env: BalatroGymnasiumEnv) -> tuple[float, bool, bo
 
 class TestRewardFn:
     def test_default_is_sparse(self) -> None:
-        env = BalatroGymnasiumEnv(adapter_factory=DirectAdapter)
+        env = BalatroGymnasiumEnv(adapter_factory=OracleAdapter)
         assert env.reward_fn is sparse_reward
 
     def test_reward_shaping_selects_shaped_reward(self) -> None:
-        env = BalatroGymnasiumEnv(adapter_factory=DirectAdapter, reward_shaping=True)
+        env = BalatroGymnasiumEnv(adapter_factory=OracleAdapter, reward_shaping=True)
         assert isinstance(env.reward_fn, ShapedReward)
 
     def test_reward_fn_and_reward_shaping_conflict(self) -> None:
         with pytest.raises(ValueError):
             BalatroGymnasiumEnv(
-                adapter_factory=DirectAdapter, reward_shaping=True, reward_fn=sparse_reward
+                adapter_factory=OracleAdapter, reward_shaping=True, reward_fn=sparse_reward
             )
 
     def test_custom_reward_fn_sees_each_transition(self) -> None:
@@ -300,7 +300,7 @@ class TestRewardFn:
             seen.append(t)
             return 7.0
 
-        env = BalatroGymnasiumEnv(adapter_factory=DirectAdapter, reward_fn=reward_fn)
+        env = BalatroGymnasiumEnv(adapter_factory=OracleAdapter, reward_fn=reward_fn)
         env.reset(seed=1)
         reward, *_ = _step_beating_every_blind(env)  # SelectBlind
         assert reward == 7.0
@@ -320,13 +320,13 @@ class TestRewardFn:
                 return 0.0
 
         fn = Stateful()
-        env = BalatroGymnasiumEnv(adapter_factory=DirectAdapter, reward_fn=fn)
+        env = BalatroGymnasiumEnv(adapter_factory=OracleAdapter, reward_fn=fn)
         env.reset(seed=1)
         env.reset(seed=2)
         assert fn.resets == 2
 
     def test_blind_bonus_paid_on_the_clearing_hand_not_the_select(self) -> None:
-        env = BalatroGymnasiumEnv(adapter_factory=DirectAdapter, reward_shaping=True)
+        env = BalatroGymnasiumEnv(adapter_factory=OracleAdapter, reward_shaping=True)
         env.reset(seed=3)
         select_reward, *_ = _step_beating_every_blind(env)
         clear_reward, *_ = _step_beating_every_blind(env)
@@ -336,7 +336,7 @@ class TestRewardFn:
     @pytest.mark.parametrize("reward_shaping", [False, True])
     def test_metrics_count_blinds_beaten_for_any_reward(self, reward_shaping: bool) -> None:
         env = BalatroGymnasiumEnv(
-            adapter_factory=DirectAdapter, max_steps=30, reward_shaping=reward_shaping
+            adapter_factory=OracleAdapter, max_steps=30, reward_shaping=reward_shaping
         )
         env.reset(seed=4)
         for _ in range(30):

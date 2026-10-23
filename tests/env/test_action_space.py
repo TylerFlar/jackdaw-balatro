@@ -92,7 +92,7 @@ from jackdaw.env.action_space import (
     get_consumable_target_info,
 )
 from jackdaw.env.agents import RandomAgent
-from jackdaw.env.game_interface import DirectAdapter
+from jackdaw.env.game_interface import OracleAdapter
 
 # ---------------------------------------------------------------------------
 # Lightweight mock Card
@@ -252,7 +252,7 @@ def _round_eval_state(**overrides: Any) -> dict[str, Any]:
 
 class TestActionType:
     def test_count(self):
-        assert len(ActionType) == NUM_ACTION_TYPES == 21
+        assert len(ActionType) == NUM_ACTION_TYPES == 23
 
     def test_values_sequential(self):
         for i, at in enumerate(ActionType):
@@ -1385,7 +1385,7 @@ def _run_coverage_episodes(
 
     for ep in range(n_episodes):
         seed = f"COVERAGE_{ep}"
-        adapter = DirectAdapter()
+        adapter = OracleAdapter()
         adapter.reset("b_red", 1, seed)
         agent.reset()
 
@@ -1437,7 +1437,7 @@ def _run_reverse_coverage(n_per_type: int = 50) -> dict[str, dict[str, int]]:
     # the engine modifies in-place on step.
     game_states: dict[str, list[tuple[dict, Any]]] = defaultdict(list)
     for seed_idx in range(20):
-        adapter = DirectAdapter()
+        adapter = OracleAdapter()
         adapter.reset("b_red", 1, f"REVERSE_{seed_idx}")
         agent = RandomAgent()
         agent.reset()

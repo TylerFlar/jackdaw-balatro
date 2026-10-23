@@ -6,6 +6,11 @@ enumerating all legal :class:`FactoredAction` instances each step.  Exposes an
 
 The reward is pluggable: pass ``reward_fn`` (see :mod:`jackdaw.env.rewards`).
 
+With :class:`~jackdaw.env.game_interface.DirectAdapter` the whole step (the
+engine, the observation, the mask, the action table and the built-in rewards)
+runs in Rust (``jackdaw._core.GymEnv``); the Python engine's adapters take the
+Python path, which the Rust one matches bit for bit.
+
 Example::
 
     from jackdaw.env import BalatroGymnasiumEnv, DirectAdapter, ShapedReward
@@ -19,6 +24,7 @@ from __future__ import annotations
 
 import math
 import operator
+import secrets
 from collections.abc import Callable, Sequence
 from functools import lru_cache
 from itertools import combinations
@@ -28,12 +34,23 @@ import gymnasium
 import numpy as np
 from gymnasium import spaces
 
+from jackdaw import _core
+from jackdaw.core import Game
 from jackdaw.env.action_space import ActionType, get_consumable_target_info
 from jackdaw.env.balatro_env import BalatroEnvironment
 from jackdaw.env.balatro_spec import balatro_game_spec
-from jackdaw.env.game_interface import GameAdapter
+from jackdaw.env.game_interface import DirectAdapter, GameAdapter, game_state_from_parts
 from jackdaw.env.game_spec import FactoredAction, GameActionMask, GameObservation
 from jackdaw.env.rewards import RewardFn, ShapedReward, Transition, sparse_reward
+from jackdaw.env.rust_gym import (
+    EpisodeStarts,
+    RustActionTable,
+    factored_from_parts,
+    gym_obs,
+    rust_reward,
+    sampler_seed,
+)
+from jackdaw.env.sampler import Xoshiro256, subsample
 
 MAX_ACTIONS: int = 500
 CARD_COMBO_BUDGET: int = 200
@@ -69,13 +86,9 @@ _CARD_ONLY_TYPES: frozenset[int] = frozenset(
 )
 
 
-def _subsample(items: Sequence[Any], budget: int, rng: np.random.Generator) -> Sequence[Any]:
+def _subsample(items: Sequence[Any], budget: int, rng: Xoshiro256) -> Sequence[Any]:
     """Return *items* if within budget, else a random subsample (order kept)."""
-    if len(items) <= budget:
-        return items
-    indices = rng.choice(len(items), size=budget, replace=False)
-    indices.sort()
-    return [items[i] for i in indices.tolist()]
+    return subsample(items, budget, rng)
 
 
 def _selection_sizes(n_cards: int, min_select: Any, max_select: Any) -> tuple[int, int]:
@@ -130,7 +143,7 @@ def _card_actions(
     legal_cards: tuple[int, ...],
     min_select: Any,
     max_select: Any,
-    rng: np.random.Generator,
+    rng: Xoshiro256,
     required: int | None = None,
 ) -> Sequence[FactoredAction]:
     """Card-selecting actions for one action type/entity, subsampled to budget.
@@ -180,6 +193,10 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         Shorthand when ``reward_fn`` is not given: True selects
         :class:`~jackdaw.env.rewards.ShapedReward`, False (default)
         :func:`~jackdaw.env.rewards.sparse_reward`.
+
+    On the Rust engine (:class:`~jackdaw.env.game_interface.DirectAdapter`) a step
+    the engine can't take yet ends the episode as truncated, with the reason in
+    ``info["balatro/not_ported"]``; :attr:`game` is a copy of the current run.
     """
 
     metadata: dict[str, Any] = {"render_modes": []}
@@ -196,19 +213,39 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         end_on_win: bool = True,
     ) -> None:
         super().__init__()
-        self._inner = BalatroEnvironment(
-            adapter_factory=adapter_factory,
-            back_keys=back_keys,
-            stakes=stakes,
-            max_steps=max_steps,
-            seed_prefix=seed_prefix,
-            end_on_win=end_on_win,
-        )
         if reward_fn is not None and reward_shaping:
             raise ValueError("Pass either reward_fn or reward_shaping=True, not both")
         if reward_fn is None:
             reward_fn = ShapedReward() if reward_shaping else sparse_reward
         self.reward_fn: RewardFn = reward_fn
+
+        # The Rust engine runs the whole step in jackdaw._core.GymEnv; the Python
+        # engine's adapters go through BalatroEnvironment.
+        self._core: Any = None
+        self._inner: BalatroEnvironment | None = None
+        if isinstance(adapter_factory(), DirectAdapter):
+            builtin = rust_reward(reward_fn)
+            # A custom reward (or an override of _compute_reward) is computed in Python.
+            self._python_reward = (
+                builtin is None
+                or type(self)._compute_reward is not BalatroGymnasiumEnv._compute_reward
+            )
+            kind, weights = ("none", None) if self._python_reward else builtin  # type: ignore[misc]
+            self._starts = EpisodeStarts(back_keys, stakes, seed_prefix)
+            back, stake, run_seed = self._starts.back_keys[0], self._starts.stakes[0], "INIT"
+            self._core = _core.GymEnv(
+                back, stake, run_seed, None, secrets.randbits(64), max_steps, end_on_win,
+                kind, weights,
+            )  # fmt: skip
+        else:
+            self._inner = BalatroEnvironment(
+                adapter_factory=adapter_factory,
+                back_keys=back_keys,
+                stakes=stakes,
+                max_steps=max_steps,
+                seed_prefix=seed_prefix,
+                end_on_win=end_on_win,
+            )
 
         # Observation space
         obs_spaces: dict[str, spaces.Space] = {
@@ -233,9 +270,12 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         # Action space
         self.action_space = spaces.Discrete(MAX_ACTIONS)
 
-        # Internal state
-        self._action_table: list[FactoredAction] = []
-        self._rng = np.random.default_rng()
+        # Internal state.  The table's subsampling draws from a seeded xoshiro256**
+        # (jackdaw.env.sampler), the generator the Rust table uses too.
+        self._action_table: Sequence[FactoredAction] = []
+        if self._core is not None:
+            self._action_table = RustActionTable(self._core)
+        self._rng = Xoshiro256(secrets.randbits(64))
         self._episode_max_ante: int = 1
         self._episode_blinds_beaten: int = 0
 
@@ -250,13 +290,16 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         options: dict[str, Any] | None = None,
     ) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
         super().reset(seed=seed)
+        if self._core is not None:
+            return self._rust_reset(seed)
         if seed is not None:
-            self._rng = np.random.default_rng(seed)
+            self._rng = Xoshiro256(seed)
 
         kwargs: dict[str, Any] = {}
         if seed is not None:
             kwargs["seed"] = str(seed)
 
+        assert self._inner is not None
         game_obs, game_mask, info = self._inner.reset(**kwargs)
         self._episode_max_ante = self._inner.episode_ante
         self._episode_blinds_beaten = 0
@@ -268,6 +311,9 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         return obs, {"action_mask": self.action_masks()}
 
     def step(self, action: int) -> tuple[dict[str, np.ndarray], float, bool, bool, dict[str, Any]]:
+        if self._core is not None:
+            return self._rust_step(action)
+        assert self._inner is not None
         factored = self._action_table[action]
         game_obs, terminated, truncated, game_mask, info = self._inner.step(factored)
 
@@ -298,6 +344,55 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         mask = np.zeros(MAX_ACTIONS, dtype=bool)
         mask[: len(self._action_table)] = True
         return mask
+
+    @property
+    def game(self) -> Game:
+        """A copy of the current run (Rust engine only)."""
+        if self._core is None:
+            raise AttributeError("the Python engine's run is env._inner._adapter.raw_state")
+        return Game(self._core.game())
+
+    # ------------------------------------------------------------------
+    # The Rust engine
+    # ------------------------------------------------------------------
+
+    def _rust_reset(self, seed: int | None) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
+        back, stake, run_seed = self._starts.next(None if seed is None else str(seed))
+        rng_seed = None if seed is None else sampler_seed(seed)
+        data, _ = self._core.reset(back, stake, run_seed, None, rng_seed)
+        self._episode_max_ante = 1
+        self._episode_blinds_beaten = 0
+        reward_reset = getattr(self.reward_fn, "reset", None)
+        if callable(reward_reset):
+            reward_reset()
+        return gym_obs(data), {"action_mask": self.action_masks()}
+
+    def _rust_step(
+        self, action: int
+    ) -> tuple[dict[str, np.ndarray], float, bool, bool, dict[str, Any]]:
+        data, reward, terminated, truncated, _, episode, not_ported = self._core.step(int(action))
+        if self._python_reward:
+            prev, curr, fa = self._core.last_transition()
+            transition = Transition(
+                prev=game_state_from_parts(prev),
+                curr=game_state_from_parts(curr),
+                action=factored_from_parts(fa),
+                terminated=terminated,
+                truncated=truncated,
+                game=Game(self._core.game()),
+            )
+            reward = self._compute_reward(transition)
+        info: dict[str, Any] = {"action_mask": self.action_masks()}
+        if terminated or truncated:
+            ante, rounds, won = episode
+            self._episode_max_ante = ante
+            self._episode_blinds_beaten = rounds
+            info["balatro/ante_reached"] = ante
+            info["balatro/rounds_beaten"] = rounds
+            info["balatro/won"] = won
+            if not_ported is not None:
+                info["balatro/not_ported"] = not_ported
+        return gym_obs(data), reward, terminated, truncated, info
 
     # ------------------------------------------------------------------
     # Internals

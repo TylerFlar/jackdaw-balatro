@@ -14,7 +14,7 @@ from jackdaw.env.action_space import (
     get_action_mask,
 )
 from jackdaw.env.agents import Agent, RandomAgent
-from jackdaw.env.game_interface import DirectAdapter
+from jackdaw.env.game_interface import OracleAdapter
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -36,7 +36,7 @@ def _run_agent_episode(
     max_steps: int = 5000,
 ) -> dict:
     """Run one episode with the given agent. Returns final raw_state."""
-    adapter = DirectAdapter()
+    adapter = OracleAdapter()
     agent.reset()
     adapter.reset(BACK, STAKE, seed)
 
@@ -100,7 +100,7 @@ class TestRandomAgent:
 
     def test_produces_valid_factored_actions(self):
         """Every action from RandomAgent can be converted to engine action."""
-        adapter = DirectAdapter()
+        adapter = OracleAdapter()
         agent = RandomAgent()
         agent.reset()
         adapter.reset(BACK, STAKE, SEED)
@@ -122,7 +122,7 @@ class TestRandomAgent:
             fa = agent.act({}, mask, info)
 
             assert isinstance(fa, FactoredAction)
-            assert 0 <= fa.action_type < 21
+            assert 0 <= fa.action_type < 23
             # Must be convertible without error
             engine_action = factored_to_engine_action(fa, gs)
             adapter.step(engine_action)
@@ -134,7 +134,7 @@ class TestRandomAgent:
         from jackdaw.engine.card_factory import create_consumable
         from jackdaw.env.action_space import ActionType
 
-        adapter = DirectAdapter()
+        adapter = OracleAdapter()
         adapter.reset(BACK, STAKE, SEED)
         adapter.step(SelectBlind())  # deal a hand to target
         gs = adapter.raw_state
@@ -155,7 +155,7 @@ class TestRandomAgent:
         from jackdaw.engine.actions import SelectBlind
         from jackdaw.env.action_space import ActionType
 
-        adapter = DirectAdapter()
+        adapter = OracleAdapter()
         adapter.reset(BACK, STAKE, SEED)
         gs = adapter.raw_state
         gs["blind_on_deck"] = "Boss"
