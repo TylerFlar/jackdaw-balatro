@@ -235,6 +235,8 @@ def import_state(snap: dict[str, Any]) -> dict[str, Any]:
         gs["pending_deck_bottom"] = [import_card(cs) for cs in sim["pending_deck_bottom"]]
     if sim["shop_d6ed"]:
         gs["shop_d6ed"] = True
+    if sim["shop_free"]:
+        gs["shop_free"] = True
     if sim["hand_last_poll_size"]:
         gs["hand_last_poll_size"] = sim["hand_last_poll_size"]
     if sim["last_blind_was_boss"]:

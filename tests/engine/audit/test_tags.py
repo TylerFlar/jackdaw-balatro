@@ -123,3 +123,45 @@ def test_boss_tag_reroll_marks_the_ante_rerolled_and_respects_bans():
         assert rr["boss_rerolled"] is True
         assert rr["blind_choices"]["Boss"] in {"bl_final_vessel", "bl_final_bell"}
         assert gs["dollars"] == dollars
+
+
+# ---------------------------------------------------------------------------
+# G42 — Coupon Tag
+# ---------------------------------------------------------------------------
+
+
+def _pending(gs: dict) -> list[str]:
+    from tests.parity.py_export import pending_tags
+
+    return [t["key"] for t in pending_tags(gs.get("awarded_tags", []))]
+
+
+def _shop_is_free(gs: dict) -> bool:
+    return all(c.cost == 0 for c in gs["shop_cards"] + gs["shop_boosters"])
+
+
+def test_coupon_tag_applies_once_per_shop():
+    """Only one Coupon Tag works per shop; a second waits for the next shop.
+
+    tag.lua:447-465: the Coupon Tag applies only ``if G.shop and not
+    G.GAME.shop_free``, and sets ``G.GAME.shop_free``; cash_out clears it
+    (button_callbacks.lua:2932).  An unapplied tag is not triggered, so it
+    stays for the next shop.
+    """
+    from jackdaw.engine.game import _award_tag
+
+    gs = new_run(seed="AUDIT_G42")
+    step(gs, SelectBlind())
+    win_blind(gs)
+    _award_tag(gs, "tag_coupon", source="test")
+    _award_tag(gs, "tag_coupon", source="test")
+    step(gs, CashOut())
+    assert _shop_is_free(gs)
+    assert _pending(gs) == ["tag_coupon"]
+
+    step(gs, NextRound())
+    step(gs, SelectBlind())
+    win_blind(gs)
+    step(gs, CashOut())
+    assert _shop_is_free(gs)
+    assert _pending(gs) == []

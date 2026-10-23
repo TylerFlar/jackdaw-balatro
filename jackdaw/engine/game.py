@@ -1207,8 +1207,9 @@ def _handle_cash_out(gs: dict[str, Any]) -> dict[str, Any]:
     """
     _require_phase(gs, GamePhase.ROUND_EVAL)
 
-    # The D6 Tag's once-per-shop guard resets at cash-out
-    # (button_callbacks.lua:2933: G.GAME.shop_d6ed = nil).
+    # The Coupon and D6 Tags' once-per-shop guards reset at cash-out
+    # (button_callbacks.lua:2932-2933: shop_free = nil, shop_d6ed = nil).
+    gs.pop("shop_free", None)
     gs.pop("shop_d6ed", None)
 
     # End-of-round targeting-card re-roll (state_events.lua:273-276):
@@ -3079,6 +3080,12 @@ def _fire_shop_tags(gs: dict[str, Any], rerolled: bool) -> None:
 
         result = tag.apply("shop_final_pass", gs, rng=rng)
         if result is not None and result.coupon:
+            # One Coupon Tag per shop: it applies only while
+            # G.GAME.shop_free is unset and sets it (tag.lua:448-449);
+            # cash_out clears it.  Otherwise it waits for the next shop.
+            if gs.get("shop_free"):
+                continue
+            gs["shop_free"] = True
             for c in gs.get("shop_cards", []) + gs.get("shop_boosters", []):
                 # couponed flag (not a bare cost=0) so reprice_shop keeps it.
                 c.ability["couponed"] = True
