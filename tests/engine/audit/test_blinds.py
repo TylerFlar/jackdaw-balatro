@@ -14,9 +14,63 @@ from jackdaw.engine.actions import GamePhase, PlayHand, SelectBlind
 from jackdaw.engine.blind import Blind
 from jackdaw.engine.data.blind_scaling import get_blind_amount, get_blind_target
 from jackdaw.engine.game import step
-from tests.engine.audit._boards import new_run
+from jackdaw.engine.rng import PseudoRandom
+from tests.engine.audit._boards import force_boss, give_joker, ids, new_run
 from tests.parity import canon
 from tests.parity.py_export import export_state
+
+# ---------------------------------------------------------------------------
+# G10 — Amber Acorn flips at set time and shuffles three times with 'aajk'
+# ---------------------------------------------------------------------------
+
+
+def _three_aajk_shuffles(seed: str, cards: list) -> list:
+    """What three ``G.jokers:shuffle('aajk')`` calls leave, from a fresh stream."""
+    ref = PseudoRandom(seed)
+    order = list(cards)
+    for _ in range(3):
+        ref.shuffle(order, ref.seed("aajk"))
+    return order
+
+
+def test_g10_amber_acorn_shuffles_three_times():
+    """Amber Acorn's set_blind queues three ``G.jokers:shuffle('aajk')`` events
+    (blind.lua:195-203); each pseudoseed('aajk') call advances the stream, so
+    the board ends in the third shuffle's order with the stream three steps
+    on.  The jokers were flipped face down first (blind.lua:190-194)."""
+    seed = "AUDIT_G10"
+    gs = new_run(seed)
+    board = [give_joker(gs, key) for key in ("j_joker", "j_greedy_joker", "j_lusty_joker")]
+    force_boss(gs, "bl_final_acorn")
+
+    step(gs, SelectBlind())
+
+    assert ids(gs["jokers"]) == ids(_three_aajk_shuffles(seed, board))
+    ref = PseudoRandom(seed)
+    for _ in range(3):
+        ref.seed("aajk")
+    assert gs["rng"].state["aajk"] == ref.state["aajk"]
+    assert all(j.facing == "back" for j in gs["jokers"])
+
+
+def test_g10_jokers_made_at_setting_blind_are_shuffled_but_face_up():
+    """The flip runs inside set_blind, before the jokers' setting_blind
+    context (state_events.lua:333-337), so Riff-raff's new jokers are not
+    flipped; the shuffles run later from queued events (blind.lua:196-203)
+    and include them."""
+    seed = "AUDIT_G10R"
+    gs = new_run(seed)
+    riff = give_joker(gs, "j_riff_raff")
+    force_boss(gs, "bl_final_acorn")
+
+    step(gs, SelectBlind())
+
+    made = [j for j in gs["jokers"] if j is not riff]
+    assert len(made) == 2
+    assert riff.facing == "back"
+    assert all(j.facing == "front" for j in made)
+    assert ids(gs["jokers"]) == ids(_three_aajk_shuffles(seed, gs["jokers"]))
+
 
 # ---------------------------------------------------------------------------
 # G51 — get_blind_amount is NaN once the formula overflows

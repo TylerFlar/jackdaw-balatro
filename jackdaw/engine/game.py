@@ -195,12 +195,29 @@ def _handle_select_blind(gs: dict[str, Any]) -> dict[str, Any]:
     # 3. Fire joker setting_blind context
     # ------------------------------------------------------------------
     jokers: list = gs.get("jokers", [])
+    # Amber Acorn's set_blind flips the board face down BEFORE the jokers'
+    # setting_blind context (blind.lua:190-194; state_events.lua:333-337),
+    # so jokers that setting_blind effects create stay face up.  Its three
+    # shuffles are queued events that run after those effects (below).
+    amber_shuffles = blind.name == "Amber Acorn" and len(jokers) > 1
+    if blind.name == "Amber Acorn":
+        for j in jokers:
+            j.facing = "back"
     setting_mutations = _fire_setting_blind(gs, jokers, blind)
 
     # ------------------------------------------------------------------
     # 4. Process setting_blind side-effects
     # ------------------------------------------------------------------
     _apply_setting_blind_mutations(gs, setting_mutations, jokers)
+
+    # Amber Acorn: three queued G.jokers:shuffle('aajk') events
+    # (blind.lua:195-203), each advancing the 'aajk' stream.  They shuffle
+    # the board as it stands once the setting_blind effects have resolved
+    # (Riff-raff's new jokers included), and a disable does not cancel them.
+    if amber_shuffles and gs.get("rng") is not None:
+        rng = gs["rng"]
+        for _ in range(3):
+            rng.shuffle(jokers, rng.seed("aajk"))
 
     # ------------------------------------------------------------------
     # 5. Boss blind set-time effects (blind.lua:157-209)
@@ -2322,6 +2339,9 @@ def _apply_setting_blind_mutations(
             blind = gs.get("blind")
             if blind:
                 blind.disabled = True
+                # Blind:disable turns face-down jokers back up (blind.lua:358-360)
+                for j in jokers:
+                    j.facing = "front"
                 # Un-debuff all playing cards
                 for card in gs.get("deck", []):
                     card.debuff = False
@@ -2464,16 +2484,8 @@ def _apply_boss_blind_effects(gs: dict[str, Any], blind: Any) -> None:
     elif name == "The Manacle":
         gs["hand_size"] = gs.get("hand_size", 8) - 1
 
-    # Amber Acorn: shuffle jokers (flip + randomize order)
-    elif name == "Amber Acorn":
-        jokers: list = gs.get("jokers", [])
-        if jokers:
-            for j in jokers:
-                j.facing = "back"
-            rng = gs.get("rng")
-            if rng and len(jokers) > 1:
-                seed_val = rng.seed("aajk")
-                rng.shuffle(jokers, seed_val)
+    # Amber Acorn's flip and shuffles are applied around the setting_blind
+    # context in _handle_select_blind (blind.lua:190-205).
 
     # The Eye: reset hand tracking
     elif name == "The Eye":
