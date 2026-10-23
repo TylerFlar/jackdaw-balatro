@@ -1,18 +1,20 @@
 """Lockstep fuzzing: random runs played by both engines, compared at every step.
 
 Each case is a random start (back, stake, seed, challenge), an optional setup
-(a forced boss, a joker board added with BalatroBot ``add``, money) and a
-seeded policy over the oracle's legal actions: random choices weighted by
-action kind, mixed with the smart agent so runs get past the early antes.
+(a forced boss, a joker board added with BalatroBot ``add``, money, a later
+ante) and a seeded policy over the oracle's legal actions: random choices
+weighted by action kind, mixed with the smart agent so runs get past the
+early antes.
 
 The Rust engine keeps one ``jackdaw._core.Game`` from the start, with no
 re-import between steps, so state a snapshot doesn't carry is exercised too.
 At every step the legal-action lists, the step outcome and the snapshot
-digests must agree. A case ends at game over, a win, ``max_steps``, or a step
-Rust refuses as not ported yet. A divergence is reported with its first
-snapshot diff and can be saved as a parity spec (start, setup, tape) that
-``tests.parity.test_rust_lockstep.lockstep`` replays. The exit status is 1
-when any case diverged (the nightly workflow runs it)::
+digests must agree. A case ends at game over (a won run plays on into
+endless mode), ``max_steps``, or a step Rust refuses as not ported yet. A
+divergence is reported with its first snapshot diff and can be saved as a
+parity spec (start, setup, tape) that :func:`replay` and
+``tests/parity/test_fuzz.py`` play again. The exit status is 1 when any case
+diverged (the nightly workflow runs it)::
 
     PYTHONPATH=. .venv/Scripts/python.exe -m tests.parity.fuzz --cases 200 [--seed 1] [--save DIR]
 """
@@ -40,6 +42,7 @@ from tests.golden.trajectories import (
     encode_action,
 )
 from tests.parity import canon
+from tests.parity.harness import ROOT
 from tests.parity.pyengine import PyEngine
 from tests.parity.rust_step import plain
 
@@ -55,6 +58,17 @@ _WEIGHTS = {
     "Reroll": 0.5,
 }
 _EDITIONS = ("foil", "holo", "polychrome", "negative")
+_SEALS = ("Red", "Blue", "Gold", "Purple")
+
+
+def _centers(*sets: str) -> list[str]:
+    data = json.loads((ROOT / "jackdaw" / "engine" / "data" / "centers.json").read_text("utf-8"))
+    return sorted(k for k, v in data.items() if v.get("set") in sets)
+
+
+_CONSUMABLES = _centers("Tarot", "Planet", "Spectral")
+_ENHANCEMENTS = _centers("Enhanced")
+_FRONTS = [f"{s}_{r}" for s in "HDCS" for r in "23456789TJQKA"]
 
 
 @dataclass
@@ -108,6 +122,21 @@ def random_case(index: int, rng: random.Random, max_steps: int = 400) -> Case:
             if r.random() < 0.2:
                 op["edition"] = r.choice(_EDITIONS)
             setup.append(op)
+        # Consumables and modified playing cards, which shops alone rarely combine with a
+        # given board. Added cards join the hand (BalatroBot add in SELECTING_HAND).
+        if r.random() < 0.5:
+            for key in r.sample(_CONSUMABLES, r.randint(1, 2)):
+                setup.append({"op": "add", "key": key})
+        if r.random() < 0.5:
+            for _ in range(r.randint(1, 4)):
+                op = {"op": "add", "key": r.choice(_FRONTS)}
+                if r.random() < 0.7:
+                    op["enhancement"] = r.choice(_ENHANCEMENTS)
+                if r.random() < 0.4:
+                    op["seal"] = r.choice(_SEALS)
+                if r.random() < 0.3:
+                    op["edition"] = r.choice(_EDITIONS[:3])
+                setup.append(op)
         setup.append({"op": "set", "dollars": r.choice([4, 15, 40, 100])})
         # Random play rarely survives ante 4: start some boards later, so late
         # antes (blind sizes, showdown bosses, pools) get played too.
@@ -163,8 +192,9 @@ def run_case(case: Case, tape: list[list[Any]] | None = None) -> Outcome:
     for pos in range(case.max_steps):
         snap = plain(py.snapshot())
         out.ante = int(snap["round_resets"]["ante"])
-        if snap["phase"] == GamePhase.GAME_OVER or snap["run"]["won"]:
-            out.stop = "game over" if snap["phase"] == GamePhase.GAME_OVER else "won"
+        # A won run goes on into endless mode, as the game offers.
+        if snap["phase"] == GamePhase.GAME_OVER:
+            out.stop = "game over (won)" if snap["run"]["won"] else "game over"
             return out
         py_legal = py.legal_actions()
         try:

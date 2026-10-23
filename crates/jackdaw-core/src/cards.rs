@@ -229,57 +229,77 @@ impl Game {
     /// fresh every frame. Lua runs it after the frame's event and state handler, so a card's
     /// code sees the values as of the end of the previous event.
     pub(crate) fn update_cards(&mut self) {
-        let has = |g: &Game, name: &str| {
-            AreaId::ALL
-                .iter()
-                .any(|&a| g.gs.areas.get(a).iter().any(|c| c.name() == name))
+        use jackdaw_data::centers::{
+            C_BASE, C_TEMPERANCE, J_CLOUD_9, J_DRIVERS_LICENSE, J_STEEL_JOKER, J_STENCIL, J_STONE,
+            J_SWASHBUCKLER, J_THROWBACK, M_STEEL, M_STONE,
         };
+        // The cards with per-frame values, one bit each (each name has a single center).
+        let bit = |c: &crate::card::Card| -> u8 {
+            match c.center {
+                J_STEEL_JOKER => 1,
+                J_STONE => 2,
+                J_CLOUD_9 => 4,
+                J_DRIVERS_LICENSE => 8,
+                J_STENCIL => 16,
+                J_SWASHBUCKLER => 32,
+                J_THROWBACK => 64,
+                C_TEMPERANCE => 128,
+                _ => 0,
+            }
+        };
+        let mut present = 0u8;
+        for a in AreaId::ALL {
+            for c in self.gs.areas.get_mut(a) {
+                if c.ability.perma_debuff {
+                    c.debuff = true;
+                }
+                present |= bit(c);
+            }
+        }
+        if present == 0 {
+            return;
+        }
         let count = |g: &Game, f: &dyn Fn(&crate::card::Card) -> bool| {
             g.playing_card_ids()
                 .into_iter()
                 .filter(|&id| g.gs.areas.card(id).is_some_and(f))
                 .count() as f64
         };
-        let steel = has(self, "Steel Joker")
-            .then(|| count(self, &|c| c.center == jackdaw_data::centers::M_STEEL));
-        let stone = has(self, "Stone Joker")
-            .then(|| count(self, &|c| c.center == jackdaw_data::centers::M_STONE));
-        let nine = has(self, "Cloud 9").then(|| count(self, &|c| c.get_id() == Some(9)));
-        let driver = has(self, "Driver's License")
-            .then(|| count(self, &|c| c.center != jackdaw_data::centers::C_BASE));
+        let steel = (present & 1 != 0).then(|| count(self, &|c| c.center == M_STEEL));
+        let stone = (present & 2 != 0).then(|| count(self, &|c| c.center == M_STONE));
+        let nine = (present & 4 != 0).then(|| count(self, &|c| c.get_id() == Some(9)));
+        let driver = (present & 8 != 0).then(|| count(self, &|c| c.center != C_BASE));
         let joker_limit = self.gs.joker_slots;
         let jokers = &self.gs.areas.jokers;
         let n_jokers = jokers.len() as f64;
-        let stencils = jokers
-            .iter()
-            .filter(|c| c.name() == "Joker Stencil")
-            .count() as f64;
+        let stencils = jokers.iter().filter(|c| c.center == J_STENCIL).count() as f64;
         let joker_sell: f64 = jokers
             .iter()
             .filter(|c| c.set() == CenterSet::Joker)
             .map(|c| c.sell_cost)
             .sum();
-        let sells: Vec<(u32, f64)> = jokers.iter().map(|c| (c.sort_id, c.sell_cost)).collect();
+        let sells: Vec<(u32, f64)> = if present & 32 != 0 {
+            jokers.iter().map(|c| (c.sort_id, c.sell_cost)).collect()
+        } else {
+            Vec::new()
+        };
         let skips = self.gs.skips;
         for a in AreaId::ALL {
             for c in self.gs.areas.get_mut(a) {
-                if c.ability.perma_debuff {
-                    c.debuff = true;
-                }
-                match c.name() {
-                    "Temperance" => {
+                match c.center {
+                    C_TEMPERANCE => {
                         let cap = c.ability.extra.num().unwrap_or(0.0);
                         c.ability.money = Some(joker_sell.min(cap));
                     }
-                    "Throwback" => {
+                    J_THROWBACK => {
                         c.ability.x_mult = 1.0 + skips * c.ability.extra.num().unwrap_or(0.0);
                     }
-                    "Driver's License" => c.ability.driver_tally = driver,
-                    "Steel Joker" => c.ability.steel_tally = steel,
-                    "Cloud 9" => c.ability.nine_tally = nine,
-                    "Stone Joker" => c.ability.stone_tally = stone,
-                    "Joker Stencil" => c.ability.x_mult = (joker_limit - n_jokers) + stencils,
-                    "Swashbuckler" => {
+                    J_DRIVERS_LICENSE => c.ability.driver_tally = driver,
+                    J_STEEL_JOKER => c.ability.steel_tally = steel,
+                    J_CLOUD_9 => c.ability.nine_tally = nine,
+                    J_STONE => c.ability.stone_tally = stone,
+                    J_STENCIL => c.ability.x_mult = (joker_limit - n_jokers) + stencils,
+                    J_SWASHBUCKLER => {
                         // Every other card in G.jokers, debuffed or not.
                         let own = c.sort_id;
                         c.ability.mult = sells

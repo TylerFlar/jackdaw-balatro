@@ -70,6 +70,7 @@ def step(game_state: dict[str, Any], action: Action) -> dict[str, Any]:
     # the dollars every frame (cardarea.lua:245).
     _align_pinned_jokers(result.get("jokers") or [])
     _sync_hand_size_to_dollars(result)
+    run_pending_reprice(result)
     # Game:update checks SELECTING_HAND every frame: an emptied hand is
     # redrawn, and a round out of cards ends (game.lua:2544-2550, 3056-3069).
     if result.get("phase") == GamePhase.SELECTING_HAND:
@@ -897,6 +898,7 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
             # NEW_ROUND), so a hand-size change there draws nothing.
             gs["phase"] = GamePhase.GAME_OVER
             _joker_end_of_round_effects(gs)
+            _end_round_win_check(gs)
             # G.GAME.won is never cleared: losing in endless mode after a
             # win keeps it (state_events.lua:111-122).
         else:
@@ -2264,7 +2266,17 @@ def _end_round(gs: dict[str, Any]) -> None:
         return
     gs["phase"] = GamePhase.GAME_OVER
     _joker_end_of_round_effects(gs)
+    _end_round_win_check(gs)
     # G.GAME.won is never cleared (state_events.lua:111-122).
+
+
+def _end_round_win_check(gs: dict[str, Any]) -> None:
+    """end_round's win check (state_events.lua:111-114): the boss of exactly
+    ``win_ante`` sets ``G.GAME.won``.  It runs after the jokers' end_of_round
+    pass and before the game-over test, so losing that boss marks the run
+    won too (G260); a boss of a later ante (endless) doesn't."""
+    if gs.get("blind_on_deck") == "Boss" and gs["round_resets"]["ante"] == gs.get("win_ante", 8):
+        gs["won"] = True
 
 
 def _boss_flags(gs: dict[str, Any]) -> tuple[bool, bool]:
@@ -2675,9 +2687,8 @@ def _round_won(gs: dict[str, Any]) -> None:
     #      at cash-out.
     # ------------------------------------------------------------------
     if blind_on_deck == "Boss":
-        # Boss beaten — check win, advance ante
-        if rr["ante"] >= gs.get("win_ante", 8):
-            gs["won"] = True
+        # Boss beaten: end_round's win check, then the ante goes up.
+        _end_round_win_check(gs)
         # Clear per-ante play tracking (The Pillar): vanilla nils
         # played_this_ante on every playing card at boss defeat only
         # (state_events.lua:266).
@@ -3717,6 +3728,19 @@ def _reroll_shop_cards(gs: dict[str, Any]) -> None:
     _fire_shop_tags(gs, rerolled=True)
 
 
+def run_pending_reprice(gs: dict[str, Any]) -> None:
+    """The set_cost pass an Astronomer joining or leaving queued.
+
+    Card:add_to_deck and Card:remove_from_deck queue an event that re-runs
+    set_cost on every card (card.lua:616-622, 673-679), so a Hex, a dagger,
+    a debuff or a created Astronomer reprices the Planets and Celestial packs
+    as a purchase or a sale does (G261). The engine has no event queue: the
+    pass runs once the action that queued it is done.
+    """
+    if gs.pop("astronomer_reprice", False):
+        _all_cards_set_cost_pass(gs)
+
+
 def _all_cards_set_cost_pass(gs: dict[str, Any]) -> None:
     """Vanilla's G.I.CARD set_cost pass: clears owned coupon flags so the
     subsequent reprice restores real costs.  Triggers: Clearance Sale /
@@ -3732,6 +3756,9 @@ def _all_cards_set_cost_pass(gs: dict[str, Any]) -> None:
     # leaves its ``couponed`` flag, as Lua does.
     for owned in gs.get("jokers", []) + gs.get("consumables", []):
         _reprice(gs, owned)
+    # An open pack's cards are in G.I.CARD too (G261).
+    for card in gs.get("pack_cards", []):
+        _reprice(gs, card)
     # G.I.CARD holds the playing cards too.
     for area in ("deck", "hand", "discard_pile", "played_cards_area"):
         for card in gs.get(area, []):
