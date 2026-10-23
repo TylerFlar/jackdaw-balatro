@@ -83,6 +83,7 @@ class Case:
 class Outcome:
     case: Case
     steps: int = 0
+    ante: int = 1  # the ante the run reached
     stop: str = ""
     divergence: str | None = None
     diff: list[str] = field(default_factory=list)
@@ -108,6 +109,10 @@ def random_case(index: int, rng: random.Random, max_steps: int = 400) -> Case:
                 op["edition"] = r.choice(_EDITIONS)
             setup.append(op)
         setup.append({"op": "set", "dollars": r.choice([4, 15, 40, 100])})
+        # Random play rarely survives ante 4: start some boards later, so late
+        # antes (blind sizes, showdown bosses, pools) get played too.
+        if r.random() < 0.4:
+            setup.append({"op": "set", "ante": r.randint(3, 9)})
     return Case(
         name=f"fuzz_{index}_{start['seed']}",
         start=start,
@@ -141,7 +146,8 @@ def _rust_view(game: Any) -> dict[str, Any]:
     return canon.from_json_compatible(json.loads(game.snapshot()))
 
 
-def run_case(case: Case) -> Outcome:
+def run_case(case: Case, tape: list[list[Any]] | None = None) -> Outcome:
+    """Play ``case`` in both engines: with its policy, or the given ``tape``."""
     out = Outcome(case)
     py = PyEngine(case.start, case.setup)
     if case.setup:
@@ -156,7 +162,8 @@ def run_case(case: Case) -> Outcome:
     rng = random.Random(case.policy_seed)
     for pos in range(case.max_steps):
         snap = plain(py.snapshot())
-        if snap["phase"] == GamePhase.GAME_OVER or snap["game"].get("won"):
+        out.ante = int(snap["round_resets"]["ante"])
+        if snap["phase"] == GamePhase.GAME_OVER or snap["run"]["won"]:
             out.stop = "game over" if snap["phase"] == GamePhase.GAME_OVER else "won"
             return out
         py_legal = py.legal_actions()
@@ -174,7 +181,13 @@ def run_case(case: Case) -> Outcome:
                 f"extra {[a for a in rj if a not in pj][:6]}",
             ]
             return out
-        action = _choose(py, rng, case.smart)
+        if tape is not None:
+            if pos == len(tape):
+                out.stop = "tape end"
+                return out
+            action = tape[pos]
+        else:
+            action = _choose(py, rng, case.smart)
         if action is None:
             out.stop = "no legal action"
             return out
@@ -210,6 +223,12 @@ def run_case(case: Case) -> Outcome:
     return out
 
 
+def replay(spec: dict[str, Any]) -> Outcome:
+    """Play a saved case (a parity spec written by ``--save``) in both engines."""
+    case = Case(spec["name"], spec["start"], spec["setup"], 0, 0.0, len(spec["tape"]) + 1)
+    return run_case(case, spec["tape"])
+
+
 def _reason(stop: str) -> str:
     """Group unported stops by what is missing (drop per-case detail)."""
     return stop.split(" (")[0]
@@ -226,6 +245,7 @@ def main() -> None:
 
     rng = random.Random(args.seed)
     stops: Counter[str] = Counter()
+    antes: Counter[int] = Counter()
     steps = 0
     divergent: list[Outcome] = []
     t0 = time.perf_counter()
@@ -233,6 +253,7 @@ def main() -> None:
         case = random_case(i, rng, args.max_steps)
         out = run_case(case)
         steps += out.steps
+        antes[out.ante] += 1
         stops[_reason(out.stop)] += 1
         if out.divergence:
             divergent.append(out)
@@ -247,6 +268,7 @@ def main() -> None:
     print(f"\n{args.cases} cases, {steps} matched steps in {took:.1f}s")
     for stop, n in stops.most_common():
         print(f"  {n:4d}  {stop}")
+    print("antes reached: " + ", ".join(f"{a}: {n}" for a, n in sorted(antes.items())))
     print(f"{len(divergent)} divergence(s)")
     raise SystemExit(1 if divergent else 0)
 

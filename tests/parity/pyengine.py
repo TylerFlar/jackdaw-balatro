@@ -89,6 +89,9 @@ class PyEngine:
                 elif field == "hands_left":
                     gs["current_round"]["hands_left"] = value
                     gs["hands_left"] = value
+                elif field == "ante":
+                    # set.lua:122-132: `G.GAME.round_resets.ante = args.ante`.
+                    gs["round_resets"]["ante"] = value
                 else:
                     raise ValueError(f"unknown set field {field!r}")
         else:
