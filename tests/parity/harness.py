@@ -15,9 +15,9 @@ Setup operations (all fields are Lua-native names):
   "enhancement": "m_steel", "edition": "foil"}`` - BalatroBot ``add``
   semantics (``SMODS.add_card``): edition poll, ``add_to_deck``, and playing
   cards join the hand in SELECTING_HAND.
-* ``{"op": "set", "dollars": 60, "hands_left": 1, "chips": 123}`` - write
-  state directly (BalatroBot ``set`` semantics; ``hands_left`` is the current
-  round's hands).
+* ``{"op": "set", "dollars": 60, "hands_left": 1, "chips": 123, "ante": 5}`` -
+  write state directly (BalatroBot ``set`` semantics; ``hands_left`` is the
+  current round's hands, ``ante`` is ``round_resets.ante``).
 """
 
 from __future__ import annotations

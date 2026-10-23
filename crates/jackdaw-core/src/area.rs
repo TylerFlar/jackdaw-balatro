@@ -154,6 +154,25 @@ impl Areas {
         self.align(id);
     }
 
+    /// `emplace` each card in turn, in one move (a deck takes each new card in front).
+    pub fn emplace_all(&mut self, id: AreaId, mut new: Vec<Card>) {
+        for card in &mut new {
+            if id.face_down() {
+                card.facing = Facing::Back;
+            } else if card.facing == Facing::Back {
+                card.facing = Facing::Front;
+            }
+        }
+        let cards = self.get_mut(id);
+        if id.kind() == AreaType::Deck {
+            new.reverse();
+            cards.splice(0..0, new);
+        } else {
+            cards.extend(new);
+        }
+        self.align(id);
+    }
+
     /// `CardArea:remove_card(card)` (cardarea.lua:66-92): the given card, or the area's next
     /// card (the last one of a deck or discard pile, else the first).
     pub fn remove_card(&mut self, id: AreaId, sort_id: Option<u32>) -> Option<Card> {

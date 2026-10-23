@@ -526,7 +526,9 @@ def _legal_shop(gs: dict[str, Any]) -> list[Action]:
         # (and truthy) even when empty, as for Judgement or The Soul.
         if "consumeable" not in ability or not can_afford(gs, card.cost):
             continue
-        if consumable_block_reason(card, gs) is None:
+        # can_buy_and_use asks can_use_consumeable alone: Card:check_use (Ankh
+        # with every joker slot taken) stops the use after the purchase (G138).
+        if consumable_block_reason(card, gs, check_use=False) is None:
             actions.append(BuyAndUse(shop_index=i, target_indices=default_use_targets(card, gs)))
 
     actions.extend(_sell_actions(gs))

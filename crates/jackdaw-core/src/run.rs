@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 use jackdaw_data::{BLINDS, CenterId, CenterSet, HANDS, P_CARDS, Value, centers};
 
 use crate::area::AreaId;
-use crate::card::{EditionKind, Rank, Seal, Suit};
+use crate::card::{Card, EditionKind, Rank, Seal, Suit};
 use crate::event::Event;
 use crate::game::{Game, LuaState, Runtime};
 use crate::hand_eval::HandType;
@@ -610,16 +610,15 @@ impl Game {
                 }
             }
         }
-        protos.sort_by_key(Proto::key);
-        for p in &protos {
-            self.card_from_control(p);
-        }
+        protos.sort_by_cached_key(Proto::key);
+        let cards: Vec<Card> = protos.iter().map(|p| self.card_from_control(p)).collect();
+        self.gs.areas.emplace_all(AreaId::Deck, cards);
         self.gs.starting_deck_size = self.playing_card_count() as f64;
     }
 
-    /// `card_from_control(control)` (misc_functions.lua:1625-1633).
-    fn card_from_control(&mut self, p: &Proto) {
-        let front = jackdaw_data::card_by_key(&format!("{}_{}", p.s, p.r)).expect("a front");
+    /// `card_from_control(control)` (misc_functions.lua:1625-1633), before it joins the deck.
+    fn card_from_control(&mut self, p: &Proto) -> Card {
+        let front = jackdaw_data::card_by_parts(p.s, p.r).expect("a front");
         let center =
             p.e.map(|e| jackdaw_data::center_by_key(e).expect("an enhancement"))
                 .unwrap_or(centers::C_BASE);
@@ -631,7 +630,7 @@ impl Game {
         if let Some(gs) = p.g {
             card.set_seal(Some(Seal::from_name(gs).expect("a seal")), &cost);
         }
-        self.gs.areas.emplace(AreaId::Deck, card, false, false);
+        card
     }
 }
 

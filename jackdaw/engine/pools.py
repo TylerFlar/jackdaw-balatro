@@ -120,9 +120,11 @@ def get_current_pool(
     # 1. Build the ordered base key list
     # ------------------------------------------------------------------
     if pool_type == "Joker":
-        if legendary:
-            rarity = 4
-        elif rarity is None:
+        # ``local rarity = _rarity or pseudorandom('rarity'..ante.._append)``
+        # (common_events.lua:1969): the roll is drawn whenever no _rarity is
+        # passed, the legendary pick included — The Soul passes none and then
+        # takes rarity 4 (common_events.lua:1970, card.lua:1418; G134).
+        if rarity is None or legendary:
             roll = rng.random("rarity" + str(ante) + append)
             if roll > 0.95:
                 rarity = 3
@@ -130,6 +132,8 @@ def get_current_pool(
                 rarity = 2
             else:
                 rarity = 1
+        if legendary:
+            rarity = 4
         base_keys: list[str] = list(JOKER_RARITY_POOLS.get(rarity, []))
     elif pool_type == "Tag":
         base_keys = sorted(TAGS.keys(), key=lambda k: TAGS[k].order)

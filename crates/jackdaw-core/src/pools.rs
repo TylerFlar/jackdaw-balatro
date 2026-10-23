@@ -297,11 +297,10 @@ impl Game {
     /// name joins `G.GAME.used_jokers` (card.lua:349-354), and To Do List draws its hand
     /// (card.lua:311-322). The boss re-debuff of a non-initial call is the caller's.
     fn set_ability_effects(&mut self, card: &mut Card) {
-        let name = card.name();
-        for c in jackdaw_data::CENTERS.iter().filter(|c| c.name == name) {
-            self.gs.sets.used_jokers.insert(c.key);
+        for &c in jackdaw_data::same_name_centers(card.center) {
+            self.gs.sets.used_jokers.insert(c.key());
         }
-        if name == "To Do List" {
+        if card.name() == "To Do List" {
             // `pairs(G.GAME.hands)` order (card.lua:312-315).
             let visible: Vec<_> = crate::hand_eval::PAIRS_ORDER
                 .into_iter()

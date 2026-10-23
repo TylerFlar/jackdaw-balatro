@@ -222,18 +222,28 @@ impl Game {
     }
 
     /// Highlight the hand cards a consumable targets (`G.hand.highlighted`), in the given
-    /// order; the forced card (Cerulean Bell) stays highlighted.
+    /// order. Cerulean Bell's card comes first: with nothing highlighted, `CardArea:update`
+    /// highlights the first forced card of the hand (cardarea.lua:252-256), so a Cryptid copy
+    /// of it, forced too, stays unhighlighted.
     fn highlight_targets(&mut self, targets: Option<&[usize]>) -> Result<(), StepError> {
+        self.rt.highlighted = self.consumable_highlight(targets.unwrap_or(&[]))?;
+        Ok(())
+    }
+
+    /// `G.hand.highlighted` for a consumable used on these hand indices: the first forced card,
+    /// then the targets in order, repeats skipped.
+    pub(crate) fn consumable_highlight(&self, targets: &[usize]) -> Result<Vec<u32>, StepError> {
         let hand = self.gs.areas.ids(AreaId::Hand);
         let mut ids: Vec<u32> = self
             .gs
             .areas
             .hand
             .iter()
-            .filter(|c| c.ability.forced_selection)
+            .find(|c| c.ability.forced_selection)
             .map(|c| c.sort_id)
+            .into_iter()
             .collect();
-        for &i in targets.unwrap_or(&[]) {
+        for &i in targets {
             let Some(&id) = hand.get(i) else {
                 return illegal(format!("hand index {i} out of range"));
             };
@@ -245,8 +255,7 @@ impl Game {
         if ids.len() > HAND_HIGHLIGHT_LIMIT {
             return illegal("select at most five cards");
         }
-        self.rt.highlighted = ids;
-        Ok(())
+        Ok(ids)
     }
 
     /// Cards can be sold whenever the game waits for input with nothing being played: in a

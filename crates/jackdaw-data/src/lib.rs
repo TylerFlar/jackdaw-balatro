@@ -47,6 +47,36 @@ pub fn card_by_key(key: &str) -> Option<CardId> {
         .map(|i| CardId(i as u8))
 }
 
+/// `G.P_CARDS[suit .. '_' .. rank]` without building the key (`suit` and `rank` are the
+/// one-letter codes, e.g. `"H"` and `"A"`).
+pub fn card_by_parts(suit: &str, rank: &str) -> Option<CardId> {
+    P_CARDS
+        .binary_search_by(|c| {
+            let (s, r) = c.key.split_once('_').expect("a playing-card key");
+            s.cmp(suit).then_with(|| r.cmp(rank))
+        })
+        .ok()
+        .map(|i| CardId(i as u8))
+}
+
+/// The centers named like `id`, `id` included: `Card:set_ability` marks every one of them in
+/// `G.GAME.used_jokers` (card.lua:349-354).
+pub fn same_name_centers(id: CenterId) -> &'static [CenterId] {
+    static GROUPS: std::sync::OnceLock<Vec<Vec<CenterId>>> = std::sync::OnceLock::new();
+    let groups = GROUPS.get_or_init(|| {
+        CENTERS
+            .iter()
+            .map(|c| {
+                (0..CENTERS.len())
+                    .filter(|&i| CENTERS[i].name == c.name)
+                    .map(|i| CenterId(i as u16))
+                    .collect()
+            })
+            .collect()
+    });
+    &groups[usize::from(id.0)]
+}
+
 /// The challenge with id `id`.
 pub fn challenge_by_id(id: &str) -> Option<&'static Challenge> {
     CHALLENGES.iter().find(|c| c.id == id)

@@ -15,7 +15,7 @@ Source: card.lua:1091-1522 (use_consumeable), card.lua:1523-1579
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -230,7 +230,11 @@ def pack_pick_block_reason(
 
 
 def consumable_block_reason(
-    card: Any, gs: dict[str, Any], targets: tuple[int, ...] | None = None
+    card: Any,
+    gs: dict[str, Any],
+    targets: tuple[int, ...] | None = None,
+    *,
+    check_use: bool = True,
 ) -> str | None:
     """Why consumable *card* cannot be used right now, else ``None``.
 
@@ -238,6 +242,8 @@ def consumable_block_reason(
     pack alike.  *targets* is the caller's explicit hand selection;
     without one, the selection :func:`default_use_targets` would choose is
     judged, so a pass guarantees a targetless use with that default works.
+    *check_use* False leaves out ``Card:check_use`` (Ankh with every joker
+    slot taken), which buy and use only meets after paying.
 
     Judging against the current hand is all vanilla's state gate needs
     here: hand-dependent consumables are usable only in SELECTING_HAND or
@@ -260,7 +266,7 @@ def consumable_block_reason(
         return f"{key}: no legal target in hand"
 
     hand = gs.get("hand", [])
-    highlighted = [hand[i] for i in (selection or ()) if 0 <= i < len(hand)]
+    highlighted = highlighted_cards(hand, selection)
     if can_use_consumable(
         card,
         highlighted=highlighted,
@@ -270,6 +276,7 @@ def consumable_block_reason(
         consumable_limit=consumable_limit,
         joker_limit=gs.get("joker_slots", 5),
         game_state=gs,
+        check_use=check_use,
     ):
         return None
 
@@ -283,6 +290,31 @@ def consumable_block_reason(
     if key in _NEED_HAND_CARDS:
         return f"{key}: needs more than one card in hand"
     return f"{key}: not usable on the current hand"
+
+
+def ankh_check_use(jokers: list[Any], joker_limit: int) -> bool:
+    """``Card:check_use`` for Ankh: every joker slot is taken (card.lua:1574-1581)."""
+    return len(jokers) >= joker_limit
+
+
+def highlighted_cards(hand: list[Any], selection: Iterable[int] | None) -> list[Any]:
+    """``G.hand.highlighted`` for a use made with the hand indices *selection*.
+
+    Under Cerulean Bell the hand's first forced card is always highlighted
+    first: with nothing highlighted, CardArea:update highlights it
+    (cardarea.lua:252-256), and it cannot be unhighlighted (cardarea.lua:188).
+    The selection's cards follow in order; indices out of the hand and
+    repeats are skipped (G137).
+    """
+    forced = next(
+        (c for c in hand if (getattr(c, "ability", None) or {}).get("forced_selection")),
+        None,
+    )
+    out: list[Any] = [forced] if forced is not None else []
+    for i in selection or ():
+        if 0 <= i < len(hand) and all(hand[i] is not c for c in out):
+            out.append(hand[i])
+    return out
 
 
 # Cards whose selection requirement is special-cased inside
@@ -334,7 +366,7 @@ def default_use_targets(card: Any, gs: dict[str, Any]) -> tuple[int, ...] | None
     def _ok(sel: tuple[int, ...]) -> bool:
         return can_use_consumable(
             card,
-            highlighted=[hand[i] for i in sel],
+            highlighted=highlighted_cards(hand, sel),
             hand_cards=hand,
             jokers=gs.get("jokers", []),
             consumables=gs.get("consumables", []),
@@ -405,10 +437,13 @@ def can_use_consumable(
     joker_limit: int = 5,
     cards_in_play: int = 0,
     game_state: dict[str, Any] | None = None,
+    check_use: bool = True,
 ) -> bool:
     """Check if a consumable can be used.
 
-    Mirrors ``Card:can_use_consumeable`` (card.lua:1523-1579).
+    Mirrors ``Card:can_use_consumeable`` (card.lua:1523-1579), and with
+    *check_use* also ``Card:check_use`` (card.lua:1574-1581), which stops
+    ``use_card`` before anything happens.
     """
     # Global blockers
     if cards_in_play > 0:
@@ -434,11 +469,11 @@ def can_use_consumable(
     if cfg.get("hand_type"):
         return True
 
-    # Need consumable slot
+    # Need consumable slot: ``#G.consumeables.cards < G.consumeables.config.card_limit
+    # or self.area == G.consumeables`` (card.lua:1550-1555) — from the tray always,
+    # even when the tray is over its limit (a Negative card gone, G142)
     if key in _NEED_CONSUMABLE_SLOT:
-        # The card itself frees a slot when used from consumable area
-        effective = len(consumables) - (1 if card in consumables else 0)
-        if effective < consumable_limit:
+        if len(consumables) < consumable_limit or card in consumables:
             if key == "c_fool":
                 ltp = gs.get("last_tarot_planet")
                 return bool(ltp) and ltp != "c_fool"
@@ -459,9 +494,12 @@ def can_use_consumable(
 
     # Ankh: can_use needs a joker and a joker limit above 1 (card.lua:1536);
     # use_card then aborts while Card:check_use is true — every joker slot
-    # taken (card.lua:1581-1588, button_callbacks.lua:2163-2169).
+    # taken (card.lua:1581-1588, button_callbacks.lua:2163-2169).  Buy and
+    # use asks can_use alone (*check_use* False) and pays before use_card
+    # stops (G138).
     if key == "c_ankh":
-        return len(jokers) > 0 and joker_limit > 1 and len(jokers) < joker_limit
+        usable = len(jokers) > 0 and joker_limit > 1
+        return usable and not (check_use and ankh_check_use(jokers, joker_limit))
 
     # Aura: need 1 highlighted card with no edition
     if key == "c_aura":
