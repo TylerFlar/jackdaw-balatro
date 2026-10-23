@@ -212,6 +212,71 @@ def push_env_state(game: Game, where: str, chain: Chain, seed: int | None) -> No
         chain.push("conv", conversions_digest(conversions(game, rs_table)))
 
 
+def state_record(state: Any) -> list[Any]:
+    """A ``GameState`` (``info["state"]``) as a JSON list."""
+    return [
+        state.phase.value, state.ante, state.round, state.dollars, state.hands_left,
+        state.discards_left, state.hand_size, state.joker_slots, state.consumable_slots,
+        state.blind_on_deck, state.blind_chips, state.chips, bool(state.won), bool(state.done),
+    ]  # fmt: skip
+
+
+def arrays_digest(arrays: dict[str, Any]) -> str:
+    """The digest of named arrays (a Gym observation, a mask): names, shapes and bits, every
+    float32 NaN alike."""
+    h = hashlib.sha256()
+    for name, value in arrays.items():
+        arr = np.ascontiguousarray(value)
+        raw = name.encode()
+        h.update(struct.pack(">I", len(raw)) + raw + arr.dtype.str.encode())
+        h.update(struct.pack(">I", arr.ndim) + struct.pack(f">{arr.ndim}I", *arr.shape))
+        if arr.dtype == np.float32:
+            bits = arr.view("<u4").copy()
+            bits[np.isnan(arr)] = _NAN32
+            arr = bits
+        h.update(arr.tobytes())
+    return short(h.hexdigest())
+
+
+def env_reset_record(info: dict[str, Any]) -> list[Any]:
+    """What ``BalatroEnvironment.reset`` returns, as a chain record."""
+    return [
+        obs_digest(info["observation"]),
+        mask_digest(info["action_mask"]),
+        state_record(info["state"]),
+        [int(n) for n in info["shop_splits"]],
+    ]
+
+
+def env_step_record(env: Any, terminated: bool, truncated: bool, info: dict[str, Any]) -> list:
+    """What ``BalatroEnvironment.step`` returns, and the episode stats, as a chain record."""
+    return [
+        obs_digest(info["observation"]),
+        mask_digest(info["action_mask"]),
+        bool(terminated),
+        bool(truncated),
+        state_record(info["prev_state"]),
+        state_record(info["state"]),
+        [int(n) for n in info["shop_splits"]],
+        [env.episode_length, bool(env.episode_won), env.episode_ante],
+    ]
+
+
+def gym_record(env: Any, obs: dict[str, Any], info: dict[str, Any], *rest: Any) -> list[Any]:
+    """What a ``BalatroGymnasiumEnv`` reset (``rest`` empty) or step (``rest`` the reward,
+    terminated and truncated) returns, with the action table, as a chain record."""
+    extra = [
+        [k, v if isinstance(v, str) else float(v)] for k, v in info.items() if k != "action_mask"
+    ]
+    return [
+        arrays_digest(obs),
+        arrays_digest({"action_mask": info["action_mask"]}),
+        [float(rest[0]), bool(rest[1]), bool(rest[2])] if rest else None,
+        extra,
+        conversions_digest(table_parts(env._action_table)),
+    ]
+
+
 def replay_env_run(run: dict[str, Any], *, every: int | None = None) -> int:
     """Replay a frozen env run (``env_fuzz.json``) on the Rust engine: the env outputs and the
     state at each of its states (conversions on every ``every``-th one), against its chain.

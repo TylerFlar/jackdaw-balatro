@@ -17,6 +17,8 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+import numpy as np
+
 from jackdaw import _core
 from jackdaw.core import Game
 from jackdaw.engine.actions import GamePhase, get_legal_actions
@@ -512,6 +514,105 @@ def env_states() -> None:
     print(f"env_states.json: {sum(map(len, edited.values()))} edited, {len(rand)} random")
 
 
+ENV_CASES = (("b_red", 1, 0.1), ("b_plasma", 3, 0.3), ("b_ghost", 5, 0.2), ("b_magic", 8, 0.5))
+
+
+def env_runs() -> None:
+    """``tests/env/test_rust_envs.py``'s runs: ``BalatroEnvironment`` and
+    ``BalatroGymnasiumEnv`` on the oracle (``OracleAdapter``), stepped side by side with the
+    same environments on the Rust engine. The policies read the oracle's state, so the actions
+    are kept: factored actions for the environment, table indices for the Gym env."""
+    from jackdaw.engine import card as card_module
+    from jackdaw.env import BalatroEnvironment, DirectAdapter, OracleAdapter
+    from jackdaw.env.action_space import engine_action_to_factored
+    from tests.env.test_rust_envs import _gym_pair
+    from tests.golden.trajectories import _gym_smart_index, _mixed_policy
+
+    def same(a: list[Any], b: list[Any], where: str) -> list[Any]:
+        if canon.digest(a) != canon.digest(b):
+            raise Disagreement(f"{where}: {canon.diff(a, b)[:6]}")
+        return a
+
+    environment: dict[str, Any] = {}
+    for back, stake, eps in ENV_CASES:
+        kwargs = {"back_keys": [back], "stakes": [stake], "seed_prefix": f"ENVPAR_{back}_{stake}"}
+        rust = BalatroEnvironment(adapter_factory=DirectAdapter, max_steps=300, **kwargs)
+        oracle = BalatroEnvironment(adapter_factory=OracleAdapter, max_steps=300, **kwargs)
+        policy = random.Random(f"{back}{stake}")
+        episodes = []
+        for episode in range(5):
+            card_module.reset_sort_id_counter()
+            chain = frozen.Chain()
+            o_info = oracle.reset()[2]
+            r_info = rust.reset()[2]
+            where = f"{back} ep{episode}"
+            rec = same(frozen.env_reset_record(o_info), frozen.env_reset_record(r_info), where)
+            chain.push("reset", rec)
+            tape = []
+            for pos in range(300):
+                gs = o_info["raw_state"]
+                action = _mixed_policy(gs, oracle._adapter.get_legal_actions(), policy, eps)
+                fa = engine_action_to_factored(action, gs)
+                _, o_term, o_trunc, _, o_info = oracle.step(fa)
+                _, r_term, r_trunc, _, r_info = rust.step(fa)
+                rec = same(
+                    frozen.env_step_record(oracle, o_term, o_trunc, o_info),
+                    frozen.env_step_record(rust, r_term, r_trunc, r_info),
+                    f"{where}@{pos}",
+                )
+                chain.push("step", rec)
+                cards = None if fa.card_target is None else list(fa.card_target)
+                tape.append([int(fa.action_type), fa.entity_target, cards])
+                if o_term or o_trunc:
+                    break
+            episodes.append({"tape": tape, "chain": chain.as_json()})
+        environment[f"{back}-{stake}-{eps}"] = episodes
+
+    from tests.env.test_rust_envs import _GYM_CASES
+
+    gym: dict[str, Any] = {}
+    for case in sorted(_GYM_CASES):
+        rust_gym, oracle_gym = _gym_pair(case, "b_red", 1 + len(case) % 4)
+        policy_np = np.random.default_rng(len(case))
+        episodes = []
+        for episode in range(6):
+            card_module.reset_sort_id_counter()
+            seed = 9000 + episode if episode < 5 else None  # the last reset is unseeded
+            chain = frozen.Chain()
+            o_obs, o_info = oracle_gym.reset(seed=seed)
+            r_obs, r_info = rust_gym.reset(seed=seed)
+            where = f"{case} ep{episode}"
+            rec = same(
+                frozen.gym_record(oracle_gym, o_obs, o_info),
+                frozen.gym_record(rust_gym, r_obs, r_info),
+                where,
+            )
+            chain.push("reset", rec)
+            tape = []
+            for pos in range(250):
+                if pos % 5:
+                    action = _gym_smart_index(oracle_gym, policy_np)
+                else:
+                    action = int(policy_np.choice(np.flatnonzero(o_info["action_mask"])))
+                o_obs, o_r, o_term, o_trunc, o_info = oracle_gym.step(action)
+                r_obs, r_r, r_term, r_trunc, r_info = rust_gym.step(action)
+                rec = same(
+                    frozen.gym_record(oracle_gym, o_obs, o_info, o_r, o_term, o_trunc),
+                    frozen.gym_record(rust_gym, r_obs, r_info, r_r, r_term, r_trunc),
+                    f"{where}@{pos}",
+                )
+                chain.push("step", rec)
+                tape.append(action)
+                if o_term or o_trunc:
+                    break
+            episodes.append({"seed": seed, "tape": tape, "chain": chain.as_json()})
+        gym[case] = episodes
+
+    frozen.write("env_runs.json", {"environment": environment, "gym": gym})
+    steps = sum(len(e["tape"]) for v in (*environment.values(), *gym.values()) for e in v)
+    print(f"env_runs.json: {len(environment)} environment and {len(gym)} Gym cases, {steps} steps")
+
+
 CASE_FILES = (
     "tests/parity/test_jokers_batch_b.py",
     "tests/parity/test_jokers_batch_c.py",
@@ -631,6 +732,7 @@ FIXTURES: dict[str, Callable[[], None]] = {
     "golden_env": golden_env,
     "env_fuzz": env_fuzz,
     "env_states": env_states,
+    "env_runs": env_runs,
     "cases": cases,
 }
 
