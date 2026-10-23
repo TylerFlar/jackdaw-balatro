@@ -10,8 +10,9 @@ stays oracle-compatible behind an `// AUDIT-Gxx` marker. The ledger rows that ca
 their `gap` column (status `gap`) show where the logic lives; see [README.md](README.md).
 
 Columns: `python fix` and `rust` take the PR or commit and code location of each fix, `test` the
-regression test id. Status is one of `open`, `in-progress`, `fixed` (both engines, test landed)
-or `wontfix` (with the reason in the summary).
+regression test id. Status is one of `open`, `in-progress`, `python-fixed` (fixed in the Python
+oracle with its regression test; the Rust port follows the fixed oracle), `fixed` (both engines,
+test landed) or `wontfix` (with the reason in the summary).
 
 ## Gameplay gaps
 
@@ -65,7 +66,7 @@ or `wontfix` (with the reason in the summary).
 | G46 | actions | Missing action: buy-and-use. | button_callbacks.lua:77/2407 |  |  |  | open |
 | G47 | shop | The Overstock refill ignores Illusion and shop tags. | ledger: card.lua:1885; common_events.lua:1097-1118 |  |  |  | open |
 | G48 | flow | `won` is reset by a later endless-mode loss. | ledger: state_events.lua:112-117 |  |  |  | open |
-| G49 | scoring | Played cards score in hand order: highlighted cards are sorted by position. Python uses the click order of `card_indices`. | state_events.lua:463 |  |  |  | open |
+| G49 | scoring | Played cards score in hand order: highlighted cards are sorted by position. Python uses the click order of `card_indices`. | state_events.lua:463 | `game.py::_handle_play_hand` plays `hand[i] for i in sorted(indices)`; discards were already sorted |  | `tests/engine/audit/test_hand_mechanics.py::test_g49_played_cards_score_in_hand_order`, `::test_g49_discarded_cards_follow_hand_order` | python-fixed |
 | G50 | scoring | `set_base` keeps `suit_nominal_original` and `original_value` across suit/rank changes. | card.lua:109-140 |  |  |  | open |
 | G51 | scoring | `get_blind_amount` gives NaN, not inf, at extreme antes. Follow Lua in both engines. | ledger: misc_functions.lua:919-954 |  |  |  | open |
 

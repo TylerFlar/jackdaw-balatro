@@ -29,7 +29,7 @@ KIND_KEYS = {
     "entity": "entity",
 }
 STATUSES = ("unreviewed", "ported", "verified", "gap", "smods-diff", "n/a-ui", "n/a-meta")
-GAP_STATUSES = {"open", "in-progress", "fixed", "wontfix"}
+GAP_STATUSES = {"open", "in-progress", "python-fixed", "fixed", "wontfix"}
 SCOPE_FILES = (
     "card.lua",
     "blind.lua",

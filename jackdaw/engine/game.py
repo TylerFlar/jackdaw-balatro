@@ -606,11 +606,12 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
     # ------------------------------------------------------------------
     # 2. Move cards from hand to play area
     # ------------------------------------------------------------------
-    # Preserve SELECTION ORDER (not hand position order).
-    # In Balatro, cards are placed left-to-right in click order.
-    # The first index in card_indices is the leftmost scored card.
+    # Hand order, not click order: play_cards_from_highlighted sorts
+    # G.hand.highlighted by T.x (the hand position) before drawing the
+    # cards into G.play (state_events.lua:463), and evaluate_play scores
+    # them in play-area order (state_events.lua:600).
     idx_set = set(indices)
-    played = [hand[i] for i in indices]
+    played = [hand[i] for i in sorted(idx_set)]
     held = [c for i, c in enumerate(hand) if i not in idx_set]
     gs["hand"] = held
     # Played cards are revealed (face-down draws from The House / The
