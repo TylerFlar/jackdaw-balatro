@@ -126,9 +126,12 @@ class TagResult:
     """Make all shop items free (coupon tag)."""
 
 
-# Hand types available for Orbital Tag selection (all 12 hand types).
-# Order matches ``G.GAME.hands`` iteration order — Lua's pseudorandom_element
-# sorts by ``sort_id`` (= order field in HandBaseData).
+# The frozen ``pairs(G.GAME.hands)`` iteration order.  The source cannot
+# tell it (it is LuaJIT hash order), so it is a shared constant: the Orbital
+# Tag (UI_definitions.lua:1510-1515) and To Do List (card.lua:313-320) both
+# collect the visible hands with ``pairs`` into an array, and
+# pseudorandom_element indexes that array as built.  To Do List's roll in
+# this order was confirmed live (seed LSVZ27Z7).
 _ORBITAL_HANDS: list[HandType] = [
     HandType.HIGH_CARD,
     HandType.PAIR,
@@ -157,15 +160,20 @@ class Tag:
         tag instance triggered.  Not required for effect dispatch.
     """
 
-    __slots__ = ("key", "proto", "name", "config", "id", "triggered")
+    __slots__ = ("key", "proto", "name", "config", "id", "triggered", "orbital_hand")
 
-    def __init__(self, key: str, tag_id: int | None = None) -> None:
+    def __init__(
+        self, key: str, tag_id: int | None = None, *, orbital_hand: str | None = None
+    ) -> None:
         self.key: str = key
         self.proto = TAGS[key]
         self.name: str = self.proto.name
         self.config: dict[str, Any] = dict(self.proto.config) if self.proto.config else {}
         self.id: int | None = tag_id
         self.triggered: bool = False
+        # ability.orbital_hand (tag.lua:103-112): the blind's pre-rolled
+        # Orbital hand, or the original's for a Double Tag copy.
+        self.orbital_hand: str | None = orbital_hand
 
     # ------------------------------------------------------------------
     # Effect dispatch
@@ -229,18 +237,17 @@ class Tag:
                 return TagResult(create_jokers=self.config["spawn_jokers"])
 
             if self.key == "tag_orbital":
-                if rng is None:
-                    raise ValueError("tag_orbital requires an rng instance")
-                seed_val = rng.seed("orbital")
-                # Select a random hand type — mirrors pseudorandom_element
-                # over the sorted hand list (sorted by order/sort_id in Lua)
-                from jackdaw.engine.data.hands import HAND_BASE
-
-                hands_by_order = sorted(HAND_BASE.keys(), key=lambda h: HAND_BASE[h].order)
-                idx = rng.random(seed_val, 1, len(hands_by_order))
-                chosen = hands_by_order[idx - 1]
+                # Levels the hand its blind rolled when the blind-select
+                # screen was built (tag.lua:191-197; see
+                # ensure_orbital_choices).  A bare Tag outside that flow
+                # rolls one the same way.
+                hand = self.orbital_hand
+                if hand is None:
+                    if rng is None:
+                        raise ValueError("tag_orbital requires an rng instance")
+                    hand = _roll_orbital_hand(rng, game_state.get("hand_levels"))
                 levels = self.config["levels"]
-                return TagResult(level_up=(chosen, levels))
+                return TagResult(level_up=(HandType(hand), levels))
 
             # Unknown immediate tag — no effect
             return None  # pragma: no cover
@@ -381,6 +388,48 @@ class Tag:
 
     def __repr__(self) -> str:
         return f"Tag({self.key!r}, id={self.id})"
+
+
+# ---------------------------------------------------------------------------
+# Orbital Tag hands
+# ---------------------------------------------------------------------------
+
+_BLIND_TYPES: tuple[str, ...] = ("Small", "Big", "Boss")
+
+
+def _roll_orbital_hand(rng: PseudoRandom, hand_levels: Any) -> str:
+    """One ``'orbital'`` pick over the visible hands (UI_definitions.lua:1510-1515)."""
+    pool = [
+        ht.value
+        for ht in _ORBITAL_HANDS
+        if hand_levels is None or hand_levels.get_state(ht).visible
+    ]
+    hand, _ = rng.element(pool, rng.seed("orbital"))
+    return hand
+
+
+def ensure_orbital_choices(game_state: dict[str, Any]) -> dict[str, str]:
+    """The current ante's Orbital Tag hands, rolled the first time they are needed.
+
+    create_UIBox_blind_choice (UI_definitions.lua:1506-1516) is called for
+    Small, Big and Boss, in that order, whenever the blind-select screen is
+    built (run start, every return from the shop: game.lua:3258-3298).  For
+    each blind type it fills ``G.GAME.orbital_choices[ante][type]`` if
+    unset, with a ``pseudorandom_element`` over the hands visible at that
+    moment (stream ``'orbital'``).  So each ante rolls three hands at its
+    first blind-select screen; later screens in the ante (after a shop, a
+    boss reroll) reuse them, and an ante revisited after Hieroglyph keeps
+    its old ones.  The skip-tag Tag objects are made right after, so an
+    Orbital Tag carries its blind's hand (tag.lua:107-110).
+    """
+    ante = game_state["round_resets"]["ante"]
+    choices = game_state.setdefault("orbital_choices", {}).setdefault(ante, {})
+    for blind_type in _BLIND_TYPES:
+        if blind_type not in choices:
+            choices[blind_type] = _roll_orbital_hand(
+                game_state["rng"], game_state.get("hand_levels")
+            )
+    return choices
 
 
 # ---------------------------------------------------------------------------

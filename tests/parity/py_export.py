@@ -312,6 +312,7 @@ def export_state(gs: dict[str, Any]) -> dict[str, Any]:
             "probabilities_normal": gs.get("probabilities", {}).get("normal", 1),
             "shop_joker_max": gs.get("shop", {}).get("joker_max", 2),
             "first_shop_buffoon": bool(gs.get("first_shop_buffoon", False)),
+            "orbital_choices": plain(gs.get("orbital_choices") or {}),
         },
         "starting_params": plain(gs.get("starting_params", {})),
         "modifiers": plain(gs.get("modifiers", {})),

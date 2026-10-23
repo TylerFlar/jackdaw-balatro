@@ -28,7 +28,7 @@ from jackdaw.engine.hand_levels import HandLevels
 from jackdaw.engine.rng import PseudoRandom
 from jackdaw.engine.round_lifecycle import reset_round_targets
 from jackdaw.engine.stakes import apply_stake_modifiers
-from jackdaw.engine.tags import assign_ante_blinds
+from jackdaw.engine.tags import assign_ante_blinds, ensure_orbital_choices
 from jackdaw.engine.vouchers import apply_voucher
 
 # ---------------------------------------------------------------------------
@@ -372,6 +372,10 @@ def initialize_run(
     # -----------------------------------------------------------------------
     gs["phase"] = GamePhase.BLIND_SELECT
     gs["blind_on_deck"] = "Small"
+
+    # Building the first blind-select screen rolls the ante's Orbital Tag
+    # hands (UI_definitions.lua:1506-1516), after the queued start events.
+    ensure_orbital_choices(gs)
 
     return gs
 

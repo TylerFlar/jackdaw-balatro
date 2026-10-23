@@ -439,21 +439,25 @@ def _deal_pack_hand(gs: dict[str, Any]) -> None:
     gs["hand"] = combined_hand
 
 
-def _award_tag(gs: dict[str, Any], tag_key: str, source: str) -> None:
+def _award_tag(
+    gs: dict[str, Any], tag_key: str, source: str, orbital_hand: str | None = None
+) -> None:
     """Grant one tag, mirroring live ``add_tag`` (UI_definitions.lua:1252).
 
     Tags live in ``awarded_tags`` as ``{"key", "result", "blind"}`` records;
     ``gs["tags"]`` is a phantom key nothing reads.  Every grant runs the
     ``immediate`` hook and applies its result, so callers never rebuild the
     record shape by hand.  ``source`` labels the provenance ("Small"/"Big"
-    for skips, otherwise the granting card).
+    for skips, otherwise the granting card).  *orbital_hand* is the tag's
+    ``ability.orbital_hand`` (the Orbital Tag levels it).
 
     Callers own the ``_check_double_tag`` call: the skip path defers it until
     after ``blind_on_deck`` advances (button_callbacks.lua:2740-2775).
     """
     from jackdaw.engine.tags import Tag
 
-    tag_result = Tag(tag_key).apply("immediate", gs, rng=gs.get("rng"))
+    tag = Tag(tag_key, orbital_hand=orbital_hand)
+    tag_result = tag.apply("immediate", gs, rng=gs.get("rng"))
     gs.setdefault("awarded_tags", []).append(
         {"key": tag_key, "result": tag_result, "blind": source}
     )
@@ -539,8 +543,13 @@ def _handle_skip_blind(gs: dict[str, Any]) -> dict[str, Any]:
     # for get_state/load_state); _award_tag setdefaults it again when it does.
     gs.setdefault("awarded_tags", [])
 
+    # The skip tag was made with the blind-select screen and took this
+    # blind's Orbital hand then (tag.lua:107-110).
+    from jackdaw.engine.tags import ensure_orbital_choices
+
+    orbital_hand = ensure_orbital_choices(gs)[blind_on_deck]
     if tag_key:
-        _award_tag(gs, tag_key, source=blind_on_deck)
+        _award_tag(gs, tag_key, source=blind_on_deck, orbital_hand=orbital_hand)
 
     # ------------------------------------------------------------------
     # 4. Fire joker skip_blind context
@@ -576,7 +585,7 @@ def _handle_skip_blind(gs: dict[str, Any]) -> dict[str, Any]:
     # 6. Double Tag check
     # ------------------------------------------------------------------
     if tag_key:
-        _check_double_tag(gs, tag_key)
+        _check_double_tag(gs, tag_key, orbital_hand=orbital_hand)
 
     # ------------------------------------------------------------------
     # 7. Fire new_blind_choice tags from awarded (deferred) tags
@@ -1834,6 +1843,11 @@ def _handle_next_round(gs: dict[str, Any]) -> dict[str, Any]:
         rr["blind_states"]["Boss"] = "Select"
 
     gs["phase"] = GamePhase.BLIND_SELECT
+    # The blind-select screen is built again (game.lua:3258-3298), rolling
+    # this ante's Orbital hands if it has none yet.
+    from jackdaw.engine.tags import ensure_orbital_choices
+
+    ensure_orbital_choices(gs)
     return gs
 
 
@@ -3461,11 +3475,15 @@ def _press_play(
 # ---------------------------------------------------------------------------
 
 
-def _check_double_tag(gs: dict[str, Any], awarded_tag_key: str) -> None:
+def _check_double_tag(
+    gs: dict[str, Any], awarded_tag_key: str, orbital_hand: str | None = None
+) -> None:
     """Each held Double Tag converts into a copy of the next tag acquired.
 
     tag.lua 'tag_added' context: the Double is consumed and a duplicate of
-    the new tag is added; a Double never duplicates another Double.
+    the new tag is added; a Double never duplicates another Double.  The
+    copy keeps the original's Orbital hand (``G.orbital_hand``,
+    tag.lua:324-328).
 
     BUG HISTORY: this used to read ``gs["tags"]`` — a key nothing writes
     (tags live in ``awarded_tags``) — so Double Tag NEVER duplicated
@@ -3481,7 +3499,8 @@ def _check_double_tag(gs: dict[str, Any], awarded_tag_key: str) -> None:
     awarded: list = gs.setdefault("awarded_tags", [])
     doubles = [e for e in awarded if e.get("key") == "tag_double"]
     for dbl in doubles:
-        dup_result = Tag(awarded_tag_key).apply("immediate", gs, rng=gs.get("rng"))
+        dup = Tag(awarded_tag_key, orbital_hand=orbital_hand)
+        dup_result = dup.apply("immediate", gs, rng=gs.get("rng"))
         awarded.append(
             {
                 "key": awarded_tag_key,

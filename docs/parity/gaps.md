@@ -57,7 +57,7 @@ oracle with its regression test; Rust still pending), `fixed` (both engines, tes
 | G37 | scoring | Growing the hand size mid-round draws immediately. | cardarea.lua:100 |  |  |  | open |
 | G38 | scoring | Cards added to the deck go to the bottom. | cardarea.lua:33 |  |  |  | open |
 | G39 | scoring | SortHand: vanilla sorts `desc` / `suit desc` (Python sorts ascending), and the chosen mode persists in `G.hand.config.sort` for later draws. | cardarea.lua:577; button_callbacks.lua:36 |  |  |  | open |
-| G40 | tags | Orbital Tag: Lua rolls its hand when the blind-select screen is built, from visible hands, three per ante; a Double Tag copy keeps that hand. | UI_definitions.lua:1506; tag.lua:324 |  |  |  | open |
+| G40 | tags | Orbital Tag: Lua rolls its hand when the blind-select screen is built, from visible hands, three per ante; a Double Tag copy keeps that hand. | UI_definitions.lua:1506; tag.lua:324 | tags.ensure_orbital_choices rolls Small/Big/Boss from the visible hands (frozen pairs order _ORBITAL_HANDS) at each ante's first blind-select screen (initialize_run, NextRound); skip tags and Double Tag copies carry the blind's hand (Tag.orbital_hand); snapshot game.orbital_choices |  | tests/engine/audit/test_tags.py (test_orbital_choices_rolled_when_blind_select_is_built, test_orbital_tag_levels_the_prerolled_hand, test_double_tag_copy_keeps_the_orbital_hand) | python-fixed |
 | G41 | tags | Boss Tag needs bans and `boss_rerolled`. | ledger: tag.lua:284-300 |  |  |  | open |
 | G42 | tags | Coupon Tag needs its `shop_free` guard. | ledger: tag.lua:448-464 |  |  |  | open |
 | G43 | tags | Packs opened by a tag must fire `open_booster` and the inflation counter. | ledger: tag.lua:209-282 |  |  |  | open |

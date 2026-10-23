@@ -79,6 +79,12 @@ booleans, numbers, strings, arrays and string-keyed objects.
 **Misc:** `pack_size`, `ecto_minus`, `perishable_rounds`, `first_shop_buffoon`
 (whether the first-shop Buffoon pack guarantee has been used).
 
+**Orbital Tag:** `orbital_choices` (`G.GAME.orbital_choices`): ante (as a
+string key) → `{Small, Big, Boss}` → the poker hand an Orbital Tag for that
+blind levels. Each ante's three hands are rolled when its first blind-select
+screen is built (UI_definitions.lua:1506-1516); every ante seen so far keeps
+its entry.
+
 ### `round_resets`
 
 `hands`, `discards`, `reroll_cost`, `temp_reroll_cost` (null or number),
