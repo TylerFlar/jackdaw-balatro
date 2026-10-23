@@ -14,6 +14,7 @@ from __future__ import annotations
 from jackdaw.core.game import (
     Game,
     IllegalActionError,
+    Legality,
     NotPortedError,
     decode_action,
     encode_action,
@@ -23,6 +24,7 @@ from jackdaw.core.game import (
 __all__ = [
     "Game",
     "IllegalActionError",
+    "Legality",
     "NotPortedError",
     "decode_action",
     "encode_action",

@@ -19,6 +19,7 @@ pub mod canon;
 pub mod card;
 mod cards;
 mod consumables;
+pub mod debug;
 pub mod event;
 mod flow;
 pub mod game;

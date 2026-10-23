@@ -46,12 +46,12 @@ from typing import Any
 
 import numpy as np
 
-from jackdaw.bridge.backend import SimBackend
 from jackdaw.engine import actions as A
 from jackdaw.engine import card as card_module
 from jackdaw.engine.actions import GamePhase, get_legal_actions
 from jackdaw.engine.challenges import get_challenge
 from jackdaw.engine.data.prototypes import JOKERS
+from jackdaw.engine.debug import add_card
 from jackdaw.engine.game import step as engine_step
 from jackdaw.engine.run_init import initialize_run
 from jackdaw.env.action_space import (
@@ -189,9 +189,7 @@ def _mixed_policy(gs: dict[str, Any], legal: list[Any], rng: random.Random, eps:
 
 def _add(gs: dict[str, Any], key: str, **params: Any) -> None:
     """Add a card through the balatrobot ``add`` path (edition poll, add_to_deck)."""
-    backend = SimBackend()
-    backend._gs = gs
-    backend.handle("add", {"key": key, **params})
+    add_card(gs, key, **params)
 
 
 def _hand_index(gs: dict[str, Any], card_key: str, nth: int = 0) -> int:
@@ -537,6 +535,8 @@ def run_engine(spec: EngineSpec, tape: list[Any] | None = None) -> Result:
 def _adapter_factory(kind: str) -> Callable[[], Any]:
     if kind == "direct":
         return OracleAdapter
+    from jackdaw.bridge.backend import SimBackend
+
     return lambda: BridgeAdapter(SimBackend())
 
 

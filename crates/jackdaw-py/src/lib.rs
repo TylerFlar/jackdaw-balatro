@@ -21,6 +21,8 @@ use jackdaw_env::observation::{Encoder, Observation};
 use pyo3::prelude::*;
 use pyo3::types::PyByteArray;
 
+mod bot;
+
 pyo3::create_exception!(
     _core,
     IllegalActionError,
@@ -277,16 +279,99 @@ impl Game {
         gym::state_to_py(&jackdaw_env::reward::StateSummary::of(&self.inner))
     }
 
+    /// BalatroBot's ``add`` (``jackdaw/engine/debug.py`` names): ``key`` is ``j_*``, ``c_*``,
+    /// ``v_*``, ``p_*`` or a playing card (``H_A``); ``seal`` ``"Red"``, ``edition``
+    /// ``"foil"``, ``enhancement`` ``"m_steel"``, ``perishable`` a round count. Returns the new
+    /// card's sort id. Debug only: no player action does this. On an error the game is
+    /// unchanged.
+    #[pyo3(signature = (
+        key, seal=None, edition=None, enhancement=None, eternal=false, perishable=None,
+        rental=false
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    fn debug_add(
+        &mut self,
+        key: &str,
+        seal: Option<&str>,
+        edition: Option<&str>,
+        enhancement: Option<&str>,
+        eternal: bool,
+        perishable: Option<f64>,
+        rental: bool,
+    ) -> PyResult<u32> {
+        use jackdaw_core::card::{EditionKind, Seal};
+        use jackdaw_core::debug::{AddKey, AddSpec};
+        let parsed =
+            AddKey::parse(key).ok_or_else(|| value_error(format!("unknown card key {key:?}")))?;
+        let mut spec = AddSpec::new(parsed);
+        if let Some(s) = seal {
+            spec.seal =
+                Some(Seal::from_name(s).ok_or_else(|| value_error(format!("unknown seal {s:?}")))?);
+        }
+        if let Some(e) = edition {
+            spec.edition = Some(
+                EditionKind::from_name(e)
+                    .ok_or_else(|| value_error(format!("unknown edition {e:?}")))?,
+            );
+        }
+        if let Some(m) = enhancement.filter(|m| *m != "c_base") {
+            spec.enhancement = Some(
+                jackdaw_core::card::center_by_key(m)
+                    .ok_or_else(|| value_error(format!("unknown enhancement {m:?}")))?,
+            );
+        }
+        spec.eternal = eternal;
+        spec.perishable = perishable;
+        spec.rental = rental;
+        self.inner.debug_add(&spec).map_err(step_error)
+    }
+
+    /// One field of BalatroBot's ``set``: ``money``, ``chips``, ``ante``, ``round``, ``hands``
+    /// or ``discards``, written directly.
+    fn debug_set(&mut self, field: &str, value: f64) -> PyResult<()> {
+        use jackdaw_core::debug::SetField;
+        let field = match field {
+            "money" => SetField::Money(value),
+            "chips" => SetField::Chips(value),
+            "ante" => SetField::Ante(value),
+            "round" => SetField::Round(value),
+            "hands" => SetField::Hands(value),
+            "discards" => SetField::Discards(value),
+            other => return Err(value_error(format!("unknown set field {other:?}"))),
+        };
+        self.inner.debug_set(field);
+        Ok(())
+    }
+
+    /// ``set {shop: true}``: a new shop, as on arrival (SHOP only).
+    fn debug_restock_shop(&mut self) -> PyResult<()> {
+        self.inner.debug_restock_shop().map_err(step_error)
+    }
+
     /// The legal actions here, as a JSON list of tape-form actions, in the Python engine's
-    /// order (`jackdaw.engine.actions.get_legal_actions`).
-    fn legal_actions(&self) -> String {
-        let list: Vec<serde_json::Value> = self
-            .inner
-            .legal_actions()
-            .iter()
-            .map(jackdaw_core::action::Action::to_json)
-            .collect();
-        serde_json::Value::Array(list).to_string()
+    /// order (`jackdaw.engine.actions.get_legal_actions`). ``legality`` is ``"vanilla"`` (the
+    /// default) or ``"balatrobot"``: only what the live BalatroBot also executes.
+    #[pyo3(signature = (legality=None))]
+    fn legal_actions(&self, legality: Option<&str>) -> PyResult<String> {
+        bot::legal_actions(&self.inner, legality)
+    }
+
+    /// BalatroBot's gamestate view of the run (JSON text, as the bot encodes it).
+    fn bot_view(&self) -> PyResult<String> {
+        bot::bot_view(&self.inner)
+    }
+
+    /// The BalatroBot request that performs an action (tape form, JSON text):
+    /// ``(method, params_json)``, or ``None`` for a sim-only action.
+    fn bot_translate(&self, action: &str) -> PyResult<Option<(String, String)>> {
+        bot::translate(&self.inner, action)
+    }
+
+    /// Apply one parity setup operation (JSON text, `tests/parity/harness.py`): ``force_boss``,
+    /// ``action``, ``add`` (BalatroBot's ``add`` with the oracle's names) or ``set``.
+    fn apply_setup(&mut self, op: &str) -> PyResult<()> {
+        let value: serde_json::Value = serde_json::from_str(op).map_err(value_error)?;
+        self.inner.apply_setup_op(&value).map_err(value_error)
     }
 
     /// An independent copy of the run.
@@ -382,6 +467,14 @@ mod _core {
     fn _gym_max_counts() -> [usize; 5] {
         jackdaw_env::env::MAX_COUNTS
     }
+
+    #[pymodule_export]
+    use super::bot::{BotSession, serve};
+
+    /// The BalatroBot release the bot layer ports.
+    #[allow(non_upper_case_globals)]
+    #[pymodule_export]
+    const BALATROBOT_VERSION: &str = jackdaw_bot::BALATROBOT_VERSION;
 
     /// Version of the Rust crates; matches the `jackdaw` distribution version.
     #[allow(non_upper_case_globals)]

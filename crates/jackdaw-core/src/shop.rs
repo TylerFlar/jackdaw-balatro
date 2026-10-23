@@ -72,6 +72,8 @@ impl Game {
         if exists {
             return;
         }
+        // The new shop's `G.shop_vouchers` holds one card (UI_definitions.lua:646-651).
+        self.rt.areas.voucher_limit = 1.0;
         let n = self.gs.shop_joker_max - self.gs.areas.shop_jokers.len() as f64;
         let mut i = 1.0;
         while i <= n {
@@ -355,6 +357,13 @@ impl Game {
     /// `toggle_shop`'s second event (button_callbacks.lua:2496-2509): `G.shop:remove()` removes
     /// every card left in the shop, then the blind-select screen comes up.
     pub(crate) fn leave_shop(&mut self) {
+        // The removed areas stay reachable (and in BalatroBot's view) with these counts.
+        let count = |a: AreaId| self.gs.areas.get(a).len() as f64;
+        self.rt.areas.stale_shop = Some(crate::game::StaleShop {
+            jokers: (count(AreaId::ShopJokers), self.gs.shop_joker_max),
+            vouchers: (count(AreaId::ShopVouchers), self.rt.areas.voucher_limit),
+            booster: (count(AreaId::ShopBooster), 2.0),
+        });
         for area in [
             AreaId::ShopJokers,
             AreaId::ShopVouchers,

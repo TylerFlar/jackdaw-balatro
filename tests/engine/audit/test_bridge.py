@@ -1,4 +1,9 @@
-"""Audit regressions: the in-process BalatroBot backend (B03, B04)."""
+"""Audit regressions: BalatroBot's ``set shop`` and ``add`` (B03, B04).
+
+Both the oracle's debug ops (:mod:`jackdaw.engine.debug`, used by the parity
+harness and golden v1) and the in-process backend (SimBackend, the Rust
+BalatroBot layer) are checked.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +11,9 @@ import pytest
 
 from jackdaw.bridge.backend import NOT_ALLOWED, RPCError, SimBackend
 from jackdaw.engine import GamePhase
+from jackdaw.engine.debug import add_card, restock_shop
+from jackdaw.engine.game import IllegalActionError
+from jackdaw.engine.run_init import initialize_run
 from tests.engine.audit._helpers import play_round
 
 
@@ -13,6 +21,13 @@ def _started(seed: str) -> SimBackend:
     backend = SimBackend()
     backend.handle("start", {"deck": "RED", "stake": "WHITE", "seed": seed})
     return backend
+
+
+def _oracle(seed: str) -> dict:
+    gs = initialize_run("b_red", 1, seed)
+    gs["phase"] = GamePhase.BLIND_SELECT
+    gs["blind_on_deck"] = "Small"
+    return gs
 
 
 def test_set_shop_restocks_the_shop():
@@ -24,24 +39,43 @@ def test_set_shop_restocks_the_shop():
     (game.lua:3072-3181): new jokers (create_card_for_shop) and packs
     (get_pack), the same voucher (``current_round.voucher``).
     """
-    backend = _started("AUDIT_B03")
-    with pytest.raises(RPCError) as exc:
-        backend.handle("set", {"shop": True})
-    assert exc.value.code == NOT_ALLOWED
-
-    gs = backend._gs
+    gs = _oracle("AUDIT_B03")
+    with pytest.raises(IllegalActionError):
+        restock_shop(gs)
     play_round(gs)
     old_cards = list(gs["shop_cards"])
     voucher = [v.center_key for v in gs["shop_vouchers"]]
     cdt = gs["rng"].state["cdt1"]
 
-    backend.handle("set", {"shop": True})
+    restock_shop(gs)
     assert gs["phase"] == GamePhase.SHOP
     assert len(gs["shop_cards"]) == gs["shop"]["joker_max"]
     assert all(c is not o for c in gs["shop_cards"] for o in old_cards)
     assert [v.center_key for v in gs["shop_vouchers"]] == voucher
     assert len(gs["shop_boosters"]) == 2
     assert gs["rng"].state["cdt1"] != cdt
+
+
+def test_set_shop_over_the_bot_protocol():
+    backend = _started("AUDIT_B03")
+    with pytest.raises(RPCError) as exc:
+        backend.handle("set", {"shop": True})
+    assert exc.value.code == NOT_ALLOWED
+    assert exc.value.message == "Can re-stock shop only in SHOP state"
+
+    backend.handle("select", {})
+    view = backend.view()
+    current = next(b for b in view["blinds"].values() if b["status"] == "CURRENT")
+    backend.handle("set", {"chips": current["score"]})
+    backend.handle("play", {"cards": [0]})
+    before = backend.handle("cash_out", {})
+    after = backend.handle("set", {"shop": True})
+    assert after["state"] == "SHOP"
+    assert [c["id"] for c in after["shop"]["cards"]] != [c["id"] for c in before["shop"]["cards"]]
+    assert [c["key"] for c in after["vouchers"]["cards"]] == [
+        c["key"] for c in before["vouchers"]["cards"]
+    ]
+    assert after["packs"]["count"] == 2
 
 
 def test_add_counts_a_jokers_discards_once():
@@ -51,11 +85,18 @@ def test_add_counts_a_jokers_discards_once():
     and ``ease_discard(d_size)`` for the current round; BalatroBot's add
     goes through add_to_deck once.
     """
-    backend = _started("AUDIT_B04")
-    backend.handle("select", {})
-    gs = backend._gs
+    gs = _oracle("AUDIT_B04")
+    from jackdaw.engine.actions import SelectBlind
+    from jackdaw.engine.game import step
+
+    step(gs, SelectBlind())
     left = gs["current_round"]["discards_left"]
     per_round = gs["round_resets"]["discards"]
-    backend.handle("add", {"key": "j_drunkard"})
+    add_card(gs, "j_drunkard")
     assert gs["current_round"]["discards_left"] == left + 1
     assert gs["round_resets"]["discards"] == per_round + 1
+
+    backend = _started("AUDIT_B04")
+    left = backend.handle("select", {})["round"]["discards_left"]
+    view = backend.handle("add", {"key": "j_drunkard"})
+    assert view["round"]["discards_left"] == left + 1

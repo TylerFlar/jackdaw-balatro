@@ -9,6 +9,9 @@ publish.workspace = true
 
 [dependencies]
 jackdaw-core.workspace = true
+jackdaw-data.workspace = true
+# Snapshots (`save`/`load`) are the engine's canonical JSON trees.
+serde_json.workspace = true
 
 [lints]
 workspace = true
