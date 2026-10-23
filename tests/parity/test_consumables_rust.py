@@ -1130,3 +1130,35 @@ def test_temperance_with_a_rental_joker() -> None:
     t.gs["dollars"] = 0
     t.use("c_temperance")
     assert t.gs["dollars"] == joker.sell_cost
+
+
+PLANETS = (
+    "c_mercury",
+    "c_venus",
+    "c_earth",
+    "c_mars",
+    "c_jupiter",
+    "c_saturn",
+    "c_uranus",
+    "c_neptune",
+    "c_pluto",
+    "c_planet_x",
+    "c_ceres",
+    "c_eris",
+)
+
+
+@pytest.mark.parametrize("key", PLANETS)
+def test_every_planet_levels_its_hand(key: str) -> None:
+    """Each Planet levels up its own hand (card.lua:1137-1143, level_up_hand); a secret
+    hand's Planet too."""
+    import json
+
+    from tests.parity.harness import ROOT
+
+    centers = json.loads((ROOT / "jackdaw" / "engine" / "data" / "centers.json").read_text("utf-8"))
+    hand = centers[key]["config"]["hand_type"]
+    t = Table(f"CS_PLANET_{key}")
+    before = t.gs["hand_levels"][hand].level
+    t.use(key)
+    assert t.gs["hand_levels"][hand].level == before + 1
