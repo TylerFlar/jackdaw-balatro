@@ -336,6 +336,8 @@ fn dna(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
     g.gs.areas.emplace(AreaId::Hand, copy, false, false);
     // `_card:add_to_deck()` does nothing more for a playing card.
     g.add_to_deck(cid, false);
+    // `G.deck.config.card_limit + 1` (card.lua:3506); only BalatroBot's view reads it.
+    g.rt.areas.deck_limit += 1.0;
     g.playing_card_joker_effects(&[cid]);
     Some(Effect {
         card: Some(id),

@@ -125,6 +125,35 @@ pub struct Runtime {
     pub round_blind: Option<jackdaw_data::BlindId>,
     /// Set when the step reached game logic that isn't ported yet.
     pub unported: Option<String>,
+    /// Card-area settings that only BalatroBot's view reads.
+    pub areas: AreaMemo,
+}
+
+/// What BalatroBot's gamestate view reads from the `CardArea` objects themselves
+/// (`config.card_limit`, `config.card_count`) where no rule and no snapshot field keeps it.
+/// It lives with the engine's runtime: a snapshot import restarts it from the cards
+/// ([`Game::from_state`]).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct AreaMemo {
+    /// `G.deck.config.card_limit`: an emplace that overfills the deck raises it
+    /// (cardarea.lua:47-51), every frame lowers it to `#G.playing_cards` (cardarea.lua:263), and
+    /// Cryptid, Marble Joker and DNA add one (card.lua:1210, 2595, 3506).
+    pub deck_limit: f64,
+    /// `G.shop_vouchers.config.card_limit`: 1 for a new shop (UI_definitions.lua:646-651), plus
+    /// one per Voucher Tag that fills it (tag.lua:308).
+    pub voucher_limit: f64,
+    /// The shop's card areas after `toggle_shop` removed the shop: `G.shop:remove()` empties
+    /// them, but `G.shop_jokers`, `G.shop_vouchers` and `G.shop_booster` keep pointing at them
+    /// until the run is deleted, with the card counts of their last frame.
+    pub stale_shop: Option<StaleShop>,
+}
+
+/// Card counts and limits of the removed shop's areas (jokers, vouchers, boosters).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StaleShop {
+    pub jokers: (f64, f64),
+    pub vouchers: (f64, f64),
+    pub booster: (f64, f64),
 }
 
 /// A run: the persistent [`GameState`] and the engine's [`Runtime`].
@@ -164,6 +193,19 @@ impl Game {
                     .pack
                     .as_ref()
                     .is_some_and(|p| p.return_phase == Phase::Shop));
+        // A snapshot keeps no CardArea settings: the deck's limit restarts at the run's playing
+        // cards (its value whenever the cards are all in the deck), the shop's voucher limit at
+        // its cards, and a removed shop's areas are gone (as after `load` in the game).
+        let playing = AreaId::PLAYING
+            .into_iter()
+            .map(|a| gs.areas.get(a).len())
+            .sum::<usize>()
+            + gs.sim.pending_deck_bottom.len();
+        let areas = AreaMemo {
+            deck_limit: playing as f64,
+            voucher_limit: (gs.areas.shop_vouchers.len() as f64).max(1.0),
+            stale_shop: None,
+        };
         let rt = Runtime {
             state,
             state_complete: true,
@@ -175,6 +217,7 @@ impl Game {
             } else {
                 None
             },
+            areas,
             ..Runtime::default()
         };
         let mut game = Game { gs, rt };

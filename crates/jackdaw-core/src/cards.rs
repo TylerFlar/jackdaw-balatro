@@ -229,6 +229,17 @@ impl Game {
     /// fresh every frame. Lua runs it after the frame's event and state handler, so a card's
     /// code sees the values as of the end of the previous event.
     pub(crate) fn update_cards(&mut self) {
+        // `G.deck.config.card_limit`: an emplace that overfills the deck raised it
+        // (cardarea.lua:47-51), and this frame's `CardArea:update` lowers it to the run's
+        // playing cards (cardarea.lua:263). Only BalatroBot's view reads it.
+        let deck = self.gs.areas.deck.len() as f64;
+        let playing = (AreaId::PLAYING
+            .into_iter()
+            .map(|a| self.gs.areas.get(a).len())
+            .sum::<usize>()
+            + self.gs.sim.pending_deck_bottom.len()) as f64;
+        let memo = &mut self.rt.areas;
+        memo.deck_limit = memo.deck_limit.max(deck).min(playing);
         let has = |g: &Game, name: &str| {
             AreaId::ALL
                 .iter()
