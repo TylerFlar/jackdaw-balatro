@@ -16,4 +16,5 @@ Bit-exact headless Balatro v1.0.1o simulator for reinforcement learning research
 
 - [RL Project Guide](rl-guide) — Observations, actions, masks, rewards, and the Gymnasium wrapper (works with MaskablePPO)
 - [Validation & Scenarios](validation) — Validating the engine against live Balatro, writing your own test scenarios
+- [Lockstep against the live game](live) — `jackdaw lockstep`, divergence bundles, replay, and the deviation catalog
 - [BalatroBot on the simulator](balatrobot) — `jackdaw serve`, `SimBackend`, and how the simulator maps onto BalatroBot's API
