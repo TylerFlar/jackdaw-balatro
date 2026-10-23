@@ -1,0 +1,5 @@
+# Vendored upstream code is pinned byte-for-byte (v1.5.2/MANIFEST.sha256), so the
+# repo-wide `ruff check .` / `ruff format --check .` must never lint or rewrite it.
+# Ruff applies the closest config file to each subtree, so this exclusion holds
+# without touching the root pyproject.toml.
+extend-exclude = ["v1.5.2"]

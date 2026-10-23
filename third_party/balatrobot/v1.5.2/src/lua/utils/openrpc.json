@@ -1,0 +1,2913 @@
+{
+  "openrpc": "1.3.2",
+  "info": {
+    "title": "BalatroBot API",
+    "description": "JSON-RPC 2.0 API for Balatro bot development. This API allows external clients to control the Balatro game, query game state, and execute actions through an HTTP server.",
+    "version": "1.5.1",
+    "license": {
+      "name": "MIT"
+    }
+  },
+  "servers": [
+    {
+      "name": "Local",
+      "url": "http://127.0.0.1:12346",
+      "description": "Local HTTP server for Balatro game communication"
+    }
+  ],
+  "methods": [
+    {
+      "name": "rpc.discover",
+      "summary": "Returns the OpenRPC schema for this service",
+      "description": "Service discovery method that returns the OpenRPC specification document describing this JSON-RPC API.",
+      "tags": [
+        {
+          "$ref": "#/components/tags/state"
+        }
+      ],
+      "params": [],
+      "result": {
+        "name": "OpenRPC Schema",
+        "schema": {
+          "$ref": "https://raw.githubusercontent.com/open-rpc/meta-schema/master/schema.json"
+        }
+      },
+      "errors": []
+    },
+    {
+      "name": "add",
+      "summary": "Add a new card to the game",
+      "description": "Add a new card to the game (joker, consumable, voucher, or playing card). Playing cards use SUIT_RANK format (e.g., H_A for Ace of Hearts).",
+      "tags": [
+        {
+          "$ref": "#/components/tags/cards"
+        }
+      ],
+      "params": [
+        {
+          "name": "key",
+          "description": "Card key. Format: jokers (j_*), consumables (c_*), vouchers (v_*), or playing cards (SUIT_RANK like H_A, D_K, C_2, S_T)",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/CardKey"
+          }
+        },
+        {
+          "name": "seal",
+          "description": "Seal type for playing cards only",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/Seal"
+          }
+        },
+        {
+          "name": "edition",
+          "description": "Edition type. NEGATIVE only valid for consumables; jokers and playing cards accept all editions. Not valid for vouchers.",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/Edition"
+          }
+        },
+        {
+          "name": "enhancement",
+          "description": "Enhancement type for playing cards only",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/Enhancement"
+          }
+        },
+        {
+          "name": "eternal",
+          "description": "If true, card cannot be sold or destroyed (jokers only)",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "perishable",
+          "description": "Number of rounds before card perishes (must be >= 1, jokers only)",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        {
+          "name": "rental",
+          "description": "If true, card costs $1 per round (jokers only)",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "gamestate",
+        "description": "Complete game state after card is added",
+        "schema": {
+          "$ref": "#/components/schemas/GameState"
+        }
+      },
+      "errors": [
+        {
+          "$ref": "#/components/errors/BadRequest"
+        },
+        {
+          "$ref": "#/components/errors/InvalidState"
+        }
+      ]
+    },
+    {
+      "name": "buy",
+      "summary": "Buy a card from the shop",
+      "description": "Buy a card, voucher, or pack from the shop. Must provide exactly one of: card, voucher, or pack.",
+      "tags": [
+        {
+          "$ref": "#/components/tags/shop"
+        }
+      ],
+      "params": [
+        {
+          "name": "card",
+          "description": "0-based index of card to buy from shop",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        {
+          "name": "voucher",
+          "description": "0-based index of voucher to buy",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        {
+          "name": "pack",
+          "description": "0-based index of pack to buy",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      ],
+      "result": {
+        "name": "gamestate",
+        "description": "Complete game state after purchase",
+        "schema": {
+          "$ref": "#/components/schemas/GameState"
+        }
+      },
+      "errors": [
+        {
+          "$ref": "#/components/errors/BadRequest"
+        },
+        {
+          "$ref": "#/components/errors/NotAllowed"
+        }
+      ]
+    },
+    {
+      "name": "cash_out",
+      "summary": "Cash out and collect round rewards",
+      "description": "Cash out and collect round rewards, transitioning to the shop phase.",
+      "tags": [
+        {
+          "$ref": "#/components/tags/shop"
+        }
+      ],
+      "params": [],
+      "result": {
+        "name": "gamestate",
+        "description": "Complete game state after transitioning to shop",
+        "schema": {
+          "$ref": "#/components/schemas/GameState"
+        }
+      },
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidState"
+        }
+      ]
+    },
+    {
+      "name": "discard",
+      "summary": "Discard cards from the hand",
+      "description": "Discard specified cards from the hand. Card indices are 0-based.",
+      "tags": [
+        {
+          "$ref": "#/components/tags/cards"
+        }
+      ],
+      "params": [
+        {
+          "name": "cards",
+          "description": "0-based indices of cards to discard (non-empty array)",
+          "required": true,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "minItems": 1
+          }
+        }
+      ],
+      "result": {
+        "name": "gamestate",
+        "description": "Complete game state after discard and hand redraw",
+        "schema": {
+          "$ref": "#/components/schemas/GameState"
+        }
+      },
+      "errors": [
+        {
+          "$ref": "#/components/errors/BadRequest"
+        }
+      ]
+    },
+    {
+      "name": "gamestate",
+      "summary": "Get current game state",
+      "description": "Get the complete current game state. Works in any game state.",
+      "tags": [
+        {
+          "$ref": "#/components/tags/state"
+        }
+      ],
+      "params": [],
+      "result": {
+        "name": "gamestate",
+        "description": "Complete current game state",
+        "schema": {
+          "$ref": "#/components/schemas/GameState"
+        }
+      },
+      "errors": []
+    },
+    {
+      "name": "health",
+      "summary": "Health check endpoint",
+      "description": "Health check endpoint for connection testing. Always succeeds and works in any game state.",
+      "tags": [
+        {
+          "$ref": "#/components/tags/state"
+        }
+      ],
+      "params": [],
+      "result": {
+        "name": "health",
+        "description": "Health check response",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": [
+                "ok"
+              ]
+            }
+          },
+          "required": [
+            "status"
+          ]
+        }
+      },
+      "errors": []
+    },
+    {
+      "name": "load",
+      "summary": "Load a saved run state from a file",
+      "description": "Load a previously saved run state from a file. The file must be a valid Balatro save file.",
+      "tags": [
+        {
+          "$ref": "#/components/tags/game-control"
+        }
+      ],
+      "params": [
+        {
+          "name": "path",
+          "description": "File path to the save file",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "description": "Load operation result",
+        "schema": {
+          "$ref": "#/components/schemas/PathResult"
+        }
+      },
+      "errors": [
+        {
+          "$ref": "#/components/errors/InternalError"
+        }
+      ]
+    },
+    {
+      "name": "menu",
+      "summary": "Return to the main menu",
+      "description": "Return to the main menu from any game state.",
+      "tags": [
+        {
+          "$ref": "#/components/tags/game-control"
+        }
+      ],
+      "params": [],
+      "result": {
+        "name": "gamestate",
+        "description": "Complete game state (state will be MENU)",
+        "schema": {
+          "$ref": "#/components/schemas/GameState"
+        }
+      },
+      "errors": []
+    },
+    {
+      "name": "next_round",
+      "summary": "Leave the shop and advance to blind selection",
+      "description": "Leave the shop and advance to the blind selection phase.",
+      "tags": [
+        {
+          "$ref": "#/components/tags/shop"
+        }
+      ],
+      "params": [],
+      "result": {
+        "name": "gamestate",
+        "description": "Complete game state (state will be BLIND_SELECT)",
+        "schema": {
+          "$ref": "#/components/schemas/GameState"
+        }
+      },
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidState"
+        }
+      ]
+    },
+    {
+      "name": "play",
+      "summary": "Play cards from the hand",
+      "description": "Play specified cards from the hand. Card indices are 0-based.",
+      "tags": [
+        {
+          "$ref": "#/components/tags/cards"
+        }
+      ],
+      "params": [
+        {
+          "name": "cards",
+          "description": "0-based indices of cards to play (non-empty array)",
+          "required": true,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "minItems": 1
+          }
+        }
+      ],
+      "result": {
+        "name": "gamestate",
+        "description": "Complete game state after playing cards. State may be ROUND_EVAL, SELECTING_HAND, or GAME_OVER.",
+        "schema": {
+          "$ref": "#/components/schemas/GameState"
+        }
+      },
+      "errors": [
+        {
+          "$ref": "#/components/errors/BadRequest"
+        }
+      ]
+    },
+    {
+      "name": "rearrange",
+      "summary": "Rearrange cards in hand, jokers, or consumables",
+      "description": "Rearrange cards by providing a new ordering. Must provide exactly one of: hand, jokers, or consumables. The array must be a valid permutation of all current indices.",
+      "tags": [
+        {
+          "$ref": "#/components/tags/cards"
+        }
+      ],
+      "params": [
+        {
+          "name": "hand",
+          "description": "0-based indices representing new order of cards in hand",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        {
+          "name": "jokers",
+          "description": "0-based indices representing new order of jokers",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        {
+          "name": "consumables",
+          "description": "0-based indices representing new order of consumables",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "gamestate",
+        "description": "Complete game state after rearrangement",
+        "schema": {
+          "$ref": "#/components/schemas/GameState"
+        }
+      },
+      "errors": [
+        {
+          "$ref": "#/components/errors/BadRequest"
+        },
+        {
+          "$ref": "#/components/errors/InvalidState"
+        },
+        {
+          "$ref": "#/components/errors/NotAllowed"
+        }
+      ]
+    },
+    {
+      "name": "reroll",
+      "summary": "Reroll shop items",
+      "description": "Reroll to update the cards in the shop area. Costs money.",
+      "tags": [
+        {
+          "$ref": "#/components/tags/shop"
+        }
+      ],
+      "params": [],
+      "result": {
+        "name": "gamestate",
+        "description": "Complete game state after reroll",
+        "schema": {
+          "$ref": "#/components/schemas/GameState"
+        }
+      },
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidState"
+        },
+        {
+          "$ref": "#/components/errors/NotAllowed"
+        }
+      ]
+    },
+    {
+      "name": "save",
+      "summary": "Save the current run state to a file",
+      "description": "Save the current run state to a file. Only works during an active run.",
+      "tags": [
+        {
+          "$ref": "#/components/tags/game-control"
+        }
+      ],
+      "params": [
+        {
+          "name": "path",
+          "description": "File path for the save file",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "description": "Save operation result",
+        "schema": {
+          "$ref": "#/components/schemas/PathResult"
+        }
+      },
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidState"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        }
+      ]
+    },
+    {
+      "name": "screenshot",
+      "summary": "Take a screenshot of the current game state",
+      "description": "Take a screenshot of the current game state and save it as PNG format.",
+      "tags": [
+        {
+          "$ref": "#/components/tags/utility"
+        }
+      ],
+      "params": [
+        {
+          "name": "path",
+          "description": "File path for the screenshot file (PNG format)",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "description": "Screenshot operation result",
+        "schema": {
+          "$ref": "#/components/schemas/PathResult"
+        }
+      },
+      "errors": [
+        {
+          "$ref": "#/components/errors/InternalError"
+        }
+      ]
+    },
+    {
+      "name": "select",
+      "summary": "Select the current blind",
+      "description": "Select the current blind to begin the round.",
+      "tags": [
+        {
+          "$ref": "#/components/tags/blind"
+        }
+      ],
+      "params": [],
+      "result": {
+        "name": "gamestate",
+        "description": "Complete game state (state will be SELECTING_HAND)",
+        "schema": {
+          "$ref": "#/components/schemas/GameState"
+        }
+      },
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidState"
+        }
+      ]
+    },
+    {
+      "name": "sell",
+      "summary": "Sell a joker or consumable",
+      "description": "Sell a joker or consumable from player inventory. Must provide exactly one of: joker or consumable.",
+      "tags": [
+        {
+          "$ref": "#/components/tags/shop"
+        }
+      ],
+      "params": [
+        {
+          "name": "joker",
+          "description": "0-based index of joker to sell",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        {
+          "name": "consumable",
+          "description": "0-based index of consumable to sell",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      ],
+      "result": {
+        "name": "gamestate",
+        "description": "Complete game state after sale",
+        "schema": {
+          "$ref": "#/components/schemas/GameState"
+        }
+      },
+      "errors": [
+        {
+          "$ref": "#/components/errors/BadRequest"
+        },
+        {
+          "$ref": "#/components/errors/NotAllowed"
+        }
+      ]
+    },
+    {
+      "name": "set",
+      "summary": "Set an in-game value",
+      "description": "Set one or more in-game values. Must provide at least one field. Only works during an active run.",
+      "tags": [
+        {
+          "$ref": "#/components/tags/utility"
+        }
+      ],
+      "params": [
+        {
+          "name": "money",
+          "description": "New money amount (must be >= 0)",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        {
+          "name": "chips",
+          "description": "New chips amount (must be >= 0)",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        {
+          "name": "ante",
+          "description": "New ante number (must be >= 0)",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        {
+          "name": "round",
+          "description": "New round number (must be >= 0)",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        {
+          "name": "hands",
+          "description": "New number of hands left (must be >= 0)",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        {
+          "name": "discards",
+          "description": "New number of discards left (must be >= 0)",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        {
+          "name": "shop",
+          "description": "If true, re-stock shop with new items (only in SHOP state)",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "gamestate",
+        "description": "Complete game state after setting values",
+        "schema": {
+          "$ref": "#/components/schemas/GameState"
+        }
+      },
+      "errors": [
+        {
+          "$ref": "#/components/errors/BadRequest"
+        },
+        {
+          "$ref": "#/components/errors/InvalidState"
+        },
+        {
+          "$ref": "#/components/errors/NotAllowed"
+        }
+      ]
+    },
+    {
+      "name": "skip",
+      "summary": "Skip the current blind",
+      "description": "Skip the current blind (Small or Big only, cannot skip Boss blind).",
+      "tags": [
+        {
+          "$ref": "#/components/tags/blind"
+        }
+      ],
+      "params": [],
+      "result": {
+        "name": "gamestate",
+        "description": "Complete game state after skipping",
+        "schema": {
+          "$ref": "#/components/schemas/GameState"
+        }
+      },
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidState"
+        },
+        {
+          "$ref": "#/components/errors/NotAllowed"
+        }
+      ]
+    },
+    {
+      "name": "start",
+      "summary": "Start a new game run",
+      "description": "Start a new game run with specified deck and stake.",
+      "tags": [
+        {
+          "$ref": "#/components/tags/game-control"
+        }
+      ],
+      "params": [
+        {
+          "name": "deck",
+          "description": "Deck to use for the run",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/Deck"
+          }
+        },
+        {
+          "name": "stake",
+          "description": "Stake level for the run",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/Stake"
+          }
+        },
+        {
+          "name": "seed",
+          "description": "Optional seed for the run",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "gamestate",
+        "description": "Complete game state (state will be BLIND_SELECT)",
+        "schema": {
+          "$ref": "#/components/schemas/GameState"
+        }
+      },
+      "errors": [
+        {
+          "$ref": "#/components/errors/BadRequest"
+        },
+        {
+          "$ref": "#/components/errors/InvalidState"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        }
+      ]
+    },
+    {
+      "name": "use",
+      "summary": "Use a consumable card",
+      "description": "Use a consumable card with optional target cards. Some consumables require card selection.",
+      "tags": [
+        {
+          "$ref": "#/components/tags/cards"
+        }
+      ],
+      "params": [
+        {
+          "name": "consumable",
+          "description": "0-based index of consumable to use",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        {
+          "name": "cards",
+          "description": "0-based indices of cards to target (required for some consumables)",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "gamestate",
+        "description": "Complete game state after using consumable",
+        "schema": {
+          "$ref": "#/components/schemas/GameState"
+        }
+      },
+      "errors": [
+        {
+          "$ref": "#/components/errors/BadRequest"
+        },
+        {
+          "$ref": "#/components/errors/InvalidState"
+        },
+        {
+          "$ref": "#/components/errors/NotAllowed"
+        }
+      ]
+    }
+  ],
+  "components": {
+    "tags": {
+      "state": {
+        "name": "state",
+        "description": "Game state query endpoints"
+      },
+      "game-control": {
+        "name": "game-control",
+        "description": "Game lifecycle control (start, menu, load, save)"
+      },
+      "blind": {
+        "name": "blind",
+        "description": "Blind selection and skipping"
+      },
+      "shop": {
+        "name": "shop",
+        "description": "Shop interactions (buy, sell, reroll, cash_out)"
+      },
+      "cards": {
+        "name": "cards",
+        "description": "Card manipulation (play, discard, rearrange, use, add)"
+      },
+      "utility": {
+        "name": "utility",
+        "description": "Utility endpoints (screenshot, set)"
+      }
+    },
+    "schemas": {
+      "GameState": {
+        "type": "object",
+        "description": "Complete game state representation",
+        "properties": {
+          "state": {
+            "$ref": "#/components/schemas/State"
+          },
+          "round_num": {
+            "type": "integer",
+            "description": "Current round number"
+          },
+          "ante_num": {
+            "type": "integer",
+            "description": "Current ante number"
+          },
+          "money": {
+            "type": "integer",
+            "description": "Current money amount"
+          },
+          "deck": {
+            "$ref": "#/components/schemas/Deck",
+            "description": "Current selected deck"
+          },
+          "stake": {
+            "$ref": "#/components/schemas/Stake",
+            "description": "Current selected stake"
+          },
+          "seed": {
+            "type": "string",
+            "description": "Seed used for the run"
+          },
+          "won": {
+            "type": "boolean",
+            "description": "Whether the game has been won"
+          },
+          "used_vouchers": {
+            "type": "object",
+            "description": "Vouchers used (name -> description)",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "hands": {
+            "type": "object",
+            "description": "Poker hands information",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Hand"
+            }
+          },
+          "round": {
+            "$ref": "#/components/schemas/Round"
+          },
+          "blinds": {
+            "type": "object",
+            "description": "Blind information",
+            "properties": {
+              "small": {
+                "$ref": "#/components/schemas/Blind"
+              },
+              "big": {
+                "$ref": "#/components/schemas/Blind"
+              },
+              "boss": {
+                "$ref": "#/components/schemas/Blind"
+              }
+            }
+          },
+          "jokers": {
+            "$ref": "#/components/schemas/Area",
+            "description": "Jokers area"
+          },
+          "consumables": {
+            "$ref": "#/components/schemas/Area",
+            "description": "Consumables area"
+          },
+          "hand": {
+            "$ref": "#/components/schemas/Area",
+            "description": "Hand area (available during playing phase)"
+          },
+          "cards": {
+            "$ref": "#/components/schemas/Area",
+            "description": "Cards remaining in deck (available during run)"
+          },
+          "pack": {
+            "$ref": "#/components/schemas/Area",
+            "description": "Currently open pack (available during pack opening phase)"
+          },
+          "shop": {
+            "$ref": "#/components/schemas/Area",
+            "description": "Shop area (available during shop phase)"
+          },
+          "vouchers": {
+            "$ref": "#/components/schemas/Area",
+            "description": "Vouchers area (available during shop phase)"
+          },
+          "packs": {
+            "$ref": "#/components/schemas/Area",
+            "description": "Booster packs area (available during shop phase)"
+          }
+        },
+        "required": [
+          "state",
+          "round_num",
+          "ante_num",
+          "money"
+        ]
+      },
+      "Hand": {
+        "type": "object",
+        "description": "Poker hand information",
+        "properties": {
+          "order": {
+            "type": "integer",
+            "description": "The importance/ordering of the hand"
+          },
+          "level": {
+            "type": "integer",
+            "description": "Level of the hand in the current run"
+          },
+          "chips": {
+            "type": "integer",
+            "description": "Current chip value for this hand"
+          },
+          "mult": {
+            "type": "integer",
+            "description": "Current multiplier value for this hand"
+          },
+          "played": {
+            "type": "integer",
+            "description": "Total number of times this hand has been played"
+          },
+          "played_this_round": {
+            "type": "integer",
+            "description": "Number of times this hand has been played this round"
+          },
+          "example": {
+            "type": "array",
+            "description": "Example cards showing what makes this hand",
+            "items": {
+              "type": "array"
+            }
+          }
+        },
+        "required": [
+          "order",
+          "level",
+          "chips",
+          "mult",
+          "played",
+          "played_this_round"
+        ]
+      },
+      "Round": {
+        "type": "object",
+        "description": "Current round state",
+        "properties": {
+          "hands_left": {
+            "type": "integer",
+            "description": "Number of hands remaining in this round"
+          },
+          "hands_played": {
+            "type": "integer",
+            "description": "Number of hands played in this round"
+          },
+          "discards_left": {
+            "type": "integer",
+            "description": "Number of discards remaining in this round"
+          },
+          "discards_used": {
+            "type": "integer",
+            "description": "Number of discards used in this round"
+          },
+          "reroll_cost": {
+            "type": "integer",
+            "description": "Current cost to reroll the shop"
+          },
+          "chips": {
+            "type": "integer",
+            "description": "Current chips scored in this round"
+          }
+        }
+      },
+      "Blind": {
+        "type": "object",
+        "description": "Blind information",
+        "properties": {
+          "type": {
+            "$ref": "#/components/schemas/BlindType"
+          },
+          "status": {
+            "$ref": "#/components/schemas/BlindStatus"
+          },
+          "name": {
+            "type": "string",
+            "description": "Name of the blind (e.g., 'Small', 'Big' or the Boss name)"
+          },
+          "effect": {
+            "type": "string",
+            "description": "Description of the blind's effect"
+          },
+          "score": {
+            "type": "integer",
+            "description": "Score requirement to beat this blind"
+          },
+          "tag_name": {
+            "type": "string",
+            "description": "Name of the tag associated with this blind (Small/Big only)"
+          },
+          "tag_effect": {
+            "type": "string",
+            "description": "Description of the tag's effect (Small/Big only)"
+          }
+        },
+        "required": [
+          "type",
+          "status",
+          "name",
+          "effect",
+          "score"
+        ]
+      },
+      "Area": {
+        "type": "object",
+        "description": "Card area (jokers, consumables, hand, shop, etc.)",
+        "properties": {
+          "count": {
+            "type": "integer",
+            "description": "Current number of cards in this area"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Maximum number of cards allowed in this area"
+          },
+          "highlighted_limit": {
+            "type": "integer",
+            "description": "Maximum number of cards that can be highlighted (hand area only)"
+          },
+          "cards": {
+            "type": "array",
+            "description": "Array of cards in this area",
+            "items": {
+              "$ref": "#/components/schemas/Card"
+            }
+          }
+        },
+        "required": [
+          "count",
+          "limit",
+          "cards"
+        ]
+      },
+      "Card": {
+        "type": "object",
+        "description": "Card representation",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "Unique identifier for the card (sort_id)"
+          },
+          "key": {
+            "type": "string",
+            "description": "Specific card key (e.g., 'c_fool', 'j_brainstorm', 'v_overstock')"
+          },
+          "set": {
+            "$ref": "#/components/schemas/CardSet"
+          },
+          "label": {
+            "type": "string",
+            "description": "Display label/name of the card"
+          },
+          "value": {
+            "$ref": "#/components/schemas/CardValue"
+          },
+          "modifier": {
+            "$ref": "#/components/schemas/CardModifier"
+          },
+          "state": {
+            "$ref": "#/components/schemas/CardState"
+          },
+          "cost": {
+            "$ref": "#/components/schemas/CardCost"
+          }
+        },
+        "required": [
+          "id",
+          "key",
+          "set",
+          "label",
+          "value",
+          "modifier",
+          "state",
+          "cost"
+        ]
+      },
+      "CardValue": {
+        "type": "object",
+        "description": "Value information for the card",
+        "properties": {
+          "suit": {
+            "$ref": "#/components/schemas/Suit",
+            "description": "Suit (only for playing cards)"
+          },
+          "rank": {
+            "$ref": "#/components/schemas/Rank",
+            "description": "Rank (only for playing cards)"
+          },
+          "effect": {
+            "type": "string",
+            "description": "Description of the card's effect (from UI)"
+          }
+        },
+        "required": [
+          "effect"
+        ]
+      },
+      "CardModifier": {
+        "type": "object",
+        "description": "Modifier information (seals, editions, enhancements)",
+        "properties": {
+          "seal": {
+            "$ref": "#/components/schemas/Seal",
+            "description": "Seal type (playing cards)"
+          },
+          "edition": {
+            "$ref": "#/components/schemas/Edition",
+            "description": "Edition type (jokers, playing cards, and NEGATIVE consumables)"
+          },
+          "enhancement": {
+            "$ref": "#/components/schemas/Enhancement",
+            "description": "Enhancement type (playing cards)"
+          },
+          "eternal": {
+            "type": "boolean",
+            "description": "If true, card cannot be sold or destroyed (jokers only)"
+          },
+          "perishable": {
+            "type": "integer",
+            "description": "Number of rounds remaining (only if > 0, jokers only)"
+          },
+          "rental": {
+            "type": "boolean",
+            "description": "If true, card costs money at end of round (jokers only)"
+          }
+        }
+      },
+      "CardState": {
+        "type": "object",
+        "description": "Current state information",
+        "properties": {
+          "debuff": {
+            "type": "boolean",
+            "description": "If true, card is debuffed and won't score"
+          },
+          "hidden": {
+            "type": "boolean",
+            "description": "If true, card is face down"
+          },
+          "highlight": {
+            "type": "boolean",
+            "description": "If true, card is currently highlighted"
+          }
+        }
+      },
+      "CardCost": {
+        "type": "object",
+        "description": "Cost information",
+        "properties": {
+          "sell": {
+            "type": "integer",
+            "description": "Sell value of the card"
+          },
+          "buy": {
+            "type": "integer",
+            "description": "Buy price of the card (if in shop)"
+          }
+        },
+        "required": [
+          "sell",
+          "buy"
+        ]
+      },
+      "PathResult": {
+        "type": "object",
+        "description": "Result for file operations (save, load, screenshot)",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "description": "Whether the operation was successful"
+          },
+          "path": {
+            "type": "string",
+            "description": "Path to the file"
+          }
+        },
+        "required": [
+          "success",
+          "path"
+        ]
+      },
+      "State": {
+        "description": "Game state enumeration",
+        "oneOf": [
+          {
+            "const": "MENU",
+            "description": "Main menu of the game"
+          },
+          {
+            "const": "BLIND_SELECT",
+            "description": "Blind selection phase"
+          },
+          {
+            "const": "SELECTING_HAND",
+            "description": "Selecting cards to play or discard"
+          },
+          {
+            "const": "HAND_PLAYED",
+            "description": "During hand playing animation"
+          },
+          {
+            "const": "DRAW_TO_HAND",
+            "description": "During hand drawing animation"
+          },
+          {
+            "const": "NEW_ROUND",
+            "description": "Round is won and new round begins"
+          },
+          {
+            "const": "ROUND_EVAL",
+            "description": "Round end, inside the cash out phase"
+          },
+          {
+            "const": "SHOP",
+            "description": "Inside the shop"
+          },
+          {
+            "const": "PLAY_TAROT",
+            "description": "Playing a tarot card"
+          },
+          {
+            "const": "TAROT_PACK",
+            "description": "Opening a tarot pack"
+          },
+          {
+            "const": "PLANET_PACK",
+            "description": "Opening a planet pack"
+          },
+          {
+            "const": "SPECTRAL_PACK",
+            "description": "Opening a spectral pack"
+          },
+          {
+            "const": "STANDARD_PACK",
+            "description": "Opening a standard pack"
+          },
+          {
+            "const": "BUFFOON_PACK",
+            "description": "Opening a buffoon pack"
+          },
+          {
+            "const": "GAME_OVER",
+            "description": "Game is over"
+          }
+        ]
+      },
+      "Deck": {
+        "description": "Deck type",
+        "oneOf": [
+          {
+            "const": "RED",
+            "description": "+1 discard every round"
+          },
+          {
+            "const": "BLUE",
+            "description": "+1 hand every round"
+          },
+          {
+            "const": "YELLOW",
+            "description": "Start with extra $10"
+          },
+          {
+            "const": "GREEN",
+            "description": "$2 per remaining Hand, $1 per remaining Discard, no interest"
+          },
+          {
+            "const": "BLACK",
+            "description": "+1 Joker slot, -1 hand every round"
+          },
+          {
+            "const": "MAGIC",
+            "description": "Start with Crystal Ball voucher and 2 copies of The Fool"
+          },
+          {
+            "const": "NEBULA",
+            "description": "Start with Telescope voucher, -1 consumable slot"
+          },
+          {
+            "const": "GHOST",
+            "description": "Spectral cards may appear in shop, start with Hex card"
+          },
+          {
+            "const": "ABANDONED",
+            "description": "Start with no Face Cards in deck"
+          },
+          {
+            "const": "CHECKERED",
+            "description": "Start with 26 Spades and 26 Hearts in deck"
+          },
+          {
+            "const": "ZODIAC",
+            "description": "Start with Tarot Merchant, Planet Merchant, and Overstock"
+          },
+          {
+            "const": "PAINTED",
+            "description": "+2 hand size, -1 Joker slot"
+          },
+          {
+            "const": "ANAGLYPH",
+            "description": "Gain Double Tag after each Boss Blind"
+          },
+          {
+            "const": "PLASMA",
+            "description": "Balanced Chips and Mult, 2X base Blind size"
+          },
+          {
+            "const": "ERRATIC",
+            "description": "All Ranks and Suits in deck are randomized"
+          }
+        ]
+      },
+      "Stake": {
+        "description": "Stake level",
+        "oneOf": [
+          {
+            "const": "WHITE",
+            "description": "Base Difficulty"
+          },
+          {
+            "const": "RED",
+            "description": "Small Blind gives no reward money"
+          },
+          {
+            "const": "GREEN",
+            "description": "Required scores scale faster for each Ante"
+          },
+          {
+            "const": "BLACK",
+            "description": "Shop can have Eternal Jokers"
+          },
+          {
+            "const": "BLUE",
+            "description": "-1 Discard"
+          },
+          {
+            "const": "PURPLE",
+            "description": "Required score scales faster for each Ante"
+          },
+          {
+            "const": "ORANGE",
+            "description": "Shop can have Perishable Jokers"
+          },
+          {
+            "const": "GOLD",
+            "description": "Shop can have Rental Jokers"
+          }
+        ]
+      },
+      "Suit": {
+        "description": "Card suit",
+        "oneOf": [
+          {
+            "const": "H",
+            "description": "Hearts"
+          },
+          {
+            "const": "D",
+            "description": "Diamonds"
+          },
+          {
+            "const": "C",
+            "description": "Clubs"
+          },
+          {
+            "const": "S",
+            "description": "Spades"
+          }
+        ]
+      },
+      "Rank": {
+        "description": "Card rank",
+        "oneOf": [
+          {
+            "const": "2",
+            "description": "Two"
+          },
+          {
+            "const": "3",
+            "description": "Three"
+          },
+          {
+            "const": "4",
+            "description": "Four"
+          },
+          {
+            "const": "5",
+            "description": "Five"
+          },
+          {
+            "const": "6",
+            "description": "Six"
+          },
+          {
+            "const": "7",
+            "description": "Seven"
+          },
+          {
+            "const": "8",
+            "description": "Eight"
+          },
+          {
+            "const": "9",
+            "description": "Nine"
+          },
+          {
+            "const": "T",
+            "description": "Ten"
+          },
+          {
+            "const": "J",
+            "description": "Jack"
+          },
+          {
+            "const": "Q",
+            "description": "Queen"
+          },
+          {
+            "const": "K",
+            "description": "King"
+          },
+          {
+            "const": "A",
+            "description": "Ace"
+          }
+        ]
+      },
+      "Seal": {
+        "description": "Card seal type",
+        "oneOf": [
+          {
+            "const": "RED",
+            "description": "Retrigger this card 1 time"
+          },
+          {
+            "const": "BLUE",
+            "description": "Creates Planet card for final played poker hand if held in hand"
+          },
+          {
+            "const": "GOLD",
+            "description": "Earn $3 when this card is played and scores"
+          },
+          {
+            "const": "PURPLE",
+            "description": "Creates a Tarot card when discarded"
+          }
+        ]
+      },
+      "Edition": {
+        "description": "Card edition type",
+        "oneOf": [
+          {
+            "const": "FOIL",
+            "description": "+50 Chips when scored"
+          },
+          {
+            "const": "HOLO",
+            "description": "+10 Mult when scored"
+          },
+          {
+            "const": "POLYCHROME",
+            "description": "X1.5 Mult when scored"
+          },
+          {
+            "const": "NEGATIVE",
+            "description": "+1 Joker slot (Jokers) or +1 Consumable slot (Consumables)"
+          }
+        ]
+      },
+      "Enhancement": {
+        "description": "Card enhancement type",
+        "oneOf": [
+          {
+            "const": "BONUS",
+            "description": "+30 Chips when scored"
+          },
+          {
+            "const": "MULT",
+            "description": "+4 Mult when scored"
+          },
+          {
+            "const": "WILD",
+            "description": "Counts as every suit simultaneously"
+          },
+          {
+            "const": "GLASS",
+            "description": "X2 Mult when scored"
+          },
+          {
+            "const": "STEEL",
+            "description": "X1.5 Mult while held in hand"
+          },
+          {
+            "const": "STONE",
+            "description": "+50 Chips, no rank or suit"
+          },
+          {
+            "const": "GOLD",
+            "description": "$3 if held in hand at end of round"
+          },
+          {
+            "const": "LUCKY",
+            "description": "1 in 5 chance +20 Mult, 1 in 15 chance $20"
+          }
+        ]
+      },
+      "CardSet": {
+        "description": "Card set/type",
+        "oneOf": [
+          {
+            "const": "DEFAULT",
+            "description": "Default playing card"
+          },
+          {
+            "const": "ENHANCED",
+            "description": "Playing card with an enhancement"
+          },
+          {
+            "const": "JOKER",
+            "description": "Joker card"
+          },
+          {
+            "const": "TAROT",
+            "description": "Tarot consumable card"
+          },
+          {
+            "const": "PLANET",
+            "description": "Planet consumable card"
+          },
+          {
+            "const": "SPECTRAL",
+            "description": "Spectral consumable card"
+          },
+          {
+            "const": "VOUCHER",
+            "description": "Voucher card"
+          },
+          {
+            "const": "BOOSTER",
+            "description": "Booster pack"
+          }
+        ]
+      },
+      "BlindType": {
+        "description": "Blind type",
+        "oneOf": [
+          {
+            "const": "SMALL",
+            "description": "No special effects, can be skipped for a Tag"
+          },
+          {
+            "const": "BIG",
+            "description": "No special effects, can be skipped for a Tag"
+          },
+          {
+            "const": "BOSS",
+            "description": "Various effects depending on boss type, cannot be skipped"
+          }
+        ]
+      },
+      "BlindStatus": {
+        "description": "Blind status",
+        "oneOf": [
+          {
+            "const": "SELECT",
+            "description": "Selectable blind"
+          },
+          {
+            "const": "CURRENT",
+            "description": "Currently selected blind"
+          },
+          {
+            "const": "UPCOMING",
+            "description": "Future blind"
+          },
+          {
+            "const": "DEFEATED",
+            "description": "Previously defeated blind"
+          },
+          {
+            "const": "SKIPPED",
+            "description": "Previously skipped blind"
+          }
+        ]
+      },
+      "TarotKey": {
+        "description": "Tarot consumable card key",
+        "oneOf": [
+          {
+            "const": "c_fool",
+            "description": "The Fool: Creates the last Tarot or Planet card used during this run"
+          },
+          {
+            "const": "c_magician",
+            "description": "The Magician: Enhances 2 selected cards to Lucky Cards"
+          },
+          {
+            "const": "c_high_priestess",
+            "description": "The High Priestess: Creates up to 2 random Planet cards"
+          },
+          {
+            "const": "c_empress",
+            "description": "The Empress: Enhances 2 selected cards to Mult Cards"
+          },
+          {
+            "const": "c_emperor",
+            "description": "The Emperor: Creates up to 2 random Tarot cards"
+          },
+          {
+            "const": "c_heirophant",
+            "description": "The Hierophant: Enhances 2 selected cards to Bonus Cards"
+          },
+          {
+            "const": "c_lovers",
+            "description": "The Lovers: Enhances 1 selected card into a Wild Card"
+          },
+          {
+            "const": "c_chariot",
+            "description": "The Chariot: Enhances 1 selected card into a Steel Card"
+          },
+          {
+            "const": "c_justice",
+            "description": "Justice: Enhances 1 selected card into a Glass Card"
+          },
+          {
+            "const": "c_hermit",
+            "description": "The Hermit: Doubles money (Max of $20)"
+          },
+          {
+            "const": "c_wheel_of_fortune",
+            "description": "The Wheel of Fortune: 1 in 4 chance to add edition to a random Joker"
+          },
+          {
+            "const": "c_strength",
+            "description": "Strength: Increases rank of up to 2 selected cards by 1"
+          },
+          {
+            "const": "c_hanged_man",
+            "description": "The Hanged Man: Destroys up to 2 selected cards"
+          },
+          {
+            "const": "c_death",
+            "description": "Death: Select 2 cards, convert the left card into the right card"
+          },
+          {
+            "const": "c_temperance",
+            "description": "Temperance: Gives the total sell value of all current Jokers (Max $50)"
+          },
+          {
+            "const": "c_devil",
+            "description": "The Devil: Enhances 1 selected card into a Gold Card"
+          },
+          {
+            "const": "c_tower",
+            "description": "The Tower: Enhances 1 selected card into a Stone Card"
+          },
+          {
+            "const": "c_star",
+            "description": "The Star: Converts up to 3 selected cards to Diamonds"
+          },
+          {
+            "const": "c_moon",
+            "description": "The Moon: Converts up to 3 selected cards to Clubs"
+          },
+          {
+            "const": "c_sun",
+            "description": "The Sun: Converts up to 3 selected cards to Hearts"
+          },
+          {
+            "const": "c_judgement",
+            "description": "Judgement: Creates a random Joker card"
+          },
+          {
+            "const": "c_world",
+            "description": "The World: Converts up to 3 selected cards to Spades"
+          }
+        ]
+      },
+      "PlanetKey": {
+        "description": "Planet consumable card key",
+        "oneOf": [
+          {
+            "const": "c_mercury",
+            "description": "Mercury: Upgrades Pair (+1 Mult, +15 Chips)"
+          },
+          {
+            "const": "c_venus",
+            "description": "Venus: Upgrades Three of a Kind (+2 Mult, +20 Chips)"
+          },
+          {
+            "const": "c_earth",
+            "description": "Earth: Upgrades Full House (+2 Mult, +25 Chips)"
+          },
+          {
+            "const": "c_mars",
+            "description": "Mars: Upgrades Four of a Kind (+3 Mult, +30 Chips)"
+          },
+          {
+            "const": "c_jupiter",
+            "description": "Jupiter: Upgrades Flush (+2 Mult, +15 Chips)"
+          },
+          {
+            "const": "c_saturn",
+            "description": "Saturn: Upgrades Straight (+3 Mult, +30 Chips)"
+          },
+          {
+            "const": "c_uranus",
+            "description": "Uranus: Upgrades Two Pair (+1 Mult, +20 Chips)"
+          },
+          {
+            "const": "c_neptune",
+            "description": "Neptune: Upgrades Straight Flush (+4 Mult, +40 Chips)"
+          },
+          {
+            "const": "c_pluto",
+            "description": "Pluto: Upgrades High Card (+1 Mult, +10 Chips)"
+          },
+          {
+            "const": "c_planet_x",
+            "description": "Planet X: Upgrades Five of a Kind (+3 Mult, +35 Chips)"
+          },
+          {
+            "const": "c_ceres",
+            "description": "Ceres: Upgrades Flush House (+4 Mult, +40 Chips)"
+          },
+          {
+            "const": "c_eris",
+            "description": "Eris: Upgrades Flush Five (+3 Mult, +50 Chips)"
+          }
+        ]
+      },
+      "SpectralKey": {
+        "description": "Spectral consumable card key",
+        "oneOf": [
+          {
+            "const": "c_familiar",
+            "description": "Familiar: Destroy 1 random card, add 3 random Enhanced face cards"
+          },
+          {
+            "const": "c_grim",
+            "description": "Grim: Destroy 1 random card, add 2 random Enhanced Aces"
+          },
+          {
+            "const": "c_incantation",
+            "description": "Incantation: Destroy 1 random card, add 4 random Enhanced numbered cards"
+          },
+          {
+            "const": "c_talisman",
+            "description": "Talisman: Add a Gold Seal to 1 selected card"
+          },
+          {
+            "const": "c_aura",
+            "description": "Aura: Add Foil, Holographic, or Polychrome to 1 selected card"
+          },
+          {
+            "const": "c_wraith",
+            "description": "Wraith: Creates a random Rare Joker, sets money to $0"
+          },
+          {
+            "const": "c_sigil",
+            "description": "Sigil: Converts all cards in hand to a single random suit"
+          },
+          {
+            "const": "c_ouija",
+            "description": "Ouija: Converts all cards in hand to a single random rank, -1 hand size"
+          },
+          {
+            "const": "c_ectoplasm",
+            "description": "Ectoplasm: Add Negative to a random Joker, -1 hand size"
+          },
+          {
+            "const": "c_immolate",
+            "description": "Immolate: Destroys 5 random cards in hand, gain $20"
+          },
+          {
+            "const": "c_ankh",
+            "description": "Ankh: Create a copy of a random Joker, destroy all other Jokers"
+          },
+          {
+            "const": "c_deja_vu",
+            "description": "Deja Vu: Add a Red Seal to 1 selected card"
+          },
+          {
+            "const": "c_hex",
+            "description": "Hex: Add Polychrome to a random Joker, destroy all other Jokers"
+          },
+          {
+            "const": "c_trance",
+            "description": "Trance: Add a Blue Seal to 1 selected card"
+          },
+          {
+            "const": "c_medium",
+            "description": "Medium: Add a Purple Seal to 1 selected card"
+          },
+          {
+            "const": "c_cryptid",
+            "description": "Cryptid: Create 2 copies of 1 selected card"
+          },
+          {
+            "const": "c_soul",
+            "description": "The Soul: Creates a Legendary Joker"
+          },
+          {
+            "const": "c_black_hole",
+            "description": "Black Hole: Upgrade every poker hand by 1 level"
+          }
+        ]
+      },
+      "JokerKey": {
+        "description": "Joker card key",
+        "oneOf": [
+          {
+            "const": "j_joker",
+            "description": "+4 Mult"
+          },
+          {
+            "const": "j_greedy_joker",
+            "description": "Played Diamond cards give +3 Mult when scored"
+          },
+          {
+            "const": "j_lusty_joker",
+            "description": "Played Heart cards give +3 Mult when scored"
+          },
+          {
+            "const": "j_wrathful_joker",
+            "description": "Played Spade cards give +3 Mult when scored"
+          },
+          {
+            "const": "j_gluttenous_joker",
+            "description": "Played Club cards give +3 Mult when scored"
+          },
+          {
+            "const": "j_jolly",
+            "description": "+8 Mult if played hand contains a Pair"
+          },
+          {
+            "const": "j_zany",
+            "description": "+12 Mult if played hand contains a Three of a Kind"
+          },
+          {
+            "const": "j_mad",
+            "description": "+10 Mult if played hand contains a Two Pair"
+          },
+          {
+            "const": "j_crazy",
+            "description": "+12 Mult if played hand contains a Straight"
+          },
+          {
+            "const": "j_droll",
+            "description": "+10 Mult if played hand contains a Flush"
+          },
+          {
+            "const": "j_sly",
+            "description": "+50 Chips if played hand contains a Pair"
+          },
+          {
+            "const": "j_wily",
+            "description": "+100 Chips if played hand contains a Three of a Kind"
+          },
+          {
+            "const": "j_clever",
+            "description": "+80 Chips if played hand contains a Two Pair"
+          },
+          {
+            "const": "j_devious",
+            "description": "+100 Chips if played hand contains a Straight"
+          },
+          {
+            "const": "j_crafty",
+            "description": "+80 Chips if played hand contains a Flush"
+          },
+          {
+            "const": "j_half",
+            "description": "+20 Mult if played hand contains 3 or fewer cards"
+          },
+          {
+            "const": "j_stencil",
+            "description": "X1 Mult for each empty Joker slot"
+          },
+          {
+            "const": "j_four_fingers",
+            "description": "All Flushes and Straights can be made with 4 cards"
+          },
+          {
+            "const": "j_mime",
+            "description": "Retrigger all card held in hand abilities"
+          },
+          {
+            "const": "j_credit_card",
+            "description": "Go up to -$20 in debt"
+          },
+          {
+            "const": "j_ceremonial",
+            "description": "When Blind selected, destroy Joker to right, add double sell value to Mult"
+          },
+          {
+            "const": "j_banner",
+            "description": "+30 Chips for each remaining discard"
+          },
+          {
+            "const": "j_mystic_summit",
+            "description": "+15 Mult when 0 discards remaining"
+          },
+          {
+            "const": "j_marble",
+            "description": "Adds one Stone card to deck when Blind is selected"
+          },
+          {
+            "const": "j_loyalty_card",
+            "description": "X4 Mult every 6 hands played"
+          },
+          {
+            "const": "j_8_ball",
+            "description": "1 in 4 chance for each played 8 to create a Tarot card"
+          },
+          {
+            "const": "j_misprint",
+            "description": "+0-23 Mult"
+          },
+          {
+            "const": "j_dusk",
+            "description": "Retrigger all played cards in final hand of the round"
+          },
+          {
+            "const": "j_raised_fist",
+            "description": "Adds double the rank of lowest ranked card held in hand to Mult"
+          },
+          {
+            "const": "j_chaos",
+            "description": "1 free Reroll per shop"
+          },
+          {
+            "const": "j_fibonacci",
+            "description": "Each played Ace, 2, 3, 5, or 8 gives +8 Mult when scored"
+          },
+          {
+            "const": "j_steel_joker",
+            "description": "Gives X0.2 Mult for each Steel Card in your full deck"
+          },
+          {
+            "const": "j_scary_face",
+            "description": "Played face cards give +30 Chips when scored"
+          },
+          {
+            "const": "j_abstract",
+            "description": "+3 Mult for each Joker card"
+          },
+          {
+            "const": "j_delayed_grat",
+            "description": "Earn $2 per discard if no discards are used by end of round"
+          },
+          {
+            "const": "j_hack",
+            "description": "Retrigger each played 2, 3, 4, or 5"
+          },
+          {
+            "const": "j_pareidolia",
+            "description": "All cards are considered face cards"
+          },
+          {
+            "const": "j_gros_michel",
+            "description": "+15 Mult, 1 in 6 chance destroyed at end of round"
+          },
+          {
+            "const": "j_even_steven",
+            "description": "Played cards with even rank give +4 Mult when scored"
+          },
+          {
+            "const": "j_odd_todd",
+            "description": "Played cards with odd rank give +31 Chips when scored"
+          },
+          {
+            "const": "j_scholar",
+            "description": "Played Aces give +20 Chips and +4 Mult when scored"
+          },
+          {
+            "const": "j_business",
+            "description": "Played face cards have 1 in 2 chance to give $2 when scored"
+          },
+          {
+            "const": "j_supernova",
+            "description": "Adds times poker hand played this run to Mult"
+          },
+          {
+            "const": "j_ride_the_bus",
+            "description": "Gains +1 Mult per consecutive hand without scoring face card"
+          },
+          {
+            "const": "j_space",
+            "description": "1 in 4 chance to upgrade level of played poker hand"
+          },
+          {
+            "const": "j_egg",
+            "description": "Gains $3 of sell value at end of round"
+          },
+          {
+            "const": "j_burglar",
+            "description": "When Blind selected, gain +3 Hands and lose all discards"
+          },
+          {
+            "const": "j_blackboard",
+            "description": "X3 Mult if all cards held in hand are Spades or Clubs"
+          },
+          {
+            "const": "j_runner",
+            "description": "Gains +15 Chips if played hand contains a Straight"
+          },
+          {
+            "const": "j_ice_cream",
+            "description": "+100 Chips, -5 Chips for every hand played"
+          },
+          {
+            "const": "j_dna",
+            "description": "If first hand has only 1 card, add permanent copy to deck"
+          },
+          {
+            "const": "j_splash",
+            "description": "Every played card counts in scoring"
+          },
+          {
+            "const": "j_blue_joker",
+            "description": "+2 Chips for each remaining card in deck"
+          },
+          {
+            "const": "j_sixth_sense",
+            "description": "If first hand is a single 6, destroy it and create a Spectral card"
+          },
+          {
+            "const": "j_constellation",
+            "description": "Gains X0.1 Mult every time a Planet card is used"
+          },
+          {
+            "const": "j_hiker",
+            "description": "Every played card permanently gains +5 Chips when scored"
+          },
+          {
+            "const": "j_faceless",
+            "description": "Earn $5 if 3 or more face cards are discarded at once"
+          },
+          {
+            "const": "j_green_joker",
+            "description": "+1 Mult per hand played, -1 Mult per discard"
+          },
+          {
+            "const": "j_superposition",
+            "description": "Create a Tarot card if hand contains Ace and Straight"
+          },
+          {
+            "const": "j_todo_list",
+            "description": "Earn $4 if poker hand matches, hand changes at end of round"
+          },
+          {
+            "const": "j_cavendish",
+            "description": "X3 Mult, 1 in 1000 chance destroyed at end of round"
+          },
+          {
+            "const": "j_card_sharp",
+            "description": "X3 Mult if played poker hand already played this round"
+          },
+          {
+            "const": "j_red_card",
+            "description": "Gains +3 Mult when any Booster Pack is skipped"
+          },
+          {
+            "const": "j_madness",
+            "description": "When Small/Big Blind selected, gain X0.5 Mult, destroy random Joker"
+          },
+          {
+            "const": "j_square",
+            "description": "Gains +4 Chips if played hand has exactly 4 cards"
+          },
+          {
+            "const": "j_seance",
+            "description": "If hand is Straight Flush, create a random Spectral card"
+          },
+          {
+            "const": "j_riff_raff",
+            "description": "When Blind selected, create 2 Common Jokers"
+          },
+          {
+            "const": "j_vampire",
+            "description": "Gains X0.1 Mult per scoring Enhanced card, removes Enhancement"
+          },
+          {
+            "const": "j_shortcut",
+            "description": "Allows Straights to be made with gaps of 1 rank"
+          },
+          {
+            "const": "j_hologram",
+            "description": "Gains X0.25 Mult every time a playing card is added to deck"
+          },
+          {
+            "const": "j_vagabond",
+            "description": "Create a Tarot card if hand played with $4 or less"
+          },
+          {
+            "const": "j_baron",
+            "description": "Each King held in hand gives X1.5 Mult"
+          },
+          {
+            "const": "j_cloud_9",
+            "description": "Earn $1 for each 9 in your full deck at end of round"
+          },
+          {
+            "const": "j_rocket",
+            "description": "Earn $1 at end of round, +$2 when Boss Blind defeated"
+          },
+          {
+            "const": "j_obelisk",
+            "description": "Gains X0.2 Mult per hand without playing most played hand"
+          },
+          {
+            "const": "j_midas_mask",
+            "description": "All played face cards become Gold cards when scored"
+          },
+          {
+            "const": "j_luchador",
+            "description": "Sell this card to disable the current Boss Blind"
+          },
+          {
+            "const": "j_photograph",
+            "description": "First played face card gives X2 Mult when scored"
+          },
+          {
+            "const": "j_gift",
+            "description": "Add $1 sell value to every Joker and Consumable at end of round"
+          },
+          {
+            "const": "j_turtle_bean",
+            "description": "+5 hand size, reduces by 1 each round"
+          },
+          {
+            "const": "j_erosion",
+            "description": "+4 Mult for each card below deck's starting size"
+          },
+          {
+            "const": "j_reserved_parking",
+            "description": "Each face card held has 1 in 2 chance to give $1"
+          },
+          {
+            "const": "j_mail",
+            "description": "Earn $5 for each discarded card of specific rank"
+          },
+          {
+            "const": "j_to_the_moon",
+            "description": "Earn extra $1 interest for every $5 at end of round"
+          },
+          {
+            "const": "j_hallucination",
+            "description": "1 in 2 chance to create Tarot when Booster Pack opened"
+          },
+          {
+            "const": "j_fortune_teller",
+            "description": "+1 Mult per Tarot card used this run"
+          },
+          {
+            "const": "j_juggler",
+            "description": "+1 hand size"
+          },
+          {
+            "const": "j_drunkard",
+            "description": "+1 discard each round"
+          },
+          {
+            "const": "j_stone",
+            "description": "Gives +25 Chips for each Stone Card in your full deck"
+          },
+          {
+            "const": "j_golden",
+            "description": "Earn $4 at end of round"
+          },
+          {
+            "const": "j_lucky_cat",
+            "description": "Gains X0.25 Mult every time a Lucky card triggers"
+          },
+          {
+            "const": "j_baseball",
+            "description": "Uncommon Jokers each give X1.5 Mult"
+          },
+          {
+            "const": "j_bull",
+            "description": "+2 Chips for each $1 you have"
+          },
+          {
+            "const": "j_diet_cola",
+            "description": "Sell this card to create a free Double Tag"
+          },
+          {
+            "const": "j_trading",
+            "description": "If first discard has only 1 card, destroy it and earn $3"
+          },
+          {
+            "const": "j_flash",
+            "description": "Gains +2 Mult per reroll in the shop"
+          },
+          {
+            "const": "j_popcorn",
+            "description": "+20 Mult, -4 Mult per round played"
+          },
+          {
+            "const": "j_trousers",
+            "description": "Gains +2 Mult if played hand contains a Two Pair"
+          },
+          {
+            "const": "j_ancient",
+            "description": "Each played card with specific suit gives X1.5 Mult"
+          },
+          {
+            "const": "j_ramen",
+            "description": "X2 Mult, loses X0.01 Mult per card discarded"
+          },
+          {
+            "const": "j_walkie_talkie",
+            "description": "Each played 10 or 4 gives +10 Chips and +4 Mult"
+          },
+          {
+            "const": "j_selzer",
+            "description": "Retrigger all cards played for the next 10 hands"
+          },
+          {
+            "const": "j_castle",
+            "description": "Gains +3 Chips per discarded card of specific suit"
+          },
+          {
+            "const": "j_smiley",
+            "description": "Played face cards give +5 Mult when scored"
+          },
+          {
+            "const": "j_campfire",
+            "description": "Gains X0.25 Mult for each card sold, resets on Boss Blind"
+          },
+          {
+            "const": "j_ticket",
+            "description": "Played Gold cards earn $4 when scored"
+          },
+          {
+            "const": "j_mr_bones",
+            "description": "Prevents Death if chips >= 25% of required, self destructs"
+          },
+          {
+            "const": "j_acrobat",
+            "description": "X3 Mult on final hand of round"
+          },
+          {
+            "const": "j_sock_and_buskin",
+            "description": "Retrigger all played face cards"
+          },
+          {
+            "const": "j_swashbuckler",
+            "description": "Adds sell value of all other Jokers to Mult"
+          },
+          {
+            "const": "j_troubadour",
+            "description": "+2 hand size, -1 hand each round"
+          },
+          {
+            "const": "j_certificate",
+            "description": "When round begins, add random playing card with seal to hand"
+          },
+          {
+            "const": "j_smeared",
+            "description": "Hearts/Diamonds same suit, Spades/Clubs same suit"
+          },
+          {
+            "const": "j_throwback",
+            "description": "X0.25 Mult for each Blind skipped this run"
+          },
+          {
+            "const": "j_hanging_chad",
+            "description": "Retrigger first played card 2 additional times"
+          },
+          {
+            "const": "j_rough_gem",
+            "description": "Played Diamond cards earn $1 when scored"
+          },
+          {
+            "const": "j_bloodstone",
+            "description": "1 in 2 chance for Heart cards to give X1.5 Mult"
+          },
+          {
+            "const": "j_arrowhead",
+            "description": "Played Spade cards give +50 Chips when scored"
+          },
+          {
+            "const": "j_onyx_agate",
+            "description": "Played Club cards give +7 Mult when scored"
+          },
+          {
+            "const": "j_glass",
+            "description": "Gains X0.75 Mult for every Glass Card destroyed"
+          },
+          {
+            "const": "j_ring_master",
+            "description": "Joker, Tarot, Planet, Spectral cards may appear multiple times"
+          },
+          {
+            "const": "j_flower_pot",
+            "description": "X3 Mult if hand contains Diamond, Club, Heart, and Spade"
+          },
+          {
+            "const": "j_blueprint",
+            "description": "Copies ability of Joker to the right"
+          },
+          {
+            "const": "j_wee",
+            "description": "Gains +8 Chips when each played 2 is scored"
+          },
+          {
+            "const": "j_merry_andy",
+            "description": "+3 discards each round, -1 hand size"
+          },
+          {
+            "const": "j_oops",
+            "description": "Doubles all listed probabilities"
+          },
+          {
+            "const": "j_idol",
+            "description": "Each played card of specific rank and suit gives X2 Mult"
+          },
+          {
+            "const": "j_seeing_double",
+            "description": "X2 Mult if hand has scoring Club and card of other suit"
+          },
+          {
+            "const": "j_matador",
+            "description": "Earn $8 if hand triggers Boss Blind ability"
+          },
+          {
+            "const": "j_hit_the_road",
+            "description": "Gains X0.5 Mult for every Jack discarded this round"
+          },
+          {
+            "const": "j_duo",
+            "description": "X2 Mult if played hand contains a Pair"
+          },
+          {
+            "const": "j_trio",
+            "description": "X3 Mult if played hand contains a Three of a Kind"
+          },
+          {
+            "const": "j_family",
+            "description": "X4 Mult if played hand contains a Four of a Kind"
+          },
+          {
+            "const": "j_order",
+            "description": "X3 Mult if played hand contains a Straight"
+          },
+          {
+            "const": "j_tribe",
+            "description": "X2 Mult if played hand contains a Flush"
+          },
+          {
+            "const": "j_stuntman",
+            "description": "+250 Chips, -2 hand size"
+          },
+          {
+            "const": "j_invisible",
+            "description": "After 2 rounds, sell to Duplicate a random Joker"
+          },
+          {
+            "const": "j_brainstorm",
+            "description": "Copies the ability of leftmost Joker"
+          },
+          {
+            "const": "j_satellite",
+            "description": "Earn $1 at end of round per unique Planet card used"
+          },
+          {
+            "const": "j_shoot_the_moon",
+            "description": "Each Queen held in hand gives +13 Mult"
+          },
+          {
+            "const": "j_drivers_license",
+            "description": "X3 Mult if you have at least 16 Enhanced cards in deck"
+          },
+          {
+            "const": "j_cartomancer",
+            "description": "Create a Tarot card when Blind is selected"
+          },
+          {
+            "const": "j_astronomer",
+            "description": "All Planet cards and Celestial Packs in shop are free"
+          },
+          {
+            "const": "j_burnt",
+            "description": "Upgrade the level of first discarded poker hand each round"
+          },
+          {
+            "const": "j_bootstraps",
+            "description": "+2 Mult for every $5 you have"
+          },
+          {
+            "const": "j_caino",
+            "description": "Gains X1 Mult when a face card is destroyed"
+          },
+          {
+            "const": "j_triboulet",
+            "description": "Played Kings and Queens each give X2 Mult when scored"
+          },
+          {
+            "const": "j_yorick",
+            "description": "Gains X1 Mult every 23 cards discarded"
+          },
+          {
+            "const": "j_chicot",
+            "description": "Disables effect of every Boss Blind"
+          },
+          {
+            "const": "j_perkeo",
+            "description": "Creates Negative copy of 1 random consumable at end of shop"
+          }
+        ]
+      },
+      "VoucherKey": {
+        "description": "Voucher card key",
+        "oneOf": [
+          {
+            "const": "v_overstock_norm",
+            "description": "Overstock: +1 card slot in shop (to 3)"
+          },
+          {
+            "const": "v_clearance_sale",
+            "description": "Clearance Sale: All cards and packs 25% off"
+          },
+          {
+            "const": "v_hone",
+            "description": "Hone: Foil, Holo, Polychrome appear 2X more often"
+          },
+          {
+            "const": "v_reroll_surplus",
+            "description": "Reroll Surplus: Rerolls cost $2 less"
+          },
+          {
+            "const": "v_crystal_ball",
+            "description": "Crystal Ball: +1 consumable slot"
+          },
+          {
+            "const": "v_telescope",
+            "description": "Telescope: Celestial Packs contain Planet for most played hand"
+          },
+          {
+            "const": "v_grabber",
+            "description": "Grabber: Permanently gain +1 hand per round"
+          },
+          {
+            "const": "v_wasteful",
+            "description": "Wasteful: Permanently gain +1 discard each round"
+          },
+          {
+            "const": "v_tarot_merchant",
+            "description": "Tarot Merchant: Tarot cards appear 2X more in shop"
+          },
+          {
+            "const": "v_planet_merchant",
+            "description": "Planet Merchant: Planet cards appear 2X more in shop"
+          },
+          {
+            "const": "v_seed_money",
+            "description": "Seed Money: Raise interest cap to $10"
+          },
+          {
+            "const": "v_blank",
+            "description": "Blank: Does nothing?"
+          },
+          {
+            "const": "v_magic_trick",
+            "description": "Magic Trick: Playing cards can be purchased from shop"
+          },
+          {
+            "const": "v_hieroglyph",
+            "description": "Hieroglyph: -1 Ante, -1 hand each round"
+          },
+          {
+            "const": "v_directors_cut",
+            "description": "Director's Cut: Reroll Boss Blind 1 time per Ante, $10"
+          },
+          {
+            "const": "v_paint_brush",
+            "description": "Paint Brush: +1 hand size"
+          },
+          {
+            "const": "v_overstock_plus",
+            "description": "Overstock Plus: +1 card slot in shop (to 4)"
+          },
+          {
+            "const": "v_liquidation",
+            "description": "Liquidation: All cards and packs 50% off"
+          },
+          {
+            "const": "v_glow_up",
+            "description": "Glow Up: Foil, Holo, Polychrome appear 4X more often"
+          },
+          {
+            "const": "v_reroll_glut",
+            "description": "Reroll Glut: Rerolls cost additional $2 less"
+          },
+          {
+            "const": "v_omen_globe",
+            "description": "Omen Globe: Spectral cards may appear in Arcana Packs"
+          },
+          {
+            "const": "v_observatory",
+            "description": "Observatory: Planet cards in consumable area give X1.5 Mult"
+          },
+          {
+            "const": "v_nacho_tong",
+            "description": "Nacho Tong: Permanently gain additional +1 hand per round"
+          },
+          {
+            "const": "v_recyclomancy",
+            "description": "Recyclomancy: Permanently gain additional +1 discard"
+          },
+          {
+            "const": "v_tarot_tycoon",
+            "description": "Tarot Tycoon: Tarot cards appear 4X more in shop"
+          },
+          {
+            "const": "v_planet_tycoon",
+            "description": "Planet Tycoon: Planet cards appear 4X more in shop"
+          },
+          {
+            "const": "v_money_tree",
+            "description": "Money Tree: Raise interest cap to $20"
+          },
+          {
+            "const": "v_antimatter",
+            "description": "Antimatter: +1 Joker slot"
+          },
+          {
+            "const": "v_illusion",
+            "description": "Illusion: Playing cards in shop may have Enhancement/Edition/Seal"
+          },
+          {
+            "const": "v_petroglyph",
+            "description": "Petroglyph: -1 Ante again, -1 discard each round"
+          },
+          {
+            "const": "v_retcon",
+            "description": "Retcon: Reroll Boss Blind unlimited times, $10 per roll"
+          },
+          {
+            "const": "v_palette",
+            "description": "Palette: +1 hand size again"
+          }
+        ]
+      },
+      "PlayingCardKey": {
+        "description": "Playing card key in SUIT_RANK format (H=Hearts, D=Diamonds, C=Clubs, S=Spades)",
+        "oneOf": [
+          {
+            "const": "H_2",
+            "description": "Two of Hearts"
+          },
+          {
+            "const": "H_3",
+            "description": "Three of Hearts"
+          },
+          {
+            "const": "H_4",
+            "description": "Four of Hearts"
+          },
+          {
+            "const": "H_5",
+            "description": "Five of Hearts"
+          },
+          {
+            "const": "H_6",
+            "description": "Six of Hearts"
+          },
+          {
+            "const": "H_7",
+            "description": "Seven of Hearts"
+          },
+          {
+            "const": "H_8",
+            "description": "Eight of Hearts"
+          },
+          {
+            "const": "H_9",
+            "description": "Nine of Hearts"
+          },
+          {
+            "const": "H_T",
+            "description": "Ten of Hearts"
+          },
+          {
+            "const": "H_J",
+            "description": "Jack of Hearts"
+          },
+          {
+            "const": "H_Q",
+            "description": "Queen of Hearts"
+          },
+          {
+            "const": "H_K",
+            "description": "King of Hearts"
+          },
+          {
+            "const": "H_A",
+            "description": "Ace of Hearts"
+          },
+          {
+            "const": "D_2",
+            "description": "Two of Diamonds"
+          },
+          {
+            "const": "D_3",
+            "description": "Three of Diamonds"
+          },
+          {
+            "const": "D_4",
+            "description": "Four of Diamonds"
+          },
+          {
+            "const": "D_5",
+            "description": "Five of Diamonds"
+          },
+          {
+            "const": "D_6",
+            "description": "Six of Diamonds"
+          },
+          {
+            "const": "D_7",
+            "description": "Seven of Diamonds"
+          },
+          {
+            "const": "D_8",
+            "description": "Eight of Diamonds"
+          },
+          {
+            "const": "D_9",
+            "description": "Nine of Diamonds"
+          },
+          {
+            "const": "D_T",
+            "description": "Ten of Diamonds"
+          },
+          {
+            "const": "D_J",
+            "description": "Jack of Diamonds"
+          },
+          {
+            "const": "D_Q",
+            "description": "Queen of Diamonds"
+          },
+          {
+            "const": "D_K",
+            "description": "King of Diamonds"
+          },
+          {
+            "const": "D_A",
+            "description": "Ace of Diamonds"
+          },
+          {
+            "const": "C_2",
+            "description": "Two of Clubs"
+          },
+          {
+            "const": "C_3",
+            "description": "Three of Clubs"
+          },
+          {
+            "const": "C_4",
+            "description": "Four of Clubs"
+          },
+          {
+            "const": "C_5",
+            "description": "Five of Clubs"
+          },
+          {
+            "const": "C_6",
+            "description": "Six of Clubs"
+          },
+          {
+            "const": "C_7",
+            "description": "Seven of Clubs"
+          },
+          {
+            "const": "C_8",
+            "description": "Eight of Clubs"
+          },
+          {
+            "const": "C_9",
+            "description": "Nine of Clubs"
+          },
+          {
+            "const": "C_T",
+            "description": "Ten of Clubs"
+          },
+          {
+            "const": "C_J",
+            "description": "Jack of Clubs"
+          },
+          {
+            "const": "C_Q",
+            "description": "Queen of Clubs"
+          },
+          {
+            "const": "C_K",
+            "description": "King of Clubs"
+          },
+          {
+            "const": "C_A",
+            "description": "Ace of Clubs"
+          },
+          {
+            "const": "S_2",
+            "description": "Two of Spades"
+          },
+          {
+            "const": "S_3",
+            "description": "Three of Spades"
+          },
+          {
+            "const": "S_4",
+            "description": "Four of Spades"
+          },
+          {
+            "const": "S_5",
+            "description": "Five of Spades"
+          },
+          {
+            "const": "S_6",
+            "description": "Six of Spades"
+          },
+          {
+            "const": "S_7",
+            "description": "Seven of Spades"
+          },
+          {
+            "const": "S_8",
+            "description": "Eight of Spades"
+          },
+          {
+            "const": "S_9",
+            "description": "Nine of Spades"
+          },
+          {
+            "const": "S_T",
+            "description": "Ten of Spades"
+          },
+          {
+            "const": "S_J",
+            "description": "Jack of Spades"
+          },
+          {
+            "const": "S_Q",
+            "description": "Queen of Spades"
+          },
+          {
+            "const": "S_K",
+            "description": "King of Spades"
+          },
+          {
+            "const": "S_A",
+            "description": "Ace of Spades"
+          }
+        ]
+      },
+      "ConsumableKey": {
+        "description": "Consumable card key (Tarot, Planet, or Spectral)",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/TarotKey"
+          },
+          {
+            "$ref": "#/components/schemas/PlanetKey"
+          },
+          {
+            "$ref": "#/components/schemas/SpectralKey"
+          }
+        ]
+      },
+      "CardKey": {
+        "description": "Card key for the add endpoint. Supports jokers (j_*), consumables (c_*), vouchers (v_*), or playing cards (SUIT_RANK)",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/JokerKey"
+          },
+          {
+            "$ref": "#/components/schemas/ConsumableKey"
+          },
+          {
+            "$ref": "#/components/schemas/VoucherKey"
+          },
+          {
+            "$ref": "#/components/schemas/PlayingCardKey"
+          }
+        ]
+      }
+    },
+    "errors": {
+      "InternalError": {
+        "code": -32000,
+        "message": "Internal error",
+        "data": {
+          "name": "INTERNAL_ERROR"
+        }
+      },
+      "BadRequest": {
+        "code": -32001,
+        "message": "Bad request",
+        "data": {
+          "name": "BAD_REQUEST"
+        }
+      },
+      "InvalidState": {
+        "code": -32002,
+        "message": "Invalid state",
+        "data": {
+          "name": "INVALID_STATE"
+        }
+      },
+      "NotAllowed": {
+        "code": -32003,
+        "message": "Not allowed",
+        "data": {
+          "name": "NOT_ALLOWED"
+        }
+      }
+    }
+  }
+}
