@@ -312,9 +312,10 @@ def _lua_mod1(a: float) -> float:
 def _truncate_13(x: float) -> float:
     """Replicate Lua's ``tonumber(string.format("%.13f", x))``.
 
-    LuaJIT's formatter rounds the exact binary value to 13 decimals and breaks
-    exact ties away from zero (Python's format rounds them to even); reading
-    the decimal back gives the nearest double, which exact integer division
+    The game's LuaJIT 2.0.5 formats through the C runtime, which rounds the
+    exact binary value to 13 decimals and breaks exact ties to even (G181;
+    LuaJIT 2.1's own formatter breaks them away from zero); reading the
+    decimal back gives the nearest double, which exact integer division
     reproduces.  ``"nan"`` reads back as LuaJIT's default NaN.
     """
     if x != x:
@@ -323,7 +324,7 @@ def _truncate_13(x: float) -> float:
         return x
     num, den = x.as_integer_ratio()
     q, r = divmod(abs(num) * 10_000_000_000_000, den)
-    if 2 * r >= den:
+    if 2 * r > den or (2 * r == den and q % 2 == 1):
         q += 1
     return (q if num > 0 else -q) / 10_000_000_000_000
 

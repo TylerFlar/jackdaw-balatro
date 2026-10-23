@@ -1,4 +1,5 @@
-//! Lua number semantics, as LuaJIT 2.1 on x86-64 computes them.
+//! Lua number semantics, as the game's LuaJIT computes them on x86-64 (2.0.5 in the shipped
+//! build; its arithmetic and RNG match 2.1, its number formatting goes through the C runtime).
 //!
 //! Balatro runs on LuaJIT, where every number is an IEEE-754 double. Ordinary arithmetic maps
 //! onto Rust's `f64` directly; this module covers the places where an exact match needs more:
@@ -11,7 +12,9 @@
 //!   ARM builds draw the same numbers as the live game on x86-64.
 //! * **`%`** is `a - floor(a/b)*b` ([`modulo`]), not the C `fmod`.
 //! * **`tonumber(string.format("%.13f", x))`**, the RNG's rounding step ([`truncate13`]).
-//!   LuaJIT's formatter rounds the exact binary value and breaks exact ties away from zero.
+//!   The game's LuaJIT 2.0.5 formats through the C runtime, which rounds the exact binary value
+//!   and breaks exact ties to even (G181; LuaJIT 2.1's own formatter breaks them away from
+//!   zero).
 //! * **`tostring(x)`** for numbers, i.e. `%.14g` ([`tostring_number`]), used where the game
 //!   builds RNG keys out of numbers.
 
@@ -88,8 +91,9 @@ pub fn modulo(a: f64, b: f64) -> f64 {
 
 /// `tonumber(string.format("%.13f", x))`.
 ///
-/// The exact binary value is rounded to 13 decimals with ties away from zero, as LuaJIT's
-/// formatter does; the decimal string then reads back as the nearest double. `"nan"` reads back
+/// The exact binary value is rounded to 13 decimals with ties to even, as the game's LuaJIT
+/// 2.0.5 formats through the C runtime (G181); the decimal string then reads back as the
+/// nearest double. `"nan"` reads back
 /// as LuaJIT's default NaN whatever the input NaN's sign; infinities pass through.
 pub fn truncate13(x: f64) -> f64 {
     if x.is_nan() {
@@ -119,7 +123,11 @@ pub fn truncate13(x: f64) -> f64 {
         let q = scaled >> shift;
         let rem = scaled - (q << shift);
         let half = 1u128 << (shift - 1);
-        if rem >= half { q + 1 } else { q }
+        if rem > half || (rem == half && q & 1 == 1) {
+            q + 1
+        } else {
+            q
+        }
     };
     // q <= 10^13 < 2^53, so both operands are exact and the quotient is correctly rounded,
     // which is exactly what reading the decimal string back yields.
@@ -134,7 +142,7 @@ fn truncate13_slow(x: f64) -> f64 {
         .into_iter()
         .chain(frac_digits[..13].iter().copied())
         .collect();
-    if frac_digits[13] >= b'5' {
+    if rounds_up(&digits, &frac_digits[13..]) {
         round_up_digits(&mut digits);
     }
     let int_len = digits.len() - 13;
@@ -155,6 +163,19 @@ fn exact_fixed(x: f64) -> (Vec<u8>, Vec<u8>) {
     (int_part.bytes().collect(), frac_part.bytes().collect())
 }
 
+/// Whether `kept`, followed by the dropped digits `rest`, rounds up to the nearest with ties
+/// to even.
+fn rounds_up(kept: &[u8], rest: &[u8]) -> bool {
+    match rest.first() {
+        Some(&d) if d > b'5' => true,
+        Some(&b'5') => {
+            rest[1..].iter().any(|&d| d != b'0')
+                || kept.last().is_some_and(|&d| (d - b'0') % 2 == 1)
+        }
+        _ => false,
+    }
+}
+
 /// Add one unit in the last place of a decimal digit string, growing it on carry-out.
 fn round_up_digits(digits: &mut Vec<u8>) {
     for d in digits.iter_mut().rev() {
@@ -168,8 +189,8 @@ fn round_up_digits(digits: &mut Vec<u8>) {
     digits.insert(0, b'1');
 }
 
-/// `tostring(x)` for a number: `%.14g` with LuaJIT's rounding (exact expansion, ties away from
-/// zero). Every NaN prints as `nan`.
+/// `tostring(x)` for a number: `%.14g` as the C runtime rounds it (exact expansion, ties to
+/// even, G181). Every NaN prints as `nan`.
 pub fn tostring_number(x: f64) -> String {
     if x.is_nan() {
         return "nan".to_owned();
@@ -197,7 +218,7 @@ pub fn tostring_number(x: f64) -> String {
     let mut exp: i32 = exp.parse().expect("exponent");
     let all: Vec<u8> = mantissa.bytes().filter(u8::is_ascii_digit).collect();
     let mut digits = all[..14].to_vec();
-    if all[14] >= b'5' {
+    if rounds_up(&digits, &all[14..]) {
         round_up_digits(&mut digits);
         if digits.len() > 14 {
             digits.truncate(14);
@@ -273,9 +294,10 @@ mod tests {
     }
 
     #[test]
-    fn truncate13_rounds_ties_away_from_zero() {
-        // 2^-14 = 0.00006103515625 exactly: a tie at the 13th decimal.
-        assert_eq!(truncate13(1.0 / 16384.0), 0.000_061_035_156_3);
+    fn truncate13_rounds_ties_to_even() {
+        // 2^-14 = 0.00006103515625 exactly: a tie at the 13th decimal; the game's LuaJIT 2.0.5
+        // prints `0.0000610351562` (G181).
+        assert_eq!(truncate13(1.0 / 16384.0), 0.000_061_035_156_2);
         assert_eq!(truncate13(3.0 / 16384.0), 0.000_183_105_468_8);
         assert_eq!(truncate13(0.123_456_789_012_34), 0.123_456_789_012_3);
         assert_eq!(truncate13(0.999_999_999_999_96), 1.0);
@@ -297,21 +319,30 @@ mod tests {
     }
 
     #[test]
+    fn tostring_rounds_ties_to_even() {
+        // 2^46 + 0.5 and 2^46 + 1.5 are exact ties at 14 significant digits (G181).
+        assert_eq!(tostring_number(70_368_744_177_664.5), "70368744177664");
+        assert_eq!(tostring_number(70_368_744_177_665.5), "70368744177666");
+    }
+
+    #[test]
     fn tostring_matches_luajit() {
-        // Expected strings printed by LuaJIT 2.1 `tostring`.
+        // Expected strings printed by LuaJIT `tostring`; on exact ties, the game's 2.0.5.
         let cases: &[(f64, &str)] = &[
             (1.0, "1"),
             (-3.0, "-3"),
             (0.5, "0.5"),
             (1e15, "1e+15"),
-            (123_456_789_012_345.0, "1.2345678901235e+14"),
+            // An exact tie: LuaJIT 2.1 prints ...235, the game's 2.0.5 (C runtime) ...234.
+            (123_456_789_012_345.0, "1.2345678901234e+14"),
             (99_999_999_999_999.0, "99999999999999"),
             (1.0 / 3.0, "0.33333333333333"),
             (1e-5, "1e-05"),
             (0.1, "0.1"),
             (9_007_199_254_740_992.0, "9.007199254741e+15"),
             (1e14, "1e+14"),
-            (12_345_678_901_234.5, "12345678901235"),
+            // An exact tie again: LuaJIT 2.1 ...235, the game's 2.0.5 ...234.
+            (12_345_678_901_234.5, "12345678901234"),
             (-0.0, "-0"),
             (f64::NAN, "nan"),
             (-f64::NAN, "nan"),
@@ -324,11 +355,12 @@ mod tests {
 
     #[test]
     fn truncate13_large_values() {
-        // Expected values printed by LuaJIT 2.1 `string.format("%.13f", x)`.
+        // Expected values printed by `string.format("%.13f", x)`.
         assert_eq!(truncate13(2.5), 2.5);
         // The double nearest 1.00000000000005 lies just below the tie.
         assert_eq!(truncate13(1.000_000_000_000_05), 1.0);
-        assert_eq!(truncate13(1.0 + 1.0 / 16384.0), 1.000_061_035_156_3);
-        assert_eq!(truncate13(-(1.0 + 1.0 / 16384.0)), -1.000_061_035_156_3);
+        // An exact tie: LuaJIT 2.1 prints ...563, the game's 2.0.5 (C runtime) ...562 (G181).
+        assert_eq!(truncate13(1.0 + 1.0 / 16384.0), 1.000_061_035_156_2);
+        assert_eq!(truncate13(-(1.0 + 1.0 / 16384.0)), -1.000_061_035_156_2);
     }
 }
