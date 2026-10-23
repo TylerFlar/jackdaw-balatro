@@ -636,7 +636,11 @@ def resolve_create_descriptor(
     # ------------------------------------------------------------------
     copy_source: Card | None = descriptor.get("copy_of")
     if copy_source is not None:
-        return copy_card(copy_source, game_state=game_state)
+        return copy_card(
+            copy_source,
+            strip_edition=bool(descriptor.get("strip_edition")),
+            game_state=game_state,
+        )
 
     # ------------------------------------------------------------------
     # DNA: copy of a played playing card (card.lua:3504 copy_card).

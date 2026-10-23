@@ -179,6 +179,41 @@ class TestCopySemantics:
         assert copy.ability["perma_bonus"] == 10
         assert copy.ability["played_this_ante"] is True
 
+    def test_ankh_copy_drops_negative(self):
+        """Ankh calls copy_card(chosen, nil, nil, nil, chosen.edition and
+        chosen.edition.negative) (card.lua:1445): a Negative joker's copy has
+        no edition, so it does not add a joker slot."""
+        gs = select_blind(new_run("AUDIT_ANKH_NEG"))
+        neg = give_joker(gs, "j_joker", edition={"negative": True})
+        slots = gs["joker_slots"]
+        give_consumable(gs, "c_ankh")
+        step(gs, UseConsumable(card_index=0))
+        copy = gs["jokers"][1]
+        assert copy is not neg and copy.center_key == "j_joker"
+        assert copy.edition is None
+        assert gs["joker_slots"] == slots
+
+    def test_ankh_copy_keeps_other_editions(self):
+        """Only Negative is stripped (card.lua:1445); copy_card copies any other
+        edition through set_edition (common_events.lua:2169-2171)."""
+        gs = select_blind(new_run("AUDIT_ANKH_FOIL"))
+        give_joker(gs, "j_joker", edition={"foil": True})
+        give_consumable(gs, "c_ankh")
+        step(gs, UseConsumable(card_index=0))
+        assert gs["jokers"][1].edition == {"foil": True, "chips": 50, "type": "foil"}
+
+    def test_invisible_joker_copy_drops_negative(self):
+        """Invisible Joker strips Negative the same way (card.lua:2384)."""
+        gs = to_shop(new_run("AUDIT_INVIS_NEG"))
+        invis = give_joker(gs, "j_invisible")
+        give_joker(gs, "j_joker", edition={"negative": True})
+        invis.ability["invis_rounds"] = 2
+        slots_after_sale = gs["joker_slots"]
+        step(gs, SellCard(area="jokers", card_index=0))
+        copy = gs["jokers"][1]
+        assert copy.edition is None
+        assert gs["joker_slots"] == slots_after_sale
+
     def test_copy_does_not_share_ability_tables(self):
         """Tables are copied with copy_table (common_events.lua:2161-2166)."""
         gs = to_shop(new_run("AUDIT_INVIS2"))

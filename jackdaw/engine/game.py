@@ -1389,8 +1389,14 @@ def _apply_selling_self_mutations(
                 from jackdaw.engine.card_factory import copy_card
 
                 chosen, _ = rng.element(candidates, rng.seed("invisible"))
-                # copy_card (card.lua:2384): a new Card, not a clone.
-                duplicate = copy_card(chosen, game_state=gs)
+                # copy_card(chosen, nil, nil, nil, chosen.edition and
+                # chosen.edition.negative) (card.lua:2384): a new Card, and a
+                # Negative joker's copy loses the edition.
+                duplicate = copy_card(
+                    chosen,
+                    strip_edition=bool(chosen.edition and chosen.edition.get("negative")),
+                    game_state=gs,
+                )
                 if "invis_rounds" in duplicate.ability:
                     duplicate.ability["invis_rounds"] = 0
                 duplicate.add_to_deck(gs)

@@ -456,9 +456,11 @@ def can_use_consumable(
     if key in _NEED_ELIGIBLE_JOKER:
         return any(not j.edition and not j.debuff for j in jokers)
 
-    # Ankh: need joker + room to duplicate
+    # Ankh: can_use needs a joker and a joker limit above 1 (card.lua:1536);
+    # use_card then aborts while Card:check_use is true — every joker slot
+    # taken (card.lua:1581-1588, button_callbacks.lua:2163-2169).
     if key == "c_ankh":
-        return len(jokers) > 0 and joker_limit > 1
+        return len(jokers) > 0 and joker_limit > 1 and len(jokers) < joker_limit
 
     # Aura: need 1 highlighted card with no edition
     if key == "c_aura":
@@ -1183,9 +1185,12 @@ def _ankh(_card: Card, ctx: ConsumableContext) -> ConsumableResult:
         return ConsumableResult()
     chosen, _ = ctx.rng.element(list(ctx.jokers), ctx.rng.seed("ankh_choice"))
     others = [j for j in ctx.jokers if j is not chosen and not j.eternal]
+    # copy_card(chosen, nil, nil, nil, chosen.edition and chosen.edition.negative)
+    # (card.lua:1445): a Negative joker's copy loses the edition.
+    strip = bool(chosen.edition and chosen.edition.get("negative"))
     return ConsumableResult(
         destroy_jokers=others if others else None,
-        create=[{"type": "Joker", "copy_of": chosen}],
+        create=[{"type": "Joker", "copy_of": chosen, "strip_edition": strip}],
     )
 
 
