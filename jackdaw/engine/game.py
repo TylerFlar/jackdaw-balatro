@@ -899,7 +899,8 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
             # GAME_OVER.
             _joker_end_of_round_effects(gs)
             gs["phase"] = GamePhase.GAME_OVER
-            gs["won"] = False
+            # G.GAME.won is never cleared: losing in endless mode after a
+            # win keeps it (state_events.lua:111-122).
         else:
             _round_won(gs)
     else:
