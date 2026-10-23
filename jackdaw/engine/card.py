@@ -35,6 +35,14 @@ def reset_sort_id_counter() -> None:
     _sort_id_counter = 0
 
 
+def _change_hand_size(game_state: dict, delta: int) -> None:
+    """``G.hand:change_size(delta)``: see :func:`jackdaw.engine.game.change_hand_size`
+    (a hand that grows mid-round draws at once)."""
+    from jackdaw.engine.game import change_hand_size
+
+    change_hand_size(game_state, delta)
+
+
 # ---------------------------------------------------------------------------
 # Face nominal values (from Card:set_base, card.lua:131-134)
 # ---------------------------------------------------------------------------
@@ -843,7 +851,7 @@ class Card:
 
         # Top-level h_size / d_size (Juggler, Merry Andy, Drunkard, etc.)
         if self.ability.get("h_size", 0) != 0:
-            game_state["hand_size"] = game_state.get("hand_size", 0) + self.ability["h_size"]
+            _change_hand_size(game_state, self.ability["h_size"])
         if self.ability.get("d_size", 0) > 0:
             rr = game_state.get("round_resets")
             if rr is not None:
@@ -870,7 +878,7 @@ class Card:
 
             calculate_reroll_cost(game_state)
         if name == "Turtle Bean" and isinstance(extra, dict):
-            game_state["hand_size"] = game_state.get("hand_size", 0) + extra.get("h_size", 0)
+            _change_hand_size(game_state, extra.get("h_size", 0))
         if name == "Oops! All 6s":
             # Vanilla doubles EVERY key of the NESTED G.GAME.probabilities
             # table (card.lua:608-11).  The old top-level
@@ -885,12 +893,12 @@ class Card:
             amount = extra if isinstance(extra, int) else 0
             game_state["interest_amount"] = game_state.get("interest_amount", 0) + amount
         if name == "Troubadour" and isinstance(extra, dict):
-            game_state["hand_size"] = game_state.get("hand_size", 0) + extra.get("h_size", 0)
+            _change_hand_size(game_state, extra.get("h_size", 0))
             rr = game_state.get("round_resets")
             if rr is not None:
                 rr["hands"] = rr.get("hands", 0) + extra.get("h_plays", 0)
         if name == "Stuntman" and isinstance(extra, dict):
-            game_state["hand_size"] = game_state.get("hand_size", 0) - extra.get("h_size", 0)
+            _change_hand_size(game_state, -extra.get("h_size", 0))
 
         if self.edition and self.edition.get("negative"):
             if from_debuff:
@@ -922,7 +930,7 @@ class Card:
         extra = self.ability.get("extra")
 
         if self.ability.get("h_size", 0) != 0:
-            game_state["hand_size"] = game_state.get("hand_size", 0) - self.ability["h_size"]
+            _change_hand_size(game_state, -self.ability["h_size"])
         if self.ability.get("d_size", 0) > 0:
             rr = game_state.get("round_resets")
             if rr is not None:
@@ -944,7 +952,7 @@ class Card:
 
             calculate_reroll_cost(game_state)
         if name == "Turtle Bean" and isinstance(extra, dict):
-            game_state["hand_size"] = game_state.get("hand_size", 0) - extra.get("h_size", 0)
+            _change_hand_size(game_state, -extra.get("h_size", 0))
         if name == "Oops! All 6s":
             # Vanilla halves every nested probabilities key, float
             # division, no clamp (card.lua:665-68).
@@ -955,12 +963,12 @@ class Card:
             amount = extra if isinstance(extra, int) else 0
             game_state["interest_amount"] = game_state.get("interest_amount", 0) - amount
         if name == "Troubadour" and isinstance(extra, dict):
-            game_state["hand_size"] = game_state.get("hand_size", 0) - extra.get("h_size", 0)
+            _change_hand_size(game_state, -extra.get("h_size", 0))
             rr = game_state.get("round_resets")
             if rr is not None:
                 rr["hands"] = rr.get("hands", 0) - extra.get("h_plays", 0)
         if name == "Stuntman" and isinstance(extra, dict):
-            game_state["hand_size"] = game_state.get("hand_size", 0) + extra.get("h_size", 0)
+            _change_hand_size(game_state, extra.get("h_size", 0))
 
         if self.edition and self.edition.get("negative"):
             if from_debuff:

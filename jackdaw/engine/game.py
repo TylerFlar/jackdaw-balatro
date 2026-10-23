@@ -271,7 +271,7 @@ def _handle_select_blind(gs: dict[str, Any]) -> dict[str, Any]:
             continue
         rsb = Tag(entry.get("key", "")).apply("round_start_bonus", gs, rng=rng)
         if rsb is not None and rsb.hand_size_delta:
-            gs["hand_size"] = gs.get("hand_size", 8) + rsb.hand_size_delta
+            change_hand_size(gs, rsb.hand_size_delta)
             # run_init seeds temp_handsize as None — `or 0`, not a default.
             rr["temp_handsize"] = (rr.get("temp_handsize") or 0) + rsb.hand_size_delta
             entry["rsb_fired"] = True
@@ -803,9 +803,10 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
             # LOSSES too (state_events.lua:96-110, game_over flag in the
             # context): Turtle Bean decays, rentals charge, perishables
             # tick as you die.  Found by lockstep: hand size differed at
-            # GAME_OVER.
-            _joker_end_of_round_effects(gs)
+            # GAME_OVER.  end_round runs out of SELECTING_HAND (vanilla's
+            # NEW_ROUND), so a hand-size change there draws nothing.
             gs["phase"] = GamePhase.GAME_OVER
+            _joker_end_of_round_effects(gs)
             gs["won"] = False
         else:
             _round_won(gs)
@@ -1445,7 +1446,7 @@ def _disable_active_blind(gs: dict[str, Any]) -> None:
     cr = gs.get("current_round", {})
     cr["discards_left"] = cr.get("discards_left", 0) + effects.get("restore_discards", 0)
     cr["hands_left"] = cr.get("hands_left", 0) + effects.get("restore_hands", 0)
-    gs["hand_size"] = gs.get("hand_size", 0) + effects.get("restore_hand_size", 0)
+    change_hand_size(gs, effects.get("restore_hand_size", 0))
     if effects.get("clear_forced"):
         _clear_forced_selection(gs)
 
@@ -1942,14 +1943,49 @@ def _draw_hand(gs: dict[str, Any]) -> None:
     stack), matching Lua's ``draw_card(G.deck, G.hand, ...)`` which
     pops from the last position.
 
-    After drawing, the hand is sorted descending by nominal value
-    (matching Lua's ``draw_from_deck_to_hand`` which passes ``sort=true``
-    to ``draw_card``, triggering ``CardArea:sort()`` with default 'desc').
+    After drawing, the hand is sorted with its stored mode (matching Lua's
+    ``draw_from_deck_to_hand`` which passes ``sort=true`` to ``draw_card``,
+    triggering ``CardArea:sort()``).  Its ``hand_space`` is
+    ``min(#deck, limit - #hand)`` (state_events.lua:362): with nothing to
+    draw there is no draw_card call, so no sort either.
     """
+    hand: list = gs.setdefault("hand", [])
+    _draw_cards(gs, min(len(gs.get("deck", [])), gs.get("hand_size", 8) - len(hand)))
+
+
+def change_hand_size(gs: dict[str, Any], delta: int) -> None:
+    """``G.hand:change_size(delta)`` (cardarea.lua:94-111).
+
+    The limit moves by *delta* (``gs["hand_size"]`` is the unclamped
+    ``real_card_limit``).  When it grows to more than 1 while the hand holds
+    cards in SELECTING_HAND, *delta* cards are drawn from the deck at once
+    and the hand is sorted.  Vanilla also draws in DRAW_TO_HAND, which the
+    engine folds into its draw steps; every hand-size change that happens
+    there finds the hand empty.  Round-end processing runs outside
+    SELECTING_HAND, as vanilla's end_round runs in NEW_ROUND.
+    """
+    if not delta:
+        return
+    gs["hand_size"] = gs.get("hand_size", 0) + delta
+    if (
+        delta > 0
+        and gs["hand_size"] > 1
+        and gs.get("hand")
+        and gs.get("phase") == GamePhase.SELECTING_HAND
+    ):
+        _draw_cards(gs, delta)
+
+
+def _draw_cards(gs: dict[str, Any], count: int) -> None:
+    """*count* ``draw_card(G.deck, G.hand, ...)`` calls: each takes the top
+    card of the deck if there is one, through ``draw_card_from``'s boss
+    face-down check (cardarea.lua:592-610), and the hand is sorted after
+    (common_events.lua:418-420) — even when the deck had run dry."""
+    if count <= 0:
+        return
     deck: list = gs.get("deck", [])
     hand: list = gs.setdefault("hand", [])
-    hand_size: int = gs.get("hand_size", 8)
-    to_draw = min(len(deck), hand_size - len(hand))
+    to_draw = min(len(deck), count)
 
     # Boss face-down draws (Blind:stay_flipped, blind.lua:605-622): The
     # Wheel (seeded 'wheel' roll per drawn card), The House (first hand of
@@ -2062,7 +2098,7 @@ def _joker_end_of_round_effects(gs: dict[str, Any]) -> dict[str, Any]:
     # End-of-round joker mutations (Turtle Bean's per-round hand-size decay)
     for mut in eor.get("mutations", []):
         if mut.get("hand_size_delta"):
-            gs["hand_size"] = gs.get("hand_size", 8) + mut["hand_size_delta"]
+            change_hand_size(gs, mut["hand_size_delta"])
         # Gros Michel's self-destruct marks the species extinct
         # (card.lua:3037): its no_pool_flag drops it from the Joker pool
         # and Cavendish's yes_pool_flag admits Cavendish.
@@ -2129,6 +2165,10 @@ def _round_won(gs: dict[str, Any]) -> None:
     blind = gs["blind"]
     jokers = gs.get("jokers", [])
     rng = gs.get("rng")
+    # end_round runs in NEW_ROUND, not SELECTING_HAND: a hand-size change
+    # from here on (a perishing Merry Andy, The Manacle's restore) draws
+    # nothing (cardarea.lua:100).
+    gs["phase"] = GamePhase.ROUND_EVAL
 
     # ------------------------------------------------------------------
     # 1-2. Joker end_of_round effects + perishable/rental — shared with
@@ -2244,7 +2284,7 @@ def _round_won(gs: dict[str, Any]) -> None:
     # Revert Juggle Tag's one-round hand-size bonus
     # (state_events.lua:270 — temp_handsize cleared at round end).
     if rr.get("temp_handsize"):
-        gs["hand_size"] = gs.get("hand_size", 8) - rr.pop("temp_handsize")
+        change_hand_size(gs, -rr.pop("temp_handsize"))
     blind_on_deck = gs.get("blind_on_deck", "Small")
     rr["blind_states"][blind_on_deck] = "Defeated"
     # Remembered for cash-out tag hooks (Investment Tag pays after a boss).
@@ -2274,7 +2314,7 @@ def _round_won(gs: dict[str, Any]) -> None:
     # The Manacle: restore hand size after boss defeat
     if blind_on_deck == "Boss" and getattr(blind, "name", "") == "The Manacle":
         if not getattr(blind, "disabled", False):
-            gs["hand_size"] = gs.get("hand_size", 7) + 1
+            change_hand_size(gs, 1)
 
     # ------------------------------------------------------------------
     # 10. Calculate round earnings (for cash-out screen)
@@ -2516,7 +2556,7 @@ def _apply_boss_blind_effects(gs: dict[str, Any], blind: Any) -> None:
 
     # The Manacle: -1 hand size
     elif name == "The Manacle":
-        gs["hand_size"] = gs.get("hand_size", 8) - 1
+        change_hand_size(gs, -1)
 
     # Amber Acorn's flip and shuffles are applied around the setting_blind
     # context in _handle_select_blind (blind.lua:190-205).
@@ -2780,7 +2820,7 @@ def _apply_consumable_result(
 
     # n. Hand size modification (Ectoplasm -1, Ouija -1)
     if getattr(result, "hand_size_mod", 0):
-        gs["hand_size"] = gs.get("hand_size", 8) + result.hand_size_mod
+        change_hand_size(gs, result.hand_size_mod)
 
 
 def _resolve_create_descriptors(gs: dict[str, Any], descriptors: list[dict[str, Any]]) -> None:
