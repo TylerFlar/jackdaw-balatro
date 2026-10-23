@@ -62,7 +62,7 @@ Source: `balatro_source/blind.lua` (Balatro 1.0.1o). 94 rows: 25 function, 42 br
 | blind/fn/Blind:stop_hover | blind.lua:440-444 | function | `Blind:stop_hover()` |  | n/a-ui |  |  |  | auto: UI/animation function by name; writes no game state |
 | blind/fn/Blind:draw | blind.lua:446-462 | function | `Blind:draw()` |  | n/a-ui |  |  |  | auto: UI/animation function by name; writes no game state |
 | blind/fn/Blind:press_play | blind.lua:464-508 | function | `Blind:press_play()` |  | unreviewed |  |  |  |  |
-| blind/branch/Blind:press_play/the-hook | blind.lua:466-486 | branch | The Hook — `self.name == "The Hook"` |  | unreviewed |  |  |  |  |
+| blind/branch/Blind:press_play/the-hook | blind.lua:466-486 | branch | The Hook — `self.name == "The Hook"` |  | gap |  |  | G57 |  |
 | blind/event/Blind:press_play/the-hook/immediate:pseudorandom_element | blind.lua:467-483 | event | `Event{}` → pseudorandom_element, pseudoseed, :add_to_highlighted, table.remove +2 | `self.name == "The Hook"` | unreviewed |  |  |  |  |
 | blind/rng/Blind:press_play/the-hook/pseudorandom_element:hook | blind.lua:475 | rng | `pseudorandom_element(_cards, pseudoseed('hook'))` | `self.name == "The Hook"` & [event] & `G.hand.cards[i]` | unreviewed |  |  |  |  |
 | blind/branch/Blind:press_play/crimson-heart | blind.lua:488-492 | branch | Crimson Heart — `self.name == 'Crimson Heart'` |  | gap |  |  | G11 |  |

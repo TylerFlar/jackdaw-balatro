@@ -463,7 +463,6 @@ pub fn card_json(c: &Card) -> Value {
         "debuff": c.debuff,
         "added_to_deck": c.added_to_deck,
         "facing": match c.facing { Facing::Front => "front", Facing::Back => "back" },
-        "playing_card": c.playing_card,
         "costs": {
             "base_cost": num(c.base_cost),
             "extra_cost": num(c.extra_cost),
@@ -555,7 +554,6 @@ pub fn card_from(v: &Value, path: &str) -> Result<Card> {
         "back" => Facing::Back,
         other => return err(format!("{path}.facing: {other:?}")),
     };
-    let playing_card = o.opt_num("playing_card")?.map(|x| x as u32);
     let cp = o.sub("costs");
     let mut costs = Obj::new(o.field("costs")?, &cp)?;
     let (base_cost, extra_cost, cost, sell_cost) = (
@@ -583,7 +581,6 @@ pub fn card_from(v: &Value, path: &str) -> Result<Card> {
         seal,
         debuff,
         facing,
-        playing_card,
         base_cost,
         extra_cost,
         cost,

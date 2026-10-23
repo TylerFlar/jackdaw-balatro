@@ -8,7 +8,7 @@ use serde_json::Value;
 use crate::area::AreaId;
 use crate::flow::HAND_HIGHLIGHT_LIMIT;
 use crate::game::{Game, LuaState, StepError};
-use crate::joker::PORTED_JOKERS;
+use crate::joker::is_ported;
 use crate::state::HandSort;
 
 /// A player decision.
@@ -168,7 +168,7 @@ impl Game {
     /// Refuse a step that would run game logic not ported yet.
     fn check_ported(&self) -> Result<(), StepError> {
         for c in &self.gs.areas.jokers {
-            if !PORTED_JOKERS.contains(&c.center.key()) {
+            if !is_ported(c.center.key()) {
                 return unported(format!("joker {}", c.center.key()));
             }
         }

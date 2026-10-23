@@ -167,7 +167,9 @@ impl Game {
             },
             ..Runtime::default()
         };
-        Game { gs, rt }
+        let mut game = Game { gs, rt };
+        game.update_cards();
+        game
     }
 
     pub fn from_snapshot(v: &Value) -> Result<Game, SnapshotError> {
@@ -215,6 +217,9 @@ impl Game {
                 None => false,
             };
             let handled = self.update_state();
+            if ran || handled {
+                self.update_cards();
+            }
             if !ran && !handled {
                 break;
             }
@@ -226,15 +231,17 @@ impl Game {
         );
     }
 
-    /// `G.playing_cards`: every playing card of the run, in `playing_card` order.
+    /// `G.playing_cards`: every playing card of the run (the cards in the deck, hand, discard
+    /// pile and play area), by sort id. Lua's list is in insertion order, which no game rule
+    /// depends on: its users count, test membership, or pick by sort id.
     pub fn playing_card_ids(&self) -> Vec<u32> {
-        let mut cards: Vec<(u32, u32)> = AreaId::PLAYING
+        let mut cards: Vec<u32> = AreaId::PLAYING
             .into_iter()
             .flat_map(|a| self.gs.areas.get(a).iter())
             .chain(self.gs.sim.pending_deck_bottom.iter())
-            .map(|c| (c.playing_card.unwrap_or(u32::MAX), c.sort_id))
+            .map(|c| c.sort_id)
             .collect();
         cards.sort_unstable();
-        cards.into_iter().map(|(_, s)| s).collect()
+        cards
     }
 }

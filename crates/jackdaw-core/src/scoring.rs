@@ -20,17 +20,19 @@ pub struct EditionMods {
     pub x_mult_mod: Option<f64>,
 }
 
-/// `extra = {mult_mod, chip_mod, swap}` in a joker's individual effect.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+/// `extra = {mult_mod, chip_mod, swap, func}` in a joker's individual effect.
+#[derive(Clone, Debug, Default)]
 pub struct ExtraMods {
     pub mult_mod: Option<f64>,
     pub chip_mod: Option<f64>,
     pub swap: bool,
+    /// `extra.func`, run when the effect is applied: 8 Ball queues its Tarot (card.lua:3110).
+    pub event: Option<Event>,
 }
 
 /// An effect table: an `eval_card` result or a `calculate_joker` return. Lua tables with
 /// optional keys; `None` is nil.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default)]
 pub struct Effect {
     pub chips: Option<f64>,
     pub mult: Option<f64>,
@@ -59,7 +61,46 @@ pub struct Effect {
 impl Effect {
     /// `next(t) == nil`.
     pub fn is_empty(&self) -> bool {
-        *self == Effect::default()
+        let Effect {
+            chips,
+            mult,
+            x_mult,
+            p_dollars,
+            dollars,
+            h_mult,
+            h_dollars,
+            edition,
+            extra,
+            chip_mod,
+            mult_mod,
+            xmult_mod,
+            repetitions,
+            card,
+            message,
+            saved,
+            remove,
+            level_up,
+            effect,
+        } = self;
+        chips.is_none()
+            && mult.is_none()
+            && x_mult.is_none()
+            && p_dollars.is_none()
+            && dollars.is_none()
+            && h_mult.is_none()
+            && h_dollars.is_none()
+            && edition.is_none()
+            && extra.is_none()
+            && chip_mod.is_none()
+            && mult_mod.is_none()
+            && xmult_mod.is_none()
+            && repetitions.is_none()
+            && card.is_none()
+            && !message
+            && !saved
+            && !remove
+            && !level_up
+            && !effect
     }
 }
 
@@ -286,7 +327,7 @@ impl Game {
                         if let Some(x) = e.dollars {
                             self.queue(Event::EaseDollars(x));
                         }
-                        if let Some(x) = e.extra {
+                        if let Some(x) = &e.extra {
                             if let Some(m) = x.mult_mod {
                                 mult = mod_mult(lua::add(mult, m));
                             }
@@ -297,6 +338,9 @@ impl Game {
                                 let old = mult;
                                 mult = mod_mult(hand_chips);
                                 hand_chips = self.mod_chips(old);
+                            }
+                            if let Some(ev) = &x.event {
+                                self.queue(ev.clone());
                             }
                         }
                         if let Some(x) = e.x_mult {

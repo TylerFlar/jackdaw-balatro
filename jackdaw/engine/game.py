@@ -882,6 +882,21 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
     return gs
 
 
+def _parse_highlighted(gs: dict[str, Any], cards: list) -> None:
+    """``CardArea:parse_highlighted`` (cardarea.lua:162-185) for the selected
+    cards: the blind's ``debuff_hand`` in check mode, which only sets
+    ``blind.triggered`` (blind.lua:519-570)."""
+    blind = gs.get("blind")
+    if blind is None or not cards:
+        return
+    from jackdaw.engine.hand_eval import evaluate_hand
+
+    result = evaluate_hand(cards, jokers=gs.get("jokers", []))
+    if result.detected_hand == "NULL":
+        return
+    blind.debuff_hand(cards, result.poker_hands, result.detected_hand, check=True, game_state=gs)
+
+
 def forced_card_index(hand: list) -> int | None:
     """Index of Cerulean Bell's forced card in *hand*, or None.
 
@@ -965,6 +980,9 @@ def _handle_discard(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str, A
     # ------------------------------------------------------------------
     idx_set = set(indices)
     discarded = [hand[i] for i in sorted(indices)]
+    # Highlighting the cards ran CardArea:parse_highlighted (cardarea.lua:162-185),
+    # whose check-mode debuff_hand leaves blind.triggered set for this hand.
+    _parse_highlighted(gs, discarded)
     gs["hand"] = [c for i, c in enumerate(hand) if i not in idx_set]
     # Discarded cards flip face up on leaving the hand (see play handler).
     for c in discarded:
@@ -3849,6 +3867,7 @@ def _press_play(
         # LSN6STIA off-by-one), only the discard counters and Burnt
         # Joker (hook-gated) are skipped.
         hand: list = gs.get("hand", [])
+        position = {id(c): i for i, c in enumerate(hand)}
         hooked: list = []
         for _ in range(min(2, len(hand))):
             if hand and rng:
@@ -3856,6 +3875,9 @@ def _press_play(
                 target, _ = rng.element(hand, seed_val)
                 hand.remove(target)
                 hooked.append(target)
+        # discard_cards_from_highlighted sorts the highlighted cards by
+        # position (state_events.lua:392), not by pick order.
+        hooked.sort(key=lambda c: position[id(c)])
         if hooked:
             _fire_discard_effects(gs, hooked, hook=True)
         blind.triggered = True

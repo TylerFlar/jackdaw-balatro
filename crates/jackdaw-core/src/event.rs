@@ -10,7 +10,7 @@ use crate::game::{Game, LuaState};
 use crate::pools::PoolType;
 
 /// A queued event.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum Event {
     /// `G.STATE = state; G.STATE_COMPLETE = complete`.
     SetState(LuaState, bool),
@@ -114,6 +114,12 @@ pub enum Event {
     RemoveTag(TagId),
     /// `add_tag(Tag(key))`.
     AddTag(TagId),
+    /// An event that ends in the card's removal by a nested event: a joker's extinction
+    /// (Gros Michel, card.lua:3021-3034) or `start_dissolve` called from an event.
+    Dissolve(u32),
+    /// A card's own queued work: `f(game, card, value)`. Jokers and consumables use it for
+    /// event closures no other card shares, so their code stays in one place.
+    Call(fn(&mut Game, u32, f64), u32, f64),
 }
 
 impl Game {
@@ -259,6 +265,8 @@ impl Game {
             }
             Event::RemoveTag(tag) => self.remove_tag(tag),
             Event::AddTag(tag) => self.add_tag(tag),
+            Event::Dissolve(id) => self.queue(Event::RemoveCard(id)),
+            Event::Call(f, card, value) => f(self, card, value),
             Event::PermaDebuff(ids) => {
                 for id in ids {
                     if let Some(c) = self.gs.areas.card_mut(id) {

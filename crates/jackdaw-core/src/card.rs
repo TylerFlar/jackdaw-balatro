@@ -536,6 +536,17 @@ pub struct Ability {
     /// A Negative joker debuffed out of the deck keeps its slot until it's removed
     /// (card.lua:686-693, 4733-4739).
     pub queue_negative_removal: bool,
+    // Per-frame values `Card:update` keeps (card.lua:4167-4202); derived, so not in snapshots.
+    /// Temperance: the jokers' sell value, capped.
+    pub money: Option<f64>,
+    /// Driver's License: enhanced playing cards.
+    pub driver_tally: Option<f64>,
+    /// Steel Joker: Steel Cards.
+    pub steel_tally: Option<f64>,
+    /// Cloud 9: 9s.
+    pub nine_tally: Option<f64>,
+    /// Stone Joker: Stone Cards.
+    pub stone_tally: Option<f64>,
     // Stickers (`ability.eternal`, `.perishable`, `.perish_tally`, `.rental`).
     pub eternal: bool,
     pub perishable: bool,
@@ -568,8 +579,6 @@ pub struct Card {
     pub seal: Option<Seal>,
     pub debuff: bool,
     pub facing: Facing,
-    /// `self.playing_card` (the creation index in `G.playing_cards`).
-    pub playing_card: Option<u32>,
     pub base_cost: f64,
     pub extra_cost: f64,
     pub cost: f64,
@@ -626,7 +635,6 @@ impl Card {
             seal: None,
             debuff: false,
             facing: Facing::Front,
-            playing_card: None,
             base_cost: 0.0,
             extra_cost: 0.0,
             cost: 0.0,

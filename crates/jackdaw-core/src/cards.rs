@@ -217,20 +217,76 @@ impl Game {
                 self.gs.sets.used_jokers.remove(c.key);
             }
         }
-        // G.playing_cards loses the card and every playing card is renumbered.
-        if card.playing_card.is_some() {
-            let order = self.playing_card_ids();
-            for (k, sid) in order.into_iter().enumerate() {
-                if let Some(c) = self.gs.areas.card_mut(sid) {
-                    c.playing_card = Some(k as u32 + 1);
-                } else if let Some(c) = self
-                    .gs
-                    .sim
-                    .pending_deck_bottom
-                    .iter_mut()
-                    .find(|c| c.sort_id == sid)
-                {
-                    c.playing_card = Some(k as u32 + 1);
+        // Lua also drops the card from G.playing_cards and renumbers every card's
+        // `playing_card` (card.lua:4752-4760). Those numbers follow the session-wide
+        // `G.playing_card` counter, which no run state can reproduce, and nothing in the game
+        // reads them, so the port doesn't keep them.
+    }
+
+    /// One frame of `Card:update` for every card (card.lua:4157-4248): the values some cards keep
+    /// fresh every frame. Lua runs it after the frame's event and state handler, so a card's
+    /// code sees the values as of the end of the previous event.
+    pub(crate) fn update_cards(&mut self) {
+        let has = |g: &Game, name: &str| {
+            AreaId::ALL
+                .iter()
+                .any(|&a| g.gs.areas.get(a).iter().any(|c| c.name() == name))
+        };
+        let count = |g: &Game, f: &dyn Fn(&crate::card::Card) -> bool| {
+            g.playing_card_ids()
+                .into_iter()
+                .filter(|&id| g.gs.areas.card(id).is_some_and(f))
+                .count() as f64
+        };
+        let steel = has(self, "Steel Joker")
+            .then(|| count(self, &|c| c.center == jackdaw_data::centers::M_STEEL));
+        let stone = has(self, "Stone Joker")
+            .then(|| count(self, &|c| c.center == jackdaw_data::centers::M_STONE));
+        let nine = has(self, "Cloud 9").then(|| count(self, &|c| c.get_id() == Some(9)));
+        let driver = has(self, "Driver's License")
+            .then(|| count(self, &|c| c.center != jackdaw_data::centers::C_BASE));
+        let joker_limit = self.gs.joker_slots;
+        let jokers = &self.gs.areas.jokers;
+        let n_jokers = jokers.len() as f64;
+        let stencils = jokers
+            .iter()
+            .filter(|c| c.name() == "Joker Stencil")
+            .count() as f64;
+        let joker_sell: f64 = jokers
+            .iter()
+            .filter(|c| c.set() == CenterSet::Joker)
+            .map(|c| c.sell_cost)
+            .sum();
+        let sells: Vec<(u32, f64)> = jokers.iter().map(|c| (c.sort_id, c.sell_cost)).collect();
+        let skips = self.gs.skips;
+        for a in AreaId::ALL {
+            for c in self.gs.areas.get_mut(a) {
+                if c.ability.perma_debuff {
+                    c.debuff = true;
+                }
+                match c.name() {
+                    "Temperance" => {
+                        let cap = c.ability.extra.num().unwrap_or(0.0);
+                        c.ability.money = Some(joker_sell.min(cap));
+                    }
+                    "Throwback" => {
+                        c.ability.x_mult = 1.0 + skips * c.ability.extra.num().unwrap_or(0.0);
+                    }
+                    "Driver's License" => c.ability.driver_tally = driver,
+                    "Steel Joker" => c.ability.steel_tally = steel,
+                    "Cloud 9" => c.ability.nine_tally = nine,
+                    "Stone Joker" => c.ability.stone_tally = stone,
+                    "Joker Stencil" => c.ability.x_mult = (joker_limit - n_jokers) + stencils,
+                    "Swashbuckler" => {
+                        // Every other card in G.jokers, debuffed or not.
+                        let own = c.sort_id;
+                        c.ability.mult = sells
+                            .iter()
+                            .filter(|(id, _)| *id != own)
+                            .map(|(_, s)| s)
+                            .sum();
+                    }
+                    _ => {}
                 }
             }
         }

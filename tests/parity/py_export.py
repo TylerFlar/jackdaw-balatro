@@ -157,8 +157,29 @@ def _truthy_keys(d: Any) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def export_ability(c: Any) -> dict[str, Any]:
+def _per_frame(c: Any, gs: dict[str, Any] | None) -> dict[str, Any]:
+    """The ability values ``Card:update`` writes every frame (card.lua:4176-4248).
+
+    The oracle computes them when a joker scores; the snapshot holds Lua's
+    stored value.
+    """
+    if gs is None:
+        return {}
+    name = c.ability.get("name")
+    jokers = gs.get("jokers", []) or []
+    if name == "Throwback":
+        return {"x_mult": 1 + gs.get("skips", 0) * c.ability.get("extra", 0)}
+    if name == "Joker Stencil":
+        stencils = sum(1 for j in jokers if j.ability.get("name") == "Joker Stencil")
+        return {"x_mult": gs.get("joker_slots", 5) - len(jokers) + stencils}
+    if name == "Swashbuckler":
+        return {"mult": sum(j.sell_cost for j in jokers if j is not c)}
+    return {}
+
+
+def export_ability(c: Any, gs: dict[str, Any] | None = None) -> dict[str, Any]:
     out = {k: plain(v) for k, v in c.ability.items() if k not in DERIVED_ABILITY_KEYS}
+    out.update(_per_frame(c, gs))
     # Once a perishable's countdown runs, Python mirrors the tally into
     # ability.perish_tally (round_lifecycle._set_perish_tally).  The snapshot
     # carries the tally once, under stickers; a mirror that disagrees stays
@@ -168,7 +189,7 @@ def export_ability(c: Any) -> dict[str, Any]:
     return out
 
 
-def export_card(c: Any) -> dict[str, Any]:
+def export_card(c: Any, gs: dict[str, Any] | None = None) -> dict[str, Any]:
     base = c.base
     return {
         "sort_id": c.sort_id,
@@ -187,13 +208,12 @@ def export_card(c: Any) -> dict[str, Any]:
             "original_value": plain(base.original_value),
             "times_played": base.times_played,
         },
-        "ability": export_ability(c),
+        "ability": export_ability(c, gs),
         "edition": plain(c.edition) if c.edition else None,
         "seal": c.seal,
         "debuff": bool(c.debuff),
         "added_to_deck": bool(c.added_to_deck),
         "facing": c.facing,
-        "playing_card": c.playing_card,
         "costs": {
             "base_cost": c.base_cost,
             "extra_cost": c.extra_cost,
@@ -342,13 +362,15 @@ def export_state(gs: dict[str, Any]) -> dict[str, Any]:
             "by_key": {k: v.get("count", 0) for k, v in usage.items()},
             "totals": plain(gs.get("consumable_usage_total") or {}),
         },
-        "areas": {name: [export_card(c) for c in gs.get(key, []) or []] for key, name in AREAS},
+        "areas": {name: [export_card(c, gs) for c in gs.get(key, []) or []] for key, name in AREAS},
         "pack": _export_pack(gs),
         "rng": _export_rng(gs["rng"]),
         "sim": {
             "next_sort_id": card_module._sort_id_counter + 1,
             "pending_tag_packs": list(gs.get("pending_tag_packs") or []),
-            "pending_deck_bottom": [export_card(c) for c in gs.get("pending_deck_bottom") or []],
+            "pending_deck_bottom": [
+                export_card(c, gs) for c in gs.get("pending_deck_bottom") or []
+            ],
             "shop_d6ed": bool(gs.get("shop_d6ed", False)),
             "shop_free": bool(gs.get("shop_free", False)),
             "hand_last_poll_size": gs.get("hand_last_poll_size", 0),

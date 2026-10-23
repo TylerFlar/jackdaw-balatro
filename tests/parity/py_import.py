@@ -74,7 +74,6 @@ def import_card(cs: dict[str, Any]) -> Card:
     c.debuff = cs["debuff"]
     c.added_to_deck = cs["added_to_deck"]
     c.facing = cs["facing"]
-    c.playing_card = cs["playing_card"]
     costs = cs["costs"]
     c.base_cost = costs["base_cost"]
     c.extra_cost = costs["extra_cost"]

@@ -155,8 +155,12 @@ Keys: `deck` (index 0 is the bottom; cards are drawn from the end), `hand`
 | `seal` | `Red`, `Blue`, `Gold`, `Purple`, or null |
 | `debuff`, `facing` | Boolean; `front`/`back` |
 | `added_to_deck` | `Card.added_to_deck`: whether the card's `add_to_deck` effects (passives, a Negative's slot) are applied. True for owned jokers and consumables; false while a joker is debuffed (its passives are off), for shop and pack cards, and for playing cards (the sim never runs their no-op `add_to_deck`) |
-| `playing_card` | `self.playing_card` index, or null |
 | `costs` | `{base_cost, extra_cost, cost, sell_cost}` |
+
+A card has no `playing_card` field. Lua numbers playing cards from the session-wide
+`G.playing_card` counter, which is never reset (it keeps counting across runs), and renumbers
+them on every removal (card.lua:4752-4760). No game rule reads the numbers, so the snapshot
+leaves them out; whether a card is in `G.playing_cards` follows from its area.
 | `stickers` | `{eternal, perishable, perish_tally (null unless perishable), rental, pinned}`. Lua keeps the first four in `self.ability` |
 
 ### `pack`
