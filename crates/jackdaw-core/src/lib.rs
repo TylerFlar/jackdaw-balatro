@@ -11,6 +11,9 @@
 //! Not ported yet: this is the Phase 0 stub.
 #![forbid(unsafe_code)]
 
+pub mod lua;
+pub mod rng;
+
 /// The generated data tables the engine runs on.
 pub use jackdaw_data as data;
 

@@ -1,0 +1,361 @@
+//! Balatro's RNG, bit-exact with LuaJIT 2.1 on x86-64.
+//!
+//! Three layers (`functions/misc_functions.lua`):
+//!
+//! 1. [`pseudohash`] maps a string to a double in `[0, 1)` (or NaN).
+//! 2. [`Rng::seed`] (`pseudoseed`) advances one named stream of `G.GAME.pseudorandom` and mixes
+//!    in the hashed run seed.
+//! 3. [`Tw223`] is LuaJIT's `math.random`: the game reseeds it from that double on every draw
+//!    (`math.randomseed`), then draws once (`pseudorandom`, `pseudorandom_element`) or several
+//!    times (`pseudoshuffle`, `random_string`).
+//!
+//! All floating-point steps go through [`crate::lua`] so NaNs carry the bits LuaJIT produces:
+//! a string whose hash reaches exactly zero ("bugged seeds") seeds TW223 from a NaN pattern.
+
+use std::collections::HashMap;
+
+use crate::lua;
+
+// ---------------------------------------------------------------------------
+// TW223 (lj_prng.c)
+// ---------------------------------------------------------------------------
+
+/// LuaJIT's combined Tausworthe generator (`PRNGState`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Tw223 {
+    u: [u64; 4],
+}
+
+/// One `TW223_GEN(z, r, i, k, q, s)` word update.
+#[inline]
+const fn gen_word(z: u64, k: u32, q: u32, s: u32) -> u64 {
+    (((z << q) ^ z) >> (k - s)) ^ ((z & (u64::MAX << (64 - k))) << s)
+}
+
+#[inline]
+const fn step_word(z: u64, word: usize) -> u64 {
+    match word {
+        0 => gen_word(z, 63, 31, 18),
+        1 => gen_word(z, 58, 19, 28),
+        2 => gen_word(z, 55, 24, 7),
+        _ => gen_word(z, 47, 21, 8),
+    }
+}
+
+const WARMUP_STEPS: usize = 10;
+
+/// `WARMUP[w][k][v]` is word `w` after the 10 warm-up steps when it starts as `v << 8k`. Each
+/// word's update is linear over GF(2), so the warm-up of any value is the xor of its bytes'
+/// entries: 32 lookups instead of 40 word updates.
+static WARMUP: [[[u64; 256]; 8]; 4] = build_warmup();
+
+const fn build_warmup() -> [[[u64; 256]; 8]; 4] {
+    let mut tables = [[[0u64; 256]; 8]; 4];
+    let mut word = 0;
+    while word < 4 {
+        // The warm-up of each single bit.
+        let mut basis = [0u64; 64];
+        let mut bit = 0;
+        while bit < 64 {
+            let mut z = 1u64 << bit;
+            let mut i = 0;
+            while i < WARMUP_STEPS {
+                z = step_word(z, word);
+                i += 1;
+            }
+            basis[bit] = z;
+            bit += 1;
+        }
+        let mut k = 0;
+        while k < 8 {
+            let mut v = 1usize;
+            while v < 256 {
+                let low = v.isolate_lowest_one();
+                tables[word][k][v] =
+                    tables[word][k][v ^ low] ^ basis[8 * k + low.trailing_zeros() as usize];
+                v += 1;
+            }
+            k += 1;
+        }
+        word += 1;
+    }
+    tables
+}
+
+#[inline]
+fn warm(word: usize, u: u64) -> u64 {
+    let t = &WARMUP[word];
+    let mut r = 0;
+    for (k, row) in t.iter().enumerate() {
+        r ^= row[((u >> (8 * k)) & 0xFF) as usize];
+    }
+    r
+}
+
+impl Tw223 {
+    /// `math.randomseed(d)` (`random_seed` in `lj_prng.c`).
+    pub fn seeded(d: f64) -> Self {
+        let mut d = d;
+        let mut u = [0u64; 4];
+        let mut r: u32 = 0x1109_0601; // 64 - k[i] as four bytes
+        for (i, slot) in u.iter_mut().enumerate() {
+            let m = 1u64 << (r & 0xFF);
+            r >>= 8;
+            d = lua::add(lua::mul(d, lua::PI), lua::E);
+            let mut bits = d.to_bits();
+            if bits < m {
+                bits += m; // make sure the top k[i] bits are not all zero
+            }
+            *slot = warm(i, bits);
+        }
+        Self { u }
+    }
+
+    /// The raw state words.
+    pub fn words(&self) -> [u64; 4] {
+        self.u
+    }
+
+    /// `lj_prng_u64d`: advance and return the double in `[1, 2)` minus one.
+    #[inline]
+    pub fn random(&mut self) -> f64 {
+        let mut r = 0u64;
+        for (i, z) in self.u.iter_mut().enumerate() {
+            *z = step_word(*z, i);
+            r ^= *z;
+        }
+        f64::from_bits((r & 0x000F_FFFF_FFFF_FFFF) | 0x3FF0_0000_0000_0000) - 1.0
+    }
+
+    /// `math.random(m)`: an integer in `[1, m]`.
+    #[inline]
+    pub fn random_n(&mut self, m: i64) -> i64 {
+        (self.random() * m as f64).floor() as i64 + 1
+    }
+
+    /// `math.random(m, n)`: an integer in `[m, n]`.
+    #[inline]
+    pub fn random_range(&mut self, m: i64, n: i64) -> i64 {
+        (self.random() * (n - m + 1) as f64).floor() as i64 + m
+    }
+}
+
+// ---------------------------------------------------------------------------
+// pseudohash / pseudoseed
+// ---------------------------------------------------------------------------
+
+/// `pseudohash(str)` over the bytes of `str` (`misc_functions.lua:279`).
+pub fn pseudohash(s: &[u8]) -> f64 {
+    pseudohash_parts(s, b"")
+}
+
+/// `pseudohash(a .. b)` without building the concatenation.
+pub fn pseudohash_parts(a: &[u8], b: &[u8]) -> f64 {
+    let mut num = 1.0;
+    let len = a.len() + b.len();
+    for i in (1..=len).rev() {
+        let byte = if i > a.len() {
+            b[i - a.len() - 1]
+        } else {
+            a[i - 1]
+        };
+        let t = lua::mul(
+            lua::mul(lua::div(1.123_928_502_3, num), f64::from(byte)),
+            lua::PI,
+        );
+        num = lua::modulo(lua::add(t, lua::mul(lua::PI, i as f64)), 1.0);
+    }
+    num
+}
+
+/// One step of a stream: `math.abs(tonumber(string.format("%.13f", (2.134453429141 + s*1.72431234) % 1)))`.
+#[inline]
+fn advance(state: f64) -> f64 {
+    let raw = lua::modulo(
+        lua::add(2.134_453_429_141, lua::mul(state, 1.724_312_34)),
+        1.0,
+    );
+    lua::truncate13(raw).abs()
+}
+
+/// `G.GAME.pseudorandom`: the run seed and one state per named stream.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Rng {
+    seed: String,
+    hashed_seed: f64,
+    streams: HashMap<String, f64>,
+}
+
+impl Rng {
+    /// A fresh RNG for a run seeded with `seed` (`G.GAME.pseudorandom = {seed, hashed_seed}`).
+    pub fn new(seed: &str) -> Self {
+        Self {
+            seed: seed.to_owned(),
+            hashed_seed: pseudohash(seed.as_bytes()),
+            streams: HashMap::new(),
+        }
+    }
+
+    /// Rebuild an RNG from saved state (`seed`, `hashed_seed`, stream values).
+    pub fn from_parts(seed: String, hashed_seed: f64, streams: HashMap<String, f64>) -> Self {
+        Self {
+            seed,
+            hashed_seed,
+            streams,
+        }
+    }
+
+    pub fn seed_str(&self) -> &str {
+        &self.seed
+    }
+
+    pub fn hashed_seed(&self) -> f64 {
+        self.hashed_seed
+    }
+
+    /// Stream key -> current state.
+    pub fn streams(&self) -> &HashMap<String, f64> {
+        &self.streams
+    }
+
+    /// `pseudoseed(key)`: advance stream `key` and return the double that seeds TW223.
+    pub fn seed(&mut self, key: &str) -> f64 {
+        let hashed = self.hashed_seed;
+        if let Some(state) = self.streams.get_mut(key) {
+            *state = advance(*state);
+            return lua::div(lua::add(*state, hashed), 2.0);
+        }
+        // First use: G.GAME.pseudorandom[key] = pseudohash(key .. seed), then advance.
+        let state = advance(pseudohash_parts(key.as_bytes(), self.seed.as_bytes()));
+        self.streams.insert(key.to_owned(), state);
+        lua::div(lua::add(state, hashed), 2.0)
+    }
+
+    /// `pseudorandom(key)`: a double in `[0, 1)` drawn from stream `key`.
+    pub fn random(&mut self, key: &str) -> f64 {
+        Tw223::seeded(self.seed(key)).random()
+    }
+
+    /// `pseudorandom(key, min, max)`: an integer in `[min, max]` drawn from stream `key`.
+    pub fn random_range(&mut self, key: &str, min: i64, max: i64) -> i64 {
+        Tw223::seeded(self.seed(key)).random_range(min, max)
+    }
+}
+
+/// `pseudoseed(key, predict_seed)`: the stateless preview the game uses to look ahead.
+pub fn predict_seed(key: &str, predict: &str) -> f64 {
+    let pseed = advance(pseudohash_parts(key.as_bytes(), predict.as_bytes()));
+    lua::div(lua::add(pseed, pseudohash(predict.as_bytes())), 2.0)
+}
+
+/// `pseudorandom(seed)` for an already computed seed double.
+pub fn random_from(seed: f64) -> f64 {
+    Tw223::seeded(seed).random()
+}
+
+/// `pseudorandom(seed, min, max)` for an already computed seed double.
+pub fn random_range_from(seed: f64, min: i64, max: i64) -> i64 {
+    Tw223::seeded(seed).random_range(min, max)
+}
+
+/// `pseudorandom_element(t, seed)` over `n` entries whose sort order is already the Lua order
+/// (keys `1..n` of an array, or entries pre-sorted by `sort_id` / key): the 0-based position.
+pub fn element_index(n: usize, seed: f64) -> usize {
+    assert!(n > 0, "pseudorandom_element over an empty table");
+    (Tw223::seeded(seed).random_n(n as i64) - 1) as usize
+}
+
+/// `pseudoshuffle(list, seed)` over a list already sorted by `sort_id` (the game sorts first
+/// when the entries carry one).
+pub fn shuffle<T>(items: &mut [T], seed: f64) {
+    let mut tw = Tw223::seeded(seed);
+    for i in (2..=items.len()).rev() {
+        let j = tw.random_n(i as i64) as usize;
+        items.swap(i - 1, j - 1);
+    }
+}
+
+/// `random_string(length, seed)`: the run-seed generator (`misc_functions.lua:270`).
+pub fn random_string(length: usize, seed: f64) -> String {
+    let mut tw = Tw223::seeded(seed);
+    let mut out = String::with_capacity(length);
+    for _ in 0..length {
+        let c = if tw.random() > 0.7 {
+            tw.random_range(i64::from(b'1'), i64::from(b'9'))
+        } else if tw.random() > 0.45 {
+            tw.random_range(i64::from(b'A'), i64::from(b'N'))
+        } else {
+            tw.random_range(i64::from(b'P'), i64::from(b'Z'))
+        };
+        out.push(char::from(c as u8));
+    }
+    out.to_ascii_uppercase()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn warmup_tables_match_ten_steps() {
+        let mut x = 0x0123_4567_89AB_CDEFu64;
+        for _ in 0..200 {
+            x = x
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            for word in 0..4 {
+                let mut z = x;
+                for _ in 0..WARMUP_STEPS {
+                    z = step_word(z, word);
+                }
+                assert_eq!(warm(word, x), z);
+            }
+        }
+    }
+
+    #[test]
+    fn known_hashes() {
+        // Values printed by LuaJIT 2.1 (bit patterns).
+        assert_eq!(pseudohash(b"7LB2WVPK").to_bits(), 0x3FC6_A501_398D_4000);
+        assert_eq!(
+            pseudohash(b"erratic7LB2WVPK").to_bits(),
+            lua::DEFAULT_NAN_BITS
+        );
+        assert_eq!(pseudohash(b"").to_bits(), 1.0f64.to_bits());
+        assert_eq!(
+            pseudohash_parts(b"erratic", b"7LB2WVPK").to_bits(),
+            pseudohash(b"erratic7LB2WVPK").to_bits()
+        );
+    }
+
+    #[test]
+    fn nan_stream_state_turns_positive() {
+        // "erratic" + "7LB2WVPK" hashes to NaN; the %.13f round trip and math.abs make the
+        // stream state the positive NaN, which then wins the (state + hashed_seed) addition.
+        let mut rng = Rng::new("7LB2WVPK");
+        let s = rng.seed("erratic");
+        assert_eq!(rng.streams()["erratic"].to_bits(), lua::POSITIVE_NAN_BITS);
+        assert_eq!(s.to_bits(), lua::POSITIVE_NAN_BITS);
+        let tw = Tw223::seeded(s);
+        assert_eq!(
+            tw.words(),
+            [
+                0x002F_FD00_0030_0300,
+                0xF818_0180_0000_2FFD,
+                0x0000_7FF8_007F_07F0,
+                0xFC01_F01F_0003_FFC3
+            ]
+        );
+        assert_eq!(Tw223::seeded(s).random_range(1, 52), 52);
+    }
+
+    #[test]
+    fn shuffle_is_a_permutation() {
+        let mut v: Vec<u32> = (1..=52).collect();
+        shuffle(&mut v, 0.123_456);
+        let mut sorted = v.clone();
+        sorted.sort_unstable();
+        assert_eq!(sorted, (1..=52).collect::<Vec<_>>());
+        assert_ne!(v, sorted);
+    }
+}

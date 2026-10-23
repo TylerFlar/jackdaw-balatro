@@ -290,17 +290,42 @@ def pseudohash(s: str) -> float:
             q = 1.1239285023 / num
         except ZeroDivisionError:
             q = math.copysign(math.inf, num)
-        num = (q * byte * math.pi + math.pi * i) % 1
+        num = _lua_mod1(q * byte * math.pi + math.pi * i)
     return num
+
+
+# LuaJIT on x86-64 makes invalid operations (inf - inf, 0/0) the SSE
+# "default NaN", whose sign bit is set; tonumber("nan") reads back as it too.
+# The sign matters: TW223 seeds from the double's bits.
+_DEFAULT_NAN = struct.unpack("<d", struct.pack("<Q", 0xFFF8_0000_0000_0000))[0]
+
+
+def _lua_mod1(a: float) -> float:
+    """Lua's ``a % 1`` (``a - floor(a)``), with LuaJIT's NaN results."""
+    if a != a:
+        return a  # a NaN operand propagates unchanged
+    if a == math.inf or a == -math.inf:
+        return _DEFAULT_NAN  # inf - floor(inf) = inf - inf
+    return a % 1  # exact for finite a: equals a - floor(a)
 
 
 def _truncate_13(x: float) -> float:
     """Replicate Lua's ``tonumber(string.format("%.13f", x))``.
 
-    Rounds to 13 decimal places then converts back to float.  This prevents
-    floating-point drift and is essential for cross-platform determinism.
+    LuaJIT's formatter rounds the exact binary value to 13 decimals and breaks
+    exact ties away from zero (Python's format rounds them to even); reading
+    the decimal back gives the nearest double, which exact integer division
+    reproduces.  ``"nan"`` reads back as LuaJIT's default NaN.
     """
-    return float(f"{x:.13f}")
+    if x != x:
+        return _DEFAULT_NAN
+    if x == 0.0 or x == math.inf or x == -math.inf:
+        return x
+    num, den = x.as_integer_ratio()
+    q, r = divmod(abs(num) * 10_000_000_000_000, den)
+    if 2 * r >= den:
+        q += 1
+    return (q if num > 0 else -q) / 10_000_000_000_000
 
 
 # ---------------------------------------------------------------------------

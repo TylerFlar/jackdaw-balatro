@@ -4,7 +4,9 @@
 #![forbid(unsafe_code)]
 
 use std::env;
-use std::process::ExitCode;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::{self, ExitCode};
 
 const USAGE: &str = "\
 Usage: cargo xtask <command> [options]
@@ -67,6 +69,13 @@ fn main() -> ExitCode {
             print!("{USAGE}");
             ExitCode::SUCCESS
         }
+        Ok(Command::LuaOracles) => match lua_oracles() {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(message) => {
+                eprintln!("xtask lua-oracles: {message}");
+                ExitCode::FAILURE
+            }
+        },
         Ok(command) => {
             eprintln!("xtask {}: not implemented yet (phase 2)", command.name());
             ExitCode::from(2)
@@ -76,6 +85,47 @@ fn main() -> ExitCode {
             ExitCode::from(2)
         }
     }
+}
+
+/// The repository root (the parent of `xtask/`).
+fn repo_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("xtask lives in the repository root")
+        .to_path_buf()
+}
+
+/// LuaJIT-executed oracles: run each script on the local Balatro source and write its fixture.
+fn lua_oracles() -> Result<(), String> {
+    let root = repo_root();
+    if !root
+        .join("balatro_source/functions/misc_functions.lua")
+        .is_file()
+    {
+        return Err("balatro_source/ (the local Balatro 1.0.1o source) is missing".to_owned());
+    }
+    let oracles = [(
+        "scripts/luajit_rng_oracle.lua",
+        "tests/fixtures/rng_luajit.json",
+    )];
+    for (script, fixture) in oracles {
+        let output = process::Command::new("luajit")
+            .arg(root.join(script))
+            .current_dir(&root)
+            .output()
+            .map_err(|e| format!("cannot run luajit: {e}"))?;
+        if !output.status.success() {
+            return Err(format!(
+                "{script} failed:
+{}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+        fs::write(root.join(fixture), &output.stdout)
+            .map_err(|e| format!("cannot write {fixture}: {e}"))?;
+        println!("{script} -> {fixture} ({} bytes)", output.stdout.len());
+    }
+    Ok(())
 }
 
 #[cfg(test)]
