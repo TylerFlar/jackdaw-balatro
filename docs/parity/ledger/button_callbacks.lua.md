@@ -180,7 +180,7 @@ Source: `balatro_source/functions/button_callbacks.lua` (Balatro 1.0.1o). 249 ro
 | button_callbacks/fn/G.FUNCS.shop_voucher_empty | button_callbacks.lua:2382-2390 | function | `G.FUNCS.shop_voucher_empty(e)` |  | unreviewed |  |  |  |  |
 | button_callbacks/fn/G.FUNCS.check_for_buy_space | button_callbacks.lua:2392-2402 | function | `G.FUNCS.check_for_buy_space(card)` |  | unreviewed |  |  |  |  |
 | button_callbacks/branch/G.FUNCS.check_for_buy_space/edition-negative | button_callbacks.lua:2393-2399 | branch | edition.negative — `card.ability.set ~= 'Voucher' and card.ability.set ~= 'Enhanced' and card.ability.set ~= 'Default'…` |  | unreviewed |  |  |  |  |
-| button_callbacks/fn/G.FUNCS.buy_from_shop | button_callbacks.lua:2404-2479 | function | `G.FUNCS.buy_from_shop(e)` |  | gap |  |  | G46, G54 |  |
+| button_callbacks/fn/G.FUNCS.buy_from_shop | button_callbacks.lua:2404-2479 | function | `G.FUNCS.buy_from_shop(e)` |  | gap | crates/jackdaw-core/src/shop.rs::buy_from_shop | tests/parity/test_rust_step.py | G46, G54, G123 |  |
 | button_callbacks/event/G.FUNCS.buy_from_shop/after:remove_nils | button_callbacks.lua:2413-2477 | event | `Event{trigger='after'}` → :remove_card, :add_to_deck, :remove, remove_nils +11 | `c1 and c1:is(Card)` | unreviewed |  |  |  |  |
 | button_callbacks/event/G.FUNCS.buy_from_shop/immediate:calculate_joker | button_callbacks.lua:2437 | event | `Event{}` → :calculate_joker | `c1 and c1:is(Card)` & [event] & `e.config.id ~= 'buy_and_use'` | unreviewed |  |  |  |  |
 | button_callbacks/ctx/G.FUNCS.buy_from_shop/calculate_joker:buying_card | button_callbacks.lua:2437 | context_call | `calculate_joker{buying_card, card}` | `c1 and c1:is(Card)` & [event] & `e.config.id ~= 'buy_and_use'` & [event] | unreviewed |  |  |  |  |
@@ -228,7 +228,7 @@ Source: `balatro_source/functions/button_callbacks.lua` (Balatro 1.0.1o). 249 ro
 | button_callbacks/event/G.FUNCS.reroll_shop/immediate:recall_cardarea_focus | button_callbacks.lua:2895-2905 | event | `Event{}` → :recall_cardarea_focus, :calculate_joker | [event] | unreviewed |  |  |  |  |
 | button_callbacks/ctx/G.FUNCS.reroll_shop/calculate_joker:reroll_shop | button_callbacks.lua:2901 | context_call | `calculate_joker{reroll_shop}` | [event] & [event] | unreviewed |  |  |  |  |
 | button_callbacks/event/G.FUNCS.reroll_shop/immediate:save_run | button_callbacks.lua:2909 | event | `Event{}` → save_run |  | unreviewed |  |  |  |  |
-| button_callbacks/fn/G.FUNCS.cash_out | button_callbacks.lua:2912-2956 | function | `G.FUNCS.cash_out(e)` |  | gap |  |  | G53 |  |
+| button_callbacks/fn/G.FUNCS.cash_out | button_callbacks.lua:2912-2956 | function | `G.FUNCS.cash_out(e)` |  | verified | crates/jackdaw-core/src/shop.rs::cash_out | tests/parity/test_rust_step.py | G53, G120 |  |
 | button_callbacks/rng/G.FUNCS.cash_out/shuffle:cashout-g-game-round_resets-ante | button_callbacks.lua:2918 | rng | `G.deck:shuffle('cashout'..G.GAME.round_resets.ante)` | `G.round_eval` | unreviewed |  |  |  |  |
 | button_callbacks/event/G.FUNCS.cash_out/immediate:remove | button_callbacks.lua:2921-2937 | event | `Event{trigger='immediate'}` → :remove | `G.round_eval` | unreviewed |  |  |  |  |
 | button_callbacks/event/G.FUNCS.cash_out/immediate | button_callbacks.lua:2939-2944 | event | `Event{}` | `G.round_eval` | unreviewed |  |  |  |  |

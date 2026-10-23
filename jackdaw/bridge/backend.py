@@ -193,6 +193,20 @@ class SimBackend:
 
         return self._serialize()
 
+    def _price_and_mark(self, card: Any) -> None:
+        """What Card:init does for a card ``add`` creates: set_cost with the run's
+        prices (card.lua:72) and the key's used_jokers mark (card.lua:349-354)."""
+        from jackdaw.engine.card_utils import astronomer_active
+
+        gs = self._gs
+        card.set_cost(
+            inflation=gs.get("inflation", 0),
+            discount_percent=gs.get("discount_percent", 0),
+            ante=gs.get("round_resets", {}).get("ante", 1),
+            has_astronomer=astronomer_active(gs),
+        )
+        gs.setdefault("used_jokers", {})[card.center_key] = True
+
     def _handle_add(self, params: dict[str, Any]) -> dict[str, Any]:
         """Insert a card into the game (debug method matching balatrobot API)."""
         if self._gs is None:
@@ -264,7 +278,7 @@ class SimBackend:
                 )
                 if edition is None:
                     card.set_edition(polled)
-            card.set_cost()
+            self._price_and_mark(card)
             self._gs["jokers"].append(card)
             # Apply passive effects (hand_size, discards, joker_slots, etc.).
             # add_to_deck also gives the current round its extra discards
@@ -279,7 +293,10 @@ class SimBackend:
 
                 _draw_hand(self._gs)
         elif key.startswith("c_"):
-            card = create_consumable(key)
+            # SMODS.add_card: create_card, add_to_deck, then the card lands.
+            card = create_consumable(key, hands_played=self._gs.get("hands_played", 0))
+            self._price_and_mark(card)
+            card.add_to_deck(self._gs)
             self._gs["consumables"].append(card)
         elif len(key) == 3 and key[1] == "_":
             # Playing card key like "H_A", "S_2"
@@ -294,6 +311,8 @@ class SimBackend:
                 enhancement=enhancement,
                 edition=edition,
                 seal=seal,
+                inflation=self._gs.get("inflation", 0),
+                discount_percent=self._gs.get("discount_percent", 0),
             )
             # Add to hand if in SELECTING_HAND, otherwise to deck
             phase = self._gs.get("phase")

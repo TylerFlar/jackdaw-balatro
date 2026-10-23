@@ -72,7 +72,7 @@ impl BlindSlot {
         BlindSlot::ALL.into_iter().find(|b| b.name() == name)
     }
 
-    fn index(self) -> usize {
+    pub fn index(self) -> usize {
         self as usize
     }
 }
@@ -334,6 +334,27 @@ pub struct PackState {
     pub return_phase: Phase,
 }
 
+/// A tag in `G.GAME.tags` (`Tag`, tag.lua).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HeldTag {
+    pub id: TagId,
+    /// `self.triggered`: the tag has fired and leaves `G.GAME.tags` with its `yep` / `nope`
+    /// events. Every step ends after those events, so a snapshot never holds one.
+    pub triggered: bool,
+    /// The Orbital Tag's hand (`self.ability.orbital_hand`, tag.lua:101-112).
+    pub orbital_hand: Option<HandType>,
+}
+
+impl HeldTag {
+    pub fn new(id: TagId) -> HeldTag {
+        HeldTag {
+            id,
+            triggered: false,
+            orbital_hand: None,
+        }
+    }
+}
+
 /// The last played hand's result.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LastScore {
@@ -423,8 +444,8 @@ pub struct GameState {
     pub round_bonus: RoundBonus,
     pub blind: Option<BlindState>,
     pub hands: [HandState; 12],
-    /// Pending tags, in order.
-    pub tags: Vec<TagId>,
+    /// `G.GAME.tags`, in order.
+    pub tags: Vec<HeldTag>,
     pub sets: Sets,
     pub consumeable_usage: ConsumeableUsage,
     pub areas: Areas,

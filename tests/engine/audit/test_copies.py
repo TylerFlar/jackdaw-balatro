@@ -142,6 +142,9 @@ class TestCopySemantics:
         source = give_card(gs, "S_A", enhancement="m_bonus", seal="Red", edition="foil")
         source.ability["perma_bonus"] = 20
         source.ability["played_this_ante"] = True
+        # A debuff that survives the blind's debuff passes (add_to_deck and
+        # remove_from_deck run one, card.lua:640-642, 697-699).
+        source.ability["perma_debuff"] = True
         source.debuff = True
         target_id = target.sort_id
         give_consumable(gs, "c_death")

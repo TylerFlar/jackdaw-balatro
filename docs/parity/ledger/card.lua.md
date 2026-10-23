@@ -6,7 +6,7 @@ Source: `balatro_source/card.lua` (Balatro 1.0.1o). 605 rows: 67 function, 310 b
 
 | id | lua | kind | subject | context | status | rust | test | gap | notes |
 |---|---|---|---|---|---|---|---|---|---|
-| card/fn/Card:init | card.lua:5-77 | function | `Card:init(X, Y, W, H, card, center, params)` |  | unreviewed |  |  |  |  |
+| card/fn/Card:init | card.lua:5-77 | function | `Card:init(X, Y, W, H, card, center, params)` |  | ported | crates/jackdaw-core/src/card.rs::Card::new |  | G122 |  |
 | card/rng/Card:init/math.random | card.lua:47 | rng | `math.random()` |  | unreviewed |  |  |  |  |
 | card/rng/Card:init/math.random#2 | card.lua:48 | rng | `math.random()` |  | unreviewed |  |  |  |  |
 | card/rng/Card:init/math.random#3 | card.lua:49 | rng | `math.random()` |  | unreviewed |  |  |  |  |

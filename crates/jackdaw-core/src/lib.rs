@@ -28,6 +28,8 @@ pub mod rng;
 mod round;
 pub mod rules;
 pub mod scoring;
+mod select;
+mod shop;
 pub mod snapshot;
 pub mod state;
 mod tags;

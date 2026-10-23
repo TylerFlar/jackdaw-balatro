@@ -498,7 +498,11 @@ def populate_shop(
     voucher: _Card | None = None
     voucher_key: str | None = gs.get("current_round", {}).get("voucher")
     if voucher_key:
-        voucher = create_voucher(voucher_key)
+        voucher = create_voucher(voucher_key, hands_played=gs.get("hands_played", 0))
+        # The shop's voucher card marks its key in used_jokers while it exists
+        # (Card:set_ability, card.lua:349-354); leaving the shop or redeeming
+        # it removes the card and the mark (card.lua:4741-4748).
+        gs.setdefault("used_jokers", {})[voucher_key] = True
         voucher.set_cost(
             inflation=gs.get("inflation", 0),
             discount_percent=gs.get("discount_percent", 0),
@@ -514,7 +518,7 @@ def populate_shop(
         if first_shop and _FIRST_SHOP_BUFFOON_PACK not in banned_keys:
             gs[_FIRST_SHOP_BUFFOON_KEY] = True
         pack_card = _Card()
-        pack_card.set_ability(pack_key)
+        pack_card.set_ability(pack_key, hands_played=gs.get("hands_played", 0))
         pack_card.set_cost(
             inflation=gs.get("inflation", 0),
             discount_percent=gs.get("discount_percent", 0),

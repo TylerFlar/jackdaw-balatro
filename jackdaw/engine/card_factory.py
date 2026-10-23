@@ -77,6 +77,8 @@ def create_playing_card(
     *,
     playing_card_index: int | None = None,
     hands_played: int = 0,
+    inflation: int = 0,
+    discount_percent: int = 0,
 ) -> Card:
     """Create a playing card (goes into the deck).
 
@@ -92,6 +94,11 @@ def create_playing_card(
         seal: Seal string (``"Gold"``, ``"Red"``, etc.) or None.
         playing_card_index: Index in ``G.playing_cards`` list.
         hands_played: Current ``G.GAME.hands_played`` for post-init fields.
+        inflation, discount_percent: ``G.GAME.inflation`` and
+            ``G.GAME.discount_percent``: Card:init prices every card
+            (card.lua:72), and set_edition/set_seal price it again
+            (card.lua:461, 498), so a playing card costs $1 (sells for $1)
+            plus its edition and the run's inflation.
 
     Returns:
         A fully initialised playing card.
@@ -105,6 +112,7 @@ def create_playing_card(
         card.set_edition(edition)
     if seal:
         card.set_seal(seal)
+    card.set_cost(inflation=inflation, discount_percent=discount_percent)
     return card
 
 
@@ -220,10 +228,14 @@ def create_consumable(key: str, *, hands_played: int = 0) -> Card:
 # ---------------------------------------------------------------------------
 
 
-def create_voucher(key: str) -> Card:
-    """Create a voucher card from a P_CENTERS key (e.g. ``"v_overstock_norm"``)."""
+def create_voucher(key: str, *, hands_played: int = 0) -> Card:
+    """Create a voucher card from a P_CENTERS key (e.g. ``"v_overstock_norm"``).
+
+    ``hands_played`` is ``G.GAME.hands_played``: Card:set_ability stamps it on
+    every card (card.lua:337).
+    """
     card = Card()
-    card.set_ability(key)
+    card.set_ability(key, hands_played=hands_played)
     return card
 
 

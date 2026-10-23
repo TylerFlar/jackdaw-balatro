@@ -7,6 +7,7 @@ use jackdaw_data::{CenterId, TagId};
 
 use crate::area::AreaId;
 use crate::game::{Game, LuaState};
+use crate::hand_eval::HandType;
 use crate::pools::{CardSpec, PoolType};
 
 /// A queued event.
@@ -112,11 +113,43 @@ pub enum Event {
     BlueSealPlanet,
     /// `Tag:yep`'s last event: `self:remove()` (tag.lua:92-99).
     RemoveTag(TagId),
-    /// `add_tag(Tag(key))`.
-    AddTag(TagId),
+    /// `add_tag(Tag(key))`, with `G.orbital_hand` set to the hand (a Double Tag's copy).
+    AddTag(TagId, Option<HandType>),
     /// An event that ends in the card's removal by a nested event: a joker's extinction
     /// (Gros Michel, card.lua:3021-3034) or `start_dissolve` called from an event.
     Dissolve(u32),
+    /// `ease_chips(mod)`'s outer event: it queues the ease to `mod` (common_events.lua:41-66).
+    EaseChips(f64),
+    /// `cash_out`'s event: the next round's hands and discards, then the shop
+    /// (button_callbacks.lua:2921-2936).
+    CashOutBody,
+    /// `update_shop`'s event: it queues the shop's construction (game.lua:3081-3091). The flag
+    /// says whether the shop already existed (`shop_exists`).
+    ShopOpen(bool),
+    /// The shop's construction (game.lua:3088-3173).
+    ShopBuild(bool),
+    /// `create_card_for_shop`'s event: the `store_joker_modify` tags see the card
+    /// (UI_definitions.lua:777-783).
+    StoreJokerModify(u32),
+    /// `reroll_shop`'s event (button_callbacks.lua:2865-2890).
+    RerollBody,
+    /// `reroll_shop`'s timed event, which queues [`Event::RerollJokers`]
+    /// (button_callbacks.lua:2891-2904).
+    RerollAfter,
+    /// The jokers see the reroll (`reroll_shop` context).
+    RerollJokers,
+    /// `buy_from_shop`'s event (button_callbacks.lua:2414-2477).
+    BuyFromShop(u32),
+    /// `Card:sell_card`'s event: the sale price and the dissolve (card.lua:1612-1626).
+    SellPayout(u32),
+    /// `toggle_shop`'s second event: the shop closes (button_callbacks.lua:2496-2509).
+    LeaveShop,
+    /// `update_blind_select`'s event: it queues the screen's construction (game.lua:3260).
+    BlindSelectOpen,
+    /// The blind-select screen's construction (game.lua:3261-3294).
+    BlindSelectBuild,
+    /// `skip_blind`'s event: the jokers and tags see the skip (button_callbacks.lua:2762-2773).
+    SkipBlindBody,
     /// A card's own queued work: `f(game, card, value)`. Jokers and consumables use it for
     /// event closures no other card shares, so their code stays in one place.
     Call(fn(&mut Game, u32, f64), u32, f64),
@@ -262,7 +295,28 @@ impl Game {
                 }
             }
             Event::RemoveTag(tag) => self.remove_tag(tag),
-            Event::AddTag(tag) => self.add_tag(tag),
+            Event::AddTag(tag, orbital_hand) => {
+                let tag = self.new_tag(tag, orbital_hand);
+                self.add_tag(tag);
+            }
+            Event::EaseChips(v) => self.queue(Event::SetChips(v)),
+            Event::CashOutBody => self.cash_out_body(),
+            Event::ShopOpen(exists) => self.queue(Event::ShopBuild(exists)),
+            Event::ShopBuild(exists) => self.shop_build(exists),
+            Event::StoreJokerModify(id) => {
+                if let Some(card) = self.gs.areas.card(id).cloned() {
+                    self.apply_tags_store_joker_modify(&card);
+                }
+            }
+            Event::RerollBody => self.reroll_body(),
+            Event::RerollAfter => self.queue(Event::RerollJokers),
+            Event::RerollJokers => self.reroll_jokers(),
+            Event::BuyFromShop(id) => self.buy_from_shop(id),
+            Event::SellPayout(id) => self.sell_payout(id),
+            Event::LeaveShop => self.leave_shop(),
+            Event::BlindSelectOpen => self.queue(Event::BlindSelectBuild),
+            Event::BlindSelectBuild => self.blind_select_build(),
+            Event::SkipBlindBody => self.skip_blind_body(),
             Event::Dissolve(id) => self.queue(Event::RemoveCard(id)),
             Event::Call(f, card, value) => f(self, card, value),
             Event::PermaDebuff(ids) => {

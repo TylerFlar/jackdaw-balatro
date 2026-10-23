@@ -118,6 +118,9 @@ pub struct Runtime {
     /// `update_selecting_hand` calls `end_round()` every frame while hand, deck and play are
     /// empty (game.lua:3056-3058); the port calls it once per stay in `SELECTING_HAND`.
     pub end_round_called: bool,
+    /// `G.shop` exists: from the shop's first construction until `toggle_shop` closes it
+    /// (it stays while a pack bought there is open).
+    pub shop_open: bool,
     /// `G.GAME.round_resets.blind`: the blind chosen at blind selection, for this round.
     pub round_blind: Option<jackdaw_data::BlindId>,
     /// Set when the step reached game logic that isn't ported yet.
@@ -155,10 +158,17 @@ impl Game {
             .map(|c| c.sort_id)
             .collect();
         let in_round = gs.phase == Phase::SelectingHand;
+        let shop_open = gs.phase == Phase::Shop
+            || (gs.phase == Phase::PackOpening
+                && gs
+                    .pack
+                    .as_ref()
+                    .is_some_and(|p| p.return_phase == Phase::Shop));
         let rt = Runtime {
             state,
             state_complete: true,
             highlighted,
+            shop_open,
             facing_blind: in_round,
             round_blind: if in_round {
                 gs.blind.as_ref().and_then(|b| b.key)

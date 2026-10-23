@@ -6,10 +6,11 @@
 use serde_json::Value;
 
 use crate::area::AreaId;
+use crate::card::Card;
+use crate::event::Event;
 use crate::flow::HAND_HIGHLIGHT_LIMIT;
 use crate::game::{Game, LuaState, StepError};
-use crate::joker::is_ported;
-use crate::state::HandSort;
+use crate::state::{BlindSlot, HandSort};
 
 /// A player decision.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -158,6 +159,15 @@ impl Game {
         Ok(())
     }
 
+    /// Cards can be sold whenever the game waits for input with nothing being played: in a
+    /// round, the shop, the blind-select screen, round evaluation and packs.
+    fn require_sell_state(&self) -> Result<(), StepError> {
+        match self.rt.state {
+            LuaState::GameOver => illegal("the run is over"),
+            _ => Ok(()),
+        }
+    }
+
     fn require(&self, state: LuaState) -> Result<(), StepError> {
         if self.rt.state != state {
             return illegal(format!("{state:?} only (now {:?})", self.rt.state));
@@ -165,27 +175,26 @@ impl Game {
         Ok(())
     }
 
-    /// Refuse a step that would run game logic not ported yet.
+    /// Refuse a step in a run whose rules the port doesn't have yet. Jokers and tags that
+    /// aren't ported refuse the step themselves when the step consults them.
     fn check_ported(&self) -> Result<(), StepError> {
-        for c in &self.gs.areas.jokers {
-            if !is_ported(c.center.key()) {
-                return unported(format!("joker {}", c.center.key()));
-            }
-        }
         if self.gs.modifier("minus_hand_size_per_X_dollar").is_some() {
             return unported("the minus_hand_size_per_X_dollar challenge rule");
         }
-        for t in &self.gs.tags {
-            let ty = t
-                .get()
-                .config("type")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            if !matches!(ty, "round_start_bonus" | "eval" | "immediate") {
-                return unported(format!("tag {} ({ty})", t.key()));
-            }
-        }
         Ok(())
+    }
+
+    /// A card in a shop area: its sort id and price.
+    fn shop_card(&self, area: AreaId, i: usize) -> Result<&Card, StepError> {
+        match self.gs.areas.get(area).get(i) {
+            Some(c) => Ok(c),
+            None => illegal(format!("{area:?} index {i} out of range")),
+        }
+    }
+
+    /// `G.GAME.dollars - G.GAME.bankrupt_at`: what the player can spend.
+    fn spendable(&self) -> f64 {
+        self.gs.dollars - self.gs.bankrupt_at
     }
 
     /// The hand's sort ids for a play or discard selection (BalatroBot highlights them).
@@ -284,6 +293,67 @@ impl Game {
                     }
                     _ => return illegal("swap index out of range"),
                 }
+            }
+            Action::SkipBlind => {
+                self.require(LuaState::BlindSelect)?;
+                self.check_ported()?;
+                // Only the Small and Big blinds have a tag to skip for (UI_definitions.lua:1519-1523).
+                let slot = match self.gs.blind_on_deck {
+                    Some(s @ (BlindSlot::Small | BlindSlot::Big)) => s,
+                    _ => return illegal("only the Small and Big blinds can be skipped"),
+                };
+                self.skip_blind(slot);
+            }
+            Action::CashOut => {
+                self.require(LuaState::RoundEval)?;
+                self.check_ported()?;
+                self.cash_out();
+            }
+            Action::NextRound => {
+                self.require(LuaState::Shop)?;
+                self.check_ported()?;
+                self.toggle_shop();
+            }
+            Action::Reroll => {
+                self.require(LuaState::Shop)?;
+                self.check_ported()?;
+                // G.FUNCS.can_reroll (button_callbacks.lua:2076-2090).
+                let cost = self.gs.current_round.reroll_cost;
+                if self.spendable() - cost < 0.0 && cost != 0.0 {
+                    return illegal("can't afford the reroll");
+                }
+                self.reroll_shop();
+            }
+            Action::BuyCard(i) => {
+                self.require(LuaState::Shop)?;
+                self.check_ported()?;
+                let card = self.shop_card(AreaId::ShopJokers, *i)?;
+                // G.FUNCS.can_buy and check_for_buy_space (button_callbacks.lua:55-60, 2392).
+                if card.cost > self.spendable() && card.cost > 0.0 {
+                    return illegal("can't afford the card");
+                }
+                if !self.check_for_buy_space(card) {
+                    return illegal("no room for the card");
+                }
+                let id = card.sort_id;
+                self.queue(Event::BuyFromShop(id));
+            }
+            Action::SellCard { area, index } => {
+                self.require_sell_state()?;
+                self.check_ported()?;
+                let card = match self.gs.areas.get(*area).get(*index) {
+                    Some(c) => c,
+                    None => return illegal(format!("{area:?} index {index} out of range")),
+                };
+                // Card:can_sell_card (card.lua:1653-1665).
+                if !self.gs.areas.play.is_empty() {
+                    return illegal("cards are being played");
+                }
+                if card.ability.eternal {
+                    return illegal("an eternal card can't be sold");
+                }
+                let id = card.sort_id;
+                self.sell_card(id);
             }
             other => return unported(format!("action {other:?}")),
         }

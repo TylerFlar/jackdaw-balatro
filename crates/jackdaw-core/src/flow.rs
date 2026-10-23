@@ -477,8 +477,10 @@ impl Game {
                 true
             }
             LuaState::GameOver => false,
+            LuaState::Shop => self.update_shop(),
+            LuaState::BlindSelect => self.update_blind_select(),
             _ => {
-                // The shop, blind selection and pack states arrive with the rest of the run.
+                // The pack states arrive with the rest of the run.
                 if self.rt.state_complete {
                     return false;
                 }

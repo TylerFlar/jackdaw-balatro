@@ -20,7 +20,8 @@ use crate::hand_eval::HandType;
 use crate::rng::Rng;
 use crate::state::{
     Areas, BlindSlot, BlindState, ConsumeableUsage, CurrentRound, GameState, HandSort, HandState,
-    LastScore, LuaValue, PackState, Phase, RoundBonus, RoundResets, Sets, SimState, StartingParams,
+    HeldTag, LastScore, LuaValue, PackState, Phase, RoundBonus, RoundResets, Sets, SimState,
+    StartingParams,
 };
 
 pub const SCHEMA: &str = "jackdaw.snapshot/1";
@@ -834,7 +835,7 @@ pub fn export(gs: &GameState) -> Value {
         "round_bonus": {"next_hands": num(gs.round_bonus.next_hands), "discards": num(gs.round_bonus.discards)},
         "blind": blind,
         "hands": hands,
-        "tags": gs.tags.iter().map(|t| json!({"key": t.key()})).collect::<Vec<_>>(),
+        "tags": gs.tags.iter().map(|t| json!({"key": t.id.key()})).collect::<Vec<_>>(),
         "sets": {
             "used_jokers": gs.sets.used_jokers.iter().filter(|k| pool_read(k)).collect::<Vec<_>>(),
             "used_vouchers": gs.sets.used_vouchers.iter().collect::<Vec<_>>(),
@@ -1080,7 +1081,7 @@ pub fn import(v: &Value) -> Result<GameState> {
             let mut to = Obj::new(t, "$.tags[]")?;
             let k = tag(to.str("key")?, "$.tags[]")?;
             to.done()?;
-            Ok(k)
+            Ok(HeldTag::new(k))
         })
         .collect::<Result<Vec<_>>>()?;
 

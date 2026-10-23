@@ -264,4 +264,10 @@ def _gen_standard(rng: PseudoRandom, ante: int, gs: dict) -> Card:
         else:
             card.set_seal("Purple")
 
+    # Card:init, set_edition and set_seal each run set_cost (card.lua:72, 461,
+    # 498): the final price carries the edition and the run's inflation.
+    card.set_cost(
+        inflation=gs.get("inflation", 0),
+        discount_percent=gs.get("discount_percent", 0),
+    )
     return card

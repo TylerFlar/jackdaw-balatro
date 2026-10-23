@@ -67,10 +67,12 @@ impl Game {
         if card.added_to_deck {
             return;
         }
-        card.added_to_deck = true;
         if matches!(card.set(), CenterSet::Enhanced | CenterSet::Default) {
+            // Lua sets `added_to_deck` on a playing card too, then returns (card.lua:568-574).
+            // Nothing reads the flag there, and the snapshot keeps it false for playing cards.
             return;
         }
+        card.added_to_deck = true;
         let card = card.clone();
         let a = &card.ability;
         if a.h_size != 0.0 {

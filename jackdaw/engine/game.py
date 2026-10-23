@@ -1180,6 +1180,12 @@ def _handle_cash_out(gs: dict[str, Any]) -> dict[str, Any]:
     # cash_out's event zeroes the shop's purchase count
     # (button_callbacks.lua:2928), and ease_chips(0) the round's score (:2948).
     gs["current_round"]["jokers_purchased"] = 0
+    # The same event refills the hands and discards for the next round
+    # (button_callbacks.lua:2929-2930); new_round sets them again.
+    rr = gs["round_resets"]
+    bonus = gs.get("round_bonus", {})
+    gs["current_round"]["discards_left"] = max(0, rr["discards"] + bonus.get("discards", 0))
+    gs["current_round"]["hands_left"] = max(1, rr["hands"] + bonus.get("next_hands", 0))
     gs["chips"] = 0
     _reset_blinds_after_boss(gs)
 
@@ -1244,15 +1250,18 @@ def _handle_buy_card(gs: dict[str, Any], idx: int) -> dict[str, Any]:
 
     gs["dollars"] -= card.cost
     shop_cards.pop(idx)
-    gs["current_round"]["jokers_purchased"] = (
-        gs.get("current_round", {}).get("jokers_purchased", 0) + 1
-    )
+    # Only a joker counts (button_callbacks.lua:2445-2448).
+    if card_set == "Joker":
+        gs["current_round"]["jokers_purchased"] = (
+            gs.get("current_round", {}).get("jokers_purchased", 0) + 1
+        )
 
     # Place card in appropriate area
     added_playing_card = False
     if card_set == "Joker":
+        # The key was marked when the card was made (card.lua:349-354); buying
+        # doesn't mark it again, so a mark cleared since stays cleared.
         gs.setdefault("jokers", []).append(card)
-        gs.setdefault("used_jokers", {})[card.center_key] = True
         card.add_to_deck(gs)
     elif card_set in ("Tarot", "Planet", "Spectral"):
         gs.setdefault("consumables", []).append(card)
@@ -1854,7 +1863,7 @@ def _handle_next_round(gs: dict[str, Any]) -> dict[str, Any]:
     _apply_shop_mutations(gs, mutations)
 
     # Clear shop areas (unsold cards dissolve -> keys released)
-    for c in gs.get("shop_cards", []) + gs.get("shop_boosters", []):
+    for c in gs.get("shop_cards", []) + gs.get("shop_vouchers", []) + gs.get("shop_boosters", []):
         _release_used_key(gs, c)
     gs["shop_cards"] = []
     gs["shop_vouchers"] = []
@@ -2895,6 +2904,8 @@ def _apply_setting_blind_mutations(
                         create.get("enhancement", "c_base"),
                         seal=seal,
                         hands_played=gs.get("hands_played", 0),
+                        inflation=gs.get("inflation", 0),
+                        discount_percent=gs.get("discount_percent", 0),
                     )
                     if ckey == "cert":
                         # create_playing_card(..., G.hand) — Certificate
@@ -3295,6 +3306,8 @@ def _resolve_create_descriptors(gs: dict[str, Any], descriptors: list[dict[str, 
                     card.add_to_deck(gs)
                     placed.append(card)
             elif card_set in ("Default", "Enhanced", ""):
+                # Card:init priced it with the run's inflation (card.lua:72).
+                _reprice(gs, card)
                 # Playing card — add to hand if mid-round, otherwise deck.
                 # Matches Balatro which routes spectral-created cards to
                 # the hand area during SELECTING_HAND.  G.hand:emplace
@@ -3445,7 +3458,8 @@ def _fire_shop_tags(gs: dict[str, Any], rerolled: bool) -> None:
                 banned_keys=gs.get("banned_keys"),
             )
             if v_key:
-                voucher = create_voucher(v_key)
+                voucher = create_voucher(v_key, hands_played=gs.get("hands_played", 0))
+                gs.setdefault("used_jokers", {})[v_key] = True
                 voucher.set_cost(
                     inflation=gs.get("inflation", 0),
                     discount_percent=gs.get("discount_percent", 0),
@@ -3530,6 +3544,10 @@ def _all_cards_set_cost_pass(gs: dict[str, Any]) -> None:
     from jackdaw.engine.shop import reprice_shop
 
     reprice_shop(gs)
+    # G.I.CARD holds the playing cards too.
+    for area in ("deck", "hand", "discard_pile", "played_cards_area"):
+        for card in gs.get(area, []):
+            _reprice(gs, card)
 
 
 def _inflate(gs: dict[str, Any]) -> None:

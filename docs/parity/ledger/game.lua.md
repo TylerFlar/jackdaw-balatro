@@ -393,7 +393,7 @@ Source: `balatro_source/game.lua` (Balatro 1.0.1o). 436 rows: 20 function, 11 rn
 | game/event/Game:start_run/immediate:unlock_notify | game.lua:2439-2445 | event | `Event{trigger='immediate'}` → unlock_notify |  | unreviewed |  |  |  |  |
 | game/fn/Game:update | game.lua:2449-2730 | function | `Game:update(dt)` |  | unreviewed |  |  |  |  |
 | game/fn/Game:update_selecting_hand | game.lua:3010-3070 | function | `Game:update_selecting_hand(dt)` |  | gap |  |  | G36 |  |
-| game/fn/Game:update_shop | game.lua:3072-3181 | function | `Game:update_shop(dt)` |  | unreviewed |  |  |  |  |
+| game/fn/Game:update_shop | game.lua:3072-3181 | function | `Game:update_shop(dt)` |  | verified | crates/jackdaw-core/src/shop.rs::update_shop | tests/parity/test_rust_step.py | G121 |  |
 | game/event/Game:update_shop/immediate:add_event | game.lua:3081-3177 | event | `Event{}` → :add_event | `not G.STATE_COMPLETE` | unreviewed |  |  |  |  |
 | game/event/Game:update_shop/after:play_sound | game.lua:3085-3174 | event | `Event{trigger='after', blockable=false}` → play_sound, :apply_to_run, :load, create_shop_card_ui +8 | `not G.STATE_COMPLETE` & [event] | unreviewed |  |  |  |  |
 | game/ctx/Game:update_shop/apply_to_run:type-shop_start | game.lua:3094 | context_call | `apply_to_run{type='shop_start'}` | `not G.STATE_COMPLETE` & [event] & [event] & `math.abs(G.shop.T.y - G.shop.VT.y) < 3` | unreviewed |  |  |  |  |
