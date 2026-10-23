@@ -52,6 +52,13 @@ def test_catalog_entries_are_documented_and_well_formed() -> None:
             assert d.reconcile is None and d.veto is None, d.id
 
 
+def test_docs_live_lists_every_entry_with_its_mode() -> None:
+    doc = (ROOT / "docs/live.md").read_text(encoding="utf-8")
+    for d in CATALOG:
+        row = rf"^\| \[?{re.escape(d.id)}\]?(\([^)]*\))? \| {d.mode.value} \|"
+        assert re.search(row, doc, re.MULTILINE), f"{d.id} ({d.mode}) is not in docs/live.md"
+
+
 def test_every_smods_entry_is_in_the_catalog() -> None:
     text = (ROOT / "docs/parity/smods-diffs.md").read_text(encoding="utf-8")
     documented = set(re.findall(r"^\| \[([SB]\d\d)\]", text, re.MULTILINE))
