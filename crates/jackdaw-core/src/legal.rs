@@ -208,8 +208,9 @@ impl Game {
         }
     }
 
-    /// How many hand cards the consumable is used against (`min_highlighted`), if any.
-    fn selection_size(&self, id: u32) -> Option<usize> {
+    /// How many hand cards the consumable (by sort id) is used against (`min_highlighted`), if
+    /// any.
+    pub fn selection_size(&self, id: u32) -> Option<usize> {
         let center = self.card(id).center();
         if center.name == "Aura" {
             return Some(1);
@@ -218,22 +219,30 @@ impl Game {
         Some(center.config_num("min_highlighted").unwrap_or(1.0) as usize)
     }
 
-    /// Whether the consumable can be used on `selection` (hand indices), judged with that
-    /// selection highlighted (after Cerulean Bell's card, as a use highlights them). With
-    /// `check_use`, `Card:check_use` must pass too: Buy and Use asks only
+    /// Whether the consumable (by sort id) can be used on `selection` (hand indices), judged
+    /// with that selection highlighted (after Cerulean Bell's card, as a use highlights them).
+    /// With `check_use`, `Card:check_use` must pass too: Buy and Use asks only
     /// `can_use_consumeable` (button_callbacks.lua:77-89, G138).
-    fn usable_with(&self, id: u32, selection: &[usize], check_use: bool) -> bool {
-        let mut g = self.clone();
-        let Ok(highlighted) = g.consumable_highlight(selection) else {
+    pub fn usable_with(&self, id: u32, selection: &[usize], check_use: bool) -> bool {
+        let Ok(highlighted) = self.consumable_highlight(selection) else {
             return false;
         };
-        g.rt.highlighted = highlighted;
-        g.can_use_consumeable(id) && !(check_use && g.check_use(id))
+        self.can_use_consumeable_with(id, &highlighted) && !(check_use && self.check_use(id))
     }
 
-    /// `Some(targets)` when the consumable can be used now: `Some(None)` for one that takes no
-    /// selection, `Some(Some(selection))` with its default selection.
-    fn consumable_use(&self, id: u32, check_use: bool) -> Option<Option<Vec<usize>>> {
+    /// Whether the boss can be rerolled here (Director's Cut / Retcon, $10).
+    pub fn boss_reroll_allowed(&self) -> bool {
+        self.can_reroll_boss()
+    }
+
+    /// Whether the open pack can be skipped now (`G.FUNCS.can_skip_booster`, G202).
+    pub fn pack_skip_allowed(&self) -> bool {
+        self.can_skip_booster()
+    }
+
+    /// `Some(targets)` when the consumable (by sort id) can be used now: `Some(None)` for one
+    /// that takes no selection, `Some(Some(selection))` with its default selection.
+    pub fn consumable_use(&self, id: u32, check_use: bool) -> Option<Option<Vec<usize>>> {
         let Some(size) = self.selection_size(id) else {
             return self.usable_with(id, &[], check_use).then_some(None);
         };

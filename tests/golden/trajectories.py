@@ -19,7 +19,7 @@ Kinds:
   mid-round creation with enhancement-gated pools).  Each step also
   fingerprints ``encode_observation``, ``get_action_mask``, the legal
   action list and the Gym wrapper's flat action table for that state.
-* ``factored``: :class:`BalatroEnvironment` end to end over DirectAdapter
+* ``factored``: :class:`BalatroEnvironment` end to end over OracleAdapter
   and BridgeAdapter(SimBackend), fingerprinting the complete reset/step
   return values, the reward ``Transition`` and the built-in rewards.
 * ``gym``: :class:`BalatroGymnasiumEnv` end to end (uniform and smart
@@ -60,11 +60,12 @@ from jackdaw.env.action_space import (
     get_action_mask,
 )
 from jackdaw.env.balatro_env import BalatroEnvironment, _action_mask_to_game
-from jackdaw.env.game_interface import BridgeAdapter, DirectAdapter
+from jackdaw.env.game_interface import BridgeAdapter, OracleAdapter
 from jackdaw.env.game_spec import GameActionMask
 from jackdaw.env.gymnasium_wrapper import BalatroGymnasiumEnv
 from jackdaw.env.observation import encode_observation
 from jackdaw.env.rewards import ShapedReward, Transition, blind_progress_reward
+from jackdaw.env.sampler import Xoshiro256
 from tests.golden.fingerprint import fingerprint
 
 CHECKPOINT_EVERY = 25
@@ -504,8 +505,8 @@ def run_engine(spec: EngineSpec, tape: list[Any] | None = None) -> Result:
         taken = 0
 
         # A wrapper instance only for its action-table builder.
-        gym = BalatroGymnasiumEnv(adapter_factory=DirectAdapter)
-        gym._rng = np.random.default_rng(zlib.crc32(spec.seed.encode()))
+        gym = BalatroGymnasiumEnv(adapter_factory=OracleAdapter)
+        gym._rng = Xoshiro256(zlib.crc32(spec.seed.encode()))
 
         for _ in range(spec.max_steps):
             if not checked and taken >= n_scripted:
@@ -515,7 +516,7 @@ def run_engine(spec: EngineSpec, tape: list[Any] | None = None) -> Result:
             mask = get_action_mask(gs)
             table = gym._enumerate_actions(_action_mask_to_game(mask), {"raw_state": gs})
             legal = get_legal_actions(gs)
-            res.push(fingerprint(gs, obs, mask, table, legal, gym._rng.bit_generator.state))
+            res.push(fingerprint(gs, obs, mask, table, legal, gym._rng.state))
             if gs.get("phase") == GamePhase.GAME_OVER or gs.get("won") or not legal:
                 break
 
@@ -549,7 +550,7 @@ def run_engine(spec: EngineSpec, tape: list[Any] | None = None) -> Result:
 
 def _adapter_factory(kind: str) -> Callable[[], Any]:
     if kind == "direct":
-        return DirectAdapter
+        return OracleAdapter
     return lambda: BridgeAdapter(SimBackend())
 
 
@@ -631,7 +632,7 @@ def run_gym(spec: GymSpec, tape: list[Any] | None = None) -> Result:
     choose = _Chooser(tape, res)
     with _fresh_sort_ids():
         env = BalatroGymnasiumEnv(
-            adapter_factory=DirectAdapter,
+            adapter_factory=OracleAdapter,
             back_keys=[spec.back],
             stakes=[spec.stake],
             seed_prefix=f"GOLD_G_{spec.name}",
@@ -663,7 +664,7 @@ def run_gym(spec: GymSpec, tape: list[Any] | None = None) -> Result:
                 res.push(
                     fingerprint(
                         obs, info, env._action_table, inner_infos.pop(),
-                        env._rng.bit_generator.state,
+                        env._rng.state,
                     )
                 )  # fmt: skip
                 for _ in range(spec.max_steps):
@@ -683,7 +684,7 @@ def run_gym(spec: GymSpec, tape: list[Any] | None = None) -> Result:
                         fingerprint(
                             action, obs, reward, terminated, truncated, info,
                             env._action_table, inner, shaped(t), blind_progress_reward(t),
-                            env._rng.bit_generator.state,
+                            env._rng.state,
                         )
                     )  # fmt: skip
                     if terminated or truncated:
@@ -900,12 +901,12 @@ def _enumerate_probe(res: Result) -> None:
     ]
     pack = [create_consumable("c_lovers"), create_joker("j_joker"), create_consumable("c_sigil")]
     raw = {"consumables": consumables, "pack_cards": pack}
-    gym = BalatroGymnasiumEnv(adapter_factory=DirectAdapter)
+    gym = BalatroGymnasiumEnv(adapter_factory=OracleAdapter)
     gen = random.Random(5)
     for n in range(0, 16):
         for lo, hi in ((1, 5), (1, 1), (2, 3), (0, 0), (5, 5), (3, 2)):
             for variant in range(4):
-                gym._rng = np.random.default_rng(n * 1000 + lo * 10 + hi + variant)
+                gym._rng = Xoshiro256(n * 1000 + lo * 10 + hi + variant)
                 type_mask = np.zeros(n_types, dtype=bool)
                 for t in gen.sample(range(n_types), gen.randint(1, n_types)):
                     type_mask[t] = True
@@ -921,7 +922,7 @@ def _enumerate_probe(res: Result) -> None:
                 }
                 mask = GameActionMask(type_mask, card_mask, entity_masks, lo, hi)
                 table = gym._enumerate_actions(mask, {"raw_state": raw})
-                res.push(fingerprint(n, lo, hi, table, gym._rng.bit_generator.state))
+                res.push(fingerprint(n, lo, hi, table, gym._rng.state))
 
 
 _PROBE_FUNCS: dict[str, Callable[[Result], None]] = {

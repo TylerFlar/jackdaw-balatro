@@ -80,8 +80,8 @@ class RerollBoss:
     """Reroll this ante's boss blind for $10 (Director's Cut / Retcon).
 
     The blind-select screen's reroll button (button_callbacks.lua:2784-2853):
-    Director's Cut allows one reroll per ante, Retcon any number.  Sim-only
-    for now: the env action space does not offer it yet.
+    Director's Cut allows one reroll per ante, Retcon any number.  Sim-only:
+    BalatroBot has no endpoint for it (factored action type 21).
     """
 
 
@@ -133,8 +133,8 @@ class BuyAndUse:
     The shop's "Buy and Use" button (button_callbacks.lua:77-89,
     2404-2477): needs no consumable slot.  ``target_indices`` is the hand
     selection, as for :class:`UseConsumable` (in the shop the hand is
-    empty, so cards that need one are never usable).  Sim-only for now:
-    the env action space does not offer it yet.
+    empty, so cards that need one are never usable).  Sim-only: BalatroBot
+    has no endpoint for it (factored action type 22).
     """
 
     shop_index: int
@@ -311,9 +311,9 @@ Action = (
     | SwapJokersRight
 )
 
-# Vanilla actions the env's factored action space and BalatroBot's endpoints
-# cannot express yet.  get_legal_actions offers them; the env adapters and
-# the bridge leave them out.
+# Vanilla actions BalatroBot's endpoints cannot express.  get_legal_actions
+# and the env's factored action space (types 21 and 22) offer them; the
+# bridge leaves them out.
 SIM_ONLY_ACTIONS: tuple[type, ...] = (RerollBoss, BuyAndUse)
 
 
