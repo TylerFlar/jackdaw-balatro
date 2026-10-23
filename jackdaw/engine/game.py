@@ -62,6 +62,10 @@ def step(game_state: dict[str, Any], action: Action) -> dict[str, Any]:
     if the action is not valid in the current phase.
     """
     result = _dispatch(game_state, action)
+    # Game:update checks SELECTING_HAND every frame: an emptied hand is
+    # redrawn, and a round out of cards ends (game.lua:2544-2550, 3056-3069).
+    if result.get("phase") == GamePhase.SELECTING_HAND:
+        _update_selecting_hand(result)
     # Vanilla recomputes shop prices continuously while shopping
     # (Card:update → set_cost each frame), so cost-relevant changes —
     # buying/selling Astronomer, coupon tags — reflect immediately.
@@ -270,60 +274,12 @@ def _handle_select_blind(gs: dict[str, Any]) -> dict[str, Any]:
             entry["rsb_fired"] = True
 
     # ------------------------------------------------------------------
-    # 7. Draw hand from deck (debuffs were set by set_blind's pass; a
-    #    draw never re-checks them)
+    # 7-9. Draw to hand: the deal (debuffs were set by set_blind's pass; a
+    #      draw never re-checks them), the first_hand_drawn context
+    #      (Certificate), then SELECTING_HAND and the boss's drawn_to_hand
+    #      (Cerulean Bell, Crimson Heart) — game.lua:3208-3245.
     # ------------------------------------------------------------------
-    _draw_hand(gs)
-
-    # ------------------------------------------------------------------
-    # 7b. Boss drawn_to_hand effects (Cerulean Bell, Crimson Heart)
-    # ------------------------------------------------------------------
-    if blind.boss and not blind.disabled:
-        dth = blind.drawn_to_hand(
-            hand_cards=gs.get("hand", []),
-            joker_cards=gs.get("jokers"),
-            rng=rng,
-        )
-        if dth.get("forced_card_index") is not None:
-            hand = gs.get("hand", [])
-            idx = dth["forced_card_index"]
-            if 0 <= idx < len(hand):
-                hand[idx].ability["forced_selection"] = True
-
-    # ------------------------------------------------------------------
-    # 8. Phase → SELECTING_HAND
-    # ------------------------------------------------------------------
-    gs["phase"] = GamePhase.SELECTING_HAND
-
-    # ------------------------------------------------------------------
-    # 9. first_hand_drawn joker context (game.lua:3226-3231): fires once
-    #    per round after the initial deal.  Certificate creates a sealed
-    #    playing card INTO THE HAND ('cert_fr' front + 'certsl' seal,
-    #    card.lua:2462-2476; live-verified: LSI5EB7T dealt 8 + red-seal
-    #    H_K appeared as the 9th hand card).  Handlers were registered
-    #    but nothing ever fired this context before.
-    # ------------------------------------------------------------------
-    from jackdaw.engine.jokers import GameSnapshot as _GS2
-
-    fhd_snap = _GS2(joker_count=len(jokers), money=gs.get("dollars", 0))
-    fhd_muts: list[dict[str, Any]] = []
-    for joker in jokers:
-        if getattr(joker, "debuff", False):
-            continue
-        from jackdaw.engine.jokers import JokerContext as _JC2
-        from jackdaw.engine.jokers import calculate_joker as _cj2
-
-        res = _cj2(joker, _JC2(first_hand_drawn=True, jokers=jokers, game=fhd_snap))
-        if res and res.extra:
-            fhd_muts.append(dict(res.extra))
-    if fhd_muts:
-        _hand_before = list(gs.get("hand", []))
-        _apply_setting_blind_mutations(gs, fhd_muts, jokers)
-        # Blind-debuff any card the mutations added to the hand
-        # (vanilla debuff_cards the created cert card, card.lua:2473).
-        for c in gs.get("hand", []):
-            if all(c is not b for b in _hand_before):
-                blind_debuff_card(gs, c)
+    _draw_to_hand(gs)
     return gs
 
 
@@ -803,43 +759,15 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
             _round_won(gs)
     else:
         # ------------------------------------------------------------------
-        # 11. More hands — draw cards and stay in SELECTING_HAND
+        # 11. More hands — draw to hand and stay in SELECTING_HAND
+        #     (update_hand_played -> DRAW_TO_HAND, game.lua:3196-3200).
+        #     The Serpent caps the draw at 3; The Fish flips only the newly
+        #     drawn cards, per card through Blind.stay_flipped
+        #     (blind.lua:617) — the old whole-hand flip here hid cards the
+        #     live game left face up (found by lockstep).  No debuff
+        #     re-check: a draw never runs debuff_card.
         # ------------------------------------------------------------------
-        # The Serpent: draw only 3 cards instead of filling to hand_size
-        serpent_play = getattr(blind, "name", "") == "The Serpent" and not getattr(
-            blind, "disabled", False
-        )
-        if serpent_play:
-            deck: list = gs.get("deck", [])
-            hand_out: list = gs.get("hand", [])
-            for _ in range(min(3, len(deck))):
-                if deck:
-                    hand_out.append(deck.pop())
-            _sort_hand(gs, hand_out)
-        else:
-            _draw_hand(gs)
-
-        # No debuff re-check here: a draw never runs debuff_card; the
-        # drawn cards carry the state set_blind's pass (and any re-check
-        # since) left them in.
-
-        # The Fish flips ONLY the newly drawn replacements, handled
-        # per-drawn-card by Blind.stay_flipped inside _draw_hand
-        # (blind.lua:611) — the old whole-hand flip here hid cards the
-        # live game left face up (found by lockstep).
-
-        # Boss drawn_to_hand effects on redraw (Cerulean Bell, Crimson Heart)
-        if blind.boss and not blind.disabled:
-            dth = blind.drawn_to_hand(
-                hand_cards=gs.get("hand", []),
-                joker_cards=jokers,
-                rng=rng,
-            )
-            if dth.get("forced_card_index") is not None:
-                hand = gs.get("hand", [])
-                idx = dth["forced_card_index"]
-                if 0 <= idx < len(hand):
-                    hand[idx].ability["forced_selection"] = True
+        _draw_to_hand(gs)
 
     return gs
 
@@ -1067,44 +995,12 @@ def _handle_discard(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str, A
     )
 
     # ------------------------------------------------------------------
-    # 9-10. Draw replacements from deck
+    # 9-11. Draw to hand (DRAW_TO_HAND, state_events.lua:438): the
+    #       replacements (The Serpent caps them at 3), then the boss's
+    #       drawn_to_hand.  No debuff re-check: a draw never runs
+    #       debuff_card.
     # ------------------------------------------------------------------
-    blind = gs.get("blind")
-    serpent = (
-        blind is not None
-        and getattr(blind, "name", "") == "The Serpent"
-        and not getattr(blind, "disabled", False)
-        and (cr.get("hands_played", 0) > 0 or cr.get("discards_used", 0) > 0)
-    )
-    if serpent:
-        # The Serpent: draw only 3 after first action
-        # Lua's draw_card(G.deck, G.hand) pops LAST card from deck
-        deck: list = gs.get("deck", [])
-        hand_out: list = gs.get("hand", [])
-        for _ in range(min(3, len(deck))):
-            if deck:
-                hand_out.append(deck.pop())
-        _sort_hand(gs, hand_out)
-    else:
-        _draw_hand(gs)
-
-    # ------------------------------------------------------------------
-    # 11. Boss drawn_to_hand effects (no debuff re-check: a draw never
-    #     runs debuff_card)
-    # ------------------------------------------------------------------
-    if blind and getattr(blind, "boss", False) and not getattr(blind, "disabled", False):
-        # Boss drawn_to_hand effects on discard redraw
-        rng = gs.get("rng")
-        dth = blind.drawn_to_hand(
-            hand_cards=gs.get("hand", []),
-            joker_cards=jokers,
-            rng=rng,
-        )
-        if dth.get("forced_card_index") is not None:
-            hand = gs.get("hand", [])
-            idx = dth["forced_card_index"]
-            if 0 <= idx < len(hand):
-                hand[idx].ability["forced_selection"] = True
+    _draw_to_hand(gs)
 
     return gs
 
@@ -1925,6 +1821,154 @@ def _draw_hand(gs: dict[str, Any]) -> None:
     _draw_cards(gs, min(len(gs.get("deck", [])), gs.get("hand_size", 8) - len(hand)))
 
 
+def _draw_from_deck_to_hand(gs: dict[str, Any], count: int | None = None) -> bool:
+    """``G.FUNCS.draw_from_deck_to_hand(e)`` (state_events.lua:355-377).
+
+    With a hand limit of 0 or less and an empty hand the game is over
+    (outside a pack; the engine's packs deal their own hand) — returns True.
+    Otherwise it draws *count* cards, by default ``min(#deck, limit - #hand)``;
+    under an active Serpent, once the round's first play or discard is done,
+    at most 3.
+    """
+    hand: list = gs.setdefault("hand", [])
+    hand_size = gs.get("hand_size", 8)
+    if hand_size <= 0 and not hand:
+        gs["phase"] = GamePhase.GAME_OVER
+        return True
+    deck: list = gs.get("deck", [])
+    hand_space = count if count is not None else min(len(deck), hand_size - len(hand))
+    blind = gs.get("blind")
+    cr = gs.get("current_round", {})
+    if (
+        blind is not None
+        and blind.name == "The Serpent"
+        and not blind.disabled
+        and (cr.get("hands_played", 0) > 0 or cr.get("discards_used", 0) > 0)
+    ):
+        hand_space = min(len(deck), 3)
+    _draw_cards(gs, hand_space)
+    return False
+
+
+def _fire_first_hand_drawn(gs: dict[str, Any]) -> None:
+    """The first_hand_drawn joker context (game.lua:3226-3231): Certificate
+    deals a sealed card into the hand ('cert_fr' front, 'certsl' seal,
+    card.lua:2462-2479; live-verified: LSI5EB7T dealt 8 + a red-seal H_K as
+    the 9th card) and runs ``G.GAME.blind:debuff_card`` on it."""
+    from jackdaw.engine.jokers import GameSnapshot, JokerContext, calculate_joker
+
+    jokers: list = gs.get("jokers", [])
+    snap = GameSnapshot(joker_count=len(jokers), money=gs.get("dollars", 0))
+    mutations: list[dict[str, Any]] = []
+    for joker in jokers:
+        if joker.debuff:
+            continue
+        res = calculate_joker(joker, JokerContext(first_hand_drawn=True, jokers=jokers, game=snap))
+        if res and res.extra:
+            mutations.append(dict(res.extra))
+    if mutations:
+        before = list(gs.get("hand", []))
+        _apply_setting_blind_mutations(gs, mutations, jokers)
+        for c in gs.get("hand", []):
+            if all(c is not b for b in before):
+                blind_debuff_card(gs, c)
+
+
+def _blind_drawn_to_hand(gs: dict[str, Any]) -> None:
+    """``G.GAME.blind:drawn_to_hand()`` — for every blind, so the prepped
+    flag clears after each draw (blind.lua:572-603)."""
+    blind = gs.get("blind")
+    if blind is None:
+        return
+    hand: list = gs.get("hand", [])
+    dth = blind.drawn_to_hand(
+        hand_cards=hand,
+        joker_cards=gs.get("jokers", []),
+        rng=gs.get("rng"),
+        game_state=gs,
+    )
+    idx = dth.get("forced_card_index")
+    if idx is not None and 0 <= idx < len(hand):
+        hand[idx].ability["forced_selection"] = True
+
+
+def _draw_to_hand(gs: dict[str, Any]) -> None:
+    """Game:update_draw_to_hand (game.lua:3208-3245), after the
+    round_start_bonus tags: draw from the deck (which may end the game),
+    fire first_hand_drawn on the round's first draw, then — in a later
+    event — enter SELECTING_HAND and call Blind:drawn_to_hand.  Certificate's
+    card is therefore in the hand when Cerulean Bell picks its forced card.
+    """
+    if _draw_from_deck_to_hand(gs):
+        return
+    cr = gs.get("current_round", {})
+    if cr.get("hands_played", 0) == 0 and cr.get("discards_used", 0) == 0:
+        _fire_first_hand_drawn(gs)
+    gs["phase"] = GamePhase.SELECTING_HAND
+    _blind_drawn_to_hand(gs)
+
+
+def _update_selecting_hand(gs: dict[str, Any]) -> None:
+    """The SELECTING_HAND branch of Game:update.  An empty hand with cards
+    left in the deck goes back to DRAW_TO_HAND (game.lua:2544-2548); with the
+    deck (and the play area) empty too, update_selecting_hand calls
+    end_round (game.lua:3056-3069)."""
+    if gs.get("phase") != GamePhase.SELECTING_HAND or gs.get("hand"):
+        return
+    if gs.get("deck"):
+        _draw_to_hand(gs)
+    else:
+        # Vanilla calls end_round() from every frame of that state, queueing
+        # one end_round event per frame until the first one leaves it; how
+        # many run depends on the frame rate.  The engine runs it once.
+        _end_round(gs)
+
+
+def _mr_bones_saver(gs: dict[str, Any]) -> Any:
+    """The joker whose game_over end_of_round pass saves the run (Mr. Bones
+    at 25% of the target, card.lua:3047-3055), or None."""
+    import math
+
+    from jackdaw.engine.jokers import JokerContext, calculate_joker
+
+    blind_chips = gs["blind"].chips
+    if not 0 < blind_chips < math.inf:  # NaN / inf targets: no ratio
+        return None
+    ratio = gs.get("chips", 0) / blind_chips
+    jokers: list = gs.get("jokers", [])
+    for joker in jokers:
+        if joker.debuff:
+            continue
+        ctx = JokerContext(jokers=jokers, rng=gs.get("rng"), blind=gs["blind"])
+        ctx.game_over = True  # type: ignore[attr-defined]
+        ctx.chips_ratio = ratio  # type: ignore[attr-defined]
+        res = calculate_joker(joker, ctx)
+        if res and res.saved:
+            return joker
+    return None
+
+
+def _end_round(gs: dict[str, Any]) -> None:
+    """end_round() for a round left without a play (state_events.lua:87-120):
+    won if the score already meets the target, saved by Mr. Bones, else lost
+    — the end_of_round pass runs either way."""
+    if gs["blind"].beaten_by(gs.get("chips", 0)):
+        _round_won(gs)
+        return
+    saver = _mr_bones_saver(gs)
+    if saver is not None:
+        jokers: list = gs.get("jokers", [])
+        if saver in jokers:
+            jokers.remove(saver)
+            saver.remove_from_deck(gs)
+            _release_used_key(gs, saver)
+        _round_won(gs)
+        return
+    gs["phase"] = GamePhase.GAME_OVER
+    _joker_end_of_round_effects(gs)
+    gs["won"] = False
+
+
 def _boss_flags(gs: dict[str, Any]) -> tuple[bool, bool]:
     """(Pareidolia, Smeared Joker) for debuff checks: ``find_joker`` skips
     debuffed jokers (misc_functions.lua:903-917)."""
@@ -2540,7 +2584,9 @@ def _apply_setting_blind_mutations(
                         seal=seal,
                         hands_played=gs.get("hands_played", 0),
                     )
-                    if ckey == "cert" and gs.get("phase") == GamePhase.SELECTING_HAND:
+                    if ckey == "cert":
+                        # create_playing_card(..., G.hand) — Certificate
+                        # deals into the hand (first_hand_drawn is in-round)
                         gs.setdefault("hand", []).append(c)
                         # Certificate's event ends with G.hand:sort() (card.lua:2474)
                         _sort_hand(gs, gs.get("hand", []))

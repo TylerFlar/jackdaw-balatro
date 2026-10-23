@@ -372,10 +372,14 @@ class Blind:
         hand_cards: list[Any],
         joker_cards: list[Any] | None = None,
         rng: Any | None = None,
+        *,
+        game_state: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Boss effect when cards are drawn to hand.
 
-        Matches ``Blind:drawn_to_hand`` (blind.lua:572-603).
+        Matches ``Blind:drawn_to_hand`` (blind.lua:572-603), which vanilla
+        calls for every blind after each draw-to-hand.  *game_state* goes to
+        ``Card.set_debuff`` so Crimson Heart's victim loses its passives.
 
         Returns side-effect descriptor:
             ``forced_card_index``: index in hand_cards to force-select (Cerulean Bell)
@@ -401,20 +405,24 @@ class Blind:
                 )
                 result["forced_card_index"] = idx
 
-        if self.name == "Crimson Heart" and rng and joker_cards:
-            # Clear all joker debuffs, then debuff one random
-            eligible = []
-            for i, j in enumerate(joker_cards):
-                if not j.debuff or len(joker_cards) < 2:
-                    eligible.append(i)
-                j.set_debuff(False)
+        if self.name == "Crimson Heart" and self.prepped and rng and joker_cards:
+            # Re-pick only when prepped (blind.lua:588): set_blind and a
+            # play's press_play prep it, so a discard's redraw keeps the
+            # victim.  The candidates are the jokers not already debuffed
+            # (all of them with fewer than 2); every joker is un-debuffed,
+            # then one candidate is debuffed — picked from the list sorted
+            # by sort_id like any pseudorandom_element over cards
+            # (blind.lua:589-599, misc_functions.lua:253-264).
+            board = list(joker_cards)
+            eligible = [j for j in board if not j.debuff or len(board) < 2]
+            for j in board:
+                j.set_debuff(False, game_state)
             if eligible:
-                _, idx = rng.element(
-                    {i: i for i in eligible},
-                    rng.seed("crimson_heart"),
+                chosen, _ = rng.element(eligible, rng.seed("crimson_heart"))
+                chosen.set_debuff(True, game_state)
+                result["debuffed_joker_index"] = next(
+                    (i for i, j in enumerate(joker_cards) if j is chosen), None
                 )
-                joker_cards[idx].set_debuff(True)
-                result["debuffed_joker_index"] = idx
 
         self.prepped = False
         return result

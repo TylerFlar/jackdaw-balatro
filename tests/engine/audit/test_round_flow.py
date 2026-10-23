@@ -6,9 +6,110 @@ Each test cites the vanilla 1.0.1o Lua it pins (``balatro_source/``).
 
 from __future__ import annotations
 
-from jackdaw.engine.actions import Discard, SelectBlind, SellCard
-from jackdaw.engine.game import step
-from tests.engine.audit._boards import force_boss, give_joker, ids, new_run
+from jackdaw.engine.actions import (
+    Discard,
+    GamePhase,
+    PlayHand,
+    SelectBlind,
+    SellCard,
+    UseConsumable,
+    get_legal_actions,
+)
+from jackdaw.engine.game import forced_card_index, step
+from jackdaw.engine.rng import PseudoRandom
+from tests.engine.audit._boards import force_boss, give_consumable, give_joker, ids, new_run
+
+# ---------------------------------------------------------------------------
+# G14 — first_hand_drawn runs before the boss's drawn_to_hand
+# ---------------------------------------------------------------------------
+
+
+def test_g14_certificate_card_is_dealt_before_cerulean_bell_picks():
+    """update_draw_to_hand fires the first_hand_drawn context (Certificate's
+    card) and only then, in a later event, switches to SELECTING_HAND and
+    calls Blind:drawn_to_hand (game.lua:3226-3239): Cerulean Bell picks its
+    forced card from the hand with Certificate's card in it."""
+    seed = "AUDIT_G14"
+    gs = new_run(seed)
+    give_joker(gs, "j_certificate")
+    force_boss(gs, "bl_final_bell")
+
+    step(gs, SelectBlind())
+
+    hand = gs["hand"]
+    assert len(hand) == 9  # 8 dealt + Certificate's card
+    ref = PseudoRandom(seed)
+    expected, _ = ref.element(list(hand), ref.seed("cerulean_bell"))
+    assert hand[forced_card_index(hand)] is expected
+
+
+# ---------------------------------------------------------------------------
+# G36 — running out of cards ends the round; no hand size is game over
+# ---------------------------------------------------------------------------
+
+
+def test_g36_an_emptied_hand_is_redrawn():
+    """Game:update moves an empty SELECTING_HAND hand with cards left in the
+    deck to DRAW_TO_HAND (game.lua:2544-2548): Immolate burning a 5-card hand
+    is followed by a fresh draw."""
+    gs = new_run("AUDIT_G36D")
+    give_joker(gs, "j_stuntman")  # -2
+    give_joker(gs, "j_merry_andy")  # -1
+    step(gs, SelectBlind())
+    assert len(gs["hand"]) == 5
+    give_consumable(gs, "c_immolate")
+
+    step(gs, UseConsumable(card_index=0))
+
+    assert gs["phase"] == GamePhase.SELECTING_HAND
+    assert len(gs["hand"]) == 5
+
+
+def test_g36_round_ends_when_hand_and_deck_run_out():
+    """With hand, deck and play all empty, update_selecting_hand calls
+    end_round() (game.lua:3056-3069); short of the target that is a loss
+    (state_events.lua:96-116) even with hands left."""
+    gs = new_run("AUDIT_G36E")
+    step(gs, SelectBlind())
+    gs["deck"].clear()
+
+    step(gs, Discard(card_indices=(0, 1, 2, 3, 4)))
+    assert len(gs["hand"]) == 3 and gs["phase"] == GamePhase.SELECTING_HAND
+    step(gs, PlayHand(card_indices=(0, 1, 2)))
+
+    assert gs["current_round"]["hands_left"] > 0
+    assert gs["phase"] == GamePhase.GAME_OVER
+
+
+def test_g36_mr_bones_saves_a_round_that_ran_out_of_cards():
+    """end_round's end_of_round pass lets Mr. Bones save a round that ran out
+    of cards at 25% of the target (card.lua:3047-3055)."""
+    gs = new_run("AUDIT_G36B")
+    give_joker(gs, "j_mr_bones")
+    step(gs, SelectBlind())
+    gs["deck"].clear()
+    gs["chips"] = gs["blind"].chips // 2
+
+    step(gs, Discard(card_indices=(0, 1, 2, 3, 4)))
+    step(gs, Discard(card_indices=(0, 1, 2)))
+
+    assert gs["phase"] == GamePhase.ROUND_EVAL
+    assert not any(j.center_key == "j_mr_bones" for j in gs["jokers"])
+
+
+def test_g36_no_hand_size_is_game_over():
+    """draw_from_deck_to_hand: with a hand limit of 0 or less and an empty
+    hand the game is over (state_events.lua:355-360)."""
+    gs = new_run("AUDIT_G36Z")
+    for _ in range(4):
+        give_joker(gs, "j_stuntman")  # -2 each
+    assert gs["hand_size"] == 0
+
+    step(gs, SelectBlind())
+
+    assert gs["phase"] == GamePhase.GAME_OVER
+    assert get_legal_actions(gs) == []
+
 
 # ---------------------------------------------------------------------------
 # G37 — growing the hand size mid-round draws at once

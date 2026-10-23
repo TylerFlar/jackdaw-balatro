@@ -38,6 +38,73 @@ from tests.parity import canon
 from tests.parity.py_export import export_state
 
 # ---------------------------------------------------------------------------
+# G11 — Crimson Heart re-picks only after a play; its debuff toggles passives
+# ---------------------------------------------------------------------------
+
+
+def _crimson_seeds(gs) -> float | None:
+    return gs["rng"].state.get("crimson_heart")
+
+
+def test_g11_crimson_heart_repicks_after_a_play_not_a_discard():
+    """drawn_to_hand re-picks only when ``self.prepped`` (blind.lua:588);
+    set_blind sets it (blind.lua:94), Blind:press_play sets it on a play
+    (blind.lua:488-493) and every drawn_to_hand clears it (blind.lua:602).
+    A discard's redraw keeps the debuffed joker and draws no 'crimson_heart'
+    seed."""
+    gs = new_run("AUDIT_G11")
+    for key in ("j_joker", "j_greedy_joker", "j_lusty_joker"):
+        give_joker(gs, key)
+    start_boss(gs, "bl_final_heart")
+    victim = [j for j in gs["jokers"] if j.debuff]
+    assert len(victim) == 1
+    stream = _crimson_seeds(gs)
+
+    step(gs, Discard(card_indices=(0,)))
+
+    assert [j for j in gs["jokers"] if j.debuff] == victim
+    assert _crimson_seeds(gs) == stream
+
+    step(gs, PlayHand(card_indices=(0,)))
+
+    assert _crimson_seeds(gs) != stream
+    assert sum(j.debuff for j in gs["jokers"]) == 1
+
+
+def test_g11_crimson_heart_picks_in_sort_id_order():
+    """pseudorandom_element sorts a list of cards by sort_id before drawing
+    (misc_functions.lua:253-264), so the pick does not follow the board's
+    order."""
+    seed = "AUDIT_G11O"
+    gs = new_run(seed)
+    jokers = [give_joker(gs, key) for key in ("j_joker", "j_greedy_joker", "j_lusty_joker")]
+    gs["jokers"].reverse()  # board order no longer matches creation order
+    ref = PseudoRandom(seed)
+    expected, _ = ref.element(jokers, ref.seed("crimson_heart"))
+
+    start_boss(gs, "bl_final_heart")
+
+    assert [j for j in gs["jokers"] if j.debuff] == [expected]
+
+
+def test_g11_crimson_heart_debuff_takes_the_passive_away():
+    """The pick goes through Card:set_debuff, which removes the joker's
+    passives (card.lua:535): a debuffed Juggler gives its hand size back
+    until the defeat frees it again."""
+    gs = new_run("AUDIT_G11P")
+    juggler = give_joker(gs, "j_juggler")
+    start_boss(gs, "bl_final_heart")
+    assert juggler.debuff
+    assert gs["hand_size"] == 8
+    assert len(gs["hand"]) == 9  # dealt before drawn_to_hand debuffed it
+
+    win_round(gs)
+
+    assert not juggler.debuff
+    assert gs["hand_size"] == 9
+
+
+# ---------------------------------------------------------------------------
 # G12 — the blind is reset after defeat (and is empty before the first one)
 # ---------------------------------------------------------------------------
 
