@@ -415,10 +415,11 @@ def _open_tag_pack(gs: dict[str, Any], pack_key: str, force: bool = False) -> No
     The caller (or agent) must then pick from the pack or skip it.
     For the engine-only path (no interactive player), we store the pack
     state so that get_legal_actions returns PickPackCard/SkipPack options.
-    """
-    from jackdaw.engine.data.prototypes import BOOSTERS
-    from jackdaw.engine.packs import generate_pack_cards
 
+    A pack tag makes a free booster Card and opens it through
+    ``G.FUNCS.use_card`` (tag.lua:209-282), i.e. the same ``Card:open`` as
+    a shop pack: see :func:`_open_pack`.
+    """
     # A pack is already open (e.g. Double Tag duplicated a pack tag):
     # queue this one.  Vanilla stacks pack opens — the next pack opens
     # when the current one closes, and its contents roll AT THAT TIME
@@ -427,23 +428,53 @@ def _open_tag_pack(gs: dict[str, Any], pack_key: str, force: bool = False) -> No
         gs.setdefault("pending_tag_packs", []).append(pack_key)
         return
 
-    rng = gs.get("rng")
-    ante = gs.get("round_resets", {}).get("ante", 1)
-
-    pack_cards, choices = generate_pack_cards(pack_key, rng, ante, gs)
-    gs["pack_cards"] = pack_cards
-    gs["pack_choices_remaining"] = choices
-
-    # Determine pack kind from prototype
-    proto = BOOSTERS.get(pack_key)
-    pack_kind = proto.kind if proto else ""
-    gs["pack_type"] = pack_kind
-
     # Save current phase and switch to pack opening
     gs["shop_return_phase"] = gs.get("phase", GamePhase.BLIND_SELECT)
+    _open_pack(gs, pack_key)
+
+
+def _open_pack(gs: dict[str, Any], pack_key: str) -> None:
+    """``Card:open`` (card.lua:1681-1811) for a shop or tag pack, once paid for.
+
+    Card:open queues one event (after 0.4s) that, in order: queues the
+    contents' creation as a non-blocking event 1.3s later (card.lua:1725),
+    runs every joker's ``open_booster`` context (card.lua:1796-1798) and,
+    under Inflation, raises ``G.GAME.inflation`` (card.lua:1800-1807).
+    Hallucination's Tarot is created by a blocking event its context
+    queues (card.lua:2339-2348), which runs on the next frame — long before
+    the contents event — so the Tarot exists, and is in used_jokers, when
+    the pack draws its cards.  An Arcana/Spectral pack then deals the hand
+    its picks target (update_arcana_pack / update_spectral_pack).
+    """
+    from jackdaw.engine.data.prototypes import BOOSTERS
+    from jackdaw.engine.packs import generate_pack_cards
+
+    # open_booster (Hallucination's 'halu' roll), then the inflation; the
+    # Tarot itself comes from the queued event, after both.
+    mutations = _fire_shop_joker_context(gs, open_booster=True)
+    _inflate(gs)
+    for mut in mutations:
+        desc = mut.get("create")
+        if desc and (
+            desc.get("type") not in ("Tarot", "Planet", "Spectral")
+            or len(gs.get("consumables", [])) < gs.get("consumable_slots", 2)
+        ):
+            _resolve_create_descriptors(gs, [desc])
+
+    rng = gs.get("rng")
+    ante = gs.get("round_resets", {}).get("ante", 1)
+    if rng and pack_key in BOOSTERS:
+        cards, choose = generate_pack_cards(pack_key, rng, ante, gs)
+        gs["pack_cards"] = cards
+        gs["pack_choices_remaining"] = choose
+        gs["pack_type"] = BOOSTERS[pack_key].kind
+    else:
+        gs["pack_cards"] = []
+        gs["pack_choices_remaining"] = 1
+        gs["pack_type"] = "Unknown"
 
     # For Arcana/Spectral packs: deal hand from deck for targeting
-    if pack_kind in ("Arcana", "Spectral"):
+    if gs["pack_type"] in ("Arcana", "Spectral"):
         _deal_pack_hand(gs)
 
     gs["phase"] = GamePhase.PACK_OPENING
@@ -1615,14 +1646,11 @@ def _handle_redeem_voucher(gs: dict[str, Any], idx: int) -> dict[str, Any]:
 
 
 def _handle_open_booster(gs: dict[str, Any], idx: int) -> dict[str, Any]:
-    """Open a booster pack — generate cards and transition to PACK_OPENING.
+    """Open a booster pack from the shop and transition to PACK_OPENING.
 
-    1. Deduct cost, remove pack from shop
-    2. Generate pack cards via :func:`generate_pack_cards`
-    3. Set ``pack_cards``, ``pack_choices_remaining``, ``pack_type``
-    4. For Arcana/Spectral: deal hand from deck for targeting
-    5. Fire ``open_booster`` joker context (Hallucination)
-    6. Phase → PACK_OPENING
+    Pays (Card:open's ease_dollars, card.lua:1711-1716), removes the pack
+    from the shop and opens it (:func:`_open_pack`: open_booster jokers,
+    inflation, contents, dealt hand).
     """
     _require_phase(gs, GamePhase.SHOP)
 
@@ -1639,48 +1667,8 @@ def _handle_open_booster(gs: dict[str, Any], idx: int) -> dict[str, Any]:
     gs["dollars"] -= pack.cost
     boosters.pop(idx)
     _release_used_key(gs, pack)
-    # Card:open raises the inflation before the pack's contents are made
-    # (card.lua:1800), so they are priced with it.
-    _inflate(gs)
-
-    # Generate pack cards
-    from jackdaw.engine.data.prototypes import BOOSTERS
-    from jackdaw.engine.packs import generate_pack_cards
-
-    pack_key = pack.center_key
-    rng = gs.get("rng")
-    ante = gs.get("round_resets", {}).get("ante", 1)
-
-    if rng and pack_key in BOOSTERS:
-        cards, choose = generate_pack_cards(pack_key, rng, ante, gs)
-        gs["pack_cards"] = cards
-        gs["pack_choices_remaining"] = choose
-        gs["pack_type"] = BOOSTERS[pack_key].kind
-    else:
-        gs["pack_cards"] = []
-        gs["pack_choices_remaining"] = 1
-        gs["pack_type"] = "Unknown"
-
     gs["shop_return_phase"] = GamePhase.SHOP
-
-    # For Arcana/Spectral packs: deal hand from deck for targeting
-    if gs.get("pack_type", "") in ("Arcana", "Spectral"):
-        _deal_pack_hand(gs)
-
-    # Fire open_booster joker context (Hallucination creates Tarot).
-    # Vanilla gates the creation on consumable room INSIDE the same
-    # condition chain (card.lua:2335) — the 'halu' roll is consumed
-    # either way (handler side), but at full slots no create fires and
-    # the Tarot pool streams stay untouched.
-    for mut in _fire_shop_joker_context(gs, open_booster=True):
-        desc = mut.get("create")
-        if desc and (
-            desc.get("type") not in ("Tarot", "Planet", "Spectral")
-            or len(gs.get("consumables", [])) < gs.get("consumable_slots", 2)
-        ):
-            _resolve_create_descriptors(gs, [desc])
-
-    gs["phase"] = GamePhase.PACK_OPENING
+    _open_pack(gs, pack.center_key)
     return gs
 
 
