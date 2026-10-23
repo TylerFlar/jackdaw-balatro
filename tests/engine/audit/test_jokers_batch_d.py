@@ -1,12 +1,12 @@
-"""Joker batch D fidelity: the round lifecycle (G55, G97-G102).
+"""Joker batch D fidelity: the round lifecycle (G55, G97-G106).
 
 Each test cites the vanilla 1.0.1o Lua it pins (``balatro_source/``).
 """
 
 from __future__ import annotations
 
-from jackdaw.engine.actions import GamePhase, SelectBlind
-from jackdaw.engine.game import step
+from jackdaw.engine.actions import GamePhase, SelectBlind, SkipBlind, SkipPack
+from jackdaw.engine.game import _award_tag, step
 from jackdaw.engine.rng import PseudoRandom
 from tests.engine.audit._boards import force_boss, give_consumable, give_joker, ids, start_boss
 
@@ -274,3 +274,38 @@ class TestCreatedPlayingCardsArePriced:
         select_blind(gs)
         (stone,) = _stones(gs)
         assert (stone.cost, stone.sell_cost) == (1, 1)
+
+
+def _held(gs: dict, key: str) -> int:
+    """Tags of ``key`` still waiting for a new_blind_choice pass."""
+    return sum(1 for e in gs["awarded_tags"] if e["key"] == key and not e.get("nbc_fired"))
+
+
+class TestPackTagsOpenOneAtATime:
+    """G106: every new_blind_choice pass over G.GAME.tags stops at the first
+    tag that fires (`if ... then break end`: skip_blind, end_consumeable,
+    reroll_boss, update_blind_select).  Skipping with two Double Tags held
+    makes three Meteor Tags (tag.lua:315-331): the first opens its pack, the
+    copies stay held, and each pack's end_consumeable pass opens the next
+    (button_callbacks.lua:2617-2619, 2775-2777)."""
+
+    def test_the_copies_wait_for_each_pack_to_close(self):
+        gs = new_run("AUDIT_G106")
+        _award_tag(gs, "tag_double", source="test")
+        _award_tag(gs, "tag_double", source="test")
+        gs["round_resets"]["blind_tags"]["Small"] = "tag_meteor"
+
+        step(gs, SkipBlind())
+        assert gs["phase"] == GamePhase.PACK_OPENING
+        assert _held(gs, "tag_meteor") == 2
+        assert not gs.get("pending_tag_packs")
+
+        for held in (1, 0):
+            step(gs, SkipPack())
+            assert gs["phase"] == GamePhase.PACK_OPENING
+            assert _held(gs, "tag_meteor") == held
+            assert not gs.get("pending_tag_packs")
+
+        step(gs, SkipPack())
+        assert gs["phase"] == GamePhase.BLIND_SELECT
+        assert gs["blind_on_deck"] == "Big"

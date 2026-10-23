@@ -349,6 +349,11 @@ def _fire_new_blind_choice_tags(gs: dict[str, Any]) -> None:
 
         if result.create_pack:
             _open_tag_pack(gs, result.create_pack)
+            # Every pass stops at the first tag that fires (`then break end`):
+            # the next pack tag stays held until end_consumeable's own pass
+            # (button_callbacks.lua:2617-2619), so one pack is open at a time
+            # (G106).
+            return
 
 
 def _reroll_boss(gs: dict[str, Any], *, from_tag: bool) -> None:
@@ -3777,8 +3782,9 @@ def _close_pack(gs: dict[str, Any]) -> None:
         gs["hand"] = [c for c in hand if id(c) not in pack_ids]
         gs["pack_hand"] = []
 
-    # Queued tag packs (Double Tag duplicates) open back-to-back before
-    # the phase is restored, mirroring vanilla's stacked pack opens.
+    # Queued tag packs open back-to-back before the phase is restored.  Only
+    # a state saved before G106 holds any: the held pack tags now wait for
+    # the new_blind_choice pass below.
     pending: list = gs.get("pending_tag_packs") or []
     if pending:
         next_key = pending.pop(0)
@@ -3791,6 +3797,9 @@ def _close_pack(gs: dict[str, Any]) -> None:
 
     # Restore phase
     gs["phase"] = gs.get("shop_return_phase", GamePhase.SHOP)
+    # end_consumeable's new_blind_choice pass (button_callbacks.lua:2617-2619):
+    # the next held pack tag opens its pack, after the state is restored (G106).
+    _fire_new_blind_choice_tags(gs)
 
 
 # ---------------------------------------------------------------------------
