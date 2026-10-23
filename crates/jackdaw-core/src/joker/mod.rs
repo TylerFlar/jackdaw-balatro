@@ -152,7 +152,9 @@ fn lookup(key: &str) -> Option<CalcFn> {
 /// Jokers with no branch of their own in `calculate_joker`: their effects are passive
 /// (`add_to_deck`, hand evaluation flags, prices, rerolls, ...) or the shared rules here.
 pub const PASSIVE: &[&str] = &[
-    // The shared main-step rules: `t_mult`, `t_chips`, or `x_mult` with a hand type.
+    // The main step's shared rules: Loyalty Card, then `t_mult`, `t_chips`, or `x_mult` with a
+    // hand type.
+    "j_loyalty_card",
     "j_jolly",
     "j_zany",
     "j_mad",
@@ -197,7 +199,26 @@ pub fn is_ported(key: &str) -> bool {
     matches!(key, "j_blueprint" | "j_brainstorm") || PASSIVE.contains(&key) || lookup(key).is_some()
 }
 
+/// The center keys of the ported jokers, in center order.
+pub fn ported() -> Vec<&'static str> {
+    jackdaw_data::CENTERS
+        .iter()
+        .filter(|c| c.set == CenterSet::Joker && is_ported(c.key))
+        .map(|c| c.key)
+        .collect()
+}
+
 impl Game {
+    /// `playing_card_joker_effects(cards)` (misc_functions.lua:1580-1584): every joker sees the
+    /// playing cards just added to the deck.
+    pub fn playing_card_joker_effects(&mut self, cards: &[u32]) {
+        for j in self.joker_ids() {
+            let mut ctx = Ctx::new(Kind::PlayingCardAdded);
+            ctx.cards = cards.to_vec();
+            self.calculate_joker(j, &mut ctx);
+        }
+    }
+
     /// `card:calculate_joker(context)` for any card.
     pub(crate) fn calculate_joker(&mut self, id: u32, ctx: &mut Ctx) -> Option<Effect> {
         let card = self.gs.areas.card(id)?;

@@ -957,18 +957,23 @@ def _get_enhanced_pool() -> list[str]:
 
 def _roll_card_spec(
     rank_pool: list[str],
-    rank_seed: str,
+    rank_seed: str | None,
     suit_seed: str,
     rng: PseudoRandom,
 ) -> dict:
     """Roll one playing-card creation descriptor.
 
     Picks rank from *rank_pool*, suit from all four, and a random
-    non-Stone enhancement — all using the provided RNG seeds.
+    non-Stone enhancement — all using the provided RNG seeds.  With no
+    *rank_seed* the rank is ``rank_pool[0]`` and nothing is drawn for it
+    (Grim's Aces, card.lua:1322-1324).
 
     Returns ``{'rank': str, 'suit': str, 'enhancement': str}``.
     """
-    rank_code, _ = rng.element(rank_pool, rng.seed(rank_seed))
+    if rank_seed is None:
+        rank_code = rank_pool[0]
+    else:
+        rank_code, _ = rng.element(rank_pool, rng.seed(rank_seed))
     suit_code, _ = rng.element(list(_SUIT_CODE), rng.seed(suit_seed))
     enhancement, _ = rng.element(_get_enhanced_pool(), rng.seed("spe_card"))
     return {
@@ -1013,7 +1018,8 @@ def _grim(card: Card, ctx: ConsumableContext) -> ConsumableResult:
     hand = list(ctx.hand_cards)
     destroyed, _ = ctx.rng.element(hand, ctx.rng.seed("random_destroy"))
     count = card.ability.get("extra", 2)
-    created = [_roll_card_spec(["A"], "grim_create", "grim_create", ctx.rng) for _ in range(count)]
+    # The rank is always an Ace: only the suit is drawn (card.lua:1322-1324).
+    created = [_roll_card_spec(["A"], None, "grim_create", ctx.rng) for _ in range(count)]
     return ConsumableResult(destroy=[destroyed], create=created)
 
 

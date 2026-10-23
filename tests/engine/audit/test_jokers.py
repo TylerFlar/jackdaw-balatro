@@ -436,3 +436,18 @@ class TestSatellite:
         gs["blind"].chips = 1
         play(gs, gs["hand"][0])
         assert gs["round_earnings"].joker_dollars == 2
+
+
+class TestLoyaltyCardCountdown:
+    """Loyalty Card keeps its countdown on the card: the main step writes
+    ``loyalty_remaining`` on every scored hand (card.lua:3632-3652)."""
+
+    def test_each_hand_counts_down(self):
+        gs = select_blind(new_run("AUDIT_LOYALTY"))
+        joker = give_joker(gs, "j_loyalty_card")
+        every = joker.ability["extra"]["every"]
+        assert joker.ability["loyalty_remaining"] == every
+        play(gs, gs["hand"][0])
+        assert joker.ability["loyalty_remaining"] == every - 1
+        play(gs, gs["hand"][0])
+        assert joker.ability["loyalty_remaining"] == every - 2

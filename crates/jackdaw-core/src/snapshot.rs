@@ -8,7 +8,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use jackdaw_data::{
-    BlindId, CenterId, TagId, blind_by_key, card_by_key, center_by_key, tag_by_key,
+    BlindId, CenterId, CenterSet, TagId, blind_by_key, card_by_key, center_by_key, tag_by_key,
 };
 use serde_json::{Map, Value, json};
 
@@ -610,6 +610,23 @@ fn cards_from(v: &[Value], path: &str) -> Result<Vec<Card>> {
 // GameState
 // ---------------------------------------------------------------------------
 
+/// Whether some rule reads this center's `used_jokers` mark: the Joker, Tarot, Planet, Spectral
+/// and Voucher pools (common_events.lua:1987) and the Soul / Black Hole rolls (2090, 2096). Lua
+/// marks every created center, playing cards' `c_base` and enhancements included; the snapshot
+/// leaves out the marks nothing reads.
+fn pool_read(key: &str) -> bool {
+    jackdaw_data::center_by_key(key).is_some_and(|c| {
+        matches!(
+            c.get().set,
+            CenterSet::Joker
+                | CenterSet::Tarot
+                | CenterSet::Planet
+                | CenterSet::Spectral
+                | CenterSet::Voucher
+        )
+    })
+}
+
 /// A snapshot of the whole run.
 pub fn export(gs: &GameState) -> Value {
     let rr = &gs.round_resets;
@@ -819,7 +836,7 @@ pub fn export(gs: &GameState) -> Value {
         "hands": hands,
         "tags": gs.tags.iter().map(|t| json!({"key": t.key()})).collect::<Vec<_>>(),
         "sets": {
-            "used_jokers": gs.sets.used_jokers.iter().collect::<Vec<_>>(),
+            "used_jokers": gs.sets.used_jokers.iter().filter(|k| pool_read(k)).collect::<Vec<_>>(),
             "used_vouchers": gs.sets.used_vouchers.iter().collect::<Vec<_>>(),
             "banned_keys": gs.sets.banned_keys.iter().collect::<Vec<_>>(),
             "pool_flags": Value::Object(gs.sets.pool_flags.iter().map(|(k, v)| (k.clone(), lua_value_json(v))).collect()),

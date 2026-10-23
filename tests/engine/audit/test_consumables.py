@@ -170,3 +170,19 @@ class TestAnkhCheckUse:
             give_joker(gs, key)
         give_consumable(gs, "c_ankh")
         assert UseConsumable(card_index=0) in get_legal_actions(gs)
+
+
+class TestGrimDrawsOnlySuits:
+    """Grim's cards are always Aces: each draws only its suit from
+    ``'grim_create'`` (card.lua:1322-1324), one draw per card."""
+
+    def test_grim_draws_grim_create_once_per_ace(self):
+        gs = select_blind(new_run("AUDIT_GRIM"))
+        grim = give_consumable(gs, "c_grim")
+        twin = rng_twin(gs)
+        step(gs, UseConsumable(card_index=gs["consumables"].index(grim), target_indices=()))
+        for _ in range(grim.ability["extra"]):
+            twin.seed("grim_create")
+        assert gs["rng"].state.get("grim_create") == twin.state.get("grim_create")
+        aces = [c for c in gs["hand"] if c.base.rank.value == "Ace"]
+        assert len(aces) >= grim.ability["extra"]

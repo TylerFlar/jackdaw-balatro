@@ -55,6 +55,13 @@ mod _core {
         Ok(jackdaw_core::snapshot::export(&gs).to_string())
     }
 
+    /// Center keys of the jokers the Rust engine has ported; a step that consults any other
+    /// joker is refused as unported.
+    #[pyfunction]
+    fn _ported_jokers() -> Vec<&'static str> {
+        jackdaw_core::joker::ported()
+    }
+
     /// Import a snapshot, take one action (its tape form, JSON text) and export the result.
     ///
     /// Returns ``(status, snapshot)``: ``"ok"`` with the new snapshot, or ``"illegal: ..."`` /

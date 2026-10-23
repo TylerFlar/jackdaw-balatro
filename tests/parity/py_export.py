@@ -17,7 +17,7 @@ from typing import Any
 from jackdaw.engine import card as card_module
 from jackdaw.engine.actions import GamePhase
 from jackdaw.engine.data.hands import HAND_BASE
-from jackdaw.engine.data.prototypes import TAGS
+from jackdaw.engine.data.prototypes import JOKERS, PLANETS, SPECTRALS, TAGS, TAROTS, VOUCHERS
 
 SCHEMA = "jackdaw.snapshot/1"
 
@@ -142,6 +142,14 @@ def plain(v: Any) -> Any:
     if isinstance(v, (set, frozenset)):
         return sorted(plain(x) for x in v)
     raise TypeError(f"export: unsupported value {type(v).__qualname__}: {v!r}")
+
+
+# The centers whose `used_jokers` mark some rule reads: the Joker, Tarot, Planet, Spectral and
+# Voucher pools (common_events.lua:1987) and the Soul / Black Hole rolls (2090, 2096). Lua marks
+# every created center, playing cards' `c_base` and enhancements included; those marks are
+# never read, so the snapshot leaves them out.
+_POOL_READ = frozenset(JOKERS) | frozenset(TAROTS) | frozenset(PLANETS) | frozenset(SPECTRALS)
+_POOL_READ |= frozenset(VOUCHERS)
 
 
 def _truthy_keys(d: Any) -> list[str]:
@@ -352,7 +360,7 @@ def export_state(gs: dict[str, Any]) -> dict[str, Any]:
         "hands": _export_hands(gs["hand_levels"]),
         "tags": pending_tags(gs.get("awarded_tags", [])),
         "sets": {
-            "used_jokers": _truthy_keys(gs.get("used_jokers")),
+            "used_jokers": [k for k in _truthy_keys(gs.get("used_jokers")) if k in _POOL_READ],
             "used_vouchers": _truthy_keys(gs.get("used_vouchers")),
             "banned_keys": _truthy_keys(gs.get("banned_keys")),
             "pool_flags": plain(gs.get("pool_flags", {})),

@@ -7,7 +7,7 @@ use jackdaw_data::{CenterId, TagId};
 
 use crate::area::AreaId;
 use crate::game::{Game, LuaState};
-use crate::pools::PoolType;
+use crate::pools::{CardSpec, PoolType};
 
 /// A queued event.
 #[derive(Clone, Debug)]
@@ -235,7 +235,8 @@ impl Game {
                 }
             }
             Event::CreateConsumable { ty, append, forced } => {
-                let card = self.create_card(ty, AreaId::Consumables, false, forced, append);
+                let card =
+                    self.create_card(CardSpec::new(ty, AreaId::Consumables, append).forced(forced));
                 let id = card.sort_id;
                 self.gs
                     .areas
@@ -249,11 +250,8 @@ impl Game {
                         p.get().config("hand_type").and_then(|v| v.as_str()) == Some(hand.name())
                     });
                     let card = self.create_card(
-                        PoolType::Planet,
-                        AreaId::Consumables,
-                        false,
-                        planet,
-                        "blusl",
+                        CardSpec::new(PoolType::Planet, AreaId::Consumables, "blusl")
+                            .forced(planet),
                     );
                     let id = card.sort_id;
                     self.gs

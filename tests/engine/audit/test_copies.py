@@ -227,3 +227,22 @@ class TestCopySemantics:
             bean.ability["extra"]["h_size"]
             == create_joker("j_turtle_bean").ability["extra"]["h_size"]
         )
+
+
+class TestCopyBaseIsNotInitial:
+    """copy_card starts from Card:init's empty base (common_events.lua:2157)
+    and then calls a non-initial ``set_base`` (2160): the copy never records
+    ``original_value`` (card.lua:136), and its suit tiebreak is its suit's own
+    (card.lua:138-141)."""
+
+    def test_cryptid_copy_has_no_original_value(self):
+        gs = select_blind(new_run("AUDIT_CRYPTID_ORIG"))
+        source = give_card(gs, "S_7")
+        assert source.base.original_value is not None
+        give_consumable(gs, "c_cryptid")
+        step(gs, UseConsumable(card_index=0, target_indices=(gs["hand"].index(source),)))
+        copies = [c for c in gs["hand"] if c is not source and c.card_key == "S_7"]
+        assert copies
+        for c in copies:
+            assert c.base.original_value is None
+            assert c.base.suit_nominal_original == source.base.suit_nominal_original

@@ -1334,6 +1334,8 @@ def _loyalty_card(card: Card, ctx: JokerContext) -> JokerResult | None:
         # the current-round one (live-verified: LSHACSAC, live's x4
         # fired exactly 738*4=2952 where sim scored flat).
         remaining = (every - 1 - (ctx.game.hands_played_run - hands_at_create)) % (every + 1)
+        # The countdown is kept on the card (card.lua:3633), Blueprint copies included.
+        card.ability["loyalty_remaining"] = remaining
         if remaining == every:
             return JokerResult(Xmult_mod=extra.get("Xmult", 4))
     return None

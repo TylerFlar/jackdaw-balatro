@@ -847,7 +847,11 @@ def copy_card(
         game_state.setdefault("used_jokers", {})[other.center_key] = True
 
     if other.base is not None:
-        new_card.set_base(other.card_key or "", other.base.suit.value, other.base.rank.value)
+        # Never initial: a fresh copy starts from Card:init's empty base (common_events.lua:2157),
+        # so its original_value stays unset and its suit tiebreak is its suit's own.
+        new_card.set_base(
+            other.card_key or "", other.base.suit.value, other.base.rank.value, initial=False
+        )
 
     for key, value in other.ability.items():
         if value is not None:

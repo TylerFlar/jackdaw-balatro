@@ -44,7 +44,7 @@ booleans, numbers, strings, arrays and string-keyed objects.
 | `blind` | object \| null | The current blind, below |
 | `hands` | object | Poker hand name → hand state (all 12 hands) |
 | `tags` | array | **Pending** tags in order: `{key}` (tags that have not triggered yet; `G.GAME.tags`) |
-| `sets` | object | `used_jokers`, `used_vouchers`, `banned_keys` (sorted key arrays), `pool_flags` (object), `bosses_used` (boss key → count) |
+| `sets` | object | `used_jokers`, `used_vouchers`, `banned_keys` (sorted key arrays), `pool_flags` (object), `bosses_used` (boss key → count). `used_jokers` holds only Joker, Tarot, Planet, Spectral and Voucher keys: Lua also marks playing cards' `c_base` and enhancements, boosters and editions, but no rule reads those marks (only these pools and the Soul / Black Hole rolls read the set, common_events.lua:1987, 2090, 2096) |
 | `consumeable_usage` | object | `by_key` (center key → times used) and `totals` (`tarot`, `planet`, `spectral`, `tarot_planet`, `all`) |
 | `areas` | object | Area name → array of cards, in area order |
 | `pack` | object \| null | The open booster pack (only in `pack_opening`) |
