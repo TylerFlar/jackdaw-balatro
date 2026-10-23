@@ -240,7 +240,7 @@ def _handle_select_blind(gs: dict[str, Any]) -> dict[str, Any]:
     #    (Amber Acorn's three 'aajk' shuffles among them)
     # ------------------------------------------------------------------
     setting_mutations = _fire_setting_blind(gs, jokers, blind)
-    touched = _apply_setting_blind_mutations(
+    touched, sliced_hand_size = _apply_setting_blind_mutations(
         gs, setting_mutations, jokers, amber_shuffles=amber_shuffles
     )
 
@@ -301,6 +301,13 @@ def _handle_select_blind(gs: dict[str, Any]) -> dict[str, Any]:
     #      (Cerulean Bell, Crimson Heart) — game.lua:3208-3245.
     # ------------------------------------------------------------------
     _draw_to_hand(gs)
+
+    # A sliced joker's G.hand:change_size (remove_from_deck, card.lua:648-650)
+    # is queued by its removal event, itself queued by the slicing joker's
+    # event: it runs after the deal counted its cards and while the hand is
+    # still empty, so it neither shrinks the deal nor draws (G105).
+    if sliced_hand_size:
+        gs["hand_size"] = gs.get("hand_size", 0) + sliced_hand_size
     return gs
 
 
@@ -2836,7 +2843,7 @@ def _apply_setting_blind_mutations(
     jokers: list,
     *,
     amber_shuffles: bool = False,
-) -> bool:
+) -> tuple[bool, int]:
     """Process the side-effects of the setting_blind (or first_hand_drawn)
     jokers in Lua's event order.
 
@@ -2853,7 +2860,10 @@ def _apply_setting_blind_mutations(
 
     Returns whether a joker or consumable was added or removed: each queues
     ``G.GAME.blind:set_blind(nil, true)`` (card.lua:641, 698), which runs
-    after every card made here (Marble's Stone included).
+    after every card made here (Marble's Stone included); and the hand-size
+    change the sliced jokers' removals queue (``G.hand:change_size`` from
+    remove_from_deck, card.lua:648-650): it lands after the round's deal is
+    counted, so the caller applies it after the deal (G105).
     """
     rng = gs.get("rng")
     # Cards dissolve over several frames (Card:remove runs after the
@@ -2861,6 +2871,7 @@ def _apply_setting_blind_mutations(
     # used_jokers while Riff-raff's create rolls.
     released: list = []
     touched = False
+    hand_size_change = 0
 
     for mut in mutations:
         # (Chicot's disable_blind is deferred by _handle_select_blind.)
@@ -2969,7 +2980,10 @@ def _apply_setting_blind_mutations(
         victim = mut.get("destroy_joker")
         if victim is not None and victim in jokers:
             jokers.remove(victim)
+            size = gs.get("hand_size", 0)
             victim.remove_from_deck(gs)
+            hand_size_change += gs.get("hand_size", 0) - size
+            gs["hand_size"] = size
             released.append(victim)
             touched = True
 
@@ -2985,7 +2999,7 @@ def _apply_setting_blind_mutations(
     gs["consumeable_buffer"] = 0
     for victim in released:
         _release_used_key(gs, victim)
-    return touched
+    return touched, hand_size_change
 
 
 # ---------------------------------------------------------------------------

@@ -209,6 +209,33 @@ class TestSettingBlindEventOrder:
         assert not stone.debuff
 
 
+class TestSlicedHandSize:
+    """G105: a sliced joker leaves by its removal event, queued by the slicing
+    joker's event (card.lua:2513-2516, 2570-2576), and remove_from_deck's
+    G.hand:change_size is one event deeper (card.lua:648-650, cardarea.lua:
+    94-111).  The round's deal counts its cards first (game.lua:3219-3222,
+    state_events.lua:362), and the change runs while the hand is still
+    empty: it neither shrinks the deal nor draws."""
+
+    def test_a_sliced_juggler_still_counts_for_the_deal(self):
+        gs = new_run("AUDIT_G105")
+        give_joker(gs, "j_ceremonial")
+        give_joker(gs, "j_juggler")
+        size = gs["hand_size"]
+        select_blind(gs)
+        assert len(gs["hand"]) == size
+        assert gs["hand_size"] == size - 1
+
+    def test_a_sliced_merry_andy_gives_its_card_back_later(self):
+        gs = new_run("AUDIT_G105M")
+        give_joker(gs, "j_ceremonial")
+        give_joker(gs, "j_merry_andy")
+        size = gs["hand_size"]
+        select_blind(gs)
+        assert len(gs["hand"]) == size
+        assert gs["hand_size"] == size + 1
+
+
 class TestMrBonesDissolvesLater:
     """G101: Mr. Bones' save queues the event that dissolves it
     (card.lua:3047-3063).  end_round's loop still charges its rent and ticks

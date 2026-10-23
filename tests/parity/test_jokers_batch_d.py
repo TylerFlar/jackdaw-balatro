@@ -152,6 +152,15 @@ class TestCeremonialDagger:
         assert [j["center"] for j in snap["areas"]["jokers"]] == ["j_blueprint", "j_ceremonial"]
         assert snap_joker(snap, "j_ceremonial")["ability"]["mult"] > 0
 
+    @pytest.mark.parametrize(("victim", "change"), [("j_juggler", -1), ("j_merry_andy", 1)])
+    def test_the_deal_counts_before_the_victims_hand_size_goes(self, victim, change):
+        """G105: the victim's change_size runs after the deal is counted."""
+        eng = at_blind_select(f"PD_DAGGER_{victim}", ("j_ceremonial", victim))
+        size = eng.snapshot()["game"]["hand_size"]
+        snap = check(eng, ["SelectBlind"])
+        assert len(snap["areas"]["hand"]) == size
+        assert snap["game"]["hand_size"] == size + change
+
     def test_madness_and_dagger_slice_one_joker(self):
         eng = at_blind_select("PD_MAD_DAGGER", ("j_madness", "j_ceremonial", "j_joker"))
         snap = check(eng, ["SelectBlind"])

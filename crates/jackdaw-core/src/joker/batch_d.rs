@@ -431,11 +431,13 @@ fn glass_joker(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
             None
         }
         Kind::UsingConsumeable => {
-            let hanged_man = ctx
+            // Lua takes the used card out of its area first (button_callbacks.lua:2209), so a
+            // card no area holds may be The Hanged Man too.
+            let other = ctx
                 .consumeable
                 .and_then(|c| g.gs.areas.card(c))
-                .is_some_and(|c| c.name() == "The Hanged Man");
-            if hanged_man {
+                .is_some_and(|c| c.name() != "The Hanged Man");
+            if !other {
                 g.unported("Glass Joker's using_consumeable branch (The Hanged Man)");
             }
             None

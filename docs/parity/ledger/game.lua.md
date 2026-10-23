@@ -407,7 +407,7 @@ Source: `balatro_source/game.lua` (Balatro 1.0.1o). 436 rows: 20 function, 11 rn
 | game/event/Game:update_hand_played/immediate | game.lua:3193-3204 | event | `Event{trigger='immediate'}` | `not G.STATE_COMPLETE` | unreviewed |  |  |  |  |
 | game/fn/Game:update_draw_to_hand | game.lua:3208-3246 | function | `Game:update_draw_to_hand(dt)` |  | unreviewed |  |  |  |  |
 | game/ctx/Game:update_draw_to_hand/apply_to_run:type-round_start_bonus | game.lua:3215 | context_call | `apply_to_run{type='round_start_bonus'}` | `not G.STATE_COMPLETE` | unreviewed |  |  |  |  |
-| game/event/Game:update_draw_to_hand/immediate:g-funcs-draw_from_deck_to_hand | game.lua:3219-3244 | event | `Event{trigger='immediate'}` → G.FUNCS.draw_from_deck_to_hand, :calculate_joker, :add_event | `not G.STATE_COMPLETE` | unreviewed |  |  |  |  |
+| game/event/Game:update_draw_to_hand/immediate:g-funcs-draw_from_deck_to_hand | game.lua:3219-3244 | event | `Event{trigger='immediate'}` → G.FUNCS.draw_from_deck_to_hand, :calculate_joker, :add_event | `not G.STATE_COMPLETE` | unreviewed |  |  | G105 |  |
 | game/ctx/Game:update_draw_to_hand/calculate_joker:first_hand_drawn | game.lua:3229 | context_call | `calculate_joker{first_hand_drawn}` | `not G.STATE_COMPLETE` & [event] & `G.GAME.current_round.hands_played == 0 and G.GAME.current_round.discard…` | gap |  |  | G14 |  |
 | game/event/Game:update_draw_to_hand/immediate:drawn_to_hand | game.lua:3233-3241 | event | `Event{trigger='immediate'}` → :drawn_to_hand | `not G.STATE_COMPLETE` & [event] | unreviewed |  |  |  |  |
 | game/fn/Game:update_new_round | game.lua:3248-3256 | function | `Game:update_new_round(dt)` |  | unreviewed |  |  |  |  |
