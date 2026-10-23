@@ -98,7 +98,7 @@ _ACTION_TYPES: dict[str, type] = {
         A.SelectBlind, A.SkipBlind, A.PlayHand, A.Discard, A.BuyCard, A.SellCard,
         A.UseConsumable, A.RedeemVoucher, A.OpenBooster, A.Reroll, A.NextRound,
         A.PickPackCard, A.SkipPack, A.CashOut, A.SortHand, A.SwapHandLeft,
-        A.SwapHandRight, A.SwapJokersLeft, A.SwapJokersRight, A.RerollBoss,
+        A.SwapHandRight, A.SwapJokersLeft, A.SwapJokersRight, A.RerollBoss, A.BuyAndUse,
     )
 }  # fmt: skip
 

@@ -24,6 +24,7 @@ from typing import Any
 
 from jackdaw.engine.actions import (
     Action,
+    BuyAndUse,
     BuyCard,
     CashOut,
     Discard,
@@ -95,6 +96,8 @@ def _dispatch(game_state: dict[str, Any], action: Action) -> dict[str, Any]:
             return _handle_cash_out(game_state)
         case BuyCard(shop_index=idx):
             return _handle_buy_card(game_state, idx)
+        case BuyAndUse(shop_index=idx, target_indices=targets):
+            return _handle_buy_and_use(game_state, idx, targets)
         case SellCard(area=area, card_index=idx):
             return _handle_sell_card(game_state, area, idx)
         case UseConsumable(card_index=idx, target_indices=targets):
@@ -1368,6 +1371,44 @@ def _handle_buy_card(gs: dict[str, Any], idx: int) -> dict[str, Any]:
         _fire_shop_joker_context(gs, playing_card_added=True, cards=[card])
 
     _inflate(gs)
+    return gs
+
+
+def _handle_buy_and_use(
+    gs: dict[str, Any], idx: int, targets: tuple[int, ...] | None
+) -> dict[str, Any]:
+    """Buy a shop consumable and use it straight away (the "Buy and Use" button).
+
+    can_buy_and_use (button_callbacks.lua:77-89) needs the card affordable
+    (``cost <= dollars - bankrupt_at`` or free) and usable
+    (Card:can_use_consumeable, in the shop's state).  buy_from_shop with
+    the 'buy_and_use' id (:2404-2477) skips check_for_buy_space, never
+    emplaces the card in G.consumeables, runs the buying_card context and
+    the Inflation increment, charges the cost and hands the card to
+    use_card, which uses it with no source area; the card then dissolves.
+    """
+    _require_phase(gs, GamePhase.SHOP)
+
+    from jackdaw.engine.consumables import consumable_block_reason
+    from jackdaw.engine.economy import can_afford
+
+    shop_cards: list = gs.get("shop_cards", [])
+    if idx < 0 or idx >= len(shop_cards):
+        raise IllegalActionError(f"Invalid shop index {idx}")
+    card = shop_cards[idx]
+    if not card.ability.get("consumeable"):
+        raise IllegalActionError("Only consumables can be bought and used")
+    if not can_afford(gs, card.cost):
+        raise IllegalActionError("Cannot afford card")
+    if (reason := consumable_block_reason(card, gs, targets)) is not None:
+        raise IllegalActionError(reason)
+
+    gs["dollars"] -= card.cost
+    shop_cards.pop(idx)
+    _fire_shop_joker_context(gs, buying_card=True)
+    _inflate(gs)
+    _use_consumable_card(gs, card, targets)
+    _release_used_key(gs, card)
     return gs
 
 

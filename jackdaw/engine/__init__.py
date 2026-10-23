@@ -10,6 +10,7 @@ Public API:
 
 from jackdaw.engine.actions import (
     Action,
+    BuyAndUse,
     BuyCard,
     CashOut,
     Discard,
@@ -50,6 +51,7 @@ __all__ = [
     "GamePhase",
     "IllegalActionError",
     # Action types
+    "BuyAndUse",
     "BuyCard",
     "CashOut",
     "Discard",

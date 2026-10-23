@@ -62,6 +62,7 @@ _EXPECTED_ALL = {
     "GamePhase",
     "IllegalActionError",
     # Action types
+    "BuyAndUse",
     "BuyCard",
     "CashOut",
     "Discard",

@@ -6,13 +6,17 @@ import pytest
 
 import jackdaw.engine
 from jackdaw.engine import (
+    BuyAndUse,
+    BuyCard,
     IllegalActionError,
     RerollBoss,
     SelectBlind,
     get_legal_actions,
     step,
 )
-from tests.engine.audit._helpers import new_run, win_blind
+from jackdaw.engine.card_factory import create_consumable
+from jackdaw.engine.data.hands import HandType
+from tests.engine.audit._helpers import new_run, play_round, win_blind
 
 # ---------------------------------------------------------------------------
 # G45 — RerollBoss (Director's Cut / Retcon)
@@ -79,3 +83,62 @@ def test_retcon_rerolls_without_limit_and_credit_card_pays():
     step(gs, RerollBoss())
     assert gs["dollars"] == -15
     assert RerollBoss() not in get_legal_actions(gs)  # -15 + 20 - 10 < 0
+
+
+# ---------------------------------------------------------------------------
+# G46 — BuyAndUse
+# ---------------------------------------------------------------------------
+
+
+def _shop_with(gs: dict, key: str) -> int:
+    """Put a consumable *key* in the shop (priced) and return its index."""
+    card = create_consumable(key)
+    card.set_cost()
+    gs["shop_cards"].append(card)
+    return len(gs["shop_cards"]) - 1
+
+
+def _fill_consumables(gs: dict) -> None:
+    while len(gs["consumables"]) < gs["consumable_slots"]:
+        gs["consumables"].append(create_consumable("c_strength"))
+
+
+def test_buy_and_use_skips_the_slot_check():
+    """A usable shop consumable can be bought and used at once, slots full or not.
+
+    button_callbacks.lua:77-89 (can_buy_and_use) enables the button when
+    the card is affordable (``cost <= dollars - bankrupt_at`` or free) and
+    ``can_use_consumeable()``; buy_from_shop (:2404-2477) with the
+    'buy_and_use' id skips check_for_buy_space, never emplaces the card in
+    G.consumeables, charges the cost and hands it to use_card.
+    """
+    gs = new_run(seed="AUDIT_G46")
+    play_round(gs)
+    gs["dollars"] = 20
+    i = _shop_with(gs, "c_mercury")  # Planet: Pair
+    _fill_consumables(gs)
+    held = list(gs["consumables"])
+    planet = gs["shop_cards"][i]
+
+    legal = get_legal_actions(gs)
+    assert BuyCard(shop_index=i) not in legal  # no room
+    assert BuyAndUse(shop_index=i) in legal
+
+    step(gs, BuyAndUse(shop_index=i))
+    assert gs["dollars"] == 20 - planet.cost
+    assert gs["hand_levels"][HandType.PAIR].level == 2
+    assert [id(c) for c in gs["consumables"]] == [id(c) for c in held]
+    assert all(c is not planet for c in gs["shop_cards"])
+    assert gs["last_tarot_planet"] == "c_mercury"
+
+
+def test_buy_and_use_needs_a_usable_card():
+    """can_buy_and_use requires can_use_consumeable (card.lua:1523-1579): in the
+    shop a card that needs a hand selection (The Magician) is not usable."""
+    gs = new_run(seed="AUDIT_G46_NO")
+    play_round(gs)
+    gs["dollars"] = 20
+    i = _shop_with(gs, "c_magician")
+    assert BuyAndUse(shop_index=i) not in get_legal_actions(gs)
+    with pytest.raises(IllegalActionError):
+        step(gs, BuyAndUse(shop_index=i))

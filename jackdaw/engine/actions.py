@@ -19,8 +19,9 @@ Each phase permits a specific subset of actions:
 |                     | UseConsumable, SwapHandLeft/Right,                   |
 |                     | SwapJokersLeft/Right                                 |
 +---------------------+------------------------------------------------------+
-| SHOP                | BuyCard, SellCard, UseConsumable, RedeemVoucher,     |
-|                     | OpenBooster, Reroll, SwapJokersLeft/Right, NextRound |
+| SHOP                | BuyCard, BuyAndUse, SellCard, UseConsumable,         |
+|                     | RedeemVoucher, OpenBooster, Reroll,                  |
+|                     | SwapJokersLeft/Right, NextRound                      |
 +---------------------+------------------------------------------------------+
 | PACK_OPENING        | PickPackCard, SkipPack, SellCard, UseConsumable      |
 +---------------------+------------------------------------------------------+
@@ -123,6 +124,21 @@ class BuyCard:
     """
 
     shop_index: int
+
+
+@dataclass(frozen=True)
+class BuyAndUse:
+    """Buy a consumable from the shop and use it at once.
+
+    The shop's "Buy and Use" button (button_callbacks.lua:77-89,
+    2404-2477): needs no consumable slot.  ``target_indices`` is the hand
+    selection, as for :class:`UseConsumable` (in the shop the hand is
+    empty, so cards that need one are never usable).  Sim-only for now:
+    the env action space does not offer it yet.
+    """
+
+    shop_index: int
+    target_indices: tuple[int, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -278,6 +294,7 @@ Action = (
     | SkipBlind
     | RerollBoss
     | BuyCard
+    | BuyAndUse
     | SellCard
     | UseConsumable
     | RedeemVoucher
@@ -297,7 +314,7 @@ Action = (
 # Vanilla actions the env's factored action space and BalatroBot's endpoints
 # cannot express yet.  get_legal_actions offers them; the env adapters and
 # the bridge leave them out.
-SIM_ONLY_ACTIONS: tuple[type, ...] = (RerollBoss,)
+SIM_ONLY_ACTIONS: tuple[type, ...] = (RerollBoss, BuyAndUse)
 
 
 # ---------------------------------------------------------------------------
@@ -498,6 +515,17 @@ def _legal_shop(gs: dict[str, Any]) -> list[Action]:
             if len(consumables) >= consumable_slots:
                 continue  # No room — agent must use/sell a consumable first
         actions.append(BuyCard(shop_index=i))
+
+    # Buy and use: affordable shop consumables that can be used right now,
+    # slots full or not (can_buy_and_use, button_callbacks.lua:77-89).
+    from jackdaw.engine.consumables import consumable_block_reason, default_use_targets
+
+    for i, card in enumerate(shop_cards):
+        ability = card.ability if isinstance(card.ability, dict) else {}
+        if not ability.get("consumeable") or not can_afford(gs, card.cost):
+            continue
+        if consumable_block_reason(card, gs) is None:
+            actions.append(BuyAndUse(shop_index=i, target_indices=default_use_targets(card, gs)))
 
     actions.extend(_sell_actions(gs))
 
