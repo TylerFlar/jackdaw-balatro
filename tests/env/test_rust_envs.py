@@ -324,3 +324,27 @@ def test_vector_env_api() -> None:
     assert vec.state(0).phase == GamePhase.BLIND_SELECT
     with pytest.raises(TypeError):
         BalatroVectorEnv(1, reward_fn=lambda t: 0.0)
+
+
+def test_vector_env_checks_its_buffers() -> None:
+    """The worker threads write into the buffers: each must be writable, C-contiguous, the
+    right size, and apart from the others."""
+    vec = BalatroVectorEnv(2, num_threads=2)
+    core = vec._core
+    resets = [("b_red", 1, f"BUF{i}", None, i) for i in range(2)]
+    obs = np.zeros((2, OBS_LEN), dtype=np.float32)
+    masks = np.zeros((2, MAX_ACTIONS), dtype=np.uint8)
+    core.reset(resets, obs, masks)
+    assert obs.any() and masks.any()
+    shared = np.zeros(2 * OBS_LEN * 4 + 2 * MAX_ACTIONS, dtype=np.uint8)
+    overlapping = shared[: 2 * OBS_LEN * 4].view(np.float32), shared[: 2 * MAX_ACTIONS]
+    read_only = masks.copy()
+    read_only.flags.writeable = False
+    for bad_obs, bad_masks in (
+        overlapping,
+        (obs, read_only),
+        (obs[:, ::2].copy(), masks),  # too small
+        (np.zeros((OBS_LEN, 2), dtype=np.float32).T, masks),  # not C-contiguous
+    ):
+        with pytest.raises((ValueError, BufferError)):
+            core.reset(resets, bad_obs, bad_masks)

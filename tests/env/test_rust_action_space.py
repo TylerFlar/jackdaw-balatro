@@ -173,7 +173,7 @@ def test_tape_states_match(spec: Any) -> None:
 # ---------------------------------------------------------------------------
 
 _FUZZ_CHUNKS = 16
-_FUZZ_CASES = 14  # per chunk: about 10,000 states in all
+_FUZZ_CASES = 18  # per chunk: about 10,000 states in all
 
 
 @pytest.mark.parametrize("chunk", range(_FUZZ_CHUNKS))

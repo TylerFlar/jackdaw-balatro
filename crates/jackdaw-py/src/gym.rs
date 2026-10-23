@@ -311,11 +311,31 @@ impl GymEnv {
     }
 }
 
+/// The addresses a buffer's memory spans.
+fn span<T: Element>(buf: &PyBuffer<T>) -> std::ops::Range<usize> {
+    let start = buf.buf_ptr() as usize;
+    start..start + buf.len_bytes()
+}
+
+/// Fail unless the buffers' memory is pairwise disjoint, so their slices can't alias.
+fn disjoint(spans: &[std::ops::Range<usize>]) -> PyResult<()> {
+    for (i, a) in spans.iter().enumerate() {
+        if spans[i + 1..]
+            .iter()
+            .any(|b| a.start < b.end && b.start < a.end)
+        {
+            return Err(value_error("the output buffers must not overlap"));
+        }
+    }
+    Ok(())
+}
+
 /// A caller's buffer of `len` items as a mutable slice, for the worker threads to write.
 ///
 /// The buffer must be writable and C-contiguous with exactly `len` items (`PyBuffer<T>` has
-/// checked their format, size and alignment against `T`). The slice borrows `buf` mutably, so
-/// one export gives one slice at a time.
+/// checked their format, size and alignment against `T`), and must not overlap any other buffer
+/// made into a slice at the same time (`disjoint`). The slice borrows `buf` mutably, so one
+/// export gives one slice at a time.
 fn writable<'a, T: Element>(
     buf: &'a mut PyBuffer<T>,
     len: usize,
@@ -328,9 +348,10 @@ fn writable<'a, T: Element>(
     }
     // SAFETY: the export held in `buf` keeps the memory alive and in place, and it holds
     // exactly `len` initialised, aligned items of `T`, any bit pattern of which is valid. No
-    // other Rust reference to it exists while the slice lives (it borrows `buf` mutably). The
-    // memory is a numpy array the vector env owns; Python code could only reach it from another
-    // thread while the GIL is released, the same contract numpy's own GIL-free loops have.
+    // other Rust reference to it exists while the slice lives: the slice borrows `buf` mutably,
+    // and the callers check that the buffers they make into slices are disjoint. The memory is
+    // a numpy array the vector env owns; Python code could only reach it from another thread
+    // while the GIL is released, the same contract numpy's own GIL-free loops have.
     Ok(unsafe { std::slice::from_raw_parts_mut(buf.buf_ptr().cast::<T>(), len) })
 }
 
@@ -395,6 +416,7 @@ impl VectorEnv {
         if specs.len() != n {
             return Err(value_error("one reset per env"));
         }
+        disjoint(&[span(&obs), span(&masks)])?;
         let obs = writable(&mut obs, n * GYM_OBS_LEN, "obs")?;
         let masks = writable(&mut masks, n * MAX_ACTIONS, "masks")?;
         let inner = &mut self.inner;
@@ -431,6 +453,7 @@ impl VectorEnv {
                 .ok_or_else(|| PyIndexError::new_err(format!("no env {i}")))?;
             *slot = Some(reset_spec(t)?);
         }
+        disjoint(&[span(&obs), span(&masks), span(&stats)])?;
         let obs = writable(&mut obs, n * GYM_OBS_LEN, "obs")?;
         let masks = writable(&mut masks, n * MAX_ACTIONS, "masks")?;
         let stats = writable(&mut stats, n * STATS, "stats")?;
