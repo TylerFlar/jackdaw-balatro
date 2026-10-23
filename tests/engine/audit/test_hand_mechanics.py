@@ -303,3 +303,28 @@ def test_g39_cards_created_into_the_hand_are_not_sorted_in():
     made = [c for c in hand if all(c is not b for b in before)]
     assert len(made) == 3
     assert ids(hand[-3:]) == ids(made)
+
+
+def test_b14_get_highest_keeps_the_older_card():
+    """get_highest (misc_functions.lua:613-620) keeps the first card with the
+    strictly highest get_nominal(); its unique_val term (card.lua:950-955,
+    ``1 - ID/1603301``) ranks an older card above an identical newer one."""
+    from jackdaw.engine.card_factory import create_playing_card
+    from jackdaw.engine.hand_eval import get_highest
+
+    older = create_playing_card(Suit.SPADES, Rank.ACE)
+    newer = create_playing_card(Suit.SPADES, Rank.ACE)
+    assert older.sort_id < newer.sort_id
+    assert get_highest([newer, older]) == [[older]]
+    assert get_highest([older, newer]) == [[older]]
+
+
+def test_b14_stone_cards_rank_by_their_suit_tiebreak():
+    """A Stone Card's get_nominal multiplies the suit tiebreaks by -1000
+    (card.lua:952): among Stones the Diamond ranks above the Spade."""
+    from jackdaw.engine.card_factory import create_playing_card
+    from jackdaw.engine.hand_eval import get_highest
+
+    spade = create_playing_card(Suit.SPADES, Rank.TWO, enhancement="m_stone")
+    diamond = create_playing_card(Suit.DIAMONDS, Rank.TWO, enhancement="m_stone")
+    assert get_highest([spade, diamond]) == [[diamond]]

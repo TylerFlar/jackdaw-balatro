@@ -20,7 +20,7 @@ from typing import Any
 
 from jackdaw import _core
 from tests.parity import canon
-from tests.parity.harness import load_specs
+from tests.parity.harness import ParitySpec, load_specs
 from tests.parity.pyengine import PyEngine
 
 
@@ -84,18 +84,23 @@ def check_step(engine: PyEngine, action: list[Any], where: str, report: Report) 
     return True
 
 
+def run_spec(spec: ParitySpec, report: Report) -> None:
+    """Check every step of one tape."""
+    engine = PyEngine(spec.start, spec.setup)
+    for pos, action in enumerate(spec.tape):
+        snap = engine.snapshot()
+        if snap["phase"] == "game_over" or snap["run"]["won"]:
+            break
+        if not check_step(engine, action, f"{spec.name}@{pos}", report):
+            break
+
+
 def run(spec_filter: str | None = None) -> Report:
     report = Report()
     for spec in load_specs():
         if spec_filter and spec_filter not in spec.name:
             continue
-        engine = PyEngine(spec.start, spec.setup)
-        for pos, action in enumerate(spec.tape):
-            snap = engine.snapshot()
-            if snap["phase"] == "game_over" or snap["run"]["won"]:
-                break
-            if not check_step(engine, action, f"{spec.name}@{pos}", report):
-                break
+        run_spec(spec, report)
     return report
 
 

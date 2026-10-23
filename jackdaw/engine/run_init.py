@@ -461,7 +461,6 @@ def start_round(game_state: dict[str, Any]) -> None:
     cr["discards_used"] = 0
     cr["reroll_cost_increase"] = 0
     cr["used_packs"] = []
-    cr["jokers_purchased"] = 0
 
     # Free rerolls: #find_joker('Chaos the Clown') (state_events.lua:311-313);
     # find_joker skips debuffed jokers (misc_functions.lua:903-917).
@@ -485,11 +484,6 @@ def start_round(game_state: dict[str, Any]) -> None:
     # _round_won: the tag's round_start_bonus fires at DRAW_TO_HAND
     # (game.lua:3215) recording the applied delta in rr["temp_handsize"],
     # and round end reverts it (state_events.lua:270).
-
-    # Temp reroll cost (D6 Tag) — clear after round start
-    if rr.get("temp_reroll_cost") is not None:
-        rr["temp_reroll_cost"] = None
-        _calculate_reroll_cost(game_state, skip_increment=True)
 
     # Reset played_this_round for all hand types
     hand_levels: HandLevels | None = game_state.get("hand_levels")

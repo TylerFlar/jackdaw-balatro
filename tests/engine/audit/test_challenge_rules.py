@@ -260,6 +260,7 @@ def test_banned_bosses_never_drawn():
         step(gs, SelectBlind())
         win_blind(gs)
         assert gs["round_resets"]["ante"] == 8
+        step(gs, CashOut())  # cash_out's reset_blinds draws the next boss
         assert gs["round_resets"]["blind_choices"]["Boss"] in {"bl_final_vessel", "bl_final_bell"}
 
 

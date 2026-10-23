@@ -480,83 +480,38 @@ def generate_blind_tags(
     return {"Small": small, "Big": big}
 
 
-def assign_ante_blinds(
-    ante: int,
-    rng: PseudoRandom,
-    game_state: dict[str, Any],
-) -> dict[str, Any]:
-    """Set up blinds and tags for a new ante.
+def roll_next_voucher(ante: int, rng: PseudoRandom, game_state: dict[str, Any]) -> str | None:
+    """``get_next_voucher_key()`` for the ante's shop voucher.
 
-    RNG calls are issued in the exact Lua source order to preserve seed
-    determinism.  The Lua game generates these across two call sites:
+    Lua rolls it at run start (game.lua:2177) and when a boss falls, in
+    end_round's last event (state_events.lua:263).  By then the shop is gone
+    (``G.shop:remove()``, button_callbacks.lua:2500, leaves
+    ``G.shop_vouchers.cards`` nil, cardarea.lua:659), so get_current_pool's
+    shop exclusion (common_events.lua:1999-2003) never applies.
+    """
+    from jackdaw.engine.vouchers import get_next_voucher_key
 
-    1. ``get_next_voucher_key()`` → state_events.lua:263 (boss defeat)
-    2. ``get_next_tag_key()``     → button_callbacks.lua:2951 (cash_out)
-    3. ``get_next_tag_key()``     → button_callbacks.lua:2952 (cash_out)
-    4. ``get_new_boss()``         → common_events.lua:2333 (reset_blinds)
+    used_v_dict = {k: True for k in set(game_state.get("used_vouchers", []))}
+    banned: dict[str, bool] = game_state.get("banned_keys") or {}
+    return get_next_voucher_key(rng, used_v_dict, in_shop=None, ante=ante, banned_keys=banned)
 
-    Side effects on *game_state*
-    ----------------------------
-    * ``game_state["bosses_used"]`` is created/updated in-place (boss usage
-      tracking that prevents the same boss from repeating too soon).
-    * ``game_state["round_resets"]["blind_tags"]`` is set to
-      ``{"Small": tag_key, "Big": tag_key}``.
 
-    Parameters
-    ----------
-    ante:
-        Current ante number (1–8+).
-    rng:
-        Live :class:`~jackdaw.engine.rng.PseudoRandom` instance.
-    game_state:
-        Mutable run-state dict.  Reads:
-
-        * ``bosses_used`` (dict[str, int], created if absent)
-        * ``used_vouchers`` (iterable of str, optional)
-
-    Returns
-    -------
-    dict
-        ``{"blind_choices": {"Small": "bl_small", "Big": "bl_big",
-        "Boss": boss_key}, "blind_tags": {"Small": tag_key,
-        "Big": tag_key}, "voucher": voucher_key_or_None}``
+def roll_ante_blinds(ante: int, rng: PseudoRandom, game_state: dict[str, Any]) -> str:
+    """The ante's blind tags and boss: ``get_next_tag_key()`` for Small, then
+    Big (button_callbacks.lua:2949-2952), then ``reset_blinds``'s
+    ``get_new_boss()`` (common_events.lua:2333).  Lua runs them at run start
+    and in ``cash_out`` after a boss.  Sets ``round_resets.blind_tags`` and
+    returns the boss key.
     """
     from jackdaw.engine.blind import get_new_boss
     from jackdaw.engine.pools import pick_card_from_pool
-    from jackdaw.engine.vouchers import get_next_voucher_key
 
     bosses_used: dict[str, int] = game_state.setdefault("bosses_used", {})
     used_vouchers: set[str] = set(game_state.get("used_vouchers", []))
-    used_v_dict: dict[str, bool] = {k: True for k in used_vouchers}
-    # Challenge bans cull all three pools (common_events.lua:2030, 2359-2361).
+    # Challenge bans cull the tag and boss pools (common_events.lua:2030, 2359-2361).
     banned: dict[str, bool] = game_state.get("banned_keys") or {}
-
-    # RNG call order must match Lua exactly:
-    #   1. get_next_voucher_key() — state_events.lua:263 (boss defeat)
-    #   2. get_next_tag_key() x2   — button_callbacks.lua:2949-2952 (cash_out)
-    #   3. get_new_boss()          — common_events.lua:2333 (reset_blinds)
-
-    # 1. Voucher
-    #    In Lua, get_next_voucher_key() fires at boss defeat
-    #    (state_events.lua:263).  By this point G.shop:remove() has already
-    #    run (button_callbacks.lua:2500), which calls CardArea:remove() on
-    #    G.shop_vouchers — setting its .cards to nil (cardarea.lua:659).
-    #    Therefore the shop-exclusion guard in get_current_pool
-    #    (common_events.lua:1999-2003) never fires and no voucher is
-    #    excluded from the pool.
-    voucher = get_next_voucher_key(
-        rng,
-        used_v_dict,
-        in_shop=None,
-        ante=ante,
-        banned_keys=banned,
-    )
-
-    # 2-3. Tags (Small then Big)
     small = pick_card_from_pool("Tag", rng, ante, used_vouchers=used_vouchers, banned_keys=banned)
     big = pick_card_from_pool("Tag", rng, ante, used_vouchers=used_vouchers, banned_keys=banned)
-
-    # 4. Boss
     boss = get_new_boss(
         ante,
         bosses_used,
@@ -564,15 +519,26 @@ def assign_ante_blinds(
         win_ante=game_state.get("win_ante", 8),
         banned_keys=banned,
     )
+    game_state.setdefault("round_resets", {})["blind_tags"] = {"Small": small, "Big": big}
+    return boss
 
-    blind_tags: dict[str, str] = {"Small": small, "Big": big}
 
-    # Persist to game_state (mirrors G.GAME.round_resets.blind_tags)
-    round_resets: dict[str, Any] = game_state.setdefault("round_resets", {})
-    round_resets["blind_tags"] = blind_tags
+def assign_ante_blinds(
+    ante: int,
+    rng: PseudoRandom,
+    game_state: dict[str, Any],
+) -> dict[str, Any]:
+    """The first ante's voucher, tags and boss, in Lua's run-start order
+    (:func:`roll_next_voucher`, then :func:`roll_ante_blinds`).
 
+    Returns ``{"blind_choices": {"Small": "bl_small", "Big": "bl_big",
+    "Boss": boss_key}, "blind_tags": {"Small": tag_key, "Big": tag_key},
+    "voucher": voucher_key_or_None}``.
+    """
+    voucher = roll_next_voucher(ante, rng, game_state)
+    boss = roll_ante_blinds(ante, rng, game_state)
     return {
         "blind_choices": {"Small": "bl_small", "Big": "bl_big", "Boss": boss},
-        "blind_tags": blind_tags,
+        "blind_tags": dict(game_state["round_resets"]["blind_tags"]),
         "voucher": voucher,
     }

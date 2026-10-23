@@ -139,37 +139,17 @@ class CardArea:
 
 
 def _card_nominal(card: Card) -> float:
-    """Sort key for rank-based sorting (``Card:get_nominal()``)."""
-    if card.base is None:
-        return 0.0
-    b = card.base
-    effect = card.ability.get("effect", "")
-    stone_penalty = -1000.0 if effect == "Stone Card" else 0.0
-    return (
-        b.nominal
-        + b.suit_nominal
-        + (b.suit_nominal_original or 0) * 0.0001
-        + b.face_nominal
-        + 0.000001 * card.sort_id
-        + stone_penalty
-    )
+    """Sort key for rank-based sorting: ``Card:get_nominal()`` (card.lua:950-955).
+
+    The ``unique_val`` term ranks an older card above an identical newer one,
+    so ``get_highest`` (misc_functions.lua:613) keeps the older card on a tie.
+    """
+    return card.get_nominal() if card.base is not None else 0.0
 
 
 def _card_nominal_suit(card: Card) -> float:
-    """Sort key for suit-based sorting (``Card:get_nominal('suit')``)."""
-    if card.base is None:
-        return 0.0
-    b = card.base
-    effect = card.ability.get("effect", "")
-    stone_penalty = -1000.0 if effect == "Stone Card" else 0.0
-    return (
-        b.nominal
-        + b.suit_nominal * 1000
-        + (b.suit_nominal_original or 0) * 0.0001 * 1000
-        + b.face_nominal
-        + 0.000001 * card.sort_id
-        + stone_penalty
-    )
+    """Sort key for suit-based sorting: ``Card:get_nominal('suit')``."""
+    return card.get_nominal("suit") if card.base is not None else 0.0
 
 
 # ---------------------------------------------------------------------------

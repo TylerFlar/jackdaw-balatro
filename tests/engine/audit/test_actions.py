@@ -8,6 +8,7 @@ import jackdaw.engine
 from jackdaw.engine import (
     BuyAndUse,
     BuyCard,
+    CashOut,
     IllegalActionError,
     RerollBoss,
     SelectBlind,
@@ -64,11 +65,13 @@ def test_directors_cut_rerolls_once_per_ante_for_ten_dollars():
     with pytest.raises(IllegalActionError):
         step(gs, RerollBoss())
 
-    # Next ante: available again.
+    # Next ante: available again once cash_out's reset_blinds has run.
     gs["blind_on_deck"] = "Boss"
     step(gs, SelectBlind())
     win_blind(gs)
-    assert rr["boss_rerolled"] is False
+    assert rr["boss_rerolled"] is True
+    step(gs, CashOut())
+    assert gs["round_resets"]["boss_rerolled"] is False
 
 
 def test_retcon_rerolls_without_limit_and_credit_card_pays():

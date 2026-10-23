@@ -191,7 +191,8 @@ def _handle_select_blind(gs: dict[str, Any]) -> dict[str, Any]:
         no_blind_reward=bool(no_reward.get(blind_on_deck)),
     )
     gs["blind"] = blind
-    gs["chips"] = 0
+    # set_blind records G.GAME.last_blind.boss (blind.lua:97-99).
+    gs["last_blind_was_boss"] = bool(blind.boss)
     rr["blind_states"][blind_on_deck] = "Current"
     rr["blind"] = blind
     # ease_round(1) fires in the select-blind callback
@@ -1145,15 +1146,7 @@ def _handle_cash_out(gs: dict[str, Any]) -> dict[str, Any]:
     gs.pop("shop_free", None)
     gs.pop("shop_d6ed", None)
 
-    # End-of-round targeting-card re-roll (state_events.lua:273-276):
-    # idol / mail / ancient / castle streams advance once per round END
-    # (they are NOT re-rolled at round start; see start_round).
     rng = gs.get("rng")
-    if rng:
-        from jackdaw.engine.round_lifecycle import reset_round_targets
-
-        ante = gs.get("round_resets", {}).get("ante", 1)
-        reset_round_targets(rng, ante, gs)
 
     # Shuffle deck at cash-out (button_callbacks.lua:2918)
     # G.deck:shuffle('cashout'..G.GAME.round_resets.ante)
@@ -1166,18 +1159,11 @@ def _handle_cash_out(gs: dict[str, Any]) -> dict[str, Any]:
     earnings = gs.get("round_earnings")
     if earnings:
         gs["dollars"] = gs.get("dollars", 0) + earnings.total
-
-    # eval-context tags (Investment: $25 once per tag, after a boss kill).
-    if gs.get("last_blind_was_boss"):
-        from jackdaw.engine.tags import Tag
-
-        for entry in gs.get("awarded_tags", []):
-            if entry.get("eval_fired"):
-                continue
-            result = Tag(entry.get("key", "")).apply("eval", gs, rng=rng, last_blind_is_boss=True)
-            if result is not None and result.dollars:
-                gs["dollars"] = gs.get("dollars", 0) + result.dollars
-                entry["eval_fired"] = True
+    # cash_out's event zeroes the shop's purchase count
+    # (button_callbacks.lua:2928), and ease_chips(0) the round's score (:2948).
+    gs["current_round"]["jokers_purchased"] = 0
+    gs["chips"] = 0
+    _reset_blinds_after_boss(gs)
 
     gs["previous_round"] = {"dollars": gs.get("dollars", 0)}
 
@@ -1856,16 +1842,19 @@ def _handle_next_round(gs: dict[str, Any]) -> dict[str, Any]:
     gs["shop_vouchers"] = []
     gs["shop_boosters"] = []
 
+    # Building the blind-select screen picks the blind on deck from the
+    # states and marks it Select (UI_definitions.lua:1441-1444, 1489).
     rr = gs["round_resets"]
-    blind_on_deck = gs.get("blind_on_deck", "Small")
-
-    # Set next blind to Select
-    if blind_on_deck == "Small":
-        rr["blind_states"]["Small"] = "Select"
-    elif blind_on_deck == "Big":
-        rr["blind_states"]["Big"] = "Select"
+    states = rr["blind_states"]
+    done = ("Defeated", "Skipped", "Hide")
+    if states.get("Small") not in done:
+        blind_on_deck = "Small"
+    elif states.get("Big") not in done:
+        blind_on_deck = "Big"
     else:
-        rr["blind_states"]["Boss"] = "Select"
+        blind_on_deck = "Boss"
+    gs["blind_on_deck"] = blind_on_deck
+    states[blind_on_deck] = "Select"
 
     gs["phase"] = GamePhase.BLIND_SELECT
     # The blind-select screen is built again (game.lua:3258-3298), rolling
@@ -2544,19 +2533,19 @@ def _round_won(gs: dict[str, Any]) -> None:
     # (state_events.lua:270 — temp_handsize cleared at round end).
     if rr.get("temp_handsize"):
         change_hand_size(gs, -rr.pop("temp_handsize"))
+    # end_round's last event marks the blind Defeated (state_events.lua:258-264);
+    # blind_on_deck moves on only when the blind-select screen is built
+    # (UI_definitions.lua:1441, _handle_next_round).
     blind_on_deck = gs.get("blind_on_deck", "Small")
     rr["blind_states"][blind_on_deck] = "Defeated"
-    # Remembered for cash-out tag hooks (Investment Tag pays after a boss).
-    gs["last_blind_was_boss"] = blind_on_deck == "Boss"
 
     # ------------------------------------------------------------------
-    # 8-9. Advance blind progression
+    # 8-9. A boss falls: the ante goes up (end_round's ease_ante,
+    #      state_events.lua:248) and the next ante's voucher is rolled
+    #      (state_events.lua:263); the tags, boss and blind states follow
+    #      at cash-out.
     # ------------------------------------------------------------------
-    if blind_on_deck == "Small":
-        gs["blind_on_deck"] = "Big"
-    elif blind_on_deck == "Big":
-        gs["blind_on_deck"] = "Boss"
-    elif blind_on_deck == "Boss":
+    if blind_on_deck == "Boss":
         # Boss beaten — check win, advance ante
         if rr["ante"] >= gs.get("win_ante", 8):
             gs["won"] = True
@@ -2579,7 +2568,20 @@ def _round_won(gs: dict[str, Any]) -> None:
         if mods.get("set_joker_slots_ante") == rr["ante"]:
             gs["joker_slots"] = 0
         _advance_ante(gs)
-        gs["blind_on_deck"] = "Small"
+
+    # The rest of end_round's last event (state_events.lua:271-276): the D6
+    # Tag's reroll price lapses, and the Idol / Mail-In Rebate / Ancient Joker
+    # / Castle targets are re-rolled for the next round (with the new ante
+    # after a boss).
+    if rr.get("temp_reroll_cost") is not None:
+        rr["temp_reroll_cost"] = None
+        from jackdaw.engine.run_init import _calculate_reroll_cost
+
+        _calculate_reroll_cost(gs, skip_increment=True)
+    if rng:
+        from jackdaw.engine.round_lifecycle import reset_round_targets
+
+        reset_round_targets(rng, rr["ante"], gs)
 
     # ------------------------------------------------------------------
     # 10. Calculate round earnings (for cash-out screen)
@@ -2594,6 +2596,18 @@ def _round_won(gs: dict[str, Any]) -> None:
         rng=rng,
         joker_dollars=eor.get("dollars_earned", 0),
     )
+    # evaluate_round's tag rows (state_events.lua:1180-1188): the Investment
+    # Tag pays after a boss (tag.lua:115-129) — part of the cash-out total.
+    if gs.get("last_blind_was_boss"):
+        from jackdaw.engine.tags import Tag
+
+        for entry in gs.get("awarded_tags", []):
+            if entry.get("eval_fired"):
+                continue
+            result = Tag(entry.get("key", "")).apply("eval", gs, rng=rng, last_blind_is_boss=True)
+            if result is not None and result.dollars:
+                earnings.total += result.dollars
+                entry["eval_fired"] = True
     gs["round_earnings"] = earnings
 
     # evaluate_round runs the back's 'eval' trigger (state_events.lua:1163):
@@ -2620,6 +2634,8 @@ def _round_won(gs: dict[str, Any]) -> None:
     if getattr(blind, "name", "") == "The Manacle" and not getattr(blind, "disabled", False):
         change_hand_size(gs, 1)
     gs["blind"] = Blind.empty()
+    # set_blind(nil) clears G.GAME.last_blind.boss (blind.lua:97-99).
+    gs["last_blind_was_boss"] = False
     _set_blind_debuff_pass(gs)
 
     # ------------------------------------------------------------------
@@ -2702,21 +2718,33 @@ def _held_cards_end_of_round(gs: dict[str, Any], hand: list, jokers: list) -> No
 
 
 def _advance_ante(gs: dict[str, Any]) -> None:
-    """Advance to the next ante after boss is defeated."""
+    """A boss fell: the ante goes up (``ease_ante(1)``, state_events.lua:248)
+    and the next ante's voucher is rolled (state_events.lua:263)."""
     rr = gs["round_resets"]
     rr["ante"] += 1
-    rr["blind_ante"] = rr["ante"]
-    rr["blind_states"] = {"Small": "Select", "Big": "Upcoming", "Boss": "Upcoming"}
-    rr["boss_rerolled"] = False
-
-    # Generate new boss, tags, voucher for next ante
-    from jackdaw.engine.tags import assign_ante_blinds
+    from jackdaw.engine.tags import roll_next_voucher
 
     rng = gs.get("rng")
     if rng:
-        ante_result = assign_ante_blinds(rr["ante"], rng, gs)
-        rr["blind_choices"]["Boss"] = ante_result["blind_choices"]["Boss"]
-        gs["current_round"]["voucher"] = ante_result["voucher"]
+        gs["current_round"]["voucher"] = roll_next_voucher(rr["ante"], rng, gs)
+
+
+def _reset_blinds_after_boss(gs: dict[str, Any]) -> None:
+    """``cash_out`` after a boss (button_callbacks.lua:2949-2953): the new
+    ante's blind tags, then ``reset_blinds`` (common_events.lua:2326-2336) —
+    every blind Upcoming, the Small blind on deck and a new boss."""
+    rr = gs["round_resets"]
+    if rr["blind_states"].get("Boss") != "Defeated":
+        return
+    rr["blind_ante"] = rr["ante"]
+    from jackdaw.engine.tags import roll_ante_blinds
+
+    rng = gs.get("rng")
+    if rng:
+        rr["blind_choices"]["Boss"] = roll_ante_blinds(rr["ante"], rng, gs)
+    rr["blind_states"] = {"Small": "Upcoming", "Big": "Upcoming", "Boss": "Upcoming"}
+    gs["blind_on_deck"] = "Small"
+    rr["boss_rerolled"] = False
 
 
 # ---------------------------------------------------------------------------

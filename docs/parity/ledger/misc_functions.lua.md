@@ -34,8 +34,8 @@ Source: `balatro_source/functions/misc_functions.lua` (Balatro 1.0.1o). 124 rows
 | misc_functions/rng/random_string/math.random#2 | misc_functions.lua:274 | rng | `math.random()` |  | unreviewed |  |  |  |  |
 | misc_functions/rng/random_string/math.random:string-byte-a-string-byte-n | misc_functions.lua:274 | rng | `math.random(string.byte('A'), string.byte('N'))` |  | unreviewed |  |  |  |  |
 | misc_functions/rng/random_string/math.random:string-byte-p-string-byte-z | misc_functions.lua:274 | rng | `math.random(string.byte('P'), string.byte('Z'))` |  | unreviewed |  |  |  |  |
-| misc_functions/fn/pseudohash | misc_functions.lua:279-296 | function | `pseudohash(str)` |  | unreviewed |  |  |  |  |
-| misc_functions/fn/pseudoseed | misc_functions.lua:298-313 | function | `pseudoseed(key, predict_seed)` |  | unreviewed |  |  |  |  |
+| misc_functions/fn/pseudohash | misc_functions.lua:279-296 | function | `pseudohash(str)` |  | gap |  |  | G52 |  |
+| misc_functions/fn/pseudoseed | misc_functions.lua:298-313 | function | `pseudoseed(key, predict_seed)` |  | gap |  |  | G52 |  |
 | misc_functions/rng/pseudoseed/math.random | misc_functions.lua:299 | rng | `math.random()` | `key == 'seed'` | unreviewed |  |  |  |  |
 | misc_functions/fn/pseudorandom | misc_functions.lua:315-320 | function | `pseudorandom(seed, min, max)` |  | unreviewed |  |  |  |  |
 | misc_functions/rng/pseudorandom/pseudoseed:seed | misc_functions.lua:316 | rng | `pseudoseed(seed)` | `type(seed) == 'string'` | unreviewed |  |  |  |  |
