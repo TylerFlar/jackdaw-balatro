@@ -7,9 +7,11 @@ import enum
 import json
 import math
 import random
+from collections.abc import Mapping
 from typing import Any
 
 from jackdaw import _core
+from jackdaw.core.views import BlindView, CardView, HandLevel, Score, hand_levels
 from jackdaw.engine import actions as _actions
 from jackdaw.engine.actions import GamePhase
 
@@ -239,6 +241,96 @@ class Game:
     @property
     def won(self) -> bool:
         return self._g.won
+
+    # -- read-only views (jackdaw.core.views) -------------------------------------
+
+    def _view(self, name: str) -> Any:
+        return _from_json(json.loads(self._g.view(name)))
+
+    def _cards(self, area: str) -> tuple[CardView, ...]:
+        return tuple(CardView.from_snapshot(c) for c in self._view(area))
+
+    @property
+    def hand(self) -> tuple[CardView, ...]:
+        """The cards in hand, in hand order."""
+        return self._cards("hand")
+
+    @property
+    def jokers(self) -> tuple[CardView, ...]:
+        return self._cards("jokers")
+
+    @property
+    def consumables(self) -> tuple[CardView, ...]:
+        return self._cards("consumables")
+
+    @property
+    def deck(self) -> tuple[CardView, ...]:
+        """The draw pile; cards are drawn from the end."""
+        return self._cards("deck")
+
+    @property
+    def discard_pile(self) -> tuple[CardView, ...]:
+        return self._cards("discard")
+
+    @property
+    def shop_jokers(self) -> tuple[CardView, ...]:
+        """The shop's cards for sale (jokers, consumables, playing cards)."""
+        return self._cards("shop_jokers")
+
+    @property
+    def shop_vouchers(self) -> tuple[CardView, ...]:
+        return self._cards("shop_vouchers")
+
+    @property
+    def shop_boosters(self) -> tuple[CardView, ...]:
+        return self._cards("shop_booster")
+
+    @property
+    def pack_cards(self) -> tuple[CardView, ...]:
+        """The open pack's cards to choose from."""
+        return self._cards("pack_cards")
+
+    @property
+    def blind(self) -> BlindView | None:
+        """The blind being played, or ``None`` before the first one."""
+        d = self._view("blind")
+        return BlindView.from_snapshot(d) if d else None
+
+    @property
+    def hand_levels(self) -> Mapping[str, HandLevel]:
+        """Each poker hand's level and base score, by name (``"Flush"``...)."""
+        return hand_levels(self._view("hands"))
+
+    @property
+    def tags(self) -> tuple[str, ...]:
+        """The held tags' keys (``"tag_double"``...)."""
+        return tuple(self._view("tags"))
+
+    @property
+    def last_score(self) -> Score | None:
+        """What the last play scored, or ``None`` before any play."""
+        d = self._view("last_score")
+        return Score.from_snapshot(d) if d else None
+
+    def check(self, action: Any) -> str | None:
+        """Why the rules refuse ``action`` here, or ``None`` when it is legal. The run is
+        unchanged either way (the action is tried on a copy)."""
+        trial = self._g.clone()
+        try:
+            trial.step(json.dumps(encode_action(action)))
+        except IllegalActionError as exc:
+            return str(exc)
+        return None
+
+    def preview_play(self, cards: Any) -> Score:
+        """What playing these hand cards (indices) would score now: the real play on a copy,
+        with hand evaluation, jokers, enhancements, editions, seals, the boss and the RNG. The
+        run is unchanged. Raises :class:`IllegalActionError` for a selection the rules refuse."""
+        trial = Game(self._g.clone())
+        trial.step(_actions.PlayHand(card_indices=tuple(cards)))
+        score = trial.last_score
+        assert score is not None, "a play records its score"
+        return score
 
     def __repr__(self) -> str:
         return (

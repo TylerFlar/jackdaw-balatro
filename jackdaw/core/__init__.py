@@ -20,9 +20,14 @@ from jackdaw.core.game import (
     encode_action,
     random_seed,
 )
+from jackdaw.core.views import BlindView, CardView, HandLevel, Score
 
 __all__ = [
+    "BlindView",
+    "CardView",
     "Game",
+    "HandLevel",
+    "Score",
     "IllegalActionError",
     "Legality",
     "NotPortedError",

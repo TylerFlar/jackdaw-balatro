@@ -145,6 +145,16 @@ impl Game {
         self.inner.snapshot().to_string()
     }
 
+    /// One section of the snapshot (JSON text) without exporting the rest: an area (`"hand"`,
+    /// `"jokers"`, `"consumables"`, `"deck"`, `"discard"`, `"play"`, `"shop_jokers"`,
+    /// `"shop_vouchers"`, `"shop_booster"`, `"pack_cards"`), `"blind"`, `"hands"`, `"pack"`,
+    /// `"tags"` or `"last_score"`.
+    fn view(&self, name: &str) -> PyResult<String> {
+        jackdaw_core::snapshot::view(&self.inner.gs, name)
+            .map(|v| v.to_string())
+            .ok_or_else(|| value_error(format!("unknown view {name:?}")))
+    }
+
     /// The observation (encoder v1, `jackdaw.env.observation`) of the current state.
     ///
     /// Returns ``(data, rows)``: ``data`` is a ``bytearray`` of native-endian float32 values,

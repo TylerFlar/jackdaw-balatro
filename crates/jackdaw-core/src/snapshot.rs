@@ -635,6 +635,124 @@ fn pool_read(key: &str) -> bool {
     })
 }
 
+/// The snapshot's `blind` section.
+fn blind_json(gs: &GameState) -> Value {
+    gs.blind.as_ref().map_or(Value::Null, |b| {
+        let mut eye: Vec<&str> = b.eye_hands.iter().map(|h| h.name()).collect();
+        eye.sort_unstable();
+        json!({
+            "key": b.key.map_or("", BlindId::key),
+            "chips": num(b.chips),
+            "mult": num(b.mult),
+            "dollars": num(b.dollars),
+            "boss": b.boss,
+            "disabled": b.disabled,
+            "triggered": b.triggered,
+            "prepped": b.prepped,
+            "eye_hands": eye,
+            "mouth_hand": b.mouth_hand.map(HandType::name),
+            "discards_sub": opt_num(b.discards_sub),
+            "hands_sub": opt_num(b.hands_sub),
+        })
+    })
+}
+
+/// The snapshot's `hands` section.
+fn hands_json(gs: &GameState) -> Value {
+    Value::Object(
+        HandType::ALL
+            .iter()
+            .map(|&h| {
+                let s = gs.hand(h);
+                (
+                    h.name().to_owned(),
+                    json!({
+                        "level": num(s.level),
+                        "chips": num(s.chips),
+                        "mult": num(s.mult),
+                        "played": num(s.played),
+                        "played_this_round": num(s.played_this_round),
+                        "visible": s.visible,
+                    }),
+                )
+            })
+            .collect(),
+    )
+}
+
+/// The snapshot's `areas` section.
+fn areas_json(gs: &GameState) -> Value {
+    Value::Object(
+        AreaId::ALL
+            .iter()
+            .map(|&a| (a.name().to_owned(), area_json(gs, a)))
+            .collect(),
+    )
+}
+
+/// One area's cards, as the snapshot writes them.
+fn area_json(gs: &GameState, a: AreaId) -> Value {
+    let mut cards = cards_json(gs.areas.get(a));
+    // Deck and discard hold their cards face down; the snapshot writes them face up.
+    if a.face_down() {
+        for c in cards.as_array_mut().expect("array") {
+            c["facing"] = json!("front");
+        }
+    }
+    cards
+}
+
+/// The snapshot's `pack` section.
+fn pack_json(gs: &GameState) -> Value {
+    gs.pack.as_ref().map_or(Value::Null, |p| {
+        // The dealt cards still held (a consumable may have destroyed some), ascending.
+        let mut held: Vec<u32> = p
+            .dealt
+            .iter()
+            .copied()
+            .filter(|&id| gs.areas.hand.iter().any(|c| c.sort_id == id))
+            .collect();
+        held.sort_unstable();
+        json!({
+            "kind": p.kind,
+            "choices_remaining": num(p.choices_remaining),
+            "dealt": held,
+            "return_phase": p.return_phase.name(),
+        })
+    })
+}
+
+/// The snapshot's `sim.last_score`.
+fn last_score_json(gs: &GameState) -> Value {
+    gs.sim.last_score.map_or(Value::Null, |s| {
+        json!({
+            "hand_type": s.hand_type.name(),
+            "chips": num(s.chips),
+            "mult": num(s.mult),
+            "total": num(s.total),
+            "dollars": num(s.dollars),
+            "debuffed": s.debuffed,
+        })
+    })
+}
+
+/// One section of the snapshot, by name, without exporting the rest: an area (`"hand"`,
+/// `"jokers"`, ...), `"blind"`, `"hands"`, `"pack"`, `"tags"` or `"last_score"`. The values are
+/// exactly [`export`]'s.
+pub fn view(gs: &GameState, name: &str) -> Option<Value> {
+    if let Some(&a) = AreaId::ALL.iter().find(|a| a.name() == name) {
+        return Some(area_json(gs, a));
+    }
+    Some(match name {
+        "blind" => blind_json(gs),
+        "hands" => hands_json(gs),
+        "pack" => pack_json(gs),
+        "tags" => json!(gs.tags.iter().map(|t| t.id.key()).collect::<Vec<_>>()),
+        "last_score" => last_score_json(gs),
+        _ => return None,
+    })
+}
+
 /// A snapshot of the whole run.
 pub fn export(gs: &GameState) -> Value {
     let rr = &gs.round_resets;
@@ -661,90 +779,12 @@ pub fn export(gs: &GameState) -> Value {
             "Big": tags[1].map(TagId::key),
         })
     });
-    let blind = gs.blind.as_ref().map_or(Value::Null, |b| {
-        let mut eye: Vec<&str> = b.eye_hands.iter().map(|h| h.name()).collect();
-        eye.sort_unstable();
-        json!({
-            "key": b.key.map_or("", BlindId::key),
-            "chips": num(b.chips),
-            "mult": num(b.mult),
-            "dollars": num(b.dollars),
-            "boss": b.boss,
-            "disabled": b.disabled,
-            "triggered": b.triggered,
-            "prepped": b.prepped,
-            "eye_hands": eye,
-            "mouth_hand": b.mouth_hand.map(HandType::name),
-            "discards_sub": opt_num(b.discards_sub),
-            "hands_sub": opt_num(b.hands_sub),
-        })
-    });
-    let hands = Value::Object(
-        HandType::ALL
-            .iter()
-            .map(|&h| {
-                let s = gs.hand(h);
-                (
-                    h.name().to_owned(),
-                    json!({
-                        "level": num(s.level),
-                        "chips": num(s.chips),
-                        "mult": num(s.mult),
-                        "played": num(s.played),
-                        "played_this_round": num(s.played_this_round),
-                        "visible": s.visible,
-                    }),
-                )
-            })
-            .collect(),
-    );
     let sp = &gs.starting_params;
-    let areas = Value::Object(
-        AreaId::ALL
-            .iter()
-            .map(|&a| {
-                let mut cards = cards_json(gs.areas.get(a));
-                // Deck and discard hold their cards face down; the snapshot writes them face up.
-                if a.face_down() {
-                    for c in cards.as_array_mut().expect("array") {
-                        c["facing"] = json!("front");
-                    }
-                }
-                (a.name().to_owned(), cards)
-            })
-            .collect(),
-    );
-    let pack = gs.pack.as_ref().map_or(Value::Null, |p| {
-        // The dealt cards still held (a consumable may have destroyed some), ascending.
-        let mut held: Vec<u32> = p
-            .dealt
-            .iter()
-            .copied()
-            .filter(|&id| gs.areas.hand.iter().any(|c| c.sort_id == id))
-            .collect();
-        held.sort_unstable();
-        json!({
-            "kind": p.kind,
-            "choices_remaining": num(p.choices_remaining),
-            "dealt": held,
-            "return_phase": p.return_phase.name(),
-        })
-    });
     let streams: Map<String, Value> = gs
         .rng
         .streams()
         .map(|(k, v)| (k.to_owned(), num(v)))
         .collect();
-    let last_score = gs.sim.last_score.map_or(Value::Null, |s| {
-        json!({
-            "hand_type": s.hand_type.name(),
-            "chips": num(s.chips),
-            "mult": num(s.mult),
-            "total": num(s.total),
-            "dollars": num(s.dollars),
-            "debuffed": s.debuffed,
-        })
-    });
     json!({
         "schema": SCHEMA,
         "phase": gs.phase.name(),
@@ -847,8 +887,8 @@ pub fn export(gs: &GameState) -> Value {
             "castle_card": {"suit": cr.castle_card.name()},
         },
         "round_bonus": {"next_hands": num(gs.round_bonus.next_hands), "discards": num(gs.round_bonus.discards)},
-        "blind": blind,
-        "hands": hands,
+        "blind": blind_json(gs),
+        "hands": hands_json(gs),
         "tags": gs.tags.iter().map(|t| json!({"key": t.id.key()})).collect::<Vec<_>>(),
         "sets": {
             "used_jokers": gs.sets.used_jokers.iter().filter(|k| pool_read(k)).collect::<Vec<_>>(),
@@ -861,8 +901,8 @@ pub fn export(gs: &GameState) -> Value {
             "by_key": Value::Object(gs.consumeable_usage.by_key.iter().map(|(k, v)| ((*k).to_owned(), num(*v))).collect()),
             "totals": Value::Object(gs.consumeable_usage.totals.iter().map(|(k, v)| (k.clone(), num(*v))).collect()),
         },
-        "areas": areas,
-        "pack": pack,
+        "areas": areas_json(gs),
+        "pack": pack_json(gs),
         "rng": {
             "seed": gs.rng.seed_str(),
             "hashed_seed": num(gs.rng.hashed_seed()),
@@ -877,7 +917,7 @@ pub fn export(gs: &GameState) -> Value {
             "hand_last_poll_size": num(gs.sim.hand_last_poll_size),
             "last_blind_was_boss": gs.sim.last_blind_was_boss,
             "pending_cashout": num(gs.sim.pending_cashout),
-            "last_score": last_score,
+            "last_score": last_score_json(gs),
             "tag_history": gs.sim.tag_history.iter().map(|t| t.key()).collect::<Vec<_>>(),
         },
     })
