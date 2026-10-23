@@ -408,10 +408,9 @@ def _open_tag_pack(gs: dict[str, Any], pack_key: str, force: bool = False) -> No
     ``G.FUNCS.use_card`` (tag.lua:209-282), i.e. the same ``Card:open`` as
     a shop pack: see :func:`_open_pack`.
     """
-    # A pack is already open (e.g. Double Tag duplicated a pack tag):
-    # queue this one.  Vanilla stacks pack opens — the next pack opens
-    # when the current one closes, and its contents roll AT THAT TIME
-    # (deferred generation keeps the streams in vanilla order).
+    # A pack is already open: queue this one, to open (and roll its
+    # contents) when the current one closes.  The tag passes never get here
+    # since G106: a second pack tag stays held until end_consumeable's pass.
     if not force and (gs.get("phase") == GamePhase.PACK_OPENING or gs.get("pack_cards")):
         gs.setdefault("pending_tag_packs", []).append(pack_key)
         return
@@ -1418,7 +1417,9 @@ def _handle_sell_card(gs: dict[str, Any], area: str, idx: int) -> dict[str, Any]
     # Live Card:sell_card dispatches selling_self before the sold card is
     # removed (card.lua:1599). Apply the returned mutation at that point too.
     selling_self_mutations = _fire_selling_self(gs, card)
-    _apply_selling_self_mutations(gs, card, selling_self_mutations)
+    if _apply_selling_self_mutations(gs, card, selling_self_mutations):
+        _sell_into_round_end(gs, card)
+        return gs
 
     gs["dollars"] = gs.get("dollars", 0) + card.sell_cost
     cards.pop(idx)
@@ -1471,15 +1472,43 @@ def _fire_selling_self(gs: dict[str, Any], card: Any) -> list[dict[str, Any]]:
     return []
 
 
+def _sell_into_round_end(gs: dict[str, Any], card: Any) -> None:
+    """A sale whose selling_self disabled a boss the score now beats (G161).
+
+    Blind:disable only queues the beaten-boss check (blind.lua:397-406), and
+    Card:sell_card queues the payout and the dissolve (card.lua:1601-1637);
+    G.FUNCS.sell_card's selling_card loop runs before any of them
+    (button_callbacks.lua:2318-2326).  The check's NEW_ROUND state queues
+    end_round (game.lua:3248-3256), which runs while the sold card is still
+    held (its dissolve removes it on a later timer), before the payout's
+    own ease_dollars event; evaluate_round's interest counts the payout.
+    Nothing in end_round reads the money, so it is paid first here.
+    """
+    _fire_shop_joker_context(gs, selling_card=True, exclude=card)
+    gs["dollars"] = gs.get("dollars", 0) + card.sell_cost
+    _end_round(gs)
+    for area in ("jokers", "consumables"):
+        held: list = gs.get(area, [])
+        if any(c is card for c in held):
+            held.remove(card)
+            card.remove_from_deck(gs)
+            _release_used_key(gs, card)
+
+
 def _apply_selling_self_mutations(
     gs: dict[str, Any],
     sold_card: Any,
     mutations: list[dict[str, Any]],
-) -> None:
-    """Apply Luchador, Invisible Joker, and Diet Cola sell effects."""
+) -> bool:
+    """Apply Luchador, Invisible Joker, and Diet Cola sell effects.
+
+    True when Luchador disabled a boss the score now beats: the round ends
+    once the sale is done (see :func:`_sell_into_round_end`).
+    """
+    round_over = False
     for mutation in mutations:
         if mutation.get("disable_blind"):
-            disable_blind(gs)
+            round_over = disable_blind(gs, end_round=False) or round_over
 
         if mutation.get("duplicate_random_joker"):
             jokers: list = gs.get("jokers", [])
@@ -1513,9 +1542,10 @@ def _apply_selling_self_mutations(
             # never duplicates another Double (tag.lua:320), so this is inert
             # for Diet Cola itself and guards any future tag-creating joker.
             _check_double_tag(gs, tag_key)
+    return round_over
 
 
-def disable_blind(gs: dict[str, Any]) -> None:
+def disable_blind(gs: dict[str, Any], *, end_round: bool = True) -> bool:
     """``G.GAME.blind:disable()`` (blind.lua:356-415).
 
     Called by Chicot (its setting_blind, deferred past the round's deck
@@ -1523,10 +1553,14 @@ def disable_blind(gs: dict[str, Any]) -> None:
     card.lua:596-600), Luchador's selling_self (card.lua:2355-2359) and any
     joker sold under Verdant Leaf (card.lua:1616-1621).  Like vanilla it
     has no guard: a second call applies the restorations again.
+
+    With ``end_round=False`` a boss the score now beats does not end the
+    round here; the return value says it should, once the caller's own work
+    is done (the queued check runs after it, blind.lua:397-406).
     """
     blind = gs.get("blind")
     if blind is None:
-        return
+        return False
     # The flag, The Wall's /2 and Violet Vessel's /3 (blind.lua:357, 377-380,
     # 393-396).
     blind.disable()
@@ -1565,15 +1599,18 @@ def disable_blind(gs: dict[str, Any]) -> None:
 
     if game_over:
         gs["phase"] = GamePhase.GAME_OVER
-        return
+        return False
     # Queued check (blind.lua:397-406): a disabled boss whose target the
-    # score already meets ends the round at once (G.STATE = NEW_ROUND).
-    if (
+    # score already meets ends the round (G.STATE = NEW_ROUND).
+    beaten = (
         blind.boss
         and gs.get("phase") == GamePhase.SELECTING_HAND
         and blind.beaten_by(gs.get("chips", 0))
-    ):
+    )
+    if beaten and end_round:
         _end_round(gs)
+        return False
+    return bool(beaten)
 
 
 def _handle_use_consumable(
@@ -3735,11 +3772,15 @@ def _get_card_set(card: Any) -> str:
     return ""
 
 
-def _fire_shop_joker_context(gs: dict[str, Any], **context_flags: Any) -> list[dict[str, Any]]:
+def _fire_shop_joker_context(
+    gs: dict[str, Any], *, exclude: Any = None, **context_flags: Any
+) -> list[dict[str, Any]]:
     """Fire a joker context during shop phase and return mutations.
 
     Accepts keyword arguments matching :class:`JokerContext` flags
-    (e.g. ``buying_card=True``, ``reroll_shop=True``).
+    (e.g. ``buying_card=True``, ``reroll_shop=True``).  ``exclude`` is a
+    held card that does not get the context (the card being sold,
+    button_callbacks.lua:2321-2325).
     """
     from jackdaw.engine.jokers import GameSnapshot, JokerContext, calculate_joker
 
@@ -3764,7 +3805,7 @@ def _fire_shop_joker_context(gs: dict[str, Any], **context_flags: Any) -> list[d
 
     mutations: list[dict[str, Any]] = []
     for joker in list(jokers):  # copy to allow mutation during iteration
-        if getattr(joker, "debuff", False):
+        if getattr(joker, "debuff", False) or joker is exclude:
             continue
         ctx = JokerContext(
             jokers=jokers,
