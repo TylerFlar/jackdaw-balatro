@@ -10,8 +10,9 @@ stays oracle-compatible behind an `// AUDIT-Gxx` marker. The ledger rows that ca
 their `gap` column (status `gap`) show where the logic lives; see [README.md](README.md).
 
 Columns: `python fix` and `rust` take the PR or commit and code location of each fix, `test` the
-regression test id. Status is one of `open`, `in-progress`, `fixed` (both engines, test landed)
-or `wontfix` (with the reason in the summary).
+regression test id. Status is one of `open`, `in-progress`, `python-fixed` (fixed in the Python
+oracle with its regression test; Rust pending), `fixed` (both engines, test landed) or `wontfix`
+(with the reason in the summary).
 
 ## Gameplay gaps
 
@@ -45,7 +46,7 @@ or `wontfix` (with the reason in the summary).
 | G26 | consumables | The Wheel of Fortune, Aura and Hex set bare edition flags without the bonus or repricing; they must go through `set_edition` + `set_cost`. | card.lua:387-462 |  |  |  | open |
 | G27 | consumables | Ectoplasm's hand-size penalty grows by one each use (`ecto_minus`). | card.lua:1494 |  |  |  | open |
 | G28 | consumables | Ankh refuses to work when joker slots are full (`check_use`). Ankh and Invisible Joker copies drop Negative. | card.lua:1581/1445/2384 |  |  |  | open |
-| G29 | consumables | `copy_card` gives copies a fresh `sort_id`; Python deep copies keep the old one, which changes later picks that sort by `sort_id`. | common_events.lua:2157 |  |  |  | open |
+| G29 | consumables | `copy_card` gives copies a fresh `sort_id`; Python deep copies keep the old one, which changes later picks that sort by `sort_id`. | common_events.lua:2157 | card_factory.copy_card mirrors common_events.lua copy_card (new Card, set_ability incl. To Do List's to_do pull, fresh base, deep-copied ability + stickers, edition/seal/debuff/pinned, set_cost); used by Ankh, Invisible Joker, Perkeo, Cryptid. Card is eq=False (identity). | | tests/engine/audit/test_copies.py::TestCardIdentity, ::TestFreshSortId, ::TestCopySemantics | python-fixed |
 | G30 | consumables | Death/DNA copies must carry `perma_bonus`, `played_this_ante` and the debuff state. | common_events.lua:2161 |  |  |  | open |
 | G31 | consumables | The Soul's edition roll uses the `sou` append; Python uses `soul`. | card.lua:1418 |  |  |  | open |
 | G32 | consumables | A debuffed Purple Seal makes no Tarot. | card.lua:2243 |  |  |  | open |

@@ -163,13 +163,17 @@ def _resolve_center(key: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-@dataclass
+@dataclass(eq=False)
 class Card:
     """A card in the game — playing card, joker, tarot, planet, spectral, etc.
 
     The ``ability`` dict is intentionally untyped (``dict[str, Any]``) to match
     Lua's dynamic table semantics.  It is populated by :meth:`set_ability` and
     freely mutated by joker effects during gameplay.
+
+    Cards compare and hash by identity, like Lua tables: two cards with equal
+    fields (a ``copy_card`` duplicate and its source) are different cards, so
+    ``list.remove`` / ``index`` / ``in`` always find the exact object.
     """
 
     # Identity

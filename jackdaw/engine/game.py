@@ -1386,10 +1386,11 @@ def _apply_selling_self_mutations(
             candidates = [joker for joker in jokers if joker is not sold_card]
             rng = gs.get("rng")
             if candidates and len(jokers) <= gs.get("joker_slots", 5) and rng is not None:
-                import copy
+                from jackdaw.engine.card_factory import copy_card
 
                 chosen, _ = rng.element(candidates, rng.seed("invisible"))
-                duplicate = copy.deepcopy(chosen)
+                # copy_card (card.lua:2384): a new Card, not a clone.
+                duplicate = copy_card(chosen, game_state=gs)
                 if "invis_rounds" in duplicate.ability:
                     duplicate.ability["invis_rounds"] = 0
                 duplicate.add_to_deck(gs)
@@ -2661,20 +2662,17 @@ def _apply_consumable_result(
 
     # k. Add playing cards to deck
     if getattr(result, "add_to_deck", None):
-        import copy as _copy
-
         from jackdaw.engine.card import Card as _Card
-        from jackdaw.engine.card import _next_sort_id
+        from jackdaw.engine.card_factory import copy_card
 
         deck_list: list = gs.setdefault("deck", [])
         for card_spec in result.add_to_deck:
             # Cryptid: copy an existing card — copies are emplaced into the
             # HAND, not the draw pile (card.lua:1206-1213: copy_card +
-            # G.hand:emplace), with a fresh sort_id like any new Card.
+            # G.hand:emplace), each a new Card with a fresh sort_id.
             copy_source = card_spec.get("copy_of")
             if copy_source is not None:
-                new_card = _copy.deepcopy(copy_source)
-                new_card.sort_id = _next_sort_id()
+                new_card = copy_card(copy_source, game_state=gs)
                 if gs.get("phase") == GamePhase.SELECTING_HAND:
                     gs.setdefault("hand", []).append(new_card)
                     _sort_hand_desc(gs.get("hand", []))
@@ -3047,6 +3045,23 @@ def _all_cards_set_cost_pass(gs: dict[str, Any]) -> None:
     reprice_shop(gs)
 
 
+def _reprice(gs: dict[str, Any], card: Any) -> None:
+    """``Card:set_cost`` for a card outside the shop areas (card.lua:369-385).
+
+    Owned and newly made cards are never couponed-to-zero (the coupon only
+    applies in ``G.shop_jokers``/``G.shop_booster``, card.lua:383).
+    """
+    from jackdaw.engine.card_utils import astronomer_active
+
+    card.set_cost(
+        inflation=gs.get("inflation", 0),
+        discount_percent=gs.get("discount_percent", 0),
+        ante=gs.get("round_resets", {}).get("ante", 1),
+        booster_ante_scaling=gs.get("booster_ante_scaling", False),
+        has_astronomer=astronomer_active(gs),
+    )
+
+
 def _get_card_set(card: Any) -> str:
     """Get the set name from a Card's ability dict."""
     ability = getattr(card, "ability", None)
@@ -3127,17 +3142,15 @@ def _apply_shop_mutations(
                 if consumables:
                     rng = gs.get("rng")
                     if rng:
-                        import copy
+                        from jackdaw.engine.card_factory import copy_card
 
                         seed_val = rng.seed("perkeo")
                         original, _ = rng.element(consumables, seed_val)
-                        duplicate = copy.deepcopy(original)
+                        # copy_card (card.lua:2417) makes a new Card; the
+                        # Negative set_edition then reprices it (card.lua:461).
+                        duplicate = copy_card(original, game_state=gs)
                         duplicate.set_edition({"negative": True})
-                        duplicate.set_cost(
-                            inflation=gs.get("inflation", 0),
-                            discount_percent=gs.get("discount_percent", 0),
-                            ante=gs.get("round_resets", {}).get("ante", 1),
-                        )
+                        _reprice(gs, duplicate)
                         consumables.append(duplicate)
                         duplicate.add_to_deck(gs)
 
