@@ -11,6 +11,7 @@ from jackdaw.env.action_space import (
     ActionMask,
     ActionType,
     FactoredAction,
+    get_consumable_target_info,
 )
 
 # ---------------------------------------------------------------------------
@@ -110,22 +111,15 @@ class RandomAgent:
 
 def _target_info(info: dict, area: str, index: int) -> tuple[int, int, bool] | None:
     """``get_consumable_target_info`` for card ``index`` of ``area`` (``"consumables"`` or
-    ``"pack_cards"``), from the run in *info*: the Rust engine's ``game`` or the Python
-    engine's ``raw_state``.  None past the end of the area."""
+    ``"pack_cards"``) of the run in ``info["game"]``.  None without a run, or past the end
+    of the area."""
     game = info.get("game")
-    if game is not None:
-        from jackdaw.env.rust_env import consumable_target_info
-
-        try:
-            return consumable_target_info(game, area, index)
-        except ValueError:  # no card there
-            return None
-    source = info.get("raw_state", {}).get(area, [])
-    if index >= len(source):
+    if game is None:
         return None
-    from jackdaw.env.action_space import get_consumable_target_info
-
-    return get_consumable_target_info(source[index])
+    try:
+        return get_consumable_target_info(game, area, index)
+    except ValueError:  # no card there
+        return None
 
 
 __all__ = ["Agent", "RandomAgent"]

@@ -8,8 +8,10 @@ The reward is pluggable: pass ``reward_fn`` (see :mod:`jackdaw.env.rewards`).
 
 With :class:`~jackdaw.env.game_interface.DirectAdapter` the whole step (the
 engine, the observation, the mask, the action table and the built-in rewards)
-runs in Rust (``jackdaw._core.GymEnv``); the Python engine's adapters take the
-Python path, which the Rust one matches bit for bit.
+runs in Rust (``jackdaw._core.GymEnv``).  Any other adapter (a
+:class:`~jackdaw.bridge.live.LiveAdapter`) takes the generic path: a
+:class:`BalatroEnvironment` step, then the action table and the reward in
+Python.  The two paths play the same.
 
 Example::
 
@@ -36,7 +38,7 @@ from gymnasium import spaces
 
 from jackdaw import _core
 from jackdaw.core import Game
-from jackdaw.env.action_space import ActionType, get_consumable_target_info
+from jackdaw.env.action_space import ActionType
 from jackdaw.env.balatro_env import BalatroEnvironment
 from jackdaw.env.balatro_spec import balatro_game_spec
 from jackdaw.env.game_interface import DirectAdapter, GameAdapter, game_state_from_parts
@@ -72,7 +74,7 @@ _ENTITY_ONLY_TYPES: frozenset[int] = frozenset(
     for i, at in enumerate(_SPEC.action_types)
     if at.needs_entity_target and not at.needs_card_select
 )
-# Entity + optional card select — the game_state list each entity indexes.
+# Entity + optional card select — the area of the run each entity indexes.
 # A targeting Tarot/Spectral takes card targets; anything else takes none.
 _TARGETED_ENTITY_SOURCES: dict[int, str] = {
     ActionType.UseConsumable: "consumables",
@@ -194,9 +196,9 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         :class:`~jackdaw.env.rewards.ShapedReward`, False (default)
         :func:`~jackdaw.env.rewards.sparse_reward`.
 
-    On the Rust engine (:class:`~jackdaw.env.game_interface.DirectAdapter`) a step
-    the engine can't take yet ends the episode as truncated, with the reason in
-    ``info["balatro/not_ported"]``; :attr:`game` is a copy of the current run.
+    With :class:`~jackdaw.env.game_interface.DirectAdapter` a step the engine can't
+    take yet ends the episode as truncated, with the reason in
+    ``info["balatro/not_ported"]``.  :attr:`game` is a copy of the current run.
     """
 
     metadata: dict[str, Any] = {"render_modes": []}
@@ -219,8 +221,8 @@ class BalatroGymnasiumEnv(gymnasium.Env):
             reward_fn = ShapedReward() if reward_shaping else sparse_reward
         self.reward_fn: RewardFn = reward_fn
 
-        # The Rust engine runs the whole step in jackdaw._core.GymEnv; the Python
-        # engine's adapters go through BalatroEnvironment.
+        # A DirectAdapter run takes the whole step in jackdaw._core.GymEnv; other
+        # adapters go through BalatroEnvironment.
         self._core: Any = None
         self._inner: BalatroEnvironment | None = None
         if isinstance(adapter_factory(), DirectAdapter):
@@ -347,9 +349,10 @@ class BalatroGymnasiumEnv(gymnasium.Env):
 
     @property
     def game(self) -> Game:
-        """A copy of the current run (Rust engine only)."""
+        """A copy of the current run."""
         if self._core is None:
-            raise AttributeError("the Python engine's run is env._inner._adapter.raw_state")
+            assert self._inner is not None
+            return self._inner._adapter.game.clone()  # type: ignore[attr-defined]
         return Game(self._core.game())
 
     # ------------------------------------------------------------------
@@ -458,17 +461,11 @@ class BalatroGymnasiumEnv(gymnasium.Env):
                 if t in mask.entity_masks:
                     legal_entities = np.nonzero(mask.entity_masks[t])[0].tolist()
                     area = _TARGETED_ENTITY_SOURCES[t]
-                    game = info.get("game")  # a Rust run (LiveAdapter's shadow)
-                    source = info.get("raw_state", {}).get(area, [])
+                    game = info["game"]  # the run (LiveAdapter's shadow)
                     for e_idx in legal_entities:
-                        if game is not None:
-                            try:
-                                target_info = game._g.consumable_target_info(area, e_idx)
-                            except ValueError:  # past the end of the area
-                                continue
-                        elif e_idx < len(source):
-                            target_info = get_consumable_target_info(source[e_idx])
-                        else:
+                        try:
+                            target_info = game._g.consumable_target_info(area, e_idx)
+                        except ValueError:  # past the end of the area
                             continue
                         min_cards, max_cards, needs = target_info
                         if needs:

@@ -12,15 +12,19 @@ Covers:
 - Seal spectrals require exactly 1 target
 - No-target consumables reject card selections
 - Validation: bounds, duplicates, filter checks
+- The specs agree with the Rust engine's targeting info
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any
+from types import SimpleNamespace
 
 import pytest
 
+from jackdaw.core import Game
+from jackdaw.engine.actions import SelectBlind
+from jackdaw.engine.data import load
+from jackdaw.env.action_space import get_consumable_target_info
 from jackdaw.env.consumable_targets import (
     get_consumable_target_spec,
     get_valid_target_cards,
@@ -28,50 +32,18 @@ from jackdaw.env.consumable_targets import (
 )
 
 # ---------------------------------------------------------------------------
-# Lightweight mock Card (matches test_action_space.py pattern)
+# Hands: anything with an ``edition`` (a CardView's is a name or None)
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class MockCard:
-    """Minimal mock card for testing targeting logic."""
-
-    center_key: str = "c_base"
-    ability: dict[str, Any] = field(default_factory=dict)
-    edition: dict[str, bool] | None = None
-    debuff: bool = False
-    eternal: bool = False
-    cost: int = 0
-    sell_cost: int = 0
-    base: Any = None
-    seal: str | None = None
-    sort_id: int = 0
+def _make_hand(n: int = 5) -> list[SimpleNamespace]:
+    """Create n hand cards without editions."""
+    return [SimpleNamespace(edition=None) for _ in range(n)]
 
 
-def _make_hand(n: int = 5) -> list[MockCard]:
-    """Create n hand cards (playing cards)."""
-    return [MockCard(center_key="c_base", sort_id=i) for i in range(n)]
-
-
-def _make_hand_with_editions(editions: list[dict | None]) -> list[MockCard]:
-    """Create hand cards with specified editions (None = no edition)."""
-    return [MockCard(center_key="c_base", sort_id=i, edition=ed) for i, ed in enumerate(editions)]
-
-
-def _make_consumable(key: str, cfg: dict | None = None) -> MockCard:
-    """Create a consumable with optional config."""
-    ability: dict[str, Any] = {"set": "Tarot"}
-    if cfg is not None:
-        ability["consumeable"] = cfg
-    return MockCard(center_key=key, ability=ability)
-
-
-def _make_planet(key: str = "c_mercury") -> MockCard:
-    """Create a planet consumable."""
-    return MockCard(
-        center_key=key,
-        ability={"set": "Planet", "consumeable": {"hand_type": "Pair"}},
-    )
+def _make_hand_with_editions(editions: list[str | None]) -> list[SimpleNamespace]:
+    """Create hand cards with the given editions (None = no edition)."""
+    return [SimpleNamespace(edition=ed) for ed in editions]
 
 
 # =========================================================================
@@ -82,32 +54,20 @@ def _make_planet(key: str = "c_mercury") -> MockCard:
 class TestEnhancementTarots:
     """Enhancement tarots use max_highlighted from config."""
 
-    @pytest.mark.parametrize(
-        "key,max_h",
-        [
-            ("c_magician", 2),
-            ("c_empress", 2),
-            ("c_heirophant", 2),
-        ],
-    )
-    def test_two_target_enhancement(self, key: str, max_h: int):
+    @pytest.mark.parametrize("key", ["c_magician", "c_empress", "c_heirophant"])
+    def test_two_target_enhancement(self, key: str):
         """Enhancement tarots with max_highlighted=2 accept 1-2 cards."""
-        card = _make_consumable(key, {"max_highlighted": max_h, "mod_conv": "m_lucky"})
-        spec = get_consumable_target_spec(card)
+        spec = get_consumable_target_spec(key)
         assert spec.needs_card_targets
         assert spec.min_targets == 1
         assert spec.max_targets == 2
         assert spec.exact_targets is None  # 1 or 2 is fine
         assert spec.target_filter == "any"
 
-    @pytest.mark.parametrize(
-        "key",
-        ["c_lovers", "c_chariot", "c_justice", "c_devil", "c_tower"],
-    )
+    @pytest.mark.parametrize("key", ["c_lovers", "c_chariot", "c_justice", "c_devil", "c_tower"])
     def test_single_target_enhancement(self, key: str):
         """Enhancement tarots with max_highlighted=1 accept exactly 1 card."""
-        card = _make_consumable(key, {"max_highlighted": 1, "mod_conv": "m_wild"})
-        spec = get_consumable_target_spec(card)
+        spec = get_consumable_target_spec(key)
         assert spec.needs_card_targets
         assert spec.min_targets == 1
         assert spec.max_targets == 1
@@ -124,8 +84,7 @@ class TestSuitChangeTarots:
     @pytest.mark.parametrize("key", ["c_star", "c_moon", "c_sun", "c_world"])
     def test_suit_change_up_to_three(self, key: str):
         """Suit-change tarots accept 1-3 cards."""
-        card = _make_consumable(key, {"max_highlighted": 3, "suit_conv": "Diamonds"})
-        spec = get_consumable_target_spec(card)
+        spec = get_consumable_target_spec(key)
         assert spec.needs_card_targets
         assert spec.min_targets == 1
         assert spec.max_targets == 3
@@ -140,18 +99,14 @@ class TestSuitChangeTarots:
 class TestTransformationTarots:
     def test_strength_one_to_two(self):
         """Strength: config has max_highlighted=2, no min → 1-2 cards."""
-        card = _make_consumable("c_strength", {"max_highlighted": 2, "mod_conv": "up_rank"})
-        spec = get_consumable_target_spec(card)
+        spec = get_consumable_target_spec("c_strength")
         assert spec.needs_card_targets
         assert spec.min_targets == 1
         assert spec.max_targets == 2
 
     def test_death_exactly_two(self):
         """Death: min_highlighted=2, max_highlighted=2 → exactly 2."""
-        card = _make_consumable(
-            "c_death", {"max_highlighted": 2, "min_highlighted": 2, "mod_conv": "card"}
-        )
-        spec = get_consumable_target_spec(card)
+        spec = get_consumable_target_spec("c_death")
         assert spec.needs_card_targets
         assert spec.min_targets == 2
         assert spec.max_targets == 2
@@ -159,8 +114,7 @@ class TestTransformationTarots:
 
     def test_hanged_man_one_to_two(self):
         """Hanged Man: max_highlighted=2, destroys 1-2 cards."""
-        card = _make_consumable("c_hanged_man", {"max_highlighted": 2, "remove_card": True})
-        spec = get_consumable_target_spec(card)
+        spec = get_consumable_target_spec("c_hanged_man")
         assert spec.needs_card_targets
         assert spec.min_targets == 1
         assert spec.max_targets == 2
@@ -191,17 +145,14 @@ class TestPlanetCards:
     )
     def test_planet_no_targets(self, key: str):
         """All planet cards need no card targets."""
-        card = _make_planet(key)
-        spec = get_consumable_target_spec(card)
+        spec = get_consumable_target_spec(key)
         assert not spec.needs_card_targets
         assert spec.min_targets == 0
         assert spec.max_targets == 0
 
     def test_black_hole_no_targets(self):
         """Black Hole (levels all hands) needs no targets."""
-        card = MockCard(center_key="c_black_hole", ability={"set": "Spectral"})
-        spec = get_consumable_target_spec(card)
-        assert not spec.needs_card_targets
+        assert not get_consumable_target_spec("c_black_hole").needs_card_targets
 
 
 # =========================================================================
@@ -229,20 +180,14 @@ class TestNoTargetConsumables:
     )
     def test_no_card_targets(self, key: str):
         """These consumables don't target hand cards."""
-        card = MockCard(center_key=key, ability={"set": "Tarot"})
-        spec = get_consumable_target_spec(card)
+        spec = get_consumable_target_spec(key)
         assert not spec.needs_card_targets
         assert spec.min_targets == 0
 
-    @pytest.mark.parametrize(
-        "key",
-        ["c_familiar", "c_grim", "c_incantation", "c_immolate"],
-    )
+    @pytest.mark.parametrize("key", ["c_familiar", "c_grim", "c_incantation", "c_immolate"])
     def test_destroy_spectrals_no_selection(self, key: str):
         """Destroy/create spectrals need hand cards but no player selection."""
-        card = MockCard(center_key=key, ability={"set": "Spectral"})
-        spec = get_consumable_target_spec(card)
-        assert not spec.needs_card_targets
+        assert not get_consumable_target_spec(key).needs_card_targets
 
 
 # =========================================================================
@@ -253,8 +198,7 @@ class TestNoTargetConsumables:
 class TestAura:
     def test_aura_spec(self):
         """Aura targets exactly 1 card with no edition."""
-        card = MockCard(center_key="c_aura", ability={"set": "Spectral"})
-        spec = get_consumable_target_spec(card)
+        spec = get_consumable_target_spec("c_aura")
         assert spec.needs_card_targets
         assert spec.min_targets == 1
         assert spec.max_targets == 1
@@ -263,24 +207,31 @@ class TestAura:
 
     def test_aura_filters_editions(self):
         """Aura only targets cards without editions."""
-        card = MockCard(center_key="c_aura", ability={"set": "Spectral"})
-        hand = _make_hand_with_editions([None, {"foil": True}, None, {"holo": True}, None])
-        valid = get_valid_target_cards(card, hand)
-        assert valid == [0, 2, 4]
+        hand = _make_hand_with_editions([None, "foil", None, "holo", None])
+        assert get_valid_target_cards("c_aura", hand) == [0, 2, 4]
 
     def test_aura_all_have_editions(self):
         """No valid targets when all hand cards have editions."""
-        card = MockCard(center_key="c_aura", ability={"set": "Spectral"})
-        hand = _make_hand_with_editions([{"foil": True}, {"holo": True}, {"polychrome": True}])
-        valid = get_valid_target_cards(card, hand)
-        assert valid == []
+        hand = _make_hand_with_editions(["foil", "holo", "polychrome"])
+        assert get_valid_target_cards("c_aura", hand) == []
 
     def test_aura_no_editions_all_valid(self):
         """All cards valid when none have editions."""
-        card = MockCard(center_key="c_aura", ability={"set": "Spectral"})
-        hand = _make_hand(4)
-        valid = get_valid_target_cards(card, hand)
-        assert valid == [0, 1, 2, 3]
+        assert get_valid_target_cards("c_aura", _make_hand(4)) == [0, 1, 2, 3]
+
+    def test_aura_on_a_real_hand(self):
+        """A run's hand (CardViews): the editioned card is no target."""
+        game = Game.new("b_red", 1, "AURA_HAND")
+        game.step(SelectBlind())
+        game.debug_add("H_A", edition="foil")
+        game.debug_add("c_aura")
+        hand = game.hand
+        (aura,) = game.consumables
+        foil = len(hand) - 1  # the card just added
+        valid = get_valid_target_cards(aura, hand)
+        assert foil not in valid and len(valid) == len(hand) - 1
+        assert not validate_card_targets(aura, (foil,), hand)
+        assert validate_card_targets(aura, (0,), hand)
 
 
 # =========================================================================
@@ -292,18 +243,14 @@ class TestSigilOuija:
     @pytest.mark.parametrize("key", ["c_sigil", "c_ouija"])
     def test_targets_all_no_selection(self, key: str):
         """Sigil/Ouija affect all hand cards — no player selection needed."""
-        card = MockCard(center_key=key, ability={"set": "Spectral"})
-        spec = get_consumable_target_spec(card)
+        spec = get_consumable_target_spec(key)
         assert not spec.needs_card_targets
         assert spec.target_filter == "all_hand"
 
     @pytest.mark.parametrize("key", ["c_sigil", "c_ouija"])
     def test_valid_targets_empty(self, key: str):
         """get_valid_target_cards returns [] since no selection is needed."""
-        card = MockCard(center_key=key, ability={"set": "Spectral"})
-        hand = _make_hand(5)
-        valid = get_valid_target_cards(card, hand)
-        assert valid == []
+        assert get_valid_target_cards(key, _make_hand(5)) == []
 
 
 # =========================================================================
@@ -315,8 +262,7 @@ class TestSealSpectrals:
     @pytest.mark.parametrize("key", ["c_talisman", "c_deja_vu", "c_trance", "c_medium"])
     def test_seal_spectral_one_target(self, key: str):
         """Seal spectrals target exactly 1 card (max_highlighted=1 in config)."""
-        card = _make_consumable(key, {"max_highlighted": 1, "extra": "Gold"})
-        spec = get_consumable_target_spec(card)
+        spec = get_consumable_target_spec(key)
         assert spec.needs_card_targets
         assert spec.min_targets == 1
         assert spec.max_targets == 1
@@ -331,8 +277,7 @@ class TestSealSpectrals:
 class TestCryptid:
     def test_cryptid_one_target(self):
         """Cryptid: max_highlighted=1 in config → exactly 1 card."""
-        card = _make_consumable("c_cryptid", {"max_highlighted": 1, "extra": 2})
-        spec = get_consumable_target_spec(card)
+        spec = get_consumable_target_spec("c_cryptid")
         assert spec.needs_card_targets
         assert spec.min_targets == 1
         assert spec.max_targets == 1
@@ -347,23 +292,15 @@ class TestCryptid:
 class TestGetValidTargetCards:
     def test_enhancement_tarot_all_valid(self):
         """Enhancement tarots accept any hand card."""
-        card = _make_consumable("c_magician", {"max_highlighted": 2})
-        hand = _make_hand(5)
-        valid = get_valid_target_cards(card, hand)
-        assert valid == [0, 1, 2, 3, 4]
+        assert get_valid_target_cards("c_magician", _make_hand(5)) == [0, 1, 2, 3, 4]
 
     def test_planet_no_valid_targets(self):
         """Planets return no valid targets."""
-        card = _make_planet()
-        hand = _make_hand(5)
-        valid = get_valid_target_cards(card, hand)
-        assert valid == []
+        assert get_valid_target_cards("c_mercury", _make_hand(5)) == []
 
     def test_empty_hand(self):
         """Empty hand returns no valid targets."""
-        card = _make_consumable("c_magician", {"max_highlighted": 2})
-        valid = get_valid_target_cards(card, [])
-        assert valid == []
+        assert get_valid_target_cards("c_magician", []) == []
 
 
 # =========================================================================
@@ -374,100 +311,70 @@ class TestGetValidTargetCards:
 class TestValidateCardTargets:
     def test_valid_single_target(self):
         """Single target within range for max_highlighted=1."""
-        card = _make_consumable("c_chariot", {"max_highlighted": 1})
-        hand = _make_hand(5)
-        assert validate_card_targets(card, (2,), hand)
+        assert validate_card_targets("c_chariot", (2,), _make_hand(5))
 
     def test_valid_two_targets(self):
         """Two targets for max_highlighted=2."""
-        card = _make_consumable("c_magician", {"max_highlighted": 2})
-        hand = _make_hand(5)
-        assert validate_card_targets(card, (1, 3), hand)
+        assert validate_card_targets("c_magician", (1, 3), _make_hand(5))
 
     def test_valid_death_two_targets(self):
         """Death requires exactly 2."""
-        card = _make_consumable("c_death", {"max_highlighted": 2, "min_highlighted": 2})
-        hand = _make_hand(5)
-        assert validate_card_targets(card, (0, 4), hand)
+        assert validate_card_targets("c_death", (0, 4), _make_hand(5))
 
     def test_death_one_target_invalid(self):
         """Death with 1 target is invalid (min=2)."""
-        card = _make_consumable("c_death", {"max_highlighted": 2, "min_highlighted": 2})
-        hand = _make_hand(5)
-        assert not validate_card_targets(card, (0,), hand)
+        assert not validate_card_targets("c_death", (0,), _make_hand(5))
 
     def test_too_many_targets(self):
         """3 targets for max_highlighted=2 is invalid."""
-        card = _make_consumable("c_magician", {"max_highlighted": 2})
-        hand = _make_hand(5)
-        assert not validate_card_targets(card, (0, 1, 2), hand)
+        assert not validate_card_targets("c_magician", (0, 1, 2), _make_hand(5))
 
     def test_zero_targets_when_required(self):
         """Empty selection for a targeting consumable is invalid."""
-        card = _make_consumable("c_chariot", {"max_highlighted": 1})
-        hand = _make_hand(5)
-        assert not validate_card_targets(card, (), hand)
+        assert not validate_card_targets("c_chariot", (), _make_hand(5))
 
     def test_no_target_consumable_empty_ok(self):
         """No-target consumable accepts empty selection."""
-        card = _make_planet()
-        hand = _make_hand(5)
-        assert validate_card_targets(card, (), hand)
+        assert validate_card_targets("c_mercury", (), _make_hand(5))
 
     def test_no_target_consumable_rejects_targets(self):
         """No-target consumable rejects non-empty selection."""
-        card = _make_planet()
-        hand = _make_hand(5)
-        assert not validate_card_targets(card, (0,), hand)
+        assert not validate_card_targets("c_mercury", (0,), _make_hand(5))
 
     def test_index_out_of_bounds(self):
         """Target index beyond hand size is invalid."""
-        card = _make_consumable("c_magician", {"max_highlighted": 2})
-        hand = _make_hand(3)
-        assert not validate_card_targets(card, (5,), hand)
+        assert not validate_card_targets("c_magician", (5,), _make_hand(3))
 
     def test_negative_index(self):
         """Negative index is invalid."""
-        card = _make_consumable("c_magician", {"max_highlighted": 2})
-        hand = _make_hand(5)
-        assert not validate_card_targets(card, (-1,), hand)
+        assert not validate_card_targets("c_magician", (-1,), _make_hand(5))
 
     def test_duplicate_indices(self):
         """Duplicate indices are invalid."""
-        card = _make_consumable("c_magician", {"max_highlighted": 2})
-        hand = _make_hand(5)
-        assert not validate_card_targets(card, (2, 2), hand)
+        assert not validate_card_targets("c_magician", (2, 2), _make_hand(5))
 
     def test_aura_valid_no_edition(self):
         """Aura accepts a card without edition."""
-        card = MockCard(center_key="c_aura", ability={"set": "Spectral"})
-        hand = _make_hand_with_editions([None, {"foil": True}, None])
-        assert validate_card_targets(card, (0,), hand)
-        assert validate_card_targets(card, (2,), hand)
+        hand = _make_hand_with_editions([None, "foil", None])
+        assert validate_card_targets("c_aura", (0,), hand)
+        assert validate_card_targets("c_aura", (2,), hand)
 
     def test_aura_rejects_edition_card(self):
         """Aura rejects targeting a card with edition."""
-        card = MockCard(center_key="c_aura", ability={"set": "Spectral"})
-        hand = _make_hand_with_editions([None, {"foil": True}, None])
-        assert not validate_card_targets(card, (1,), hand)
+        hand = _make_hand_with_editions([None, "foil", None])
+        assert not validate_card_targets("c_aura", (1,), hand)
 
     def test_aura_rejects_two_targets(self):
         """Aura only accepts exactly 1 target."""
-        card = MockCard(center_key="c_aura", ability={"set": "Spectral"})
-        hand = _make_hand(5)
-        assert not validate_card_targets(card, (0, 1), hand)
+        assert not validate_card_targets("c_aura", (0, 1), _make_hand(5))
 
     def test_suit_change_three_targets(self):
         """Suit-change tarots accept up to 3."""
-        card = _make_consumable("c_star", {"max_highlighted": 3})
-        hand = _make_hand(5)
-        assert validate_card_targets(card, (0, 2, 4), hand)
+        assert validate_card_targets("c_star", (0, 2, 4), _make_hand(5))
 
     def test_suit_change_four_invalid(self):
         """4 targets for suit-change tarot is invalid."""
-        card = _make_consumable("c_star", {"max_highlighted": 3})
-        hand = _make_hand(5)
-        assert not validate_card_targets(card, (0, 1, 2, 3), hand)
+        assert not validate_card_targets("c_star", (0, 1, 2, 3), _make_hand(5))
 
 
 # =========================================================================
@@ -478,15 +385,38 @@ class TestValidateCardTargets:
 class TestPackOpeningEdgeCase:
     def test_consumable_in_pack_no_hand(self):
         """Consumable from a pack with no hand cards: empty valid targets."""
-        card = _make_consumable("c_magician", {"max_highlighted": 2})
-        valid = get_valid_target_cards(card, [])
-        assert valid == []
+        assert get_valid_target_cards("c_magician", []) == []
         # Validation also fails since there are no valid targets
-        assert not validate_card_targets(card, (0,), [])
+        assert not validate_card_targets("c_magician", (0,), [])
 
     def test_planet_in_pack(self):
         """Planet from a pack always has no targets."""
-        card = _make_planet()
+        assert not get_consumable_target_spec("c_mercury").needs_card_targets
+        assert validate_card_targets("c_mercury", (), [])
+
+
+# =========================================================================
+# Tests: The specs against the Rust engine
+# =========================================================================
+
+# Their targeting isn't in their config (card.lua's can_use_consumeable): the engine's
+# targeting info follows max_highlighted only.
+_SPECIAL = {"c_aura", "c_sigil", "c_ouija"}
+
+
+def test_specs_agree_with_the_engines_targeting_info():
+    """Every Tarot, Planet and Spectral: the spec's bounds are the engine's."""
+    keys = sorted(
+        k for k, v in load("centers").items() if v.get("set") in ("Tarot", "Planet", "Spectral")
+    )
+    game = Game.new("b_red", 1, "TARGET_SPECS")
+    game.step(SelectBlind())
+    for key in keys:
+        if key in _SPECIAL:
+            continue
+        run = game.clone()
+        run.debug_add(key)
+        (card,) = run.consumables
         spec = get_consumable_target_spec(card)
-        assert not spec.needs_card_targets
-        assert validate_card_targets(card, (), [])
+        info = get_consumable_target_info(run, "consumables", 0)
+        assert (spec.min_targets, spec.max_targets, spec.needs_card_targets) == info, key

@@ -71,7 +71,7 @@ def test_balatro_environment_matches_the_oracle(case: str, adapter: type) -> Non
     for n, episode in enumerate(_RUNS["environment"][case]):
         chain = frozen.Chain()
         _, _, info = env.reset()
-        assert isinstance(info["game"], Game) and "raw_state" not in info
+        assert isinstance(info["game"], Game)
         chain.push("reset", frozen.env_reset_record(info))
         for pos, (t, entity, cards) in enumerate(episode["tape"]):
             fa = FactoredAction(
@@ -108,7 +108,6 @@ def test_direct_adapter_runs_the_rust_engine() -> None:
     state = adapter.reset("b_red", 1, "ADAPTER")
     assert state.phase == GamePhase.BLIND_SELECT and not adapter.done
     assert isinstance(adapter.game, Game)
-    assert not hasattr(adapter, "raw_state")
     legal = adapter.get_legal_actions()
     assert SelectBlind() in legal
     after = adapter.step(SelectBlind())

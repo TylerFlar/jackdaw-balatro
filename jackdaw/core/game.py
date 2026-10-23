@@ -151,10 +151,9 @@ class Game:
         self._g.step(json.dumps(encode_action(action)))
 
     def legal_actions(self, legality: Legality | str = Legality.VANILLA) -> list[Any]:
-        """The legal actions (dataclasses from :mod:`jackdaw.engine.actions`), in the
-        Python engine's order. ``PlayHand`` / ``Discard`` appear once each, with no cards,
-        standing for any selection; a consumable that targets cards carries its default
-        targets."""
+        """The legal actions (dataclasses from :mod:`jackdaw.engine.actions`), in a fixed
+        order. ``PlayHand`` / ``Discard`` appear once each, with no cards, standing for any
+        selection; a consumable that targets cards carries its default targets."""
         text = self._g.legal_actions(Legality(legality).value)
         return [decode_action(a) for a in json.loads(text)]
 
@@ -191,7 +190,7 @@ class Game:
         """BalatroBot's ``add`` with the engine's names (``seal="Red"``,
         ``edition="foil"``, ``enhancement="m_steel"``, ``perishable`` in rounds): a
         joker, consumable, voucher, booster or playing card (``"H_A"``). Returns the
-        card's sort id. Debug only; see :mod:`jackdaw.engine.debug`."""
+        card's sort id. Debug only (``docs/balatrobot.md``)."""
         return self._g.debug_add(key, seal, edition, enhancement, eternal, perishable, rental)
 
     def debug_set(self, **values: float) -> None:
