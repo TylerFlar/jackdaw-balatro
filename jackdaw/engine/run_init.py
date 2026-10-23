@@ -121,6 +121,10 @@ def init_game_object() -> dict[str, Any]:
         "base_reroll_cost": 5,
         "blind_on_deck": None,
         "sort": "desc",
+        # G.hand.config.sort (cardarea.lua:23): the hand's sort mode, set by
+        # the sort buttons ('desc' / 'suit desc', button_callbacks.lua:36-48)
+        # and used by every later auto-sort.  G.GAME.sort above is never read.
+        "hand_sort": "desc",
         "previous_round": {"dollars": 4},
         "tags": {},
         "tag_tally": 0,

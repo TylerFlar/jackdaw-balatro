@@ -60,6 +60,7 @@ GAME_SCALARS: tuple[str, ...] = (
     "spectral_rate",
     "playing_card_rate",
     "hand_size",
+    "hand_sort",
     "joker_slots",
     "consumable_slots",
     "starting_deck_size",

@@ -8,11 +8,15 @@ from __future__ import annotations
 
 from jackdaw.engine.actions import (
     BuyCard,
+    CashOut,
     Discard,
+    NextRound,
     OpenBooster,
     PickPackCard,
     PlayHand,
     SelectBlind,
+    SortHand,
+    SwapHandLeft,
     UseConsumable,
 )
 from jackdaw.engine.card import Card
@@ -26,7 +30,9 @@ from tests.engine.audit._boards import (
     new_run,
     playing_card,
     to_shop,
+    win_round,
 )
+from tests.parity.py_export import export_state
 
 # ---------------------------------------------------------------------------
 # G49 — played and discarded cards are processed in hand order
@@ -218,3 +224,82 @@ def test_g38_standard_pack_pick_goes_to_the_bottom_of_the_deck():
 
     assert gs["deck"][0] is picked
     assert gs["deck"][-1] is top
+
+
+# ---------------------------------------------------------------------------
+# G39 — SortHand sorts like the sort buttons and the mode persists
+# ---------------------------------------------------------------------------
+
+
+def _scrambled_hand_run(seed: str) -> dict:
+    gs = new_run(seed)
+    step(gs, SelectBlind())
+    for i in range(1, len(gs["hand"])):
+        step(gs, SwapHandLeft(idx=i))  # walk the first card to the right end
+    return gs
+
+
+def test_g39_sort_by_rank_is_descending():
+    """sort_hand_value calls G.hand:sort('desc') (button_callbacks.lua:44-47):
+    get_nominal() descending (cardarea.lua:577-580)."""
+    gs = _scrambled_hand_run("AUDIT_G39R")
+
+    step(gs, SortHand(mode="rank"))
+
+    hand = gs["hand"]
+    assert ids(hand) == ids(sorted(hand, key=lambda c: c.get_nominal(), reverse=True))
+    assert gs["hand_sort"] == "desc"
+
+
+def test_g39_sort_by_suit_is_suit_descending():
+    """sort_hand_suit calls G.hand:sort('suit desc') (button_callbacks.lua:36-39):
+    get_nominal('suit') descending (cardarea.lua:583-584) — Spades, Hearts,
+    Clubs, Diamonds, each high to low."""
+    gs = _scrambled_hand_run("AUDIT_G39S")
+
+    step(gs, SortHand(mode="suit"))
+
+    hand = gs["hand"]
+    assert ids(hand) == ids(sorted(hand, key=lambda c: c.get_nominal("suit"), reverse=True))
+    order = {"Spades": 0, "Hearts": 1, "Clubs": 2, "Diamonds": 3}
+    keys = [(order[c.base.suit.value], -c.base.id) for c in hand]
+    assert keys == sorted(keys)
+    assert gs["hand_sort"] == "suit desc"
+
+
+def test_g39_sort_mode_persists_for_later_draws():
+    """CardArea:sort stores the method in G.hand.config.sort (cardarea.lua:578),
+    and every later draw sorts with it (draw_card(..., sort=true) calls
+    to:sort(), common_events.lua:418-420) — this round and the next."""
+    gs = new_run("AUDIT_G39P")
+    step(gs, SelectBlind())
+    step(gs, SortHand(mode="suit"))
+
+    step(gs, Discard(card_indices=(0, 1, 2)))
+    hand = gs["hand"]
+    assert ids(hand) == ids(sorted(hand, key=lambda c: c.get_nominal("suit"), reverse=True))
+
+    win_round(gs)
+    step(gs, CashOut())
+    step(gs, NextRound())
+    step(gs, SelectBlind())
+    hand = gs["hand"]
+    assert ids(hand) == ids(sorted(hand, key=lambda c: c.get_nominal("suit"), reverse=True))
+    assert export_state(gs)["game"]["hand_sort"] == "suit desc"
+
+
+def test_g39_cards_created_into_the_hand_are_not_sorted_in():
+    """create_playing_card emplaces into G.hand, which appends
+    (cardarea.lua:32-37); nothing sorts the hand until the next draw.  Familiar's
+    three cards sit at the right end of the hand (card.lua:1320-1335)."""
+    gs = new_run("AUDIT_G39F")
+    step(gs, SelectBlind())
+    give_consumable(gs, "c_familiar")
+    before = list(gs["hand"])
+
+    step(gs, UseConsumable(card_index=0))
+
+    hand = gs["hand"]
+    made = [c for c in hand if all(c is not b for b in before)]
+    assert len(made) == 3
+    assert ids(hand[-3:]) == ids(made)

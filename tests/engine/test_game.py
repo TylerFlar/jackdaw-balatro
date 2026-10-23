@@ -490,7 +490,8 @@ class TestSortHand:
         step(gs, SelectBlind())
         step(gs, SortHand(mode="rank"))
         ids = [c.base.id for c in gs["hand"] if c.base]
-        assert ids == sorted(ids)
+        # G.hand:sort('desc') (button_callbacks.lua:44-47): high to low
+        assert ids == sorted(ids, reverse=True)
 
 
 # ---------------------------------------------------------------------------

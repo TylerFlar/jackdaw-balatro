@@ -70,6 +70,11 @@ booleans, numbers, strings, arrays and string-keyed objects.
 **Area limits:** `hand_size`, `joker_slots`, `consumable_slots`, plus
 `shop_joker_max` (`G.GAME.shop.joker_max`).
 
+**Hand sort:** `hand_sort` is `G.hand.config.sort`, the sort mode every
+automatic hand sort uses: `"desc"` (by rank, the default) or `"suit desc"`.
+The sort buttons set it (button_callbacks.lua:36-48) and it lasts for the
+rest of the run.
+
 **Progress:** `round`, `skips`, `hands_played` (whole run), `unused_discards`,
 `starting_deck_size`, `blind_on_deck` (`Small`/`Big`/`Boss`/null).
 
