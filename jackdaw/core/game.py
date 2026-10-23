@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import dataclasses
 import enum
 import json
 import math
@@ -13,7 +12,7 @@ from typing import Any
 from jackdaw import _core
 from jackdaw.core.views import BlindView, CardView, HandLevel, Score, hand_levels
 from jackdaw.engine import actions as _actions
-from jackdaw.engine.actions import GamePhase
+from jackdaw.engine.actions import GamePhase, decode_action, encode_action
 
 IllegalActionError = _core.IllegalActionError
 NotPortedError = _core.NotPortedError
@@ -30,32 +29,6 @@ class Legality(enum.StrEnum):
 
     VANILLA = "vanilla"
     BALATROBOT = "balatrobot"
-
-
-_ACTION_TYPES: dict[str, type] = {
-    cls.__name__: cls
-    for cls in vars(_actions).values()
-    if isinstance(cls, type)
-    and dataclasses.is_dataclass(cls)
-    and cls.__module__ == _actions.__name__
-}
-
-
-def encode_action(action: Any) -> list[Any]:
-    """An action's tape form: ``["PlayHand", [0, 2, 3]]``. A list passes through."""
-    if isinstance(action, list):
-        return action
-    out: list[Any] = [type(action).__name__]
-    for f in dataclasses.fields(action):
-        v = getattr(action, f.name)
-        out.append(list(v) if isinstance(v, tuple) else v)
-    return out
-
-
-def decode_action(entry: list[Any]) -> Any:
-    """The action dataclass for a tape entry."""
-    cls = _ACTION_TYPES[entry[0]]
-    return cls(*(tuple(v) if isinstance(v, list) else v for v in entry[1:]))
 
 
 def random_seed(rng: random.Random | None = None) -> str:
