@@ -1,11 +1,10 @@
 //! Reinforcement-learning hot paths on top of the engine.
 //!
-//! Holds the observation encoder (writing into caller-owned buffers), the action masks for both
-//! legality modes, the Gym action enumeration, and the batched vector environment that steps many
-//! games in parallel.
-//!
-//! Not ported yet: this is the Phase 0 stub.
+//! Holds the observation encoder (writing into caller-owned buffers). The action masks for both
+//! legality modes, the Gym action enumeration and the batched vector environment come next.
 #![forbid(unsafe_code)]
+
+pub mod observation;
 
 #[cfg(test)]
 mod tests {
