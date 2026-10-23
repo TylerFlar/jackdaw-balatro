@@ -19,7 +19,9 @@ from ._helpers import (
     give_card,
     give_consumable,
     give_joker,
+    indices,
     new_run,
+    play,
     rng_twin,
     select_blind,
     to_shop,
@@ -127,6 +129,55 @@ class TestCopySemantics:
         copies[0].ability["perma_bonus"] = 99
         assert source.ability["perma_bonus"] == 15
         assert source.base.times_played == 3
+
+    def test_death_copies_the_whole_card_onto_the_target(self):
+        """Death runs copy_card(rightmost, target) (card.lua:1111-1119): the
+        target takes the source's center, base, *every* ability entry
+        (perma_bonus and played_this_ante included, common_events.lua:2161-2167),
+        edition (with its scoring values), seal and debuff — but keeps its
+        own sort_id."""
+        gs = select_blind(new_run("AUDIT_DEATH"))
+        target = give_card(gs, "H_3")
+        target.ability["perma_bonus"] = 7
+        source = give_card(gs, "S_A", enhancement="m_bonus", seal="Red", edition="foil")
+        source.ability["perma_bonus"] = 20
+        source.ability["played_this_ante"] = True
+        source.debuff = True
+        target_id = target.sort_id
+        give_consumable(gs, "c_death")
+        step(gs, UseConsumable(card_index=0, target_indices=indices(gs, target, source)))
+        assert target.sort_id == target_id
+        assert target.card_key == "S_A" and target.base.id == 14
+        assert target.center_key == "m_bonus"
+        assert target.ability["bonus"] == source.ability["bonus"]
+        assert target.ability["perma_bonus"] == 20
+        assert target.ability["played_this_ante"] is True
+        assert target.debuff is True
+        assert target.seal == "Red"
+        assert target.edition == {"foil": True, "chips": 50, "type": "foil"}
+        assert target.edition is not source.edition
+
+    def test_dna_copy_is_a_held_card_of_the_same_hand(self):
+        """DNA copies the played card with copy_card in the ``before`` pass and
+        emplaces the copy into G.hand at once (card.lua:3501-3508), so it is a
+        held card for the rest of that evaluation (state_events.lua:784): a
+        copied Steel card's x1.5 applies to the hand that created it.  The
+        copy keeps the source's perma_bonus and played_this_ante."""
+        gs = select_blind(new_run("AUDIT_DNA"))
+        give_joker(gs, "j_dna")
+        source = give_card(gs, "S_K", enhancement="m_steel")
+        source.ability["perma_bonus"] = 10
+        hand_before = list(gs["hand"])
+        play(gs, source)
+        # High Card L1 (5 chips, x1) + King 10 + perma_bonus 10, held copy x1.5
+        assert gs["last_score_result"].total == int((5 + 10 + 10) * 1.5)
+        copies = [c for c in gs["hand"] if c not in hand_before]
+        copies = [c for c in copies if c.card_key == "S_K" and c is not source]
+        assert len(copies) == 1
+        copy = copies[0]
+        assert copy.center_key == "m_steel"
+        assert copy.ability["perma_bonus"] == 10
+        assert copy.ability["played_this_ante"] is True
 
     def test_copy_does_not_share_ability_tables(self):
         """Tables are copied with copy_table (common_events.lua:2161-2166)."""

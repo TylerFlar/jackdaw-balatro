@@ -2597,23 +2597,14 @@ def _apply_consumable_result(
             if hasattr(target, "change_rank"):
                 target.change_rank(delta)
 
-    # d. Copy card (Death)
+    # d. Copy card (Death): copy_card(rightmost, target) (card.lua:1117)
+    #    overwrites the target in place — center, base, every ability entry
+    #    (perma_bonus, played_this_ante, ...), edition, seal and debuff.
     if getattr(result, "copy_card", None):
+        from jackdaw.engine.card_factory import copy_card
+
         source, target = result.copy_card
-        if hasattr(target, "copy_from"):
-            target.copy_from(source)
-        else:
-            # Manual copy: base, enhancement, edition, seal
-            if source.base and target.base:
-                target.set_base(
-                    source.card_key or "",
-                    source.base.suit.value,
-                    source.base.rank.value,
-                )
-            target.edition = source.edition
-            target.seal = source.seal
-            if hasattr(source, "center_key") and hasattr(target, "set_ability"):
-                target.set_ability(source.center_key)
+        copy_card(source, target, game_state=gs)
 
     # e. Destroy playing cards
     if getattr(result, "destroy", None):

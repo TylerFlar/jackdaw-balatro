@@ -10,7 +10,7 @@ pipeline from ``state_events.lua:571-1065``.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -673,10 +673,20 @@ def score_hand(
             base_chips, base_mult = hand_levels.get(hand_type)
             hand_chips = float(base_chips)
             mult = float(base_mult)
-        # DNA's playing-card copy is a before-context create
-        # (card.lua:3501-13) — this pass used to drop extra entirely.
         if result and result.extra and "create" in result.extra:
-            joker_creates.append(result.extra["create"])
+            create = result.extra["create"]
+            if create.get("type") == "playing_card_copy":
+                # DNA (card.lua:3501-3508): copy_card runs right here and the
+                # copy is emplaced into G.hand at once, so it is a held card
+                # for the rest of this evaluation (held effects, Raised Fist,
+                # Blackboard) and already counts in G.playing_cards (Erosion).
+                from jackdaw.engine.card_factory import copy_card
+
+                held_cards.append(copy_card(create["source_card"], game_state=game_state))
+                snapshot = replace(snapshot, playing_cards_count=snapshot.playing_cards_count + 1)
+                _shared["game"] = snapshot
+            else:
+                joker_creates.append(create)
 
     for card in scoring_cards:
         if getattr(card, "vampired", False):

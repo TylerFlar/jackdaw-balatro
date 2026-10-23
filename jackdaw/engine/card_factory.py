@@ -639,25 +639,15 @@ def resolve_create_descriptor(
         return copy_card(copy_source, game_state=game_state)
 
     # ------------------------------------------------------------------
-    # DNA: copy of a played playing card (card.lua:3505 copy_card).
-    # A FRESH Card object — vanilla's Card:init assigns the next global
-    # sort_id, so the copy must NOT share the source's (shuffles sort
-    # by sort_id first; a duplicate id would desync deck order).
+    # DNA: copy of a played playing card (card.lua:3504 copy_card).
+    # score_hand makes this copy itself, in the ``before`` pass where
+    # vanilla makes it; this branch serves direct callers.
     # ------------------------------------------------------------------
     if card_type == "playing_card_copy":
         source: Card | None = descriptor.get("source_card")
         if source is None or getattr(source, "base", None) is None:
             return None
-        suit = source.base.suit
-        rank = source.base.rank
-        return create_playing_card(
-            Suit(suit.value if hasattr(suit, "value") else suit),
-            Rank(rank.value if hasattr(rank, "value") else rank),
-            enhancement=getattr(source, "center_key", None) or "c_base",
-            edition=dict(source.edition) if getattr(source, "edition", None) else None,
-            seal=getattr(source, "seal", None),
-            hands_played=game_state.get("hands_played", 0) if game_state else 0,
-        )
+        return copy_card(source, game_state=game_state)
 
     # ------------------------------------------------------------------
     # Pool-drawn consumables and jokers
