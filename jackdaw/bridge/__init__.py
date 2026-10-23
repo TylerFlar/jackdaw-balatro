@@ -4,7 +4,7 @@ Converts between jackdaw engine Actions and balatrobot JSON-RPC calls,
 and between balatrobot game state responses and engine game_state dicts.
 """
 
-from jackdaw.bridge.backend import Backend, LiveBackend, RPCError, SimBackend
+from jackdaw.bridge.backend import Backend, LiveBackend, RPCError, SimBackend, to_bot_add_params
 from jackdaw.bridge.balatrobot_adapter import (
     action_to_rpc,
     bot_accepts,
@@ -39,4 +39,5 @@ __all__ = [
     "LiveBackend",
     "RPCError",
     "SimBackend",
+    "to_bot_add_params",
 ]

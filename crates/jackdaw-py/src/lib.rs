@@ -51,6 +51,14 @@ fn value_error(e: impl std::fmt::Display) -> PyErr {
     pyo3::exceptions::PyValueError::new_err(e.to_string())
 }
 
+fn step_error(e: jackdaw_core::game::StepError) -> PyErr {
+    use jackdaw_core::game::StepError;
+    match e {
+        StepError::Illegal(m) => IllegalActionError::new_err(m),
+        StepError::Unported(m) => NotPortedError::new_err(m),
+    }
+}
+
 /// Row counts of the five entity arrays (hand, jokers, consumables, shop, pack).
 type ObservationRows = (usize, usize, usize, usize, usize);
 
@@ -129,13 +137,78 @@ impl Game {
     /// On an error the game is unchanged.
     fn step(&mut self, action: &str) -> PyResult<()> {
         use jackdaw_core::action::Action;
-        use jackdaw_core::game::StepError;
         let value: serde_json::Value = serde_json::from_str(action).map_err(value_error)?;
         let action = Action::from_json(&value).map_err(value_error)?;
-        self.inner.step(&action).map_err(|e| match e {
-            StepError::Illegal(m) => IllegalActionError::new_err(m),
-            StepError::Unported(m) => NotPortedError::new_err(m),
-        })
+        self.inner.step(&action).map_err(step_error)
+    }
+
+    /// BalatroBot's ``add`` (``jackdaw/engine/debug.py`` names): ``key`` is ``j_*``, ``c_*``,
+    /// ``v_*``, ``p_*`` or a playing card (``H_A``); ``seal`` ``"Red"``, ``edition``
+    /// ``"foil"``, ``enhancement`` ``"m_steel"``, ``perishable`` a round count. Returns the new
+    /// card's sort id. Debug only: no player action does this. On an error the game is
+    /// unchanged.
+    #[pyo3(signature = (
+        key, seal=None, edition=None, enhancement=None, eternal=false, perishable=None,
+        rental=false
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    fn debug_add(
+        &mut self,
+        key: &str,
+        seal: Option<&str>,
+        edition: Option<&str>,
+        enhancement: Option<&str>,
+        eternal: bool,
+        perishable: Option<f64>,
+        rental: bool,
+    ) -> PyResult<u32> {
+        use jackdaw_core::card::{EditionKind, Seal};
+        use jackdaw_core::debug::{AddKey, AddSpec};
+        let parsed =
+            AddKey::parse(key).ok_or_else(|| value_error(format!("unknown card key {key:?}")))?;
+        let mut spec = AddSpec::new(parsed);
+        if let Some(s) = seal {
+            spec.seal =
+                Some(Seal::from_name(s).ok_or_else(|| value_error(format!("unknown seal {s:?}")))?);
+        }
+        if let Some(e) = edition {
+            spec.edition = Some(
+                EditionKind::from_name(e)
+                    .ok_or_else(|| value_error(format!("unknown edition {e:?}")))?,
+            );
+        }
+        if let Some(m) = enhancement.filter(|m| *m != "c_base") {
+            spec.enhancement = Some(
+                jackdaw_core::card::center_by_key(m)
+                    .ok_or_else(|| value_error(format!("unknown enhancement {m:?}")))?,
+            );
+        }
+        spec.eternal = eternal;
+        spec.perishable = perishable;
+        spec.rental = rental;
+        self.inner.debug_add(&spec).map_err(step_error)
+    }
+
+    /// One field of BalatroBot's ``set``: ``money``, ``chips``, ``ante``, ``round``, ``hands``
+    /// or ``discards``, written directly.
+    fn debug_set(&mut self, field: &str, value: f64) -> PyResult<()> {
+        use jackdaw_core::debug::SetField;
+        let field = match field {
+            "money" => SetField::Money(value),
+            "chips" => SetField::Chips(value),
+            "ante" => SetField::Ante(value),
+            "round" => SetField::Round(value),
+            "hands" => SetField::Hands(value),
+            "discards" => SetField::Discards(value),
+            other => return Err(value_error(format!("unknown set field {other:?}"))),
+        };
+        self.inner.debug_set(field);
+        Ok(())
+    }
+
+    /// ``set {shop: true}``: a new shop, as on arrival (SHOP only).
+    fn debug_restock_shop(&mut self) -> PyResult<()> {
+        self.inner.debug_restock_shop().map_err(step_error)
     }
 
     /// The legal actions here, as a JSON list of tape-form actions, in the Python engine's

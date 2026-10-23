@@ -270,14 +270,42 @@ class TestBridgeAdapterSim:
         legal = adapter.get_legal_actions()
         assert any(isinstance(a, SelectBlind) for a in legal)
 
-    def test_raw_state_is_sim_engine_dict(self):
-        """For SimBackend, raw_state should be the engine's live dict."""
+    def test_raw_state_is_the_shadow_run(self):
+        """For SimBackend, raw_state is the shadow run's live engine dict, kept
+        in step with the simulator behind the bot protocol."""
         from jackdaw.bridge.backend import SimBackend
 
         backend = SimBackend()
         adapter = BridgeAdapter(backend)
         adapter.reset(BACK, STAKE, SEED)
-        assert adapter.raw_state is backend._gs
+        gs = adapter.raw_state
+        adapter.step(SelectBlind())
+        assert adapter.raw_state is gs
+        assert gs["phase"] == GamePhase.SELECTING_HAND
+        view = backend.view()
+        assert view["money"] == gs["dollars"]
+        assert [c["key"] for c in view["hand"]["cards"]] == [c.card_key for c in gs["hand"]]
+
+    def test_a_sort_is_a_permutation(self):
+        """SortHand goes out as a ``rearrange`` permutation: the hand is sorted,
+        but the sort mode (G.hand.config.sort) has no bot counterpart."""
+        adapter = self._make_adapter()
+        adapter.reset(BACK, STAKE, SEED)
+        adapter.step(SelectBlind())
+        mode = adapter.raw_state.get("hand_sort")
+        adapter.step(SortHand(mode="suit"))
+        assert adapter.raw_state.get("hand_sort") == mode
+        suits = [c.base.suit for c in adapter.raw_state["hand"]]
+        assert suits == sorted(suits, key=suits.index)  # grouped by suit
+
+    def test_a_divergence_is_reported(self):
+        from jackdaw.env.game_interface import DivergenceError
+
+        adapter = self._make_adapter()
+        adapter.reset(BACK, STAKE, SEED)
+        adapter.raw_state["dollars"] += 1
+        with pytest.raises(DivergenceError, match="money"):
+            adapter.step(SelectBlind())
 
     def test_done_won_flags(self):
         adapter = self._make_adapter()
@@ -295,15 +323,37 @@ class TestBridgeAdapterSim:
         assert adapter.done or adapter.won
 
 
-def _open_celestial_pack_with_tray_planet(adapter: GameAdapter) -> None:
-    from jackdaw.engine.card_factory import create_consumable
+def _debug(adapter: GameAdapter, method: str, params: dict) -> None:
+    """BalatroBot's ``add`` / ``set`` on the adapter's run: the engine dict (the
+    oracle's debug ops) and, for the bridge, the simulator behind it."""
+    from jackdaw.engine.debug import add_card, set_values
 
-    gs = adapter.raw_state
-    gs["phase"] = GamePhase.PACK_OPENING
-    gs["pack_type"] = "Celestial"
-    gs["pack_cards"] = [create_consumable("c_mercury")]
-    gs["pack_choices_remaining"] = 1
-    gs["consumables"] = [create_consumable("c_pluto")]
+    if method == "add":
+        add_card(adapter.raw_state, **params)
+    else:
+        set_values(adapter.raw_state, **params)
+    if isinstance(adapter, BridgeAdapter):
+        adapter._backend.handle(method, params)
+
+
+def _to_shop(adapter: GameAdapter) -> None:
+    """Beat the Small Blind (``set`` its chips) and cash out."""
+    adapter.step(SelectBlind())
+    _debug(adapter, "set", {"chips": adapter.raw_state["blind"].chips})
+    adapter.step(PlayHand(card_indices=(0,)))
+    adapter.step(CashOut())
+    assert adapter.raw_state["phase"] == GamePhase.SHOP
+
+
+def _open_pack_with_tray_planet(adapter: GameAdapter) -> None:
+    """In a pack (with picks left), holding a Pluto."""
+    from jackdaw.engine.actions import OpenBooster
+
+    _to_shop(adapter)
+    _debug(adapter, "add", {"key": "c_pluto"})
+    _debug(adapter, "set", {"money": 50})
+    adapter.step(OpenBooster(card_index=0))
+    assert adapter.raw_state["phase"] == GamePhase.PACK_OPENING
 
 
 class TestBridgeFollowsBalatrobot:
@@ -317,7 +367,7 @@ class TestBridgeFollowsBalatrobot:
 
         for adapter, offered in ((DirectAdapter(), True), (BridgeAdapter(SimBackend()), False)):
             adapter.reset(BACK, STAKE, SEED)
-            _open_celestial_pack_with_tray_planet(adapter)
+            _open_pack_with_tray_planet(adapter)
             legal = adapter.get_legal_actions()
             assert any(isinstance(a, UseConsumable) for a in legal) is offered
             assert any(isinstance(a, SellCard) for a in legal) is offered
@@ -331,9 +381,9 @@ class TestBridgeFollowsBalatrobot:
             (DirectAdapter, True),
             (lambda: BridgeAdapter(SimBackend()), False),
         ):
-            env = BalatroEnvironment(adapter_factory=factory)
+            env = BalatroEnvironment(adapter_factory=factory, back_keys=[BACK], stakes=[STAKE])
             env.reset(seed=SEED)
-            _open_celestial_pack_with_tray_planet(env._adapter)
+            _open_pack_with_tray_planet(env._adapter)
             mask = env._action_mask(env._adapter.raw_state)
             assert bool(mask.type_mask[ActionType.UseConsumable]) is offered
             assert bool(mask.type_mask[ActionType.SellConsumable]) is offered
@@ -343,14 +393,13 @@ class TestBridgeFollowsBalatrobot:
         # use.lua refuses a consumable that needs card selection outside
         # SELECTING_HAND, even where the endpoint itself is allowed.
         from jackdaw.bridge.backend import SimBackend
-        from jackdaw.engine.card_factory import create_consumable
         from jackdaw.env.action_space import ActionMask, ActionType
 
         adapter = BridgeAdapter(SimBackend())
         adapter.reset(BACK, STAKE, SEED)
-        gs = adapter.raw_state
-        gs["phase"] = GamePhase.SHOP
-        gs["consumables"] = [create_consumable("c_pluto"), create_consumable("c_magician")]
+        _to_shop(adapter)
+        _debug(adapter, "add", {"key": "c_pluto"})
+        _debug(adapter, "add", {"key": "c_magician"})
         type_mask = np.zeros(21, dtype=bool)
         type_mask[ActionType.UseConsumable] = True
         mask = ActionMask(

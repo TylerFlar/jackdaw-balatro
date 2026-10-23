@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import enum
 import json
 import math
 import random
@@ -14,6 +15,20 @@ from jackdaw.engine.actions import GamePhase
 
 IllegalActionError = _core.IllegalActionError
 NotPortedError = _core.NotPortedError
+
+
+class Legality(enum.StrEnum):
+    """Which actions count as legal (``Game.legal_actions``).
+
+    ``VANILLA`` is the game's own rules (Balatro 1.0.1o).  ``BALATROBOT`` keeps
+    the vanilla actions that BalatroBot v1.5.2 also executes: the action's
+    request passes the bot's argument, state and endpoint checks (run as a dry
+    run in ``jackdaw-bot``).  See ``docs/balatrobot.md``.
+    """
+
+    VANILLA = "vanilla"
+    BALATROBOT = "balatrobot"
+
 
 _ACTION_TYPES: dict[str, type] = {
     cls.__name__: cls
@@ -114,6 +129,60 @@ class Game:
         """Take one action (a dataclass from :mod:`jackdaw.engine.actions`, or its
         tape form) and play until the game waits for the next decision."""
         self._g.step(json.dumps(encode_action(action)))
+
+    def legal_actions(self, legality: Legality | str = Legality.VANILLA) -> list[Any]:
+        """The legal actions (dataclasses from :mod:`jackdaw.engine.actions`), in the
+        Python engine's order. ``PlayHand`` / ``Discard`` appear once each, with no cards,
+        standing for any selection; a consumable that targets cards carries its default
+        targets."""
+        text = self._g.legal_actions(Legality(legality).value)
+        return [decode_action(a) for a in json.loads(text)]
+
+    def bot_view(self) -> dict[str, Any]:
+        """BalatroBot's ``gamestate`` view of the run (``jackdaw-bot``), as the bot
+        sends it: text fields carry names, false flags and empty areas are left out."""
+        return json.loads(self._g.bot_view())
+
+    def bot_request(self, action: Any) -> tuple[str, dict[str, Any]] | None:
+        """The BalatroBot request that performs ``action`` here: ``(method, params)``, or
+        ``None`` for a sim-only action (``RerollBoss``, ``BuyAndUse``). ``SortHand`` and the
+        swaps become ``rearrange`` permutations."""
+        out = self._g.bot_translate(json.dumps(encode_action(action)))
+        if out is None:
+            return None
+        method, params = out
+        return method, json.loads(params) or {}  # an empty Lua table encodes as []
+
+    def apply_setup(self, op: dict[str, Any]) -> None:
+        """Apply one parity setup operation (``tests/parity/harness.py``)."""
+        self._g.apply_setup(json.dumps(op))
+
+    def debug_add(
+        self,
+        key: str,
+        *,
+        seal: str | None = None,
+        edition: str | None = None,
+        enhancement: str | None = None,
+        eternal: bool = False,
+        perishable: int | None = None,
+        rental: bool = False,
+    ) -> int:
+        """BalatroBot's ``add`` with the engine's names (``seal="Red"``,
+        ``edition="foil"``, ``enhancement="m_steel"``, ``perishable`` in rounds): a
+        joker, consumable, voucher, booster or playing card (``"H_A"``). Returns the
+        card's sort id. Debug only; see :mod:`jackdaw.engine.debug`."""
+        return self._g.debug_add(key, seal, edition, enhancement, eternal, perishable, rental)
+
+    def debug_set(self, **values: float) -> None:
+        """BalatroBot's ``set``: ``money``, ``chips``, ``ante``, ``round``, ``hands``,
+        ``discards``, written directly. Debug only."""
+        for field, value in values.items():
+            self._g.debug_set(field, float(value))
+
+    def debug_restock_shop(self) -> None:
+        """``set {shop: true}``: a new shop as on arrival (SHOP only). Debug only."""
+        self._g.debug_restock_shop()
 
     def clone(self) -> Game:
         """An independent copy of the run."""

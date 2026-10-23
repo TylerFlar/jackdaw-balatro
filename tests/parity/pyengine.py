@@ -6,10 +6,10 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
 
-from jackdaw.bridge.backend import SimBackend
 from jackdaw.engine import card as card_module
 from jackdaw.engine.actions import GamePhase, get_legal_actions
 from jackdaw.engine.challenges import get_challenge
+from jackdaw.engine.debug import add_card
 from jackdaw.engine.game import step as engine_step
 from jackdaw.engine.run_init import initialize_run
 from tests.golden.trajectories import decode_action, encode_action
@@ -74,10 +74,8 @@ class PyEngine:
             self.step(op["action"])
         elif kind == "add":
             params = {k: op[k] for k in ("seal", "enhancement", "edition") if k in op}
-            backend = SimBackend()
-            backend._gs = gs
             with self._ids():
-                backend.handle("add", {"key": op["key"], **params})
+                add_card(gs, op["key"], **params)
         elif kind == "set":
             for field, value in op.items():
                 if field == "op":

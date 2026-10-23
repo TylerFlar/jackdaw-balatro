@@ -278,6 +278,20 @@ fn serve_connection(stream: &mut TcpStream, session: &mut Session) -> std::io::R
     };
     stream.write_all(&http_response(status, &body))?;
     stream.flush()?;
+    if status == 400 {
+        // A refused request may still be arriving (a body over the limit): half-close and
+        // drain it, so closing doesn't reset the connection before the client reads the
+        // response. (server.lua closes at once; the response is the same.)
+        let _ = stream.shutdown(std::net::Shutdown::Write);
+        let _ = stream.set_read_timeout(Some(Duration::from_millis(250)));
+        let mut drained = 0usize;
+        while drained < 4 * MAX_BODY_SIZE {
+            match stream.read(&mut chunk) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => drained += n,
+            }
+        }
+    }
     let _ = stream.shutdown(std::net::Shutdown::Both);
     Ok(())
 }

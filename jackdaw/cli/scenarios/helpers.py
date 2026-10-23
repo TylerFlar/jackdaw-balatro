@@ -35,6 +35,7 @@ def start_both(
     delay: float = _DEFAULT_DELAY,
 ) -> None:
     """Start a new run on both backends with the same params."""
+    sim("menu", None)
     live("menu", None)
     time.sleep(delay)
     params = {"deck": deck, "stake": stake, "seed": seed}

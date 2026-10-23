@@ -2,7 +2,7 @@
 
 Runs are driven through the public engine (``initialize_run`` + ``step``).
 Cards are injected the way BalatroBot's ``add`` does it
-(:class:`jackdaw.bridge.backend.SimBackend`); :func:`give_joker` is the same
+(:func:`jackdaw.engine.debug.add_card`); :func:`give_joker` is the same
 path minus the edition poll, so a test controls the joker's edition.
 """
 
@@ -11,11 +11,11 @@ from __future__ import annotations
 import copy
 from typing import Any
 
-from jackdaw.bridge.backend import SimBackend
 from jackdaw.engine.actions import CashOut, Discard, GamePhase, PlayHand, SelectBlind
 from jackdaw.engine.card import Card
 from jackdaw.engine.card_factory import create_joker
 from jackdaw.engine.card_utils import astronomer_active
+from jackdaw.engine.debug import add_card
 from jackdaw.engine.game import step
 from jackdaw.engine.rng import PseudoRandom
 from jackdaw.engine.run_init import initialize_run
@@ -35,11 +35,9 @@ def select_blind(gs: dict[str, Any]) -> dict[str, Any]:
 
 
 def bot_add(gs: dict[str, Any], key: str, **params: Any) -> None:
-    """BalatroBot ``add`` (SimBackend): jokers poll an edition; playing cards
-    join the hand in SELECTING_HAND."""
-    backend = SimBackend()
-    backend._gs = gs
-    backend.handle("add", {"key": key, **params})
+    """BalatroBot ``add`` (the oracle's debug op): jokers poll an edition;
+    playing cards join the hand in SELECTING_HAND."""
+    add_card(gs, key, **params)
 
 
 def give_joker(

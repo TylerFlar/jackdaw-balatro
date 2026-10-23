@@ -319,7 +319,7 @@ impl Game {
 
     /// Apply one setup operation of a parity spec (`tests/parity/harness.py`): `force_boss`,
     /// `action`, `add` (oracle names: `{"key": "H_A", "seal": "Red", "enhancement": "m_steel",
-    /// "edition": "foil"}`) or `set` (`dollars`, `chips`, `hands_left`).
+    /// "edition": "foil"}`) or `set` (`dollars`, `chips`, `hands_left`, `ante`).
     pub fn apply_setup_op(&mut self, op: &Value) -> Result<(), String> {
         let kind = op
             .get("op")
@@ -371,6 +371,7 @@ impl Game {
                         "dollars" => self.debug_set(SetField::Money(v()?)),
                         "chips" => self.debug_set(SetField::Chips(v()?)),
                         "hands_left" => self.debug_set(SetField::Hands(v()?)),
+                        "ante" => self.debug_set(SetField::Ante(v()?)),
                         other => return Err(format!("unknown set field {other:?}")),
                     }
                 }
