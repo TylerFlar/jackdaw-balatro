@@ -304,43 +304,39 @@ def _handle_select_blind(gs: dict[str, Any]) -> dict[str, Any]:
 
 
 def _fire_new_blind_choice_tags(gs: dict[str, Any]) -> None:
-    """Fire new_blind_choice context for any awarded tags that need it.
+    """One ``new_blind_choice`` pass over the held tags.
 
-    In Lua, new_blind_choice tags fire when entering the blind select screen
-    after a skip.  Pack-creating tags (buffoon, charm, ethereal, meteor,
-    standard) open a pack for the player to pick from.  The boss tag rerolls
-    the boss blind.
+    Every pass stops at the first tag that fires: ``if
+    G.GAME.tags[i]:apply_to_run({type = 'new_blind_choice'}) then break end``
+    after a skip, a boss reroll and a pack's close (button_callbacks.lua:
+    2775-2777, 2847-2849, 2617-2619), and every tag that fires returns true
+    (tag.lua:206-301).  So a second pack tag (a Double Tag's copy) stays held
+    while the first one's pack is open and fires when that pack closes
+    (G160).  The Boss Tag rerolls through G.FUNCS.reroll_boss, whose event
+    runs a pass of its own after the new boss.
 
-    Since the engine has no interactive player, pack-creating tags populate
-    ``gs["pack_cards"]`` and set the phase to PACK_OPENING so the caller
-    (or agent) can pick or skip.
+    Pack-creating tags (Buffoon, Charm, Ethereal, Meteor, Standard) populate
+    ``gs["pack_cards"]`` and set the phase to PACK_OPENING so the caller (or
+    agent) can pick or skip.
     """
     from jackdaw.engine.tags import Tag
 
-    awarded: list[dict] = gs.get("awarded_tags", [])
     rng = gs.get("rng")
-
-    for entry in awarded:
-        tag_key = entry.get("key", "")
-        # Only fire tags that haven't been processed for new_blind_choice yet
+    for entry in gs.get("awarded_tags", []):
         if entry.get("nbc_fired"):
             continue
-
-        tag = Tag(tag_key)
-        result = tag.apply("new_blind_choice", gs, rng=rng)
+        result = Tag(entry.get("key", "")).apply("new_blind_choice", gs, rng=rng)
+        # A tag of another type never fires here; marking it saves later passes the look.
         entry["nbc_fired"] = True
-
         if result is None:
             continue
-
         if result.reroll_boss:
             # Boss Tag: G.from_boss_tag + G.FUNCS.reroll_boss (tag.lua:284-300).
-            # The loop goes on to the next pending tag, as reroll_boss's own
-            # new_blind_choice pass would.
             _reroll_boss(gs, from_tag=True)
-
-        if result.create_pack:
+            _fire_new_blind_choice_tags(gs)
+        elif result.create_pack:
             _open_tag_pack(gs, result.create_pack)
+        return
 
 
 def _reroll_boss(gs: dict[str, Any], *, from_tag: bool) -> None:
@@ -1381,7 +1377,9 @@ def _handle_sell_card(gs: dict[str, Any], area: str, idx: int) -> dict[str, Any]
     # Live Card:sell_card dispatches selling_self before the sold card is
     # removed (card.lua:1599). Apply the returned mutation at that point too.
     selling_self_mutations = _fire_selling_self(gs, card)
-    _apply_selling_self_mutations(gs, card, selling_self_mutations)
+    if _apply_selling_self_mutations(gs, card, selling_self_mutations):
+        _sell_into_round_end(gs, card)
+        return gs
 
     gs["dollars"] = gs.get("dollars", 0) + card.sell_cost
     cards.pop(idx)
@@ -1434,15 +1432,43 @@ def _fire_selling_self(gs: dict[str, Any], card: Any) -> list[dict[str, Any]]:
     return []
 
 
+def _sell_into_round_end(gs: dict[str, Any], card: Any) -> None:
+    """A sale whose selling_self disabled a boss the score now beats (G161).
+
+    Blind:disable only queues the beaten-boss check (blind.lua:397-406), and
+    Card:sell_card queues the payout and the dissolve (card.lua:1601-1637);
+    G.FUNCS.sell_card's selling_card loop runs before any of them
+    (button_callbacks.lua:2318-2326).  The check's NEW_ROUND state queues
+    end_round (game.lua:3248-3256), which runs while the sold card is still
+    held (its dissolve removes it on a later timer), before the payout's
+    own ease_dollars event; evaluate_round's interest counts the payout.
+    Nothing in end_round reads the money, so it is paid first here.
+    """
+    _fire_shop_joker_context(gs, selling_card=True, exclude=card)
+    gs["dollars"] = gs.get("dollars", 0) + card.sell_cost
+    _end_round(gs)
+    for area in ("jokers", "consumables"):
+        held: list = gs.get(area, [])
+        if any(c is card for c in held):
+            held.remove(card)
+            card.remove_from_deck(gs)
+            _release_used_key(gs, card)
+
+
 def _apply_selling_self_mutations(
     gs: dict[str, Any],
     sold_card: Any,
     mutations: list[dict[str, Any]],
-) -> None:
-    """Apply Luchador, Invisible Joker, and Diet Cola sell effects."""
+) -> bool:
+    """Apply Luchador, Invisible Joker, and Diet Cola sell effects.
+
+    True when Luchador disabled a boss the score now beats: the round ends
+    once the sale is done (see :func:`_sell_into_round_end`).
+    """
+    round_over = False
     for mutation in mutations:
         if mutation.get("disable_blind"):
-            disable_blind(gs)
+            round_over = disable_blind(gs, end_round=False) or round_over
 
         if mutation.get("duplicate_random_joker"):
             jokers: list = gs.get("jokers", [])
@@ -1476,9 +1502,10 @@ def _apply_selling_self_mutations(
             # never duplicates another Double (tag.lua:320), so this is inert
             # for Diet Cola itself and guards any future tag-creating joker.
             _check_double_tag(gs, tag_key)
+    return round_over
 
 
-def disable_blind(gs: dict[str, Any]) -> None:
+def disable_blind(gs: dict[str, Any], *, end_round: bool = True) -> bool:
     """``G.GAME.blind:disable()`` (blind.lua:356-415).
 
     Called by Chicot (its setting_blind, deferred past the round's deck
@@ -1486,10 +1513,14 @@ def disable_blind(gs: dict[str, Any]) -> None:
     card.lua:596-600), Luchador's selling_self (card.lua:2355-2359) and any
     joker sold under Verdant Leaf (card.lua:1616-1621).  Like vanilla it
     has no guard: a second call applies the restorations again.
+
+    With ``end_round=False`` a boss the score now beats does not end the
+    round here; the return value says it should, once the caller's own work
+    is done (the queued check runs after it, blind.lua:397-406).
     """
     blind = gs.get("blind")
     if blind is None:
-        return
+        return False
     # The flag, The Wall's /2 and Violet Vessel's /3 (blind.lua:357, 377-380,
     # 393-396).
     blind.disable()
@@ -1528,15 +1559,18 @@ def disable_blind(gs: dict[str, Any]) -> None:
 
     if game_over:
         gs["phase"] = GamePhase.GAME_OVER
-        return
+        return False
     # Queued check (blind.lua:397-406): a disabled boss whose target the
-    # score already meets ends the round at once (G.STATE = NEW_ROUND).
-    if (
+    # score already meets ends the round (G.STATE = NEW_ROUND).
+    beaten = (
         blind.boss
         and gs.get("phase") == GamePhase.SELECTING_HAND
         and blind.beaten_by(gs.get("chips", 0))
-    ):
+    )
+    if beaten and end_round:
         _end_round(gs)
+        return False
+    return bool(beaten)
 
 
 def _handle_use_consumable(
@@ -3599,11 +3633,15 @@ def _get_card_set(card: Any) -> str:
     return ""
 
 
-def _fire_shop_joker_context(gs: dict[str, Any], **context_flags: Any) -> list[dict[str, Any]]:
+def _fire_shop_joker_context(
+    gs: dict[str, Any], *, exclude: Any = None, **context_flags: Any
+) -> list[dict[str, Any]]:
     """Fire a joker context during shop phase and return mutations.
 
     Accepts keyword arguments matching :class:`JokerContext` flags
-    (e.g. ``buying_card=True``, ``reroll_shop=True``).
+    (e.g. ``buying_card=True``, ``reroll_shop=True``).  ``exclude`` is a
+    held card that does not get the context (the card being sold,
+    button_callbacks.lua:2321-2325).
     """
     from jackdaw.engine.jokers import GameSnapshot, JokerContext, calculate_joker
 
@@ -3628,7 +3666,7 @@ def _fire_shop_joker_context(gs: dict[str, Any], **context_flags: Any) -> list[d
 
     mutations: list[dict[str, Any]] = []
     for joker in list(jokers):  # copy to allow mutation during iteration
-        if getattr(joker, "debuff", False):
+        if getattr(joker, "debuff", False) or joker is exclude:
             continue
         ctx = JokerContext(
             jokers=jokers,
@@ -3696,8 +3734,9 @@ def _close_pack(gs: dict[str, Any]) -> None:
     Matches ``end_consumeable`` in ``button_callbacks.lua:2565``:
     - Remove remaining pack cards
     - Return dealt hand cards to deck (Arcana/Spectral packs deal a hand)
-    - Fire ``new_blind_choice`` tags (deferred from skip)
     - Restore phase from ``shop_return_phase``
+    - Run a ``new_blind_choice`` pass: a pack tag still held (a Double Tag's
+      copy) opens its pack now (button_callbacks.lua:2612-2619, G160)
     """
     # Clear pack state (unpicked cards dissolve -> keys released)
     for c in gs.get("pack_cards", []):
@@ -3730,8 +3769,8 @@ def _close_pack(gs: dict[str, Any]) -> None:
         gs["hand"] = [c for c in hand if id(c) not in pack_ids]
         gs["pack_hand"] = []
 
-    # Queued tag packs (Double Tag duplicates) open back-to-back before
-    # the phase is restored, mirroring vanilla's stacked pack opens.
+    # Queued tag packs (a pack opened while another was open) open
+    # back-to-back before the phase is restored.
     pending: list = gs.get("pending_tag_packs") or []
     if pending:
         next_key = pending.pop(0)
@@ -3742,8 +3781,9 @@ def _close_pack(gs: dict[str, Any]) -> None:
         gs["phase"] = GamePhase.PACK_OPENING
         return
 
-    # Restore phase
+    # Restore phase (G.STATE = G.GAME.PACK_INTERRUPT), then the pass.
     gs["phase"] = gs.get("shop_return_phase", GamePhase.SHOP)
+    _fire_new_blind_choice_tags(gs)
 
 
 # ---------------------------------------------------------------------------
