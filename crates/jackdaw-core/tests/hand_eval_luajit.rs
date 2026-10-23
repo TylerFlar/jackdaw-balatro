@@ -111,3 +111,30 @@ fn matches_the_games_hand_evaluation() {
         }
     }
 }
+
+#[test]
+fn get_nominal_matches_the_game() {
+    use jackdaw_core::card::{Base, Rank, Suit, nominal};
+    for case in fixture()["cases"].as_array().unwrap() {
+        for c in case["cards"].as_array().unwrap() {
+            let suit = Suit::from_name(c["suit"].as_str().unwrap()).unwrap();
+            let rank = Rank::from_id(c["rank"].as_u64().unwrap() as u8).unwrap();
+            let original = Suit::from_name(c["original_suit"].as_str().unwrap()).unwrap();
+            let base = Base {
+                front: Base::front_for(suit, rank),
+                suit,
+                value: rank,
+                suit_nominal_original: original.nominal_original(),
+                original_value: rank,
+                times_played: 0.0,
+            };
+            let stone = c["enh"] == "stone";
+            let got = nominal(&base, stone, c["unique_val"].as_f64().unwrap(), false);
+            assert_eq!(
+                got.to_bits(),
+                c["nominal"].as_f64().unwrap().to_bits(),
+                "{c}"
+            );
+        }
+    }
+}

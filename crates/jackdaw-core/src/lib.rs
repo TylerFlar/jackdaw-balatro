@@ -11,6 +11,7 @@
 //! Not ported yet: this is the Phase 0 stub.
 #![forbid(unsafe_code)]
 
+pub mod card;
 pub mod hand_eval;
 pub mod lua;
 pub mod rng;
