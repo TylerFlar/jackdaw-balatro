@@ -75,13 +75,8 @@ def step(game_state: dict[str, Any], action: Action) -> dict[str, Any]:
     # redrawn, and a round out of cards ends (game.lua:2544-2550, 3056-3069).
     if result.get("phase") == GamePhase.SELECTING_HAND:
         _update_selecting_hand(result)
-    # Vanilla recomputes shop prices continuously while shopping
-    # (Card:update → set_cost each frame), so cost-relevant changes —
-    # buying/selling Astronomer, coupon tags — reflect immediately.
-    if result.get("phase") == GamePhase.SHOP:
-        from jackdaw.engine.shop import reprice_shop
-
-        reprice_shop(result)
+    # No per-step reprice: Lua re-runs set_cost only where it calls it
+    # (shop.shop_set_cost lists the points; G204).
     return result
 
 
@@ -3594,6 +3589,7 @@ def _fire_shop_tags(gs: dict[str, Any], rerolled: bool) -> None:
     ``store_joker_create`` (Rare/Uncommon Tag) is wired separately via
     :func:`~jackdaw.engine.shop.apply_store_joker_create_tag`.
     """
+    from jackdaw.engine.shop import shop_set_cost
     from jackdaw.engine.tags import Tag
 
     awarded: list[dict[str, Any]] = gs.get("awarded_tags", [])
@@ -3619,11 +3615,12 @@ def _fire_shop_tags(gs: dict[str, Any], rerolled: bool) -> None:
                 target.set_edition(edition)
             else:
                 target.edition = edition
-            # Vanilla marks the joker couponed (tags.lua) — set_cost then
-            # zeroes it (card.lua:383).  The flag must live on the card so
-            # reprice_shop doesn't restore the price.
+            # The tag's event (tag.lua:398-441): set_edition prices the
+            # edition in (card.lua:461), then the joker is couponed and
+            # set_cost zeroes its price (card.lua:383); the sell value keeps
+            # the full price (G204).
             target.ability["couponed"] = True
-            target.cost = 0
+            shop_set_cost(gs, target)
             entry["shop_fired"] = True
             continue
 
@@ -3675,9 +3672,10 @@ def _fire_shop_tags(gs: dict[str, Any], rerolled: bool) -> None:
                 continue
             gs["shop_free"] = True
             for c in gs.get("shop_cards", []) + gs.get("shop_boosters", []):
-                # couponed flag (not a bare cost=0) so reprice_shop keeps it.
+                # couponed, then set_cost (tag.lua:450-459): the flag keeps the
+                # card free through later passes in the shop.
                 c.ability["couponed"] = True
-                c.cost = 0
+                shop_set_cost(gs, c)
             entry["shop_fired"] = True
             continue
 
