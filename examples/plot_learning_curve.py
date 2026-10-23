@@ -142,12 +142,12 @@ def plot(
     )  # fmt: skip
     legend.set_zorder(5)
     fig.text(
-        0.99, 0.985,
+        0.01, 0.008,
         f"Training: rolling mean over {window} rollouts.  Evaluations: 64 validation seeds.  "
         "Gray lines: the baselines on the test seeds.",
-        ha="right", va="top", fontsize=8.5, color=theme["muted"],
+        ha="left", va="bottom", fontsize=8.5, color=theme["muted"],
     )  # fmt: skip
-    fig.tight_layout(rect=(0, 0, 1, 0.95), h_pad=2.2, w_pad=2.0)
+    fig.tight_layout(rect=(0, 0.03, 1, 0.95), h_pad=2.2, w_pad=2.0)
     fig.savefig(path, dpi=150, facecolor=theme["surface"])
 
 

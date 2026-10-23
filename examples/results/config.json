@@ -16,7 +16,7 @@
   "seed": 0,
   "threads": 6,
   "run_dir": "runs/maskable_ppo",
-  "run_name": "demo-seed0",
+  "run_name": "demo2-seed0",
   "checkpoint_freq": 5000000,
   "eval_freq": 2000000,
   "eval_episodes": 64,

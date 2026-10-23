@@ -7,17 +7,17 @@ step, and `jackdaw.cli.smart_agent`, the repo's hand-written heuristic player.
 
 ## Results
 
-The demo run trained for 44.2M environment steps in 1 h 51 min on 6 CPU threads, and was
-stopped once learning had plateaued (from about 30M steps on, see the curves). Every agent then
-played the same 1,000 runs (seeds 10,000,000 to 10,000,999, Red Deck, stake 1), which training
-and validation never saw:
+The demo run trained for 30.2M environment steps in 65 min on 6 CPU threads, and was stopped
+once learning had slowed to about 0.1 more blinds per 10M steps (see the curves). Every agent
+then played the same 1,000 runs (seeds 10,000,000 to 10,000,999, Red Deck, stake 1), which
+training and validation never saw:
 
 | Agent | Mean ante reached | Blinds beaten per run | Win rate | Mean episode reward | Mean episode length (steps) |
 |---|---:|---:|---:|---:|---:|
-| MaskablePPO, sampled | 1.93 | 4.08 ± 0.11 | 0% | +1.07 | 53 |
-| MaskablePPO, greedy | 1.72 | 3.32 ± 0.10 | 0% | -0.04 | 671 |
+| MaskablePPO, sampled | 1.83 | 3.74 ± 0.11 | 0% | +0.96 | 57 |
+| MaskablePPO, greedy | 1.48 | 2.65 ± 0.07 | 0% | -0.72 | 984 |
 | `smart_agent` | 2.31 | 5.38 ± 0.13 | 0% | +1.48 | 50 |
-| Random legal action | 1.00 | 0.003 ± 0.002 | 0% | +0.02 | 9 |
+| Random legal action | 1.00 | 0.001 ± 0.001 | 0% | +0.02 | 9 |
 
 - **Sampled** draws each action from the policy's masked distribution, as in training. **Greedy**
   takes the most likely legal action.
@@ -25,18 +25,20 @@ and validation never saw:
   summed over the episode.
 - Episodes end when the run is lost or won, or after 2,000 steps.
 
-From beating essentially no blind, PPO learns to clear about four per run and reaches ante 6 at
-best. The hand-written `smart_agent` is still better: 1.3 more blinds per run, and ante 7 at
+From beating essentially no blind, PPO learns to clear almost four per run and reaches ante 6 at
+best. The hand-written `smart_agent` is still better: 1.6 more blinds per run, and ante 7 at
 best. No agent wins a run.
 
 The greedy policy is weaker than the sampled one because it loops. In some states its most
-likely action is a free move (sorting or swapping cards), and from the next state another free
-move, and so on: 32% of its episodes run into the 2,000-step cap. Sampling breaks such cycles
-(no sampled episode reached the cap), and the sampled policy is the one PPO optimizes.
+likely action is a free move (here mostly swapping two cards in the hand, or two jokers in the
+shop), and from the next state another free move, and so on: 48% of its episodes run into the
+2,000-step cap.
+Sampling breaks such cycles (no sampled episode reached the cap), and the sampled policy is the
+one PPO optimizes.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="results/learning_curve_dark.png">
-  <img src="results/learning_curve.png" alt="Learning curves over 44M environment steps. Blinds beaten per episode rises from 0 to about 3 in the first 5M steps, then slowly to about 4 by 30M steps, where it levels off; the sampled evaluation tracks the training rollouts, the greedy evaluation sits lower and is noisier, and smart_agent's 5.4 stays above both. Ante reached, episode reward and episode length follow the same pattern, the greedy episodes running to several hundred steps.">
+  <img src="results/learning_curve.png" alt="Learning curves over 30M environment steps. Blinds beaten per episode rises from 0 to about 3 in the first 5M steps, then slowly to about 3.7 by 20M steps, where it levels off; the sampled evaluation tracks the training rollouts, the greedy evaluation sits lower, and smart_agent's 5.4 stays above both. Ante reached and episode reward follow the same pattern; the greedy episodes run to several hundred steps.">
 </picture>
 
 The four panels show the training rollouts (episodes that ended in each rollout, smoothed), and
@@ -66,11 +68,11 @@ CUDA libraries.
 ## Train
 
 ```bash
-uv run --group train python examples/train_maskable_ppo.py --timesteps 44171264
+uv run --group train python examples/train_maskable_ppo.py --timesteps 30154752
 ```
 
 The defaults are the demo run's settings, except that it ran up to 60M steps and was stopped
-after 5,392 updates of 8,192 steps; `--timesteps 44171264` ends at the same update. Training is
+after 3,681 updates of 8,192 steps; `--timesteps 30154752` ends at the same update. Training is
 seeded (the envs' runs, the action-table sampler, torch, numpy), but floating-point results can
 still differ with the hardware and the thread count. Everything goes to
 `runs/maskable_ppo/<run>/`, which is gitignored:
@@ -117,7 +119,7 @@ summary. The first command reproduces the table from the committed model in abou
 new episode's first observation. MaskablePPO then reads the masks with
 `env_method("action_masks")`, which asks each env for the mask of the observation it just
 returned, so the policy always picks from the legal actions of the state it sees. A check over
-17,454 automatic resets found every returned observation and mask equal to those of a fresh env
+17,415 automatic resets found every returned observation and mask equal to those of a fresh env
 starting the same run.
 
 **Why not `BalatroVectorEnv`.** The vector env steps several times faster than 32 Gym envs in a
@@ -129,7 +131,7 @@ one, and the vector env can reset a sub-env only by stepping all the others with
 resetting them all). Wrapping it would put one fake transition per episode into PPO's rollout
 buffer: an action chosen with every action masked, which the env ignores, scored as a real step
 in the advantages, the value targets and the episode statistics. The env is not the bottleneck
-anyway: on 6 threads MaskablePPO trains at up to about 10K steps/s (6.6K on average over the demo
+anyway: on 6 threads MaskablePPO trains at up to about 10K steps/s (7.8K on average over the demo
 run, on a machine shared with other work), half in rollouts and half in updates. Stepping the 32
 envs takes about a fifth of the time (they run at about 46K steps/s on their own), so even an
 instant env would save at most a fifth of the wall clock.
@@ -140,7 +142,8 @@ built-in dense reward (computed in Rust) with heavier progress terms and no loss
 defaults. With the default weights, putting off the end of a lost run saves
 `loss * (1 - gamma)` per step, which equals `step_cost` at `gamma = 0.995`, so stalling is free.
 In a pilot with the defaults, the greedy policy learned to alternate sorting and swapping cards
-until the 2,000-step cap and beat no blind. Pilots with the same settings otherwise:
+until the 2,000-step cap and beat no blind. Pilots with the same settings otherwise (on the
+engine before G206, see below):
 
 | Reward | Blinds beaten on the validation seeds (greedy / sampled) |
 |---|---|
@@ -167,6 +170,13 @@ runs about a third slower.
 action from its own table, where `BalatroVectorEnv` ends that episode instead. The
 `EndOnRefusal` wrapper does the same here, so that an env bug can't stop a long run, and prints
 the refusal. None happened in the demo run or its evaluations.
+
+**Engine versions.** A trained policy is tied to the action masks it was trained with. G206 (a
+fix to follow the game's drag and drop) made joker swaps legal at blind select and on the
+cash-out screen. A first demo model, trained just before it, had never seen those table slots
+unmasked there: on the engine with G206, 97% of its sampled moves were those swaps, and its
+blinds beaten per run fell from 4.1 to 2.2. The model here was trained after the change. Retrain
+(or fine-tune) a policy when the masks change.
 
 ## Files
 
