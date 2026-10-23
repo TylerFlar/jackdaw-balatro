@@ -211,6 +211,11 @@ class Card:
     perish_tally: int = 5  # rounds until perish
     rental: bool = False
 
+    # Card.added_to_deck (card.lua:62): whether add_to_deck's effects are
+    # currently applied.  add_to_deck / remove_from_deck run once each way
+    # (card.lua:568, 646), and a joker's debuff removes them meanwhile.
+    added_to_deck: bool = field(default=False, compare=False)
+
     def set_base(
         self,
         card_key: str,
@@ -444,8 +449,37 @@ class Card:
     def set_rental(self, rental: bool) -> None:
         self.rental = rental
 
-    def set_debuff(self, should_debuff: bool) -> None:
-        self.debuff = should_debuff
+    def _perished(self) -> bool:
+        """``ability.perishable and ability.perish_tally <= 0`` (card.lua:527)."""
+        if not (self.perishable or self.ability.get("perishable")):
+            return False
+        tally = self.ability.get("perish_tally", self.perish_tally)
+        return tally is not None and tally <= 0
+
+    def set_debuff(self, should_debuff: bool, game_state: dict | None = None) -> None:
+        """Card:set_debuff (card.lua:526-538).
+
+        A perished card (perish_tally 0) is debuffed for good, whatever is
+        asked.  Otherwise a change of state on a joker in the joker area
+        also removes or restores its passives: remove_from_deck(true) on
+        debuff, add_to_deck(true) on un-debuff.  Pass *game_state* whenever
+        the card may be a joker; without it only the flag changes (playing
+        cards have no passives).
+        """
+        in_jokers = game_state is not None and any(j is self for j in game_state.get("jokers", ()))
+        if self._perished():
+            if not self.debuff:
+                self.debuff = True
+                if in_jokers:
+                    self.remove_from_deck(game_state, from_debuff=True)
+            return
+        if bool(should_debuff) != bool(self.debuff):
+            if in_jokers:
+                if should_debuff:
+                    self.remove_from_deck(game_state, from_debuff=True)
+                else:
+                    self.add_to_deck(game_state, from_debuff=True)
+            self.debuff = bool(should_debuff)
 
     def set_cost(
         self,
@@ -778,13 +812,32 @@ class Card:
                 return {"repetitions": 1, "card": self}
         return None
 
-    def add_to_deck(self, game_state: dict) -> None:
+    def _negative_slot_key(self) -> str:
+        """The area limit a Negative edition raises (card.lua:568 routing):
+        consumables raise the consumable limit, everything else jokers."""
+        if self.ability.get("consumeable") or self.ability.get("set") in (
+            "Tarot",
+            "Planet",
+            "Spectral",
+        ):
+            return "consumable_slots"
+        return "joker_slots"
+
+    def add_to_deck(self, game_state: dict, from_debuff: bool = False) -> None:
         """Apply joker's passive effects when added to deck (card.lua:Card:add_to_deck).
 
-        Mutates *game_state* in-place.  Matches card.lua:564 exactly.
+        Mutates *game_state* in-place.  Matches card.lua:564-643: it runs
+        once (``added_to_deck``), does nothing more for a playing card, and
+        ``from_debuff`` (a joker coming back from a debuff, card.lua:535)
+        keeps a Negative's slot, which its debuff never took away.
         game_state keys: hand_size, discards, joker_slots, probabilities_normal,
         bankrupt_at, free_rerolls, hands_per_round, interest_amount.
         """
+        if self.added_to_deck:
+            return
+        self.added_to_deck = True
+        if self.ability.get("set") in ("Enhanced", "Default"):
+            return
         name = self.ability.get("name", "")
         extra = self.ability.get("extra")
 
@@ -840,22 +893,31 @@ class Card:
             game_state["hand_size"] = game_state.get("hand_size", 0) - extra.get("h_size", 0)
 
         if self.edition and self.edition.get("negative"):
-            # card.lua:568 routes the Negative slot bonus by card type:
-            # consumables raise the consumable limit, everything else jokers.
-            if self.ability.get("consumeable") or self.ability.get("set") in (
-                "Tarot",
-                "Planet",
-                "Spectral",
-            ):
-                game_state["consumable_slots"] = game_state.get("consumable_slots", 0) + 1
+            if from_debuff:
+                # card.lua:631-632: the slot was never given back
+                self.ability.pop("queue_negative_removal", None)
             else:
-                game_state["joker_slots"] = game_state.get("joker_slots", 0) + 1
+                key = self._negative_slot_key()
+                game_state[key] = game_state.get(key, 0) + 1
 
-    def remove_from_deck(self, game_state: dict) -> None:
+    def remove_from_deck(self, game_state: dict, from_debuff: bool = False) -> None:
         """Reverse joker's passive effects when removed from deck (card.lua:Card:remove_from_deck).
 
-        Mirrors :meth:`add_to_deck` — each effect is undone.  Matches card.lua:648.
+        Mirrors :meth:`add_to_deck` — each effect is undone, once
+        (``added_to_deck``, card.lua:646-647).  A debuff (``from_debuff``,
+        card.lua:535) keeps a Negative's slot and queues its removal instead
+        (card.lua:687-690); any other call is the card leaving play
+        (Card:remove), which then gives back such a queued slot
+        (card.lua:4733-4739).
         """
+        if self.added_to_deck:
+            self._remove_passives(game_state, from_debuff)
+        if not from_debuff and self.ability.get("queue_negative_removal"):
+            key = self._negative_slot_key()
+            game_state[key] = game_state.get(key, 0) - 1
+
+    def _remove_passives(self, game_state: dict, from_debuff: bool) -> None:
+        self.added_to_deck = False
         name = self.ability.get("name", "")
         extra = self.ability.get("extra")
 
@@ -901,14 +963,11 @@ class Card:
             game_state["hand_size"] = game_state.get("hand_size", 0) + extra.get("h_size", 0)
 
         if self.edition and self.edition.get("negative"):
-            if self.ability.get("consumeable") or self.ability.get("set") in (
-                "Tarot",
-                "Planet",
-                "Spectral",
-            ):
-                game_state["consumable_slots"] = game_state.get("consumable_slots", 0) - 1
+            if from_debuff:
+                self.ability["queue_negative_removal"] = True
             else:
-                game_state["joker_slots"] = game_state.get("joker_slots", 0) - 1
+                key = self._negative_slot_key()
+                game_state[key] = game_state.get(key, 0) - 1
 
     def __repr__(self) -> str:
         if self.base:

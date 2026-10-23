@@ -1409,6 +1409,8 @@ def _apply_selling_self_mutations(
 
                 chosen, _ = rng.element(candidates, rng.seed("invisible"))
                 duplicate = copy.deepcopy(chosen)
+                # copy_card builds a fresh Card: its add_to_deck runs anew
+                duplicate.added_to_deck = False
                 if "invis_rounds" in duplicate.ability:
                     duplicate.ability["invis_rounds"] = 0
                 duplicate.add_to_deck(gs)
@@ -1991,8 +1993,13 @@ def _joker_end_of_round_effects(gs: dict[str, Any]) -> dict[str, Any]:
     Dollars returned here are only ever banked via the cash-out screen,
     which a lost run never reaches.
     """
-    from jackdaw.engine.jokers import GameSnapshot, on_end_of_round
-    from jackdaw.engine.round_lifecycle import process_round_end_cards
+    from jackdaw.engine.jokers import (
+        GameSnapshot,
+        JokerContext,
+        calc_dollar_bonus,
+        calculate_joker,
+    )
+    from jackdaw.engine.round_lifecycle import calculate_perishable, calculate_rental
 
     cr = gs.get("current_round", {})
     jokers = gs.get("jokers", [])
@@ -2018,18 +2025,35 @@ def _joker_end_of_round_effects(gs: dict[str, Any]) -> dict[str, Any]:
         nine_tally=sum(1 for c in _all_owned if c.get_id() == 9),
         joker_count=len(jokers),
     )
-    eor = on_end_of_round(
-        jokers,
-        game_snap,
-        rng,
+    # end_round's joker loop (state_events.lua:99-110): each joker in turn
+    # gets its end_of_round context, then calculate_rental, then
+    # calculate_perishable.  A joker that destroys itself is only removed
+    # by a later event, so it still pays its rent in the same pass; one
+    # that perishes is debuffed through set_debuff and loses its passives.
+    ctx = JokerContext(
+        end_of_round=True,
+        jokers=jokers,
+        rng=rng,
+        game=game_snap,
         hand_levels=gs.get("hand_levels"),
         # Rocket's boss bump reads the just-finished blind
         # (card.lua:2896); fires on losses too (bug #15 semantics).
         blind=gs.get("blind"),
     )
-    # Dollars are NOT banked here: vanilla pays the whole round total in
-    # one ease_dollars at the cash-out press, with interest computed on
-    # pre-payout money.  The value flows to calculate_round_earnings.
+    removed: list = []
+    mutations: list[dict[str, Any]] = []
+    for joker in list(jokers):
+        if not joker.debuff:
+            result = calculate_joker(joker, ctx)
+            if result:
+                if result.remove:
+                    removed.append(joker)
+                if result.extra:
+                    mutations.append(result.extra)
+        calculate_rental(joker, gs)
+        calculate_perishable(joker, gs)
+    eor: dict[str, Any] = {"jokers_removed": removed, "mutations": mutations}
+
     for removed_joker in eor.get("jokers_removed", []):
         if removed_joker in jokers:
             jokers.remove(removed_joker)
@@ -2070,7 +2094,14 @@ def _joker_end_of_round_effects(gs: dict[str, Any]) -> dict[str, Any]:
                         ante=gs.get("round_resets", {}).get("ante", 1),
                     )
 
-    process_round_end_cards(jokers, gs)
+    # calculate_dollar_bonus runs later, in evaluate_round
+    # (state_events.lua:1175-1182): after the perishable ticks — a joker
+    # that perished this round is debuffed and pays nothing
+    # (card.lua:1655-1656) — and after the self-destructions.  Dollars are
+    # NOT banked here: vanilla pays the whole round total in one
+    # ease_dollars at the cash-out press, with interest computed on
+    # pre-payout money; the value flows to calculate_round_earnings.
+    eor["dollars_earned"] = sum(calc_dollar_bonus(j, game_snap) for j in jokers)
     return eor
 
 
@@ -2699,6 +2730,7 @@ def _apply_consumable_result(
             if copy_source is not None:
                 new_card = _copy.deepcopy(copy_source)
                 new_card.sort_id = _next_sort_id()
+                new_card.added_to_deck = False
                 if gs.get("phase") == GamePhase.SELECTING_HAND:
                     # Emplaced at the right end; nothing sorts the hand
                     # until the next draw (cardarea.lua:32-37).
@@ -3154,6 +3186,8 @@ def _apply_shop_mutations(
                         seed_val = rng.seed("perkeo")
                         original, _ = rng.element(consumables, seed_val)
                         duplicate = copy.deepcopy(original)
+                        # copy_card builds a fresh Card: add_to_deck runs anew
+                        duplicate.added_to_deck = False
                         duplicate.set_edition({"negative": True})
                         duplicate.set_cost(
                             inflation=gs.get("inflation", 0),

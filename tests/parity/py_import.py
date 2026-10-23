@@ -72,6 +72,7 @@ def import_card(cs: dict[str, Any]) -> Card:
     c.edition = copy.deepcopy(cs["edition"]) if cs["edition"] else None
     c.seal = cs["seal"]
     c.debuff = cs["debuff"]
+    c.added_to_deck = cs["added_to_deck"]
     c.facing = cs["facing"]
     c.playing_card = cs["playing_card"]
     costs = cs["costs"]

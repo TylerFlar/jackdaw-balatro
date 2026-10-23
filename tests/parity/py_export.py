@@ -184,6 +184,7 @@ def export_card(c: Any) -> dict[str, Any]:
         "edition": plain(c.edition) if c.edition else None,
         "seal": c.seal,
         "debuff": bool(c.debuff),
+        "added_to_deck": bool(c.added_to_deck),
         "facing": c.facing,
         "playing_card": c.playing_card,
         "costs": {

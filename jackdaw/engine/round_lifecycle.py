@@ -97,33 +97,44 @@ def process_round_end_cards(
     RoundEndResult
         Summary of what happened.
     """
-    rental_rate: int = game_state.get("rental_rate", 3)
     result = RoundEndResult()
 
     for joker in jokers:
-        # ---------------------------------------------------------------
-        # calculate_rental — card.lua:2271-2276
-        # ---------------------------------------------------------------
-        if _is_rental(joker):
-            game_state["dollars"] = game_state.get("dollars", 0) - rental_rate
-            result.rental_cost += rental_rate
+        charged = calculate_rental(joker, game_state)
+        if charged:
+            result.rental_cost += charged
             result.rental_cards.append(joker)
-
-        # ---------------------------------------------------------------
-        # calculate_perishable — card.lua:2278-2289
-        # ---------------------------------------------------------------
-        if _is_perishable(joker):
-            tally = _get_perish_tally(joker)
-            if tally > 0:
-                if tally == 1:
-                    # Hits zero — permanently debuff
-                    _set_perish_tally(joker, 0)
-                    joker.debuff = True
-                    result.perished.append(joker)
-                else:
-                    _set_perish_tally(joker, tally - 1)
+        if calculate_perishable(joker, game_state):
+            result.perished.append(joker)
 
     return result
+
+
+def calculate_rental(joker: Card, game_state: dict[str, Any]) -> int:
+    """Card:calculate_rental (card.lua:2271-2276): a rental joker pays
+    ``rental_rate`` at round end — debuffed or not.  Returns the charge."""
+    if not _is_rental(joker):
+        return 0
+    rental_rate: int = game_state.get("rental_rate", 3)
+    game_state["dollars"] = game_state.get("dollars", 0) - rental_rate
+    return rental_rate
+
+
+def calculate_perishable(joker: Card, game_state: dict[str, Any]) -> bool:
+    """Card:calculate_perishable (card.lua:2278-2289): tick the tally down;
+    at 0 the joker is debuffed through set_debuff, which also takes its
+    passives away (card.lua:526-531).  Returns True when it perished now."""
+    if not _is_perishable(joker):
+        return False
+    tally = _get_perish_tally(joker)
+    if tally <= 0:
+        return False
+    if tally == 1:
+        _set_perish_tally(joker, 0)
+        joker.set_debuff(True, game_state)
+        return True
+    _set_perish_tally(joker, tally - 1)
+    return False
 
 
 # ---------------------------------------------------------------------------
