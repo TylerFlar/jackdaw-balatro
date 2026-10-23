@@ -205,6 +205,9 @@ class Card:
     perishable: bool = False
     perish_tally: int = 5  # rounds until perish
     rental: bool = False
+    # Challenge pin (game.lua:2073): the joker area sorts pinned cards first
+    # (cardarea.lua:528), so a pinned joker cannot be moved.
+    pinned: bool = False
 
     def set_base(self, card_key: str, suit: str, value: str) -> None:
         """Populate base fields from P_CARDS data, matching Card:set_base."""

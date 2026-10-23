@@ -62,6 +62,9 @@ def step(game_state: dict[str, Any], action: Action) -> dict[str, Any]:
     if the action is not valid in the current phase.
     """
     result = _dispatch(game_state, action)
+    # The joker area re-sorts pinned cards to the left every frame
+    # (cardarea.lua:528).
+    _align_pinned_jokers(result.get("jokers") or [])
     # Vanilla recomputes shop prices continuously while shopping
     # (Card:update → set_cost each frame), so cost-relevant changes —
     # buying/selling Astronomer, coupon tags — reflect immediately.
@@ -1876,13 +1879,29 @@ def _handle_swap_jokers(gs: dict[str, Any], idx: int, direction: int) -> dict[st
     """
     _require_phase(gs, GamePhase.SELECTING_HAND, GamePhase.SHOP)
 
+    from jackdaw.engine.actions import joker_swap_allowed
+
     jokers: list = gs.get("jokers", [])
     other = idx + direction
     if not (0 <= idx < len(jokers) and 0 <= other < len(jokers)):
         raise IllegalActionError("Swap index out of range")
+    if not joker_swap_allowed(jokers, idx, direction):
+        raise IllegalActionError("A pinned joker cannot be moved")
 
     jokers[idx], jokers[other] = jokers[other], jokers[idx]
     return gs
+
+
+def _align_pinned_jokers(jokers: list) -> None:
+    """Sort pinned jokers to the left, as the joker area does every frame.
+
+    cardarea.lua:528 orders G.jokers by ``T.x - 100*(pinned and sort_id or
+    0)``: pinned cards first (the newest pin leftmost), the rest in their
+    current order.  Only something that reorders the area (Amber Acorn's
+    shuffle) or copies a pinned joker can disturb it.
+    """
+    if any(getattr(j, "pinned", False) for j in jokers):
+        jokers.sort(key=lambda j: -j.sort_id if j.pinned else 0)
 
 
 # ---------------------------------------------------------------------------

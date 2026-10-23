@@ -145,6 +145,46 @@ def create_joker(
     return card
 
 
+def add_joker(
+    key: str,
+    game_state: dict[str, Any],
+    edition: str | None = None,
+    *,
+    eternal: bool = False,
+) -> Card:
+    """Create *key* straight into its owned area, as ``add_joker`` does.
+
+    Mirrors ``add_joker`` (common_events.lua:372-384), the helper behind the
+    challenge starting cards (game.lua:2071/2083): a bare Card for the
+    center — no ``create_card``, so no pool pick, sticker roll or edition
+    poll — then ``add_to_deck``, the optional edition (a Negative set on an
+    added card raises the slot count, card.lua:405-415; Python's
+    ``add_to_deck`` reads the edition instead, same total), and the card
+    joins G.jokers, or G.consumeables for a consumable center.  There is no
+    slot check.  Card:init's set_ability marks the key in used_jokers
+    (card.lua:349-354) and set_cost prices the card.
+    """
+    from jackdaw.engine.card_utils import astronomer_active
+
+    card = Card()
+    card.set_ability(key, hands_played=game_state.get("hands_played", 0))
+    game_state.setdefault("used_jokers", {})[key] = True
+    if edition:
+        card.set_edition({edition: True})
+    if eternal:
+        card.set_eternal(True)
+    card.set_cost(
+        inflation=game_state.get("inflation", 0),
+        discount_percent=game_state.get("discount_percent", 0),
+        ante=game_state.get("round_resets", {}).get("ante", 1),
+        has_astronomer=astronomer_active(game_state),
+    )
+    area = "consumables" if card.ability.get("consumeable") else "jokers"
+    game_state.setdefault(area, []).append(card)
+    card.add_to_deck(game_state)
+    return card
+
+
 # ---------------------------------------------------------------------------
 # Consumable creation (tarots, planets, spectrals)
 # ---------------------------------------------------------------------------

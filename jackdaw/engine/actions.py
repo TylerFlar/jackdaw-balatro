@@ -399,13 +399,32 @@ def _legal_selecting_hand(gs: dict[str, Any]) -> list[Action]:
     actions.extend(_usable_consumables(gs))
 
     # Swap jokers
-    jokers: list[Card] = gs.get("jokers", [])
-    if len(jokers) > 1:
-        for i in range(1, len(jokers)):
-            actions.append(SwapJokersLeft(idx=i))
-        for i in range(len(jokers) - 1):
-            actions.append(SwapJokersRight(idx=i))
+    actions.extend(_joker_swap_actions(gs.get("jokers", [])))
 
+    return actions
+
+
+def joker_swap_allowed(jokers: list[Card], idx: int, direction: int) -> bool:
+    """Whether ``jokers[idx]`` may swap with its neighbour in *direction* (±1).
+
+    A pinned joker never moves: the joker area sorts pinned cards first
+    every frame (cardarea.lua:528), so swapping one, or swapping another
+    card past it, snaps straight back.  Shared by the executor, the legal
+    actions and the env mask.
+    """
+    other = idx + direction
+    if not (0 <= idx < len(jokers) and 0 <= other < len(jokers)):
+        return False
+    return not (getattr(jokers[idx], "pinned", False) or getattr(jokers[other], "pinned", False))
+
+
+def _joker_swap_actions(jokers: list[Card]) -> list[Action]:
+    actions: list[Action] = [
+        SwapJokersLeft(idx=i) for i in range(1, len(jokers)) if joker_swap_allowed(jokers, i, -1)
+    ]
+    actions.extend(
+        SwapJokersRight(idx=i) for i in range(len(jokers) - 1) if joker_swap_allowed(jokers, i, +1)
+    )
     return actions
 
 
@@ -468,11 +487,7 @@ def _legal_shop(gs: dict[str, Any]) -> list[Action]:
     actions.append(NextRound())
 
     # Swap jokers
-    if len(jokers) > 1:
-        for i in range(1, len(jokers)):
-            actions.append(SwapJokersLeft(idx=i))
-        for i in range(len(jokers) - 1):
-            actions.append(SwapJokersRight(idx=i))
+    actions.extend(_joker_swap_actions(jokers))
 
     return actions
 
