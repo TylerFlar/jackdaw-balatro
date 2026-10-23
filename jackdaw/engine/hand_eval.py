@@ -140,19 +140,13 @@ def get_straight(
     return [t]
 
 
-def get_x_same(num: int, hand: list[Card]) -> list[list[Card]]:
-    """Find all groups of exactly *num* cards sharing the same rank.
+def _x_same_scan(num: int, hand: list[Card]) -> list[list[Card]]:
+    """Reference O(n^2) scan, a direct port of ``get_X_same``.
 
-    Matches ``get_X_same`` (misc_functions.lua:592).
-
-    Returns groups ordered by rank descending (highest first).
-    Each group contains exactly *num* cards.
+    Used only for rank ids that cannot be dict keys (unhashable), which
+    the grouping fast path cannot handle.
     """
-    # vals[id] = list of cards with that id, only if count == num
     vals: dict[int, list[Card]] = {}
-
-    # get_id is pure (stone cards return a fixed -1 placeholder), so it can
-    # be hoisted out of the O(n^2) comparison loop.
     ids = [c.get_id() for c in hand]
     for i in range(len(hand) - 1, -1, -1):
         curr = [hand[i]]
@@ -162,13 +156,51 @@ def get_x_same(num: int, hand: list[Card]) -> list[list[Card]]:
                 curr.append(hand[j])
         if len(curr) == num:
             vals[card_id] = curr
+    return [vals[rank_id] for rank_id in range(14, 0, -1) if rank_id in vals]
 
-    # Return in descending rank order
-    ret: list[list[Card]] = []
-    for rank_id in range(14, 0, -1):
-        if rank_id in vals:
-            ret.append(vals[rank_id])
-    return ret
+
+def _group_by_id(hand: list[Card]) -> dict[int, list[Card]] | None:
+    """Cards grouped by rank id, each group in hand order.
+
+    This equals the Lua scan's result: it keeps, per rank, the group built
+    from that rank's lowest-index card, which is the card followed by the
+    rest of its rank in index order.  ``None`` if an id is unhashable.
+    """
+    groups: dict[int, list[Card]] = {}
+    try:
+        for card in hand:
+            card_id = card.get_id()
+            group = groups.get(card_id)
+            if group is None:
+                groups[card_id] = [card]
+            else:
+                group.append(card)
+    except TypeError:
+        return None
+    return groups
+
+
+def _x_same_from_groups(num: int, groups: dict[int, list[Card]]) -> list[list[Card]]:
+    """Groups of exactly *num* cards, highest rank first (ids 14..1 only)."""
+    return [
+        groups[rank_id]
+        for rank_id in range(14, 0, -1)
+        if rank_id in groups and len(groups[rank_id]) == num
+    ]
+
+
+def get_x_same(num: int, hand: list[Card]) -> list[list[Card]]:
+    """Find all groups of exactly *num* cards sharing the same rank.
+
+    Matches ``get_X_same`` (misc_functions.lua:592).
+
+    Returns groups ordered by rank descending (highest first).
+    Each group contains exactly *num* cards, in hand order.
+    """
+    groups = _group_by_id(hand)
+    if groups is None:
+        return _x_same_scan(num, hand)
+    return _x_same_from_groups(num, groups)
 
 
 def get_highest(hand: list[Card]) -> list[list[Card]]:
@@ -308,10 +340,16 @@ def evaluate_poker_hand(
     }
 
     # Compute component parts
-    _5 = get_x_same(5, hand)
-    _4 = get_x_same(4, hand)
-    _3 = get_x_same(3, hand)
-    _2 = get_x_same(2, hand)
+    # One grouping pass serves all four get_X_same calls; each group has a
+    # single size, so no group list is shared between _5/_4/_3/_2.
+    groups = _group_by_id(hand)
+    if groups is None:
+        _5, _4, _3, _2 = (_x_same_scan(k, hand) for k in (5, 4, 3, 2))
+    else:
+        _5 = _x_same_from_groups(5, groups)
+        _4 = _x_same_from_groups(4, groups)
+        _3 = _x_same_from_groups(3, groups)
+        _2 = _x_same_from_groups(2, groups)
     _flush = get_flush(hand, four_fingers=four_fingers, smeared=smeared)
     _straight = get_straight(hand, four_fingers=four_fingers, shortcut=shortcut)
     _highest = get_highest(hand)

@@ -17,7 +17,10 @@ Example::
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import math
+import operator
+from collections.abc import Callable, Sequence
+from functools import lru_cache
 from itertools import combinations
 from typing import Any
 
@@ -66,26 +69,79 @@ _CARD_ONLY_TYPES: frozenset[int] = frozenset(
 )
 
 
-def _subsample(items: list[Any], budget: int, rng: np.random.Generator) -> list[Any]:
-    """Return *items* if within budget, else a random subsample."""
+def _subsample(items: Sequence[Any], budget: int, rng: np.random.Generator) -> Sequence[Any]:
+    """Return *items* if within budget, else a random subsample (order kept)."""
     if len(items) <= budget:
         return items
     indices = rng.choice(len(items), size=budget, replace=False)
-    return [items[i] for i in sorted(indices)]
+    indices.sort()
+    return [items[i] for i in indices.tolist()]
 
 
-def _card_combos(
-    legal_cards: np.ndarray,
-    min_select: int,
-    max_select: int,
-) -> list[tuple[int, ...]]:
-    """Enumerate all card-index combinations within the selection range."""
-    upper = min(len(legal_cards), max_select)
+def _selection_sizes(n_cards: int, min_select: Any, max_select: Any) -> tuple[int, int]:
+    """``(first, stop)`` of the selection-size range, validated like ``range()``."""
+    upper = min(n_cards, max_select)
     lower = min(min_select, upper)
+    return operator.index(lower), operator.index(upper + 1)
+
+
+def _card_combos(legal_cards: tuple[int, ...], first: int, stop: int) -> list[tuple[int, ...]]:
+    """Enumerate all card-index combinations with sizes in ``range(first, stop)``."""
     result: list[tuple[int, ...]] = []
-    for k in range(lower, upper + 1):
-        result.extend(tuple(int(c) for c in combo) for combo in combinations(legal_cards, k))
+    for k in range(first, stop):
+        result.extend(combinations(legal_cards, k))
     return result
+
+
+# FactoredAction is frozen, so identical actions can be shared across steps
+# instead of being rebuilt (hundreds per step for PlayHand/Discard).  Only
+# modest selection spaces are cached, which bounds the cache's memory
+# (at most _CARD_ACTIONS_CACHE entries of _CACHE_MAX_COMBOS actions).
+_CACHE_MAX_COMBOS = 1024
+_CARD_ACTIONS_CACHE = 128
+
+
+@lru_cache(maxsize=_CARD_ACTIONS_CACHE)
+def _cached_card_actions(
+    action_type: int,
+    entity_target: int | None,
+    legal_cards: tuple[int, ...],
+    first: int,
+    stop: int,
+) -> tuple[FactoredAction, ...]:
+    return tuple(
+        FactoredAction(action_type=action_type, entity_target=entity_target, card_target=combo)
+        for combo in _card_combos(legal_cards, first, stop)
+    )
+
+
+def _card_actions(
+    action_type: int,
+    entity_target: int | None,
+    legal_cards: tuple[int, ...],
+    min_select: Any,
+    max_select: Any,
+    rng: np.random.Generator,
+) -> Sequence[FactoredAction]:
+    """Card-selecting actions for one action type/entity, subsampled to budget."""
+    n = len(legal_cards)
+    first, stop = _selection_sizes(n, min_select, max_select)
+    if sum(math.comb(n, k) for k in range(max(first, 0), stop)) <= _CACHE_MAX_COMBOS:
+        actions = _cached_card_actions(action_type, entity_target, legal_cards, first, stop)
+        return _subsample(actions, CARD_COMBO_BUDGET, rng)
+    # Large selection spaces: sample the combinations first, then build only
+    # the sampled actions (same draw: the population size is identical).
+    combos = _subsample(_card_combos(legal_cards, first, stop), CARD_COMBO_BUDGET, rng)
+    return [
+        FactoredAction(action_type=action_type, entity_target=entity_target, card_target=combo)
+        for combo in combos
+    ]
+
+
+@lru_cache(maxsize=1024)
+def _target_action(action_type: int, entity_target: int | None = None) -> FactoredAction:
+    """The single :class:`FactoredAction` with no card selection."""
+    return FactoredAction(action_type=action_type, entity_target=entity_target)
 
 
 class BalatroGymnasiumEnv(gymnasium.Env):
@@ -260,6 +316,7 @@ class BalatroGymnasiumEnv(gymnasium.Env):
     ) -> list[FactoredAction]:
         actions: list[FactoredAction] = []
         type_mask = mask.type_mask
+        legal_cards: tuple[int, ...] | None = None
 
         for t in range(len(type_mask)):
             if not type_mask[t]:
@@ -267,49 +324,42 @@ class BalatroGymnasiumEnv(gymnasium.Env):
 
             # --- Simple (no targets) ---
             if t in _SIMPLE_TYPES:
-                actions.append(FactoredAction(action_type=t))
+                actions.append(_target_action(t))
 
             # --- Entity-only ---
             elif t in _ENTITY_ONLY_TYPES:
                 if t in mask.entity_masks:
-                    legal = np.nonzero(mask.entity_masks[t])[0]
-                    for idx in legal:
-                        actions.append(FactoredAction(action_type=t, entity_target=int(idx)))
+                    for idx in np.nonzero(mask.entity_masks[t])[0].tolist():
+                        actions.append(_target_action(t, idx))
 
             # --- Card-only (PlayHand / Discard) ---
             elif t in _CARD_ONLY_TYPES:
-                legal_cards = np.nonzero(mask.card_mask)[0]
-                combos = _card_combos(legal_cards, mask.min_card_select, mask.max_card_select)
-                combos = _subsample(combos, CARD_COMBO_BUDGET, self._rng)
-                for combo in combos:
-                    actions.append(FactoredAction(action_type=t, card_target=combo))
+                if legal_cards is None:
+                    legal_cards = tuple(np.nonzero(mask.card_mask)[0].tolist())
+                min_select, max_select = mask.min_card_select, mask.max_card_select
+                actions.extend(
+                    _card_actions(t, None, legal_cards, min_select, max_select, self._rng)
+                )
 
             # --- Entity + optional cards (UseConsumable / PickPackCard) ---
             elif t in _TARGETED_ENTITY_SOURCES:
                 if t in mask.entity_masks:
-                    legal_entities = np.nonzero(mask.entity_masks[t])[0]
+                    legal_entities = np.nonzero(mask.entity_masks[t])[0].tolist()
                     source = info.get("raw_state", {}).get(_TARGETED_ENTITY_SOURCES[t], [])
                     for e_idx in legal_entities:
-                        e_idx_int = int(e_idx)
-                        if e_idx_int < len(source):
-                            card = source[e_idx_int]
+                        if e_idx < len(source):
+                            card = source[e_idx]
                             min_cards, max_cards, needs = get_consumable_target_info(card)
                             if needs:
-                                legal_cards = np.nonzero(mask.card_mask)[0]
-                                combos = _card_combos(legal_cards, min_cards, max_cards)
-                                combos = _subsample(combos, CARD_COMBO_BUDGET, self._rng)
-                                for combo in combos:
-                                    actions.append(
-                                        FactoredAction(
-                                            action_type=t,
-                                            entity_target=e_idx_int,
-                                            card_target=combo,
-                                        )
+                                if legal_cards is None:
+                                    legal_cards = tuple(np.nonzero(mask.card_mask)[0].tolist())
+                                actions.extend(
+                                    _card_actions(
+                                        t, e_idx, legal_cards, min_cards, max_cards, self._rng
                                     )
-                            else:
-                                actions.append(
-                                    FactoredAction(action_type=t, entity_target=e_idx_int)
                                 )
+                            else:
+                                actions.append(_target_action(t, e_idx))
 
         # Subsample to budget if needed
         if len(actions) > MAX_ACTIONS:

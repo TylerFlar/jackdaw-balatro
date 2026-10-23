@@ -761,14 +761,14 @@ def encode_global_context(
     # Hand levels [30:90] — 12 hand types × 5 features
     hand_levels: HandLevels | None = gs.get("hand_levels")
     base_idx = 30
-    for j, ht in enumerate(_HAND_TYPES):
-        offset = base_idx + j * 5
-        if hand_levels is not None:
+    if hand_levels is not None:
+        for j, ht in enumerate(_HAND_TYPES):
+            offset = base_idx + j * 5
             hs = hand_levels.get_state(ht)
             v[offset + 0] = hs.level / 20.0
-            v[offset + 1] = _log_scale(hs.chips)
-            v[offset + 2] = _log_scale(hs.mult)
-            v[offset + 3] = _log_scale(hs.played)
+            v[offset + 1] = _ls(hs.chips)
+            v[offset + 2] = _ls(hs.mult)
+            v[offset + 3] = _ls(hs.played)
             v[offset + 4] = float(hs.visible)
 
     # --- Vouchers owned [90:122] — 32-dim binary vector ---

@@ -55,8 +55,11 @@ class HandLevels:
 
     def get_state(self, hand_type: HandType | str) -> HandState:
         """Return the full mutable ``HandState`` for *hand_type*."""
-        ht = HandType(hand_type) if isinstance(hand_type, str) else hand_type
-        return self._hands[ht]
+        # HandType is a StrEnum, so members also pass isinstance(str); skip
+        # the (identity) HandType() round-trip for them.
+        if type(hand_type) is not HandType and isinstance(hand_type, str):
+            hand_type = HandType(hand_type)
+        return self._hands[hand_type]
 
     def level_up(self, hand_type: HandType | str, amount: int = 1) -> None:
         """Level up *hand_type* by *amount* (from Planet card, Space Joker, etc.).
@@ -112,8 +115,11 @@ class HandLevels:
 
     def __getitem__(self, hand_type: HandType | str) -> HandState:
         """Dict-like access: ``levels[HandType.PAIR]`` or ``levels["Pair"]``."""
-        ht = HandType(hand_type) if isinstance(hand_type, str) else hand_type
-        return self._hands[ht]
+        # HandType is a StrEnum, so members also pass isinstance(str); skip
+        # the (identity) HandType() round-trip for them.
+        if type(hand_type) is not HandType and isinstance(hand_type, str):
+            hand_type = HandType(hand_type)
+        return self._hands[hand_type]
 
     def __contains__(self, hand_type: HandType | str) -> bool:
         try:

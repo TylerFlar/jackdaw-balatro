@@ -260,6 +260,48 @@ def _truncate_13(x: float) -> float:
 # ---------------------------------------------------------------------------
 
 
+def _select_element(table: dict | list, tw_state: list[int]) -> tuple:
+    """Shared body of ``pseudorandom_element``: deterministic sort, then draw.
+
+    Returns ``(selected_value, selected_key)``.
+    """
+    # An exact list/tuple enumerates as it indexes, so its (i + 1, v)
+    # entries need not be materialised unless they have to be sorted.
+    plain_seq = type(table) is list or type(table) is tuple
+    if plain_seq:
+        if not table:
+            raise ValueError("cannot select from empty table")
+        first_val = table[0]
+    else:
+        if isinstance(table, dict):
+            entries = list(table.items())
+        else:
+            entries = [(i + 1, v) for i, v in enumerate(table)]
+        if not entries:
+            raise ValueError("cannot select from empty table")
+        first_val = entries[0][1]
+
+    # Deterministic sort (matches Lua pseudorandom_element)
+    if isinstance(first_val, dict) and "sort_id" in first_val:
+        if plain_seq:
+            entries = [(i + 1, v) for i, v in enumerate(table)]
+        entries.sort(key=lambda e: e[1]["sort_id"])
+    elif hasattr(first_val, "sort_id"):
+        if plain_seq:
+            entries = [(i + 1, v) for i, v in enumerate(table)]
+        entries.sort(key=lambda e: e[1].sort_id)
+    elif plain_seq:
+        # Keys 1..n are already in sorted order: index directly.
+        idx = _luajit_random_int(tw_state, 1, len(table))
+        return table[idx - 1], idx
+    else:
+        entries.sort(key=lambda e: (isinstance(e[0], str), e[0]))
+
+    idx = _luajit_random_int(tw_state, 1, len(entries))
+    k, v = entries[idx - 1]  # Lua is 1-based
+    return v, k
+
+
 class PseudoRandom:
     """Balatro-compatible stateful PRNG.
 
@@ -363,28 +405,7 @@ class PseudoRandom:
 
         Returns ``(selected_value, selected_key)``.
         """
-        tw_state = _luajit_seed(seed_val)
-
-        if isinstance(table, dict):
-            entries = list(table.items())
-        else:
-            entries = [(i + 1, v) for i, v in enumerate(table)]
-
-        if not entries:
-            raise ValueError("cannot select from empty table")
-
-        # Deterministic sort (matches Lua pseudorandom_element)
-        first_val = entries[0][1]
-        if isinstance(first_val, dict) and "sort_id" in first_val:
-            entries.sort(key=lambda e: e[1]["sort_id"])
-        elif hasattr(first_val, "sort_id"):
-            entries.sort(key=lambda e: e[1].sort_id)
-        else:
-            entries.sort(key=lambda e: (isinstance(e[0], str), e[0]))
-
-        idx = _luajit_random_int(tw_state, 1, len(entries))
-        k, v = entries[idx - 1]  # Lua is 1-based
-        return v, k
+        return _select_element(table, _luajit_seed(seed_val))
 
     # -- pseudoshuffle ------------------------------------------------------
 
@@ -466,27 +487,7 @@ def pseudorandom(
 
 def pseudorandom_element(table: dict | list, seed: float) -> tuple:
     """Functional API matching Lua ``pseudorandom_element(_t, seed)``."""
-    tw_state = _luajit_seed(seed)
-
-    if isinstance(table, dict):
-        entries = list(table.items())
-    else:
-        entries = [(i + 1, v) for i, v in enumerate(table)]
-
-    if not entries:
-        raise ValueError("cannot select from empty table")
-
-    first_val = entries[0][1]
-    if isinstance(first_val, dict) and "sort_id" in first_val:
-        entries.sort(key=lambda e: e[1]["sort_id"])
-    elif hasattr(first_val, "sort_id"):
-        entries.sort(key=lambda e: e[1].sort_id)
-    else:
-        entries.sort(key=lambda e: (isinstance(e[0], str), e[0]))
-
-    idx = _luajit_random_int(tw_state, 1, len(entries))
-    k, v = entries[idx - 1]
-    return v, k
+    return _select_element(table, _luajit_seed(seed))
 
 
 def pseudoshuffle(lst: list, seed: float) -> None:

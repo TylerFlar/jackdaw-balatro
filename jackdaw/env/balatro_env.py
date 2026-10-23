@@ -18,7 +18,7 @@ from jackdaw.env.action_space import (
     get_action_mask,
 )
 from jackdaw.env.balatro_spec import balatro_game_spec
-from jackdaw.env.game_interface import GameAdapter, _snapshot
+from jackdaw.env.game_interface import DirectAdapter, GameAdapter, GameState, _snapshot
 from jackdaw.env.game_spec import GameActionMask, GameObservation, GameSpec
 from jackdaw.env.observation import encode_observation
 
@@ -109,7 +109,7 @@ class BalatroEnvironment:
             random.choice(self._back_keys) if len(self._back_keys) > 1 else self._back_keys[0]
         )
         stake = random.choice(self._stakes) if len(self._stakes) > 1 else self._stakes[0]
-        self._adapter.reset(back_key, stake, seed)
+        reset_state = self._adapter.reset(back_key, stake, seed)
 
         gs = self._adapter.raw_state
         obs = encode_observation(gs)
@@ -118,7 +118,7 @@ class BalatroEnvironment:
         game_mask = _action_mask_to_game(mask)
         info: dict[str, object] = {
             "raw_state": gs,
-            "state": _snapshot(gs),
+            "state": self._reuse_snapshot(reset_state, gs),
             "shop_splits": _compute_shop_splits(gs),
             "observation": obs,
             "action_mask": mask,
@@ -135,7 +135,7 @@ class BalatroEnvironment:
         # place, so gs_prev is about to become the post-step state.
         prev_state = _snapshot(gs_prev)
         engine_action = factored_to_engine_action(action, gs_prev)
-        self._adapter.step(engine_action)
+        step_state = self._adapter.step(engine_action)
 
         gs = self._adapter.raw_state
         self.episode_length += 1
@@ -156,12 +156,23 @@ class BalatroEnvironment:
         info: dict[str, object] = {
             "raw_state": gs,
             "prev_state": prev_state,
-            "state": _snapshot(gs),
+            "state": self._reuse_snapshot(step_state, gs),
             "shop_splits": _compute_shop_splits(gs),
             "observation": obs,
             "action_mask": mask,
         }
         return game_obs, terminated, truncated, game_mask, info
+
+    def _reuse_snapshot(self, returned: GameState, gs: dict[str, Any]) -> GameState:
+        """The post-step snapshot of *gs*.
+
+        DirectAdapter returns exactly ``_snapshot(raw_state)`` from
+        reset/step and nothing touches the state in between, so its result
+        is reused; any other adapter is snapshotted afresh, as before.
+        """
+        if type(self._adapter) is DirectAdapter:
+            return returned
+        return _snapshot(gs)
 
     def _action_mask(self, gs: dict[str, Any]) -> ActionMask:
         """The action mask, narrowed by an adapter that can't execute
