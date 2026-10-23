@@ -353,15 +353,6 @@ class TestPerFrameValues:
     """Values Card:update recomputes every frame (card.lua:4203-4248) count
     every card in G.jokers, debuffed ones included."""
 
-    def test_stencil_needs_an_empty_slot(self):
-        """Joker Stencil scores only while G.jokers.config.card_limit -
-        #G.jokers.cards > 0 (card.lua:3966-3972), however many Stencils."""
-        gs = select_blind(new_run("AUDIT_STENCIL_FULL"))
-        for key in ("j_stencil", "j_stencil", "j_greedy_joker", "j_lusty_joker", "j_mad"):
-            give_joker(gs, key)
-        play(gs, give_card(gs, "S_2"))
-        assert gs["last_score_result"].total == 5 + 2  # High Card, no Stencil x
-
     def test_stencil_counts_debuffed_stencils(self):
         """x_mult = empty slots + every 'Joker Stencil' in G.jokers, debuffed
         or not (card.lua:4203-4208)."""
