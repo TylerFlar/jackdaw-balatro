@@ -4,18 +4,20 @@
 //!
 //! These write state no player action can reach, so they follow what the Python oracle's
 //! versions do (`jackdaw/engine/debug.py`, formerly `SimBackend._handle_add` / `_handle_set` /
-//! `_restock_shop`): a parity spec's setup gives the same canonical snapshot in both engines.
-//! Where the oracle has no behaviour (vouchers, packs, consumable editions, sticker counts) they
-//! follow BalatroBot and Steamodded's `SMODS.add_card`. Every known difference from the live
-//! game is a row in `docs/parity/gaps.md` (B15, B18-B23):
+//! `_restock_shop`): a parity spec's setup gives the same canonical snapshot in both engines
+//! (`tests/parity/test_rust_setup.py`). Where the oracle has no behaviour (vouchers, packs,
+//! consumable editions, sticker counts) they follow BalatroBot and Steamodded's
+//! `SMODS.add_card`. The known differences from the live game are rows in
+//! `docs/parity/gaps.md`:
 //!
 //! - a joker's `'edi'..ante` edition poll runs even when an edition is given (the live game
 //!   skips it, B15);
 //! - an added playing card draws no `'front'..ante` card (Steamodded's `create_card('Base')`
 //!   draws one, B18) and is not checked against the boss (an enhancement passed to `SMODS.add_card`
-//!   goes through a non-initial `set_ability`, which calls `Blind:debuff_card`, B19);
-//! - stickers are forced, as `force_stickers` does: eternal and perishable together, on any
-//!   joker (B21).
+//!   goes through a non-initial `set_ability`, which calls `Blind:debuff_card`, B19).
+//!
+//! Stickers are forced, as `force_stickers` does in the live game: eternal and perishable
+//! together, on any joker, even ones vanilla never makes eternal (`docs/balatrobot.md`).
 
 use jackdaw_data::{BlindId, CardId, CenterId, CenterSet, centers};
 use serde_json::Value;

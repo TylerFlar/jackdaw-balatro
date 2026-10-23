@@ -5,7 +5,7 @@
 //! `SMODS.add_card` (or `SMODS.add_booster_to_shop` for a pack); the sim runs
 //! [`jackdaw_core::game::Game::debug_add`], which follows the Python oracle where it has an
 //! `add` and Steamodded otherwise. The differences from the live game are listed in
-//! `docs/balatrobot.md` (and `docs/parity/gaps.md` B15, B18-B23). A key that names no card of
+//! `docs/balatrobot.md` (and `docs/parity/gaps.md` B15, B18, B19). A key that names no card of
 //! its kind fails as `SMODS.add_card` does: `Failed to add card: <key>`.
 
 use jackdaw_core::card::{EditionKind, Seal};

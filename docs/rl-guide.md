@@ -383,7 +383,8 @@ These are tracked the same way whatever reward function is in use, and are usefu
 To validate your agent against real Balatro, swap the adapter:
 
 ```python
-from jackdaw.bridge import LiveBackend, BridgeAdapter
+from jackdaw.bridge import LiveBackend
+from jackdaw.env import BalatroEnvironment, BridgeAdapter
 
 env = BalatroEnvironment(
     adapter_factory=lambda: BridgeAdapter(LiveBackend("127.0.0.1", 12346))
@@ -393,4 +394,4 @@ env = BalatroEnvironment(
 
 You must have Balatro running with BalatroBot configured to listen on the same host and port.
 
-The simulator follows vanilla, which allows a few things BalatroBot's endpoints refuse: using a consumable at blind select, on the cash-out screen or while a pack is open, selling while a pack is open or at blind select, and using a card-targeting consumable in the shop. Over a `BridgeAdapter` those actions are masked out (and `SimBackend` refuses them the same way), so an agent is never offered a move the bot can't make.
+The simulator follows vanilla, which allows a few things BalatroBot's endpoints refuse: using a consumable at blind select, on the cash-out screen or while a pack is open, selling while a pack is open or at blind select, and using a card-targeting consumable in the shop. Over a `BridgeAdapter` those actions are masked out (and `SimBackend`, which runs BalatroBot's endpoints on the simulator, refuses them the same way), so an agent is never offered a move the bot can't make. `Game.legal_actions(Legality.BALATROBOT)` gives the same list from the Rust engine. See [BalatroBot on the simulator](balatrobot) for the full policy and `jackdaw serve`.

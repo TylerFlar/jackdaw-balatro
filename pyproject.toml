@@ -26,7 +26,11 @@ build-backend = "maturin"
 # installed as `jackdaw/_core.*`.
 manifest-path = "crates/jackdaw-py/Cargo.toml"
 module-name = "jackdaw._core"
-include = [{ path = "jackdaw/engine/data/*.json", format = ["sdist", "wheel"] }]
+include = [
+    { path = "jackdaw/engine/data/*.json", format = ["sdist", "wheel"] },
+    # jackdaw-bot embeds BalatroBot's OpenRPC document (include_str!) for rpc.discover.
+    { path = "third_party/balatrobot/v1.5.2/src/lua/utils/openrpc.json", format = "sdist" },
+]
 exclude = ["**/__pycache__/**"]
 
 [project.scripts]

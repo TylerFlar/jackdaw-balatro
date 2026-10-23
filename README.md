@@ -55,7 +55,8 @@ See the [RL Project Guide](https://tylerflar.github.io/jackdaw-balatro/rl-guide)
 Swap the adapter to play against real Balatro via [BalatroBot](https://github.com/townofdon/balatrobot) — the interface is identical:
 
 ```python
-from jackdaw.bridge import LiveBackend, BridgeAdapter
+from jackdaw.bridge import LiveBackend
+from jackdaw.env import BalatroEnvironment, BridgeAdapter
 
 env = BalatroEnvironment(
     adapter_factory=lambda: BridgeAdapter(LiveBackend("127.0.0.1", 12346))

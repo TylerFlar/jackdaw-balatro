@@ -88,3 +88,16 @@ def test_rpc_discover_serves_the_vendored_document() -> None:
     ok, text = s.call("rpc.discover", "{}")
     assert ok
     assert json.loads(text) == openrpc()
+
+
+def test_the_deck_limit_follows_cryptid() -> None:
+    """Cryptid raises ``G.deck.config.card_limit`` by one per copy (card.lua:1210), and the
+    frame's clamp to ``#G.playing_cards`` keeps it there."""
+    s = _core.BotSession()
+    call(s, "start", {"deck": "RED", "stake": "WHITE", "seed": "SCHEMA_CRYPTID"})
+    view = call(s, "select")
+    assert (view["cards"]["count"], view["cards"]["limit"]) == (44, 52)
+    call(s, "add", {"key": "c_cryptid"})
+    view = call(s, "use", {"consumable": 0, "cards": [0]})
+    assert (view["cards"]["count"], view["cards"]["limit"]) == (44, 54)
+    assert view["hand"]["count"] == 10

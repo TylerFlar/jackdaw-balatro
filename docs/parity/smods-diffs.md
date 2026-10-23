@@ -573,6 +573,9 @@ does more than press a button a player could press. File references are to
 - **Severity:** state-difference: a different hand is played.
 - **Python: vanilla.** `game.py:897-907` (`_require_forced_card`) raises unless the forced card is
   selected.
+- **Bot layer: BalatroBot.** `jackdaw-bot`'s `play` and `discard` (`crates/jackdaw-bot/src/
+  endpoints/play.rs`) click the requested cards the same way, so `jackdaw serve` and `SimBackend`
+  play the hand the live game plays; the engine then takes that (vanilla) selection.
 
 <a id="b03"></a>
 ### B03: the debug `add` endpoint
@@ -584,12 +587,20 @@ does more than press a button a player could press. File references are to
     edition is passed, so `create_card` skips the `'edi'..ante` edition poll. In the dump's
     `common_events.lua:2394-2398` the poll runs only when no edition was given.
   - `add_to_deck` → `change_size` → `handle_card_limit` fills the hand to the new limit (S04).
-- `add` is not a vanilla action. It is listed because SimBackend imitates it:
-  - `jackdaw/bridge/backend.py:253-266` polls `'edi'..ante` even when an edition was requested,
-    which the live game does not (**neither**);
-  - `backend.py:273-280` fills the hand (**SMODS**, see S04).
-- **Severity:** RNG-desync on `'edi'..ante` between SimBackend and the live game whenever `add`
-  passes an edition.
+  - A playing card goes through `create_card('Base', ...)`, which draws a random front from
+    `'front'..ante` (dump `common_events.lua:2363`) before `SMODS.set_create_card_front` replaces
+    it; an enhancement is applied with a second `set_ability`, which lets the boss debuff the
+    card (`card.lua:365`).
+- `add` is not a vanilla action. It is listed because the simulator imitates it (the oracle's
+  `jackdaw/engine/debug.py::add_card`, which the Rust `Game::debug_add` and so `SimBackend` and
+  `jackdaw serve` follow):
+  - it polls `'edi'..ante` even when an edition was requested, which the live game does not
+    (**neither**, gaps.md B15);
+  - it draws no `'front'..ante` card for a playing card and doesn't check the boss for an
+    enhanced one (**neither**, gaps.md B18, B19);
+  - it fills the hand (**SMODS**, see S04).
+- **Severity:** RNG-desync on `'edi'..ante` (an edition passed) and `'front'..ante` (a playing
+  card added) between the simulator and the live game.
 
 <a id="b04"></a>
 ### B04: runtime settings and hooks (no gameplay effect)

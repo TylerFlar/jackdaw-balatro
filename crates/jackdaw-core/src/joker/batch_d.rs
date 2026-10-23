@@ -240,7 +240,8 @@ fn cartomancer_event(g: &mut Game, _: u32, _: f64) {
 fn marble_joker(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
     if ctx.kind == Kind::SettingBlind && !g.source_sliced(id, ctx) {
         g.queue(Event::Call(marble_create, id, 0.0));
-        // The deck limit event between the two (card.lua:2593-2597) changes nothing here.
+        // `G.deck.config.card_limit + 1` (card.lua:2593-2597); only BalatroBot's view reads it.
+        g.queue(Event::Call(marble_deck_limit, id, 0.0));
         g.queue(Event::DrawCard {
             from: AreaId::Play,
             to: AreaId::Deck,
@@ -250,6 +251,11 @@ fn marble_joker(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
         g.playing_card_joker_effects(&[PENDING_CARD]);
     }
     None
+}
+
+/// Marble Joker's second event: the deck's card limit grows by one.
+fn marble_deck_limit(g: &mut Game, _: u32, _: f64) {
+    g.rt.areas.deck_limit += 1.0;
 }
 
 /// Marble Joker's event: the Stone Card joins `G.play` and `G.playing_cards`.
