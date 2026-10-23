@@ -2,25 +2,24 @@
 --- Extract prototype data tables from Balatro's game.lua into JSON files.
 ---
 --- Usage:
----   luajit scripts/extract_prototypes.lua
+---   luajit scripts/extract_prototypes.lua [OUT_DIR]      (default jackdaw/engine/data)
 ---
---- Outputs:
----   jackdaw/engine/data/centers.json
----   jackdaw/engine/data/cards.json
----   jackdaw/engine/data/blinds.json
----   jackdaw/engine/data/tags.json
----   jackdaw/engine/data/stakes.json
----   jackdaw/engine/data/seals.json
+--- Outputs (in OUT_DIR):
+---   centers.json
+---   cards.json
+---   blinds.json
+---   tags.json
+---   stakes.json
+---   seals.json
+---
+--- Integral numbers are written as integers, others in the shortest of %.15g, %.16g and %.17g
+--- that reads back as the same double, so every value round-trips exactly.
 ---
 --- Compatible with LuaJIT 2.1.
 
--- Resolve project root from script location (works on both Windows and Unix)
-local script_dir = arg[0]:match("(.*[/\\])") or "./"
-local project_root = script_dir:gsub("[/\\]scripts[/\\]$", "/")
--- Fallback: if script_dir doesn't contain 'scripts', try relative
-if not script_dir:find("scripts") then
-    project_root = "./"
-end
+-- Resolve the project root from the script's path (`scripts/` is a child of the root; works with
+-- relative and absolute paths, on Windows and Unix). Fallback: the current directory.
+local project_root = arg and arg[0] and arg[0]:match("^(.*)scripts[/\\]") or "./"
 local source_path = project_root .. "balatro_source/game.lua"
 
 ----------------------------------------------------------------------------
@@ -33,6 +32,16 @@ local function json_string(s)
 end
 
 local json_value  -- forward declaration
+
+-- The shortest of %.15g, %.16g and %.17g that reads back as exactly `v` (%.17g always should).
+local function json_number(v)
+    assert(v == v and v ~= math.huge and v ~= -math.huge, "non-finite number in table")
+    for _, fmt in ipairs({"%.15g", "%.16g", "%.17g"}) do
+        local s = string.format(fmt, v)
+        if tonumber(s) == v then return s end
+    end
+    error("no exact decimal form for " .. string.format("%.17g", v))
+end
 
 local function is_array(t)
     local max_idx = 0
@@ -59,7 +68,7 @@ json_value = function(v, indent, level)
         if v == math.floor(v) and math.abs(v) < 2^53 then
             return string.format("%d", v)
         else
-            return string.format("%.15g", v)
+            return json_number(v)
         end
     elseif t == "string" then
         return json_string(v)
@@ -214,7 +223,10 @@ add_keys(game_obj.P_SEALS or {})
 -- Write JSON files
 ----------------------------------------------------------------------------
 
-local out_dir = project_root .. "jackdaw/engine/data/"
+local out_dir = arg[1] or (project_root .. "jackdaw/engine/data/")
+if not out_dir:match("[/\\]$") then
+    out_dir = out_dir .. "/"
+end
 
 io.write("\nWriting JSON files...\n")
 write_json(out_dir .. "centers.json", game_obj.P_CENTERS or {})

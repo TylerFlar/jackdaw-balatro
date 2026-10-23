@@ -4,6 +4,7 @@
 #![forbid(unsafe_code)]
 
 mod codegen;
+mod verify_source;
 
 use std::env;
 use std::fs;
@@ -16,9 +17,13 @@ Usage: cargo xtask <command> [options]
 Commands:
   codegen [--check]  Generate crates/jackdaw-data from jackdaw/engine/data/*.json;
                      with --check, fail if the checked-in output is stale (CI)
-  verify-source      Re-extract the data from a local balatro_source/ and diff it
-                     against the committed JSON (local only)
-  lua-oracles        Regenerate the LuaJIT-executed RNG and blind-amount fixtures
+  verify-source      Re-extract the game data from a local balatro_source/ with
+                     LuaJIT into a temporary directory and compare it value by
+                     value with the committed JSON; fails on any difference
+                     (local only)
+  lua-oracles        Regenerate the LuaJIT-executed fixtures (RNG, hand
+                     evaluation) and the hands, challenges and blind-amount
+                     JSON from a local balatro_source/ (local only)
   help               Print this message
 ";
 
@@ -66,32 +71,27 @@ fn main() -> ExitCode {
         .skip(1)
         .map(|arg| arg.to_string_lossy().into_owned())
         .collect();
-    match parse(&args) {
-        Ok(Command::Help) => {
-            print!("{USAGE}");
-            ExitCode::SUCCESS
-        }
-        Ok(Command::Codegen { check }) => match codegen::run(&repo_root(), check) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(message) => {
-                eprintln!("xtask codegen: {message}");
-                ExitCode::FAILURE
-            }
-        },
-        Ok(Command::LuaOracles) => match lua_oracles() {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(message) => {
-                eprintln!("xtask lua-oracles: {message}");
-                ExitCode::FAILURE
-            }
-        },
-        Ok(command) => {
-            eprintln!("xtask {}: not implemented yet (phase 2)", command.name());
-            ExitCode::from(2)
-        }
+    let command = match parse(&args) {
+        Ok(command) => command,
         Err(message) => {
             eprintln!("error: {message}\n\n{USAGE}");
-            ExitCode::from(2)
+            return ExitCode::from(2);
+        }
+    };
+    let result = match command {
+        Command::Help => {
+            print!("{USAGE}");
+            Ok(())
+        }
+        Command::Codegen { check } => codegen::run(&repo_root(), check),
+        Command::VerifySource => verify_source::run(&repo_root()),
+        Command::LuaOracles => lua_oracles(),
+    };
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(message) => {
+            eprintln!("xtask {}: {message}", command.name());
+            ExitCode::FAILURE
         }
     }
 }

@@ -62,10 +62,31 @@ The variable applies to every rebuild in that shell. Unset it and run
 `uv sync --reinstall-package jackdaw` to go back to release. To see what is installed, run
 `uv run python -c "import jackdaw._core as c; print(c._build_info())"`.
 
-`cargo xtask` is a small std-only CLI. `codegen [--check]`, `verify-source` and `lua-oracles`
-arrive in phase 2; until then they exit with status 2. `uv build` writes an sdist and an abi3
-wheel (CPython 3.12+) to `dist/`. The `Wheels` workflow builds the release wheels for Linux,
-macOS and Windows on `v*` tags.
+`uv build` writes an sdist and an abi3 wheel (CPython 3.12+) to `dist/`. The `Wheels` workflow
+builds the release wheels for Linux, macOS and Windows on `v*` tags.
+
+## Game data and `cargo xtask`
+
+`cargo xtask` is a small CLI with no argument-parsing dependency:
+
+- `codegen [--check]` generates `crates/jackdaw-data/src/generated.rs` from
+  `jackdaw/engine/data/*.json`. CI runs it with `--check`, which fails if the committed file is
+  stale.
+- `verify-source` checks that JSON against the game itself. It runs
+  `scripts/extract_prototypes.lua` and `scripts/extract_game_tables.lua` on `balatro_source/`
+  into a temporary directory and compares each file with the committed one value by value:
+  formatting and object key order do not matter, array order does, and numbers must be the same
+  double. It lists the JSON path of every difference and exits non-zero if there is any. To
+  update the committed data instead, run the two scripts without an output directory, then
+  `cargo xtask codegen`.
+- `lua-oracles` reruns the LuaJIT oracles behind the `tests/fixtures/*_luajit.json` fixtures
+  (RNG, hand evaluation) and rewrites the hands, challenges and blind-amount JSON.
+
+`verify-source` and `lua-oracles` need LuaJIT 2.1 on `PATH` and the game's Lua source in
+`balatro_source/` at the repository root (gitignored: the source is proprietary).
+`verify-source` also requires the first line of its `version.jkr` to be the release the data
+targets, `BALATRO_VERSION` in `crates/jackdaw-data` (`1.0.1o-FULL`). CI has no copy of the
+source, so these two commands run only locally.
 
 ## Windows: the `.pyd` is locked while Python has it loaded
 
