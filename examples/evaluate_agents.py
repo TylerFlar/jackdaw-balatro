@@ -8,9 +8,9 @@ Agents, each playing one episode from every seed ``EVAL_SEED_BASE + k`` (k < --e
 - ``ppo_greedy``: the model's most likely legal action;
 - ``ppo_sampled``: an action sampled from the model's masked distribution, as in training;
 - ``random``: a uniformly random legal action;
-- ``smart``: ``jackdaw.cli.smart_agent``, the repo's hand-written agent.  It reads the Python
-  engine's state, so it plays through ``OracleAdapter``, which plays exactly as the Rust engine.
-  It picks from the same action table as the other agents.
+- ``smart``: ``jackdaw.cli.smart_agent``, the repo's hand-written agent.  It reads the run
+  (``env.game``, a copy of the Rust run) and picks from the same action table as the other
+  agents.
 
 All agents use the reward and episode cap the model was trained with (``config.json`` next to
 the model, else the flags).  Prints a Markdown table and writes the summary as JSON.
@@ -49,17 +49,16 @@ def cap_threads(n: int) -> None:
 
 
 def smart_chooser() -> Any:
-    """``jackdaw.cli.smart_agent`` as a chooser over the env's action table (OracleAdapter)."""
+    """``jackdaw.cli.smart_agent`` as a chooser over the env's action table."""
     from jackdaw.cli.smart_agent import smart_agent
     from jackdaw.engine import actions as A
     from jackdaw.env import FactoredAction, engine_action_to_factored
 
-    def with_forced_card(action: Any, gs: dict[str, Any]) -> Any:
-        # Cerulean Bell: vanilla always selects the forced card (as tests/golden does).
+    def with_forced_card(action: Any, game: Any) -> Any:
+        # Cerulean Bell: vanilla always selects the forced card.
         if not isinstance(action, (A.PlayHand, A.Discard)):
             return action
-        hand = gs.get("hand", [])
-        forced = [i for i, c in enumerate(hand) if c.ability.get("forced_selection")]
+        forced = [i for i, c in enumerate(game.hand) if c.ability.get("forced_selection")]
         if not forced or forced[0] in action.card_indices:
             return action
         kept = list(action.card_indices)[:4]
@@ -83,11 +82,10 @@ def smart_chooser() -> Any:
         actions = []
         for env in envs:
             gym_env = env.unwrapped
-            adapter = gym_env._inner._adapter  # OracleAdapter: the Python engine's state
-            gs = adapter.raw_state
-            legal = adapter.get_legal_actions()
+            game = gym_env.game  # a copy of the run
             table = list(gym_env._action_table)
-            wanted = engine_action_to_factored(with_forced_card(smart_agent(gs, legal), gs), gs)
+            action = with_forced_card(smart_agent(game, game.legal_actions()), game)
+            wanted = engine_action_to_factored(action)
             if wanted.card_target == ():
                 wanted = FactoredAction(wanted.action_type, None, wanted.entity_target)
             actions.append(table.index(wanted) if wanted in table else closest(table, wanted))
@@ -105,8 +103,6 @@ def main(argv: list[str] | None = None) -> None:
     import torch
     from sb3_contrib import MaskablePPO
 
-    from jackdaw.env import OracleAdapter
-
     torch.set_num_threads(args.threads)
     torch.manual_seed(args.seed)
 
@@ -123,7 +119,7 @@ def main(argv: list[str] | None = None) -> None:
         "ppo_greedy": (demo.model_chooser(model, deterministic=True), seeds, {}),
         "ppo_sampled": (demo.model_chooser(model, deterministic=False), seeds, {}),
         "random": (demo.random_chooser(args.seed), seeds, {}),
-        "smart": (smart_chooser(), smart_seeds, {"adapter_factory": OracleAdapter}),
+        "smart": (smart_chooser(), smart_seeds, {}),
     }
     summary: dict[str, Any] = {
         "model": model_path.as_posix(),

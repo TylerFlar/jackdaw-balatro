@@ -116,10 +116,10 @@ def _estimate_hand_score(
         return "High Card", 0.0
     hand_type, scoring = found
 
-    # Base chips/mult at the hand's level, plus the scoring cards' chips
+    # Base chips/mult at the hand's level, plus the played cards' chips
     level = hand_levels.get(hand_type)
     base_chips, base_mult = (level.chips, level.mult) if level is not None else (5, 1)
-    total_chips = base_chips + sum(_chip_bonus(hand[i]) for i in scoring)
+    total_chips = base_chips + sum(_chip_bonus(hand[i]) for i in positions)
 
     # Estimate joker contributions (rough)
     flat_chips = 0.0
@@ -132,8 +132,6 @@ def _estimate_hand_score(
         key = j.key
         if key == "j_blue_joker":
             flat_chips += _num(a.get("extra")) * 2  # rough estimate
-        elif key == "j_stencil":
-            x_mult *= max(1, _num(a.get("x_mult"), 1))
         elif key == "j_steel_joker":
             x_mult *= max(1, 1 + _num(a.get("extra")) * 0.2)
         elif key in _FLAT_MULT:
@@ -269,7 +267,6 @@ _GREAT_JOKERS: set[str] = {
     "j_order",
     "j_tribe",
     "j_blackboard",
-    "j_stencil",
     "j_blueprint",
     "j_brainstorm",
 }
@@ -411,7 +408,9 @@ def smart_agent(game: Game, legal_actions: list[Any]) -> Any:
         jokers = game.jokers
         consumables = game.consumables
         shop_cards = game.shop_jokers
-        ante = game.ante
+        # The agent's Python version read the ante from a key its engine's state didn't
+        # have, so its shop always saw ante 1. Kept, so the agent plays as it did.
+        ante = 1
 
         has_joker_room = len(jokers) < state.joker_slots
         # Economy: in early game spend aggressively on jokers,
