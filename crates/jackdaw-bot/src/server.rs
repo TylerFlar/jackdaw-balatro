@@ -278,10 +278,11 @@ fn serve_connection(stream: &mut TcpStream, session: &mut Session) -> std::io::R
     };
     stream.write_all(&http_response(status, &body))?;
     stream.flush()?;
-    if status == 400 {
-        // A refused request may still be arriving (a body over the limit): half-close and
-        // drain it, so closing doesn't reset the connection before the client reads the
-        // response. (server.lua closes at once; the response is the same.)
+    if status != 200 {
+        // A refused request may still be arriving or unread (a body over the limit, or a PUT's
+        // body, which a 405 never reads): half-close and drain it, so closing doesn't reset the
+        // connection before the client reads the response (Windows sends RST when unread data
+        // is discarded). server.lua closes at once; the response is the same.
         let _ = stream.shutdown(std::net::Shutdown::Write);
         let _ = stream.set_read_timeout(Some(Duration::from_millis(250)));
         let mut drained = 0usize;
