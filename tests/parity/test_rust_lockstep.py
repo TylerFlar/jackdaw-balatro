@@ -2,8 +2,9 @@
 
 Unlike :mod:`tests.parity.test_rust_step`, which re-imports the oracle's state
 before every step, Rust here keeps its own state from the start: a new run
-from ``_core._new_run`` (or, for a spec with setup ops, the oracle's state
-after the setup), then every tape action applied to Rust's previous result.
+from ``_core._new_run`` (for a spec with setup ops, a new ``_core.Game`` with
+the ops applied natively, ``Game.apply_setup``), then every tape action
+applied to Rust's previous result.
 Each step's snapshot must equal the oracle's. A step Rust can't take yet ends
 that tape's lockstep; how far each tape got is the coverage report.
 """
@@ -19,6 +20,7 @@ from jackdaw import _core
 from tests.parity import canon
 from tests.parity.harness import load_specs
 from tests.parity.pyengine import PyEngine
+from tests.parity.rust_setup import rust_setup, rust_snapshot
 from tests.parity.rust_step import plain
 
 _SPECS = load_specs()
@@ -37,14 +39,14 @@ def lockstep(spec: Any) -> tuple[int, str | None, list[str]]:
     """Play ``spec`` in both engines; return (steps matched, why it stopped, first diff)."""
     py = PyEngine(spec.start, spec.setup)
     if spec.setup:
-        rs = plain(py.snapshot())
+        rs = rust_snapshot(rust_setup(spec.start, spec.setup))
     else:
         s = spec.start
         text = _core._new_run(s["back"], s["stake"], s["seed"], s.get("challenge"))
         rs = canon.from_json_compatible(json.loads(text))
-        found = canon.diff(plain(py.snapshot()), rs)
-        if found:
-            return 0, "new run", found
+    found = canon.diff(plain(py.snapshot()), rs)
+    if found:
+        return 0, "setup" if spec.setup else "new run", found
     for pos, action in enumerate(spec.tape):
         if plain(py.snapshot())["phase"] == "game_over":
             return pos, None, []

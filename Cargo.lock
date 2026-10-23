@@ -120,6 +120,8 @@ name = "jackdaw-bot"
 version = "0.1.0"
 dependencies = [
  "jackdaw-core",
+ "jackdaw-data",
+ "serde_json",
 ]
 
 [[package]]

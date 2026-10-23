@@ -39,11 +39,12 @@ The 23 action types (21 and 22 were appended, so 0-20 keep their indices):
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import IntEnum, StrEnum
+from enum import IntEnum
 from typing import Any
 
 import numpy as np
 
+from jackdaw.core.game import Legality
 from jackdaw.engine.actions import (
     Action,
     GamePhase,
@@ -131,17 +132,10 @@ from jackdaw.env.game_spec import FactoredAction  # noqa: F401 — re-export
 NUM_ACTION_TYPES = 23
 
 
-class Legality(StrEnum):
-    """Which actions a mask offers.
-
-    ``VANILLA`` follows the game's own rules (Balatro 1.0.1o).  ``BALATROBOT``
-    narrows them to what the BalatroBot endpoints accept (vanilla and the
-    endpoint's validate step as a dry run); it comes with the BalatroBot layer
-    (``crates/jackdaw-bot``) and is not available yet.
-    """
-
-    VANILLA = "vanilla"
-    BALATROBOT = "balatrobot"
+# Which actions a mask offers: one definition, shared with ``Game.legal_actions``.
+# ``BALATROBOT`` narrows vanilla to what the BalatroBot endpoints accept; the Rust
+# masks (``jackdaw.env.rust_env.action_mask``) support it, this module's Python
+# masks (the oracle's) only ``VANILLA``.
 
 
 class ActionType(IntEnum):
@@ -235,7 +229,10 @@ def get_action_mask(
         The complete mask structure for the current state.
     """
     if Legality(legality) is not Legality.VANILLA:
-        raise NotImplementedError("BALATROBOT legality comes with the BalatroBot layer")
+        raise NotImplementedError(
+            "the Python engine's masks support VANILLA only; BALATROBOT legality is computed "
+            "by the Rust masks (jackdaw.env.rust_env.action_mask)"
+        )
     phase = game_state.get("phase")
     if isinstance(phase, str):
         phase = GamePhase(phase)

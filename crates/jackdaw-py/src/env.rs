@@ -4,17 +4,31 @@
 
 use jackdaw_env::action::{ActionType, FactoredAction, NUM_ACTION_TYPES, Selection};
 use jackdaw_env::mask::{ActionMask, Legality};
-use pyo3::exceptions::{PyNotImplementedError, PyValueError};
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyByteArray;
+
+/// BALATROBOT legality's filter: an action the live BalatroBot v1.5.2 also executes (a dry run
+/// of its endpoint's checks, `jackdaw_bot::bot_accepts`).
+struct BotFilter;
+
+impl jackdaw_env::mask::ActionFilter for BotFilter {
+    fn allows(
+        &self,
+        game: &jackdaw_core::game::Game,
+        action: &jackdaw_core::action::Action,
+    ) -> bool {
+        jackdaw_bot::bot_accepts(game, action)
+    }
+}
+
+static BOT_FILTER: BotFilter = BotFilter;
 
 /// `Legality` by its Python value.
 pub fn legality(name: &str) -> PyResult<Legality<'static>> {
     match name {
         "vanilla" => Ok(Legality::Vanilla),
-        "balatrobot" => Err(PyNotImplementedError::new_err(
-            "BALATROBOT legality comes with the BalatroBot layer (crates/jackdaw-bot)",
-        )),
+        "balatrobot" => Ok(Legality::Filtered(&BOT_FILTER)),
         other => Err(PyValueError::new_err(format!("unknown legality {other:?}"))),
     }
 }

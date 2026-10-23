@@ -2,17 +2,22 @@
 
 Two implementations:
 
-- **SimBackend** — runs the jackdaw engine in-process. Fast, headless,
-  deterministic, zero runtime deps.
+- **SimBackend** — BalatroBot v1.5.2's API on the Rust simulator, in-process
+  (``jackdaw._core.BotSession``, ``crates/jackdaw-bot``): the same
+  dispatcher, validator, endpoints and gamestate view as ``jackdaw serve``.
+  Fast, headless, deterministic.
 - **LiveBackend** — proxies all requests to a real balatrobot instance
   over HTTP. Requires a running Balatro + balatrobot mod.
 """
 
 from __future__ import annotations
 
-from typing import Any, Protocol
+import json
+import os
+from typing import TYPE_CHECKING, Any, Protocol
 
-from jackdaw.engine.actions import GamePhase
+if TYPE_CHECKING:
+    from jackdaw.core import Game, Legality
 
 # ---------------------------------------------------------------------------
 # Balatrobot enum → engine value maps
@@ -68,7 +73,8 @@ class RPCError(Exception):
         super().__init__(message)
 
 
-# Error codes
+# Error codes (balatrobot src/lua/settings.lua: BB_ERROR_CODES)
+INTERNAL_ERROR = -32000
 BAD_REQUEST = -32001
 INVALID_STATE = -32002
 NOT_ALLOWED = -32003
@@ -88,305 +94,124 @@ class Backend(Protocol):
 
 
 # ---------------------------------------------------------------------------
+# ``add`` arguments: engine names → balatrobot enums
+# ---------------------------------------------------------------------------
+
+_ENHANCEMENT_TO_BOT: dict[str, str] = {
+    "m_bonus": "BONUS",
+    "m_mult": "MULT",
+    "m_wild": "WILD",
+    "m_glass": "GLASS",
+    "m_steel": "STEEL",
+    "m_stone": "STONE",
+    "m_gold": "GOLD",
+    "m_lucky": "LUCKY",
+}
+_EDITION_TO_BOT: dict[str, str] = {
+    "foil": "FOIL",
+    "holo": "HOLO",
+    "polychrome": "POLYCHROME",
+    "negative": "NEGATIVE",
+}
+_SEAL_TO_BOT: dict[str, str] = {
+    "Gold": "GOLD",
+    "Red": "RED",
+    "Blue": "BLUE",
+    "Purple": "PURPLE",
+}
+
+
+def to_bot_add_params(params: dict[str, Any]) -> dict[str, Any]:
+    """``add`` arguments with engine names (``m_glass``, ``foil``, ``Gold``) in
+    balatrobot's enums (``GLASS``, ``FOIL``, ``GOLD``); bot names pass through."""
+    params = dict(params)  # shallow copy
+    if "enhancement" in params:
+        params["enhancement"] = _ENHANCEMENT_TO_BOT.get(
+            params["enhancement"], params["enhancement"]
+        )
+    if "edition" in params:
+        params["edition"] = _EDITION_TO_BOT.get(params["edition"], params["edition"])
+    if "seal" in params:
+        params["seal"] = _SEAL_TO_BOT.get(params["seal"], params["seal"])
+    return params
+
+
+# ---------------------------------------------------------------------------
 # SimBackend
 # ---------------------------------------------------------------------------
 
-# Methods that map to engine game actions (handled via rpc_to_action + step).
-_ACTION_METHODS = frozenset(
-    {
-        "play",
-        "discard",
-        "select",
-        "skip",
-        "buy",
-        "sell",
-        "use",
-        "reroll",
-        "next_round",
-        "cash_out",
-        "pack",
-        "rearrange",
-    }
-)
-
 
 class SimBackend:
-    """Backend that runs the jackdaw engine in-process."""
+    """BalatroBot v1.5.2 on the Rust simulator, in-process.
 
-    def __init__(self) -> None:
-        self._gs: dict[str, Any] | None = None
+    A thin wrapper over ``jackdaw._core.BotSession``: every request runs
+    through the port of BalatroBot's dispatcher, validator and endpoint, and
+    the result is its gamestate view, so results and errors (codes and
+    messages) are what the live bot sends.  The session starts at the main
+    menu; ``start`` begins a run.  ``add`` also takes the engine's names
+    (``m_glass``, ``foil``, ``Gold``), as :class:`LiveBackend` does.
+
+    ``fs_root`` confines ``save``/``load`` paths; ``debug`` registers
+    BalatroBot's test endpoints.  See ``docs/balatrobot.md``.
+    """
+
+    def __init__(self, *, fs_root: str | os.PathLike[str] | None = None, debug: bool = False):
+        from jackdaw import _core
+
+        self._session = _core.BotSession(None if fs_root is None else os.fspath(fs_root), debug)
 
     def handle(self, method: str, params: dict[str, Any] | None) -> dict[str, Any]:
-        if params is None:
-            params = {}
+        if method == "add" and params:
+            params = to_bot_add_params(params)
+        ok, text = self._session.call(method, json.dumps({} if params is None else params))
+        data = json.loads(text)
+        if not ok:
+            raise RPCError(data["code"], data["message"], {"name": data["name"]})
+        return data
 
-        if method == "health":
-            return {"status": "ok"}
+    def check(self, method: str, params: dict[str, Any] | None = None) -> RPCError | None:
+        """Why the bot would refuse this request now (its argument, state and
+        endpoint checks, run as a dry run), or ``None`` if it would run it."""
+        ok, text = self._session.check(method, json.dumps({} if params is None else params))
+        if ok:
+            return None
+        data = json.loads(text)
+        return RPCError(data["code"], data["message"], {"name": data["name"]})
 
-        if method == "start":
-            return self._handle_start(params)
+    @property
+    def state(self) -> str:
+        """The view's ``state``: ``MENU``, ``BLIND_SELECT``, ..., or ``UNKNOWN``."""
+        return self._session.state()
 
-        if method == "menu":
-            self._gs = None
-            return {"state": "MENU"}
+    @property
+    def game(self) -> Game | None:
+        """A copy of the run in progress (``jackdaw.core.Game``), if any."""
+        from jackdaw.core import Game
 
-        if method == "gamestate":
-            return self._require_gamestate()
+        inner = self._session.game()
+        return None if inner is None else Game(inner)
 
-        if method == "add":
-            return self._handle_add(params)
+    def view(self) -> dict[str, Any]:
+        """The gamestate view, as ``gamestate`` returns it."""
+        return json.loads(self._session.view())
 
-        if method == "set":
-            return self._handle_set(params)
+    def legal_actions(self, legality: Legality | str = "balatrobot") -> list[Any]:
+        """The run's legal actions (engine dataclasses); BALATROBOT legality by default."""
+        from jackdaw.core import Legality, decode_action
 
-        if method in _ACTION_METHODS:
-            return self._handle_action(method, params)
+        text = self._session.legal_actions(Legality(legality).value)
+        return [decode_action(a) for a in json.loads(text)]
 
-        raise RPCError(BAD_REQUEST, f"Unknown method: {method!r}")
+    def request_for(self, action: Any) -> tuple[str, dict[str, Any]] | None:
+        """The request that performs an engine action in the current run:
+        ``(method, params)``, or ``None`` for a sim-only action."""
+        from jackdaw.core import encode_action
 
-    # -- internal -----------------------------------------------------------
-
-    def _handle_start(self, params: dict[str, Any]) -> dict[str, Any]:
-        from jackdaw.engine.run_init import initialize_run
-
-        deck_str = params.get("deck", "RED")
-        stake_str = params.get("stake", "WHITE")
-        seed = params.get("seed", "DEFAULT")
-
-        back_key = DECK_FROM_BOT.get(deck_str, "b_red")
-        stake = STAKE_FROM_BOT.get(stake_str, 1)
-
-        self._gs = initialize_run(back_key, stake, seed)
-        self._gs["phase"] = GamePhase.BLIND_SELECT
-        self._gs["blind_on_deck"] = "Small"
-
-        return self._serialize()
-
-    def _handle_action(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
-        if self._gs is None:
-            raise RPCError(INVALID_STATE, "No active run — call 'start' first")
-
-        from jackdaw.bridge.balatrobot_adapter import bot_refusal
-        from jackdaw.bridge.deserializer import rpc_to_action
-
-        try:
-            action = rpc_to_action(method, params)
-        except ValueError as exc:
-            raise RPCError(BAD_REQUEST, str(exc)) from exc
-
-        # balatrobot checks the game state after the schema and before the
-        # endpoint runs; refuse what it refuses, though the engine (vanilla)
-        # would allow it, so the in-process bridge behaves like the live one.
-        refusal = bot_refusal(method, params, self._gs)
-        if refusal is not None:
-            raise RPCError(INVALID_STATE, refusal)
-
-        if action is None:
-            return self._serialize()
-
-        from jackdaw.engine.game import IllegalActionError, step
-
-        try:
-            step(self._gs, action)
-        except IllegalActionError as exc:
-            raise RPCError(NOT_ALLOWED, str(exc)) from exc
-
-        return self._serialize()
-
-    def _price_and_mark(self, card: Any) -> None:
-        """What Card:init does for a card ``add`` creates: set_cost with the run's
-        prices (card.lua:72) and the key's used_jokers mark (card.lua:349-354)."""
-        from jackdaw.engine.card_utils import astronomer_active
-
-        gs = self._gs
-        card.set_cost(
-            inflation=gs.get("inflation", 0),
-            discount_percent=gs.get("discount_percent", 0),
-            ante=gs.get("round_resets", {}).get("ante", 1),
-            has_astronomer=astronomer_active(gs),
-        )
-        gs.setdefault("used_jokers", {})[card.center_key] = True
-
-    def _handle_add(self, params: dict[str, Any]) -> dict[str, Any]:
-        """Insert a card into the game (debug method matching balatrobot API)."""
-        if self._gs is None:
-            raise RPCError(INVALID_STATE, "No active run — call 'start' first")
-
-        key = params.get("key")
-        if not key:
-            raise RPCError(BAD_REQUEST, "'add' requires a 'key' parameter")
-
-        # Validate phase (matches balatrobot API constraints)
-        phase = self._gs.get("phase")
-        if key.startswith("v_") or key.startswith("p_"):
-            if phase != GamePhase.SHOP:
-                raise RPCError(
-                    INVALID_STATE,
-                    f"Method 'add' requires SHOP state for vouchers/packs (got {phase})",
-                )
-        elif phase not in (GamePhase.SELECTING_HAND, GamePhase.SHOP, GamePhase.ROUND_EVAL):
-            raise RPCError(
-                INVALID_STATE,
-                "Method 'add' requires one of these states: SELECTING_HAND, SHOP, ROUND_EVAL",
-            )
-
-        from jackdaw.engine.card_factory import (
-            RANK_LETTER,
-            SUIT_LETTER,
-            create_consumable,
-            create_joker,
-            create_playing_card,
-        )
-        from jackdaw.engine.card_utils import poll_edition
-
-        seal = params.get("seal")  # Gold, Red, Blue, Purple
-        edition_key = params.get("edition")  # foil, holo, polychrome, negative
-        enhancement = params.get("enhancement", "c_base")  # m_bonus, m_mult, etc.
-        eternal = params.get("eternal", False)
-        perishable = params.get("perishable", False)
-        rental = params.get("rental", False)
-
-        edition = {edition_key: True} if edition_key else None
-
-        if key.startswith("j_"):
-            card = create_joker(
-                key,
-                edition=edition,
-                eternal=eternal,
-                perishable=perishable,
-                rental=rental,
-                hands_played=self._gs.get("hands_played", 0),
-            )
-            # To Do List rolls its target at creation, before the edition
-            # poll (card.lua:311) — balatrobot's add goes through the full
-            # create_card pipeline, so mirror it here.
-            if key == "j_todo_list":
-                from jackdaw.engine.card_factory import roll_to_do_hand
-
-                roll_to_do_hand(card, self._gs.get("rng"), self._gs.get("hand_levels"))
-            # Poll for edition to match balatrobot's create_card() behaviour.
-            # Balatrobot's add command goes through the full Lua create_card()
-            # pipeline which calls poll_edition(), so we must do the same to
-            # keep the RNG stream in sync.
-            rng = self._gs.get("rng")
-            if rng is not None:
-                ante = self._gs.get("round_resets", {}).get("ante", 1)
-                polled = poll_edition(
-                    "edi" + str(ante),
-                    rng,
-                    rate=self._gs.get("edition_rate", 1.0),
-                )
-                if edition is None:
-                    card.set_edition(polled)
-            self._price_and_mark(card)
-            self._gs["jokers"].append(card)
-            # Apply passive effects (hand_size, discards, joker_slots, etc.).
-            # add_to_deck also gives the current round its extra discards
-            # (ease_discard, card.lua:589-592); hand count changes (h_plays)
-            # take effect on future rounds via round_resets.
-            old_hand_size = self._gs.get("hand_size", 8)
-            card.add_to_deck(self._gs)
-            from jackdaw.engine.game import run_pending_reprice
-
-            # add waits for the events the new card queued (add.lua:450-490).
-            run_pending_reprice(self._gs)
-            # If hand_size increased mid-round, draw cards to fill the new
-            # size — matches balatrobot which immediately fills on add.
-            if self._gs.get("hand_size", 8) > old_hand_size and phase == GamePhase.SELECTING_HAND:
-                from jackdaw.engine.game import _draw_hand
-
-                _draw_hand(self._gs)
-        elif key.startswith("c_"):
-            # SMODS.add_card: create_card, add_to_deck, then the card lands.
-            card = create_consumable(key, hands_played=self._gs.get("hands_played", 0))
-            self._price_and_mark(card)
-            card.add_to_deck(self._gs)
-            self._gs["consumables"].append(card)
-        elif len(key) == 3 and key[1] == "_":
-            # Playing card key like "H_A", "S_2"
-            suit_letter, rank_letter = key[0], key[2]
-            if suit_letter not in SUIT_LETTER or rank_letter not in RANK_LETTER:
-                raise RPCError(BAD_REQUEST, f"Invalid playing card key: {key!r}")
-            suit = SUIT_LETTER[suit_letter]
-            rank = RANK_LETTER[rank_letter]
-            card = create_playing_card(
-                suit=suit,
-                rank=rank,
-                enhancement=enhancement,
-                edition=edition,
-                seal=seal,
-                inflation=self._gs.get("inflation", 0),
-                discount_percent=self._gs.get("discount_percent", 0),
-            )
-            # Add to hand if in SELECTING_HAND, otherwise to deck
-            phase = self._gs.get("phase")
-            if phase == GamePhase.SELECTING_HAND:
-                self._gs["hand"].append(card)
-            else:
-                self._gs["deck"].append(card)
-        else:
-            raise RPCError(BAD_REQUEST, f"Unrecognised card key prefix: {key!r}")
-
-        return self._serialize()
-
-    def _handle_set(self, params: dict[str, Any]) -> dict[str, Any]:
-        """Modify game state values (debug method matching balatrobot API)."""
-        if self._gs is None:
-            raise RPCError(INVALID_STATE, "No active run — call 'start' first")
-
-        if "money" in params:
-            self._gs["dollars"] = params["money"]
-
-        if "hands" in params:
-            self._gs["current_round"]["hands_left"] = params["hands"]
-
-        if "discards" in params:
-            self._gs["current_round"]["discards_left"] = params["discards"]
-
-        if "ante" in params:
-            self._gs["round_resets"]["ante"] = params["ante"]
-
-        if "round" in params:
-            self._gs["round"] = params["round"]
-
-        if "chips" in params:
-            self._gs["chips"] = params["chips"]
-
-        if "shop" in params and params["shop"]:
-            self._restock_shop()
-
-        return self._serialize()
-
-    def _restock_shop(self) -> None:
-        """BalatroBot ``set`` with ``shop=true`` (endpoints/set.lua:170-189).
-
-        Only in SHOP.  It removes G.shop — the shop cards dissolve, freeing
-        their keys (Card:remove, card.lua:4741-4748) — nils
-        ``current_round.used_packs`` so the packs are rolled again, and
-        reruns ``G:update_shop()`` (game.lua:3072-3181): new jokers, the
-        same voucher (``current_round.voucher``), new packs and the shop
-        tag hooks — the cash-out restock.
-        """
-        gs = self._gs
-        assert gs is not None
-        if gs.get("phase") != GamePhase.SHOP:
-            raise RPCError(NOT_ALLOWED, "Can re-stock shop only in SHOP state")
-        from jackdaw.engine.game import _populate_shop, _release_used_key
-
-        for card in gs.get("shop_cards", []) + gs.get("shop_boosters", []):
-            _release_used_key(gs, card)
-        gs.setdefault("current_round", {})["used_packs"] = []
-        _populate_shop(gs)
-
-    def _require_gamestate(self) -> dict[str, Any]:
-        if self._gs is None:
-            raise RPCError(INVALID_STATE, "No active run — call 'start' first")
-        return self._serialize()
-
-    def _serialize(self) -> dict[str, Any]:
-        from jackdaw.bridge.serializer import game_state_to_bot_response
-
-        return game_state_to_bot_response(self._gs)  # type: ignore[arg-type]
+        out = self._session.translate(json.dumps(encode_action(action)))
+        if out is None:
+            return None
+        method, params = out
+        return method, json.loads(params) or {}  # an empty Lua table encodes as []
 
 
 # ---------------------------------------------------------------------------
@@ -397,52 +222,15 @@ class SimBackend:
 class LiveBackend:
     """Backend that proxies requests to a real balatrobot instance."""
 
-    # Internal → balatrobot format maps for the "add" method
-    _ENHANCEMENT_TO_BOT: dict[str, str] = {
-        "m_bonus": "BONUS",
-        "m_mult": "MULT",
-        "m_wild": "WILD",
-        "m_glass": "GLASS",
-        "m_steel": "STEEL",
-        "m_stone": "STONE",
-        "m_gold": "GOLD",
-        "m_lucky": "LUCKY",
-    }
-    _EDITION_TO_BOT: dict[str, str] = {
-        "foil": "FOIL",
-        "holo": "HOLO",
-        "polychrome": "POLYCHROME",
-        "negative": "NEGATIVE",
-    }
-    _SEAL_TO_BOT: dict[str, str] = {
-        "Gold": "GOLD",
-        "Red": "RED",
-        "Blue": "BLUE",
-        "Purple": "PURPLE",
-    }
-
     def __init__(self, host: str = "127.0.0.1", port: int = 12346) -> None:
         self._url = f"http://{host}:{port}"
-
-    def _convert_add_params(self, params: dict[str, Any]) -> dict[str, Any]:
-        """Convert internal format to balatrobot format for 'add' params."""
-        params = dict(params)  # shallow copy
-        if "enhancement" in params:
-            params["enhancement"] = self._ENHANCEMENT_TO_BOT.get(
-                params["enhancement"], params["enhancement"]
-            )
-        if "edition" in params:
-            params["edition"] = self._EDITION_TO_BOT.get(params["edition"], params["edition"])
-        if "seal" in params:
-            params["seal"] = self._SEAL_TO_BOT.get(params["seal"], params["seal"])
-        return params
 
     def handle(self, method: str, params: dict[str, Any] | None) -> dict[str, Any]:
         import httpx
 
         rpc_params = params or {}
         if method == "add" and rpc_params:
-            rpc_params = self._convert_add_params(rpc_params)
+            rpc_params = to_bot_add_params(rpc_params)
 
         payload: dict[str, Any] = {
             "jsonrpc": "2.0",

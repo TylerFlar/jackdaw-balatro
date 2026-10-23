@@ -203,7 +203,7 @@ pub(super) fn aura(g: &mut Game, _: u32, _: f64) {
 
 /// Cryptid: `extra` copies of the highlighted card join the hand, then the jokers see them
 /// (card.lua:1201-1220). Each copy is added to the deck (only the flag its removal reads, G205)
-/// and `G.deck`'s card limit grows, which nothing reads.
+/// and `G.deck`'s card limit grows, which only BalatroBot's view reads.
 pub(super) fn cryptid(g: &mut Game, id: u32, _: f64) {
     let extra = g.extra(id);
     let source = highlighted(g, 0.0);
@@ -213,6 +213,7 @@ pub(super) fn cryptid(g: &mut Game, id: u32, _: f64) {
         let card = g.copy_card(source, false, AreaId::Hand);
         let cid = card.sort_id;
         new_cards.push(cid);
+        g.rt.areas.deck_limit += 1.0;
         g.gs.areas.emplace(AreaId::Hand, card, false, false);
         g.add_to_deck(cid, false);
         i += 1.0;

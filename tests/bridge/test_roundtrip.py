@@ -25,6 +25,7 @@ from jackdaw.engine.actions import (
     SwapJokersRight,
     UseConsumable,
 )
+from tests.bot.schema import schemas, validate, validate_gamestate
 
 # ============================================================================
 # Helpers
@@ -39,130 +40,35 @@ _VALID_STATES = {
     "GAME_OVER",
 }
 
-_VALID_DECKS = {
-    "RED",
-    "BLUE",
-    "YELLOW",
-    "GREEN",
-    "BLACK",
-    "MAGIC",
-    "NEBULA",
-    "GHOST",
-    "ABANDONED",
-    "CHECKERED",
-    "ZODIAC",
-    "PAINTED",
-    "ANAGLYPH",
-    "PLASMA",
-    "ERRATIC",
-}
-
-_VALID_STAKES = {"WHITE", "RED", "GREEN", "BLACK", "BLUE", "PURPLE", "ORANGE", "GOLD"}
-
-_TOP_LEVEL_KEYS = {
-    "state",
-    "round_num",
-    "ante_num",
-    "money",
-    "deck",
-    "stake",
-    "seed",
-    "won",
-    "used_vouchers",
-    "hands",
-    "round",
-    "blinds",
-    "jokers",
-    "consumables",
-    "cards",
-    "hand",
-    "shop",
-    "vouchers",
-    "packs",
-    "pack",
-}
-
-_AREA_KEYS = {"count", "limit", "highlighted_limit", "cards"}
-
-_CARD_KEYS = {"id", "key", "set", "label", "value", "modifier", "state", "cost"}
-
 
 def _start(sim: SimBackend, seed: str = "M15_ROUNDTRIP") -> dict:
     return sim.handle("start", {"deck": "RED", "stake": "WHITE", "seed": seed})
 
 
+def _beat_blind(sim: SimBackend) -> dict:
+    """``set`` the round's chips to the blind's score, then play one card."""
+    view = sim.handle("gamestate", None)
+    current = next(b for b in view["blinds"].values() if b["status"] == "CURRENT")
+    sim.handle("set", {"chips": current["score"]})
+    return sim.handle("play", {"cards": [0]})
+
+
 def _assert_valid_gamestate(gs: dict) -> None:
-    """Assert structural validity of a serialized gamestate."""
-    assert set(gs.keys()) >= _TOP_LEVEL_KEYS
+    """The view fits BalatroBot's GameState schema, and its areas count their cards."""
+    validate_gamestate(gs)
     assert gs["state"] in _VALID_STATES
-    assert isinstance(gs["round_num"], int)
-    assert isinstance(gs["ante_num"], int)
-    assert isinstance(gs["money"], int)
-    assert gs["deck"] in _VALID_DECKS
-    assert gs["stake"] in _VALID_STAKES
     assert isinstance(gs["seed"], str) and gs["seed"]
-    assert isinstance(gs["won"], bool)
-
-    # Round
-    r = gs["round"]
-    _round_keys = (
-        "hands_left",
-        "hands_played",
-        "discards_left",
-        "discards_used",
-        "reroll_cost",
-        "chips",
-    )
-    for k in _round_keys:
-        assert isinstance(r[k], int), f"round.{k} should be int"
-
-    # Blinds
-    blinds = gs["blinds"]
     for btype in ("small", "big", "boss"):
-        b = blinds[btype]
-        assert b["type"] == btype.upper()
-        assert isinstance(b["status"], str)
-        assert isinstance(b["name"], str)
-        assert isinstance(b["score"], int)
-
-    # Areas
-    for area_key in ("jokers", "consumables", "cards", "hand", "shop", "vouchers", "packs", "pack"):
+        assert gs["blinds"][btype]["type"] == btype.upper()
+    for area_key in ("jokers", "consumables", "cards", "hand"):
         area = gs[area_key]
-        assert set(area.keys()) >= _AREA_KEYS, f"area '{area_key}' missing keys"
-        assert isinstance(area["count"], int)
-        assert isinstance(area["limit"], int)
-        assert isinstance(area["cards"], list)
-        assert area["count"] == len(area["cards"])
-
-    # Hands
-    assert isinstance(gs["hands"], dict)
-    assert len(gs["hands"]) >= 9  # at least the 9 visible hands
+        assert area["count"] == len(area["cards"]), area_key
+    assert len(gs["hands"]) == 12  # every hand, secret ones included
 
 
 def _assert_valid_card(card: dict) -> None:
-    """Assert structural validity of a serialized card."""
-    assert set(card.keys()) >= _CARD_KEYS
-    assert isinstance(card["id"], int)
-    assert isinstance(card["key"], str)
-    assert isinstance(card["set"], str)
-    assert isinstance(card["label"], str)
-
-    v = card["value"]
-    assert "suit" in v and "rank" in v and "effect" in v
-
-    m = card["modifier"]
-    for k in ("seal", "edition", "enhancement", "eternal", "perishable", "rental"):
-        assert k in m, f"modifier missing '{k}'"
-    assert isinstance(m["eternal"], bool)
-    assert isinstance(m["rental"], bool)
-
-    s = card["state"]
-    for k in ("debuff", "hidden", "highlight"):
-        assert k in s and isinstance(s[k], bool)
-
-    c = card["cost"]
-    assert isinstance(c["sell"], int)
-    assert isinstance(c["buy"], int)
+    """A card fits BalatroBot's Card schema."""
+    validate(card, schemas()["Card"])
 
 
 # ============================================================================
@@ -338,10 +244,7 @@ class TestGamestateSchemaCompleteness:
         sim = SimBackend()
         _start(sim, seed="M15_SCHEMA_3")
         sim.handle("select", {})
-        # Make blind trivially beatable
-        sim._gs["blind"].chips = 1
-        n = min(5, len(sim._gs["hand"]))
-        gs = sim.handle("play", {"cards": list(range(n))})
+        gs = _beat_blind(sim)
         assert gs["state"] == "ROUND_EVAL"
         _assert_valid_gamestate(gs)
 
@@ -349,18 +252,18 @@ class TestGamestateSchemaCompleteness:
         sim = SimBackend()
         _start(sim, seed="M15_SCHEMA_4")
         sim.handle("select", {})
-        sim._gs["blind"].chips = 1
-        n = min(5, len(sim._gs["hand"]))
-        sim.handle("play", {"cards": list(range(n))})
+        _beat_blind(sim)
         gs = sim.handle("cash_out", {})
         assert gs["state"] == "SHOP"
         _assert_valid_gamestate(gs)
+        for area_key in ("shop", "vouchers", "packs"):
+            assert gs[area_key]["count"] == len(gs[area_key]["cards"]) > 0
 
     def test_hands_dict_structure(self):
         sim = SimBackend()
         gs = _start(sim, seed="M15_SCHEMA_5")
         hands = gs["hands"]
-        assert len(hands) >= 9
+        assert len(hands) == 12
         for name, h in hands.items():
             assert isinstance(name, str)
             assert isinstance(h["order"], int)
@@ -427,10 +330,8 @@ class TestBlindScoresIncreaseWithAnte:
 
         # Play through 3 blinds of ante 1
         for _ in range(3):
-            gs = sim.handle("select", {})
-            sim._gs["blind"].chips = 1
-            n = min(5, gs["hand"]["count"])
-            gs = sim.handle("play", {"cards": list(range(n))})
+            sim.handle("select", {})
+            gs = _beat_blind(sim)
             # May need multiple hands if somehow didn't beat
             for _ in range(5):
                 if gs["state"] != "SELECTING_HAND":
@@ -462,9 +363,7 @@ class TestMoneyChangesOnActions:
 
         # Get to shop
         sim.handle("select", {})
-        sim._gs["blind"].chips = 1
-        n = min(5, len(sim._gs["hand"]))
-        sim.handle("play", {"cards": list(range(n))})
+        _beat_blind(sim)
         gs = sim.handle("cash_out", {})
         assert gs["state"] == "SHOP"
 
@@ -475,8 +374,8 @@ class TestMoneyChangesOnActions:
             gs = sim.handle("reroll", {})
             assert gs["money"] == money_before - reroll_cost
         else:
-            # Can't afford reroll — verify it fails
-            with pytest.raises(RPCError) as exc_info:
+            # Can't afford reroll: verify it fails
+            with pytest.raises(RPCError, match="Not enough dollars to reroll") as exc_info:
                 sim.handle("reroll", {})
             assert exc_info.value.code == NOT_ALLOWED
 
@@ -487,9 +386,7 @@ class TestMoneyChangesOnActions:
         money_at_start = sim.handle("gamestate", None)["money"]
 
         sim.handle("select", {})
-        sim._gs["blind"].chips = 1
-        n = min(5, len(sim._gs["hand"]))
-        sim.handle("play", {"cards": list(range(n))})
+        _beat_blind(sim)
         gs = sim.handle("cash_out", {})
 
         # After beating a blind and cashing out, money should increase

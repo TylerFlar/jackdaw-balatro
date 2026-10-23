@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pytest
 
-from jackdaw.bridge.backend import SimBackend
 from jackdaw.engine import (
     CashOut,
     GamePhase,
@@ -17,6 +16,7 @@ from jackdaw.engine import (
 )
 from jackdaw.engine.card_factory import create_joker
 from jackdaw.engine.challenges import CHALLENGES
+from jackdaw.engine.debug import add_card
 from jackdaw.env.action_space import ActionType, get_action_mask
 from tests.engine.audit._helpers import force_boss, new_run, play_round, win_blind
 
@@ -144,10 +144,8 @@ def _knife_run_in_shop(seed: str = "AUDIT_G03_PIN") -> dict:
     """On a Knife's Edge (pinned Ceremonial Dagger) in the shop with 3 jokers."""
     gs = new_run(challenge="c_knife_1", seed=seed)
     play_round(gs)
-    backend = SimBackend()
-    backend._gs = gs
-    backend.handle("add", {"key": "j_joker"})
-    backend.handle("add", {"key": "j_egg"})
+    add_card(gs, "j_joker")
+    add_card(gs, "j_egg")
     assert [j.center_key for j in gs["jokers"]] == ["j_ceremonial", "j_joker", "j_egg"]
     return gs
 

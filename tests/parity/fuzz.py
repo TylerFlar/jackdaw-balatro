@@ -179,15 +179,16 @@ def run_case(case: Case, tape: list[list[Any]] | None = None) -> Outcome:
     """Play ``case`` in both engines: with its policy, or the given ``tape``."""
     out = Outcome(case)
     py = PyEngine(case.start, case.setup)
-    if case.setup:
-        game = _core.Game.from_snapshot(json.dumps(canon.to_json_compatible(py.snapshot())))
-    else:
-        s = case.start
-        game = _core.Game.new(s["back"], s["stake"], s["seed"], s["challenge"])
-        found = canon.diff(plain(py.snapshot()), _rust_view(game))
-        if found:
-            out.stop, out.divergence, out.diff = "divergence", "new run", found
-            return out
+    # The setup ops run natively in Rust too (BalatroBot's add/set, Game.apply_setup).
+    s = case.start
+    game = _core.Game.new(s["back"], s["stake"], s["seed"], s.get("challenge"))
+    for op in case.setup:
+        game.apply_setup(json.dumps(op))
+    found = canon.diff(plain(py.snapshot()), _rust_view(game))
+    if found:
+        out.stop, out.divergence = "divergence", "setup" if case.setup else "new run"
+        out.diff = found
+        return out
     rng = random.Random(case.policy_seed)
     for pos in range(case.max_steps):
         snap = plain(py.snapshot())

@@ -273,3 +273,27 @@ def test_xoshiro_reference_outputs() -> None:
     # xoshiro256** from state [1, 2, 3, 4], as the reference C implementation computes it.
     rng = Xoshiro256.from_state([1, 2, 3, 4])
     assert [rng.next_u64() for _ in range(4)] == [11520, 0, 1509978240, 1215971899390074240]
+
+
+@pytest.mark.parametrize("spec", _SPECS[::10], ids=[s.name for s in _SPECS[::10]])
+def test_balatrobot_masks_narrow_the_vanilla_ones(spec) -> None:
+    """BALATROBOT legality (jackdaw-bot's dry run of the endpoint checks) only
+    takes actions away: never a sim-only type, never one vanilla refuses."""
+    engine = PyEngine(spec.start, spec.setup)
+    for pos, action in enumerate(spec.tape[:120]):
+        snap = engine.snapshot()
+        if snap["phase"] == "game_over":
+            break
+        game = _core.Game.from_snapshot(json.dumps(canon.to_json_compatible(snap)))
+        vanilla = action_mask_from_parts(game.action_mask())
+        bot = action_mask_from_parts(game.action_mask("balatrobot"))
+        where = f"{spec.name}@{pos}"
+        assert not (bot.type_mask & ~vanilla.type_mask).any(), where
+        assert not bot.type_mask[ActionType.RerollBoss], where
+        assert not bot.type_mask[ActionType.BuyAndUse], where
+        for t, m in bot.entity_masks.items():
+            assert not (m & ~vanilla.entity_masks[t]).any(), f"{where} entity {int(t)}"
+        try:
+            engine.step(action)
+        except Exception:
+            break

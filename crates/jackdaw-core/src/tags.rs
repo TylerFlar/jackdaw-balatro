@@ -413,6 +413,8 @@ fn voucher_tag(g: &mut Game, _: u32, _: f64) {
     let Some(key) = g.get_next_voucher_key(true) else {
         return;
     };
+    // `G.shop_vouchers.config.card_limit + 1` (tag.lua:308); only BalatroBot's view reads it.
+    g.rt.areas.voucher_limit += 1.0;
     let card = g.new_card(key, None, AreaId::ShopVouchers);
     g.gs.areas.emplace(AreaId::ShopVouchers, card, false, false);
 }
