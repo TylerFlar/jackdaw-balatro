@@ -540,6 +540,10 @@ class TestTradingCard:
         assert snap["game"]["dollars"] == dollars + 3
         assert len(owned(snap)) == 52
         assert snap_joker(snap, "j_caino")["ability"]["caino_xmult"] == 2
+        # Caino's X2 in the main step (card.lua:4052-4057).
+        snap = check(eng, ["PlayHand", [0]])
+        last_score = snap["sim"]["last_score"]
+        assert last_score["mult"] == 2 * 1  # High Card's mult 1, then X2
 
     def test_blueprint_copy_does_nothing(self):
         eng = in_round("PD_TRADE_BP", ("j_blueprint", "j_trading"), ({"key": "H_K"},))

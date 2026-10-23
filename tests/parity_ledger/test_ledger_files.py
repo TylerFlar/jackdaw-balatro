@@ -51,7 +51,7 @@ QUOTE_LIMIT = 100  # the ledger may quote at most 100 characters of Lua in one p
 _CELL_SPLIT = re.compile(r"(?<!\\)\|")
 _CODE_SPAN = re.compile(r"``\s(.*?)\s``|`([^`]*)`")
 _LUA_REF = re.compile(r"^(?P<file>[A-Za-z_]+\.lua):(?P<start>\d+)(?:-(?P<end>\d+))?$")
-_GAP_ID = re.compile(r"^[GB]\d{2}$")
+_GAP_ID = re.compile(r"^[GB]\d{2,3}$")
 
 
 def split_cells(line: str) -> list[str]:

@@ -97,7 +97,7 @@ Source: `balatro_source/functions/common_events.lua` (Balatro 1.0.1o). 141 rows:
 | common_events/rng/get_next_tag_key/get_current_pool:append | common_events.lua:1916 | rng | `get_current_pool('Tag', nil, nil, append)` |  | unreviewed |  |  |  |  |
 | common_events/rng/get_next_tag_key/pseudorandom_element:_pool_key | common_events.lua:1917 | rng | `pseudorandom_element(_pool, pseudoseed(_pool_key))` |  | unreviewed |  |  |  |  |
 | common_events/rng/get_next_tag_key/pseudorandom_element:_pool_key-_resample-it | common_events.lua:1921 | rng | `pseudorandom_element(_pool, pseudoseed(_pool_key..'_resample'..it))` |  | unreviewed |  |  |  |  |
-| common_events/fn/create_playing_card | common_events.lua:1927-1942 | function | `create_playing_card(card_init, area, skip_materialize, silent, colours)` |  | ported | crates/jackdaw-core/src/pools.rs::create_playing_card |  |  |  |
+| common_events/fn/create_playing_card | common_events.lua:1927-1942 | function | `create_playing_card(card_init, area, skip_materialize, silent, colours)` |  | ported | crates/jackdaw-core/src/pools.rs::create_playing_card |  | G103 |  |
 | common_events/rng/create_playing_card/pseudorandom_element:front | common_events.lua:1929 | rng | `pseudorandom_element(G.P_CARDS, pseudoseed('front'))` |  | ported | crates/jackdaw-core/src/pools.rs::random_front |  |  |  |
 | common_events/fn/get_pack | common_events.lua:1944-1961 | function | `get_pack(_key, _type)` |  | unreviewed |  |  |  |  |
 | common_events/rng/get_pack/p_buffoon_normal_1/math.random:1-2 | common_events.lua:1947 | rng | `(math.random(1, 2))` | `not G.GAME.first_shop_buffoon and not G.GAME.banned_keys['p_buffoon_nor…` | unreviewed |  |  |  |  |

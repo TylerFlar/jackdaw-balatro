@@ -17,11 +17,11 @@ Source: `balatro_source/blind.lua` (Balatro 1.0.1o). 94 rows: 25 function, 42 br
 | blind/branch/Blind:set_blind/the-eye | blind.lua:157-171 | branch | The Eye — `self.name == 'The Eye' and not reset` |  | unreviewed |  |  |  |  |
 | blind/branch/Blind:set_blind/the-mouth | blind.lua:173-174 | branch | The Mouth — `self.name == 'The Mouth' and not reset` |  | unreviewed |  |  |  |  |
 | blind/branch/Blind:set_blind/the-fish | blind.lua:176-177 | branch | The Fish — `self.name == 'The Fish' and not reset` |  | unreviewed |  |  |  |  |
-| blind/branch/Blind:set_blind/the-water | blind.lua:179-181 | branch | The Water — `self.name == 'The Water' and not reset` |  | unreviewed |  |  |  |  |
+| blind/branch/Blind:set_blind/the-water | blind.lua:179-181 | branch | The Water — `self.name == 'The Water' and not reset` |  | verified | crates/jackdaw-core/src/blind.rs::set_blind | tests/parity/test_jokers_batch_d.py::TestBurglar | G97 |  |
 | blind/branch/Blind:set_blind/the-needle | blind.lua:183-185 | branch | The Needle — `self.name == 'The Needle' and not reset` |  | unreviewed |  |  |  |  |
 | blind/branch/Blind:set_blind/the-manacle | blind.lua:187-188 | branch | The Manacle — `self.name == 'The Manacle' and not reset` |  | unreviewed |  |  |  |  |
 | blind/branch/Blind:set_blind/amber-acorn | blind.lua:190-204 | branch | Amber Acorn — `self.name == 'Amber Acorn' and not reset and #G.jokers.cards > 0` |  | gap |  |  | G10 |  |
-| blind/event/Blind:set_blind/amber-acorn/after:delay | blind.lua:196-203 | event | `Event{trigger='after'}` → :add_event, delay | `self.name == 'Amber Acorn' and not reset and #G.jokers.cards > 0` & `#G.jokers.cards > 1` | unreviewed |  |  |  |  |
+| blind/event/Blind:set_blind/amber-acorn/after:delay | blind.lua:196-203 | event | `Event{trigger='after'}` → :add_event, delay | `self.name == 'Amber Acorn' and not reset and #G.jokers.cards > 0` & `#G.jokers.cards > 1` | unreviewed |  |  | G100 |  |
 | blind/event/Blind:set_blind/amber-acorn/immediate:play_sound | blind.lua:197 | event | `Event{}` → :shuffle, play_sound | `self.name == 'Amber Acorn' and not reset and #G.jokers.cards > 0` & `#G.jokers.cards > 1` & [event] | unreviewed |  |  |  |  |
 | blind/rng/Blind:set_blind/amber-acorn/shuffle:aajk | blind.lua:197 | rng | `G.jokers:shuffle('aajk')` | `self.name == 'Amber Acorn' and not reset and #G.jokers.cards > 0` & `#G.jokers.cards > 1` & [event] & [event] | gap |  |  | G10 |  |
 | blind/event/Blind:set_blind/amber-acorn/immediate:play_sound#2 | blind.lua:199 | event | `Event{}` → :shuffle, play_sound | `self.name == 'Amber Acorn' and not reset and #G.jokers.cards > 0` & `#G.jokers.cards > 1` & [event] | unreviewed |  |  |  |  |
@@ -76,7 +76,7 @@ Source: `balatro_source/blind.lua` (Balatro 1.0.1o). 94 rows: 25 function, 42 br
 | blind/branch/Blind:debuff_hand/debuff-h_size_ge | blind.lua:527-529 | branch | debuff.h_size_ge — `self.debuff.h_size_ge and #cards < self.debuff.h_size_ge` | `self.debuff` | unreviewed |  |  |  |  |
 | blind/branch/Blind:debuff_hand/the-eye | blind.lua:535-540 | branch | The Eye — `self.name == "The Eye"` | `self.debuff` | unreviewed |  |  |  |  |
 | blind/branch/Blind:debuff_hand/the-mouth | blind.lua:542-547 | branch | The Mouth — `self.name == "The Mouth"` | `self.debuff` | unreviewed |  |  |  |  |
-| blind/branch/Blind:debuff_hand/the-arm | blind.lua:550-558 | branch | The Arm — `self.name == 'The Arm'` |  | unreviewed |  |  |  |  |
+| blind/branch/Blind:debuff_hand/the-arm | blind.lua:550-558 | branch | The Arm — `self.name == 'The Arm'` |  | verified | crates/jackdaw-core/src/blind.rs::blind_debuff_hand | tests/parity/test_jokers_batch_d.py::TestBurntJoker | G98 |  |
 | blind/branch/Blind:debuff_hand/the-ox | blind.lua:560-568 | branch | The Ox — `self.name == 'The Ox'` |  | gap |  |  | G09 |  |
 | blind/fn/Blind:drawn_to_hand | blind.lua:572-603 | function | `Blind:drawn_to_hand()` |  | unreviewed |  |  |  |  |
 | blind/branch/Blind:drawn_to_hand/cerulean-bell | blind.lua:574-586 | branch | Cerulean Bell — `self.name == 'Cerulean Bell'` | `not self.disabled` | unreviewed |  |  |  |  |
