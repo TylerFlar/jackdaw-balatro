@@ -685,10 +685,16 @@ def score_hand(
                 # for the rest of this evaluation (held effects, Raised Fist,
                 # Blackboard) and already counts in G.playing_cards (Erosion).
                 from jackdaw.engine.card_factory import copy_card
+                from jackdaw.engine.jokers import playing_card_joker_effects
 
-                held_cards.append(copy_card(create["source_card"], game_state=game_state))
+                dna_copy = copy_card(create["source_card"], game_state=game_state)
+                held_cards.append(dna_copy)
                 snapshot = replace(snapshot, playing_cards_count=snapshot.playing_cards_count + 1)
                 _shared["game"] = snapshot
+                # playing_cards_created -> playing_card_joker_effects, right
+                # in this pass (card.lua:3521, common_events.lua:922-923):
+                # Hologram grows before this hand's joker_main.
+                playing_card_joker_effects(jokers, [dna_copy], game=snapshot)
             else:
                 joker_creates.append(create)
 

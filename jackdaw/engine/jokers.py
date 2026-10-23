@@ -368,6 +368,27 @@ def calculate_joker(card: Card, context: JokerContext) -> JokerResult | None:
     return handler(card, context)
 
 
+def playing_card_joker_effects(
+    jokers: list[Card], cards: list[Any], *, game: GameSnapshot | None = None
+) -> None:
+    """``playing_card_joker_effects`` (misc_functions.lua:1580-1584): every
+    joker's calculate_joker({playing_card_added = true, cards = cards}).
+
+    Called wherever playing cards join the deck: Certificate, Marble Joker,
+    DNA, Cryptid, Familiar/Grim/Incantation, Standard-pack picks and shop
+    buys.  *cards* may hold placeholders: vanilla passes ``{true}`` when the
+    card is made later in an event.  Hologram is the only responder.
+    """
+    for joker in list(jokers):
+        ctx = JokerContext(
+            playing_card_added=True,
+            cards=list(cards),
+            jokers=jokers,
+            game=game if game is not None else _DEFAULT_GAME,
+        )
+        calculate_joker(joker, ctx)
+
+
 def registered_jokers() -> list[str]:
     """Return sorted list of all registered joker center keys."""
     return sorted(_REGISTRY)
@@ -1753,8 +1774,17 @@ def _campfire(card: Card, ctx: JokerContext) -> JokerResult | None:
 
 @register("j_hologram")
 def _hologram(card: Card, ctx: JokerContext) -> JokerResult | None:
-    """Hologram: +0.25 xMult per card added to deck. Source: card.lua:2457."""
-    if ctx.playing_card_added and not ctx.blueprint and ctx.cards:
+    """Hologram: +0.25 xMult per card added to deck.
+
+    Source: card.lua:2456-2461 (``playing_card_added and not
+    self.getting_sliced``, ``not context.blueprint``).
+    """
+    if (
+        ctx.playing_card_added
+        and not getattr(card, "getting_sliced", False)
+        and not ctx.blueprint
+        and ctx.cards
+    ):
         card.ability["x_mult"] = card.ability.get("x_mult", 1) + len(ctx.cards) * card.ability.get(
             "extra", 0.25
         )

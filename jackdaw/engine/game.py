@@ -308,6 +308,10 @@ def _handle_select_blind(gs: dict[str, Any]) -> dict[str, Any]:
         res = _cj2(joker, _JC2(first_hand_drawn=True, jokers=jokers, game=fhd_snap))
         if res and res.extra:
             fhd_muts.append(dict(res.extra))
+            # Certificate calls playing_card_joker_effects({true}) at calc
+            # time; the card itself is made in an event (card.lua:2464-2481).
+            if (res.extra.get("create") or {}).get("key") == "cert":
+                _playing_card_joker_effects(gs, [True])
     if fhd_muts:
         _hand_before = list(gs.get("hand", []))
         _apply_setting_blind_mutations(gs, fhd_muts, jokers)
@@ -1271,8 +1275,9 @@ def _handle_buy_card(gs: dict[str, Any], idx: int) -> dict[str, Any]:
     _fire_shop_joker_context(gs, buying_card=True)
 
     # Fire playing_card_added if a playing card was bought
+    # (button_callbacks.lua:2429)
     if added_playing_card:
-        _fire_shop_joker_context(gs, playing_card_added=True, cards=[card])
+        _playing_card_joker_effects(gs, [card])
 
     return gs
 
@@ -1730,8 +1735,8 @@ def _handle_pick_pack_card(
     else:
         # Standard pack: playing card → add to deck
         gs.setdefault("deck", []).append(card)
-        # Fire playing_card_added joker context (Hologram)
-        _fire_shop_joker_context(gs, playing_card_added=True, cards=[card])
+        # playing_card_joker_effects({card}) (button_callbacks.lua:2228)
+        _playing_card_joker_effects(gs, [card])
 
     # Check if pack should close
     if gs["pack_choices_remaining"] <= 0 or not pack_cards:
@@ -2304,6 +2309,10 @@ def _fire_setting_blind(
             # (card.lua: v ~= self) — record who fired the mutation.
             entry["_source_joker"] = joker
             mutations.append(entry)
+            # Marble Joker calls playing_card_joker_effects({true}) at calc
+            # time; the Stone card is made in an event (card.lua:2580-2600).
+            if (entry.get("create") or {}).get("key") == "marble":
+                _playing_card_joker_effects(gs, [True])
 
     return mutations
 
@@ -2637,7 +2646,12 @@ def _apply_consumable_result(
 
     # g. Create cards (High Priestess, Emperor, Judgement, etc.)
     if getattr(result, "create", None):
-        _resolve_create_descriptors(gs, result.create)
+        created = _resolve_create_descriptors(gs, result.create)
+        # Familiar / Grim / Incantation: playing_card_joker_effects with the
+        # new cards, in the creation event (card.lua:1311-1338).
+        new_playing_cards = [c for c in created if c.ability.get("set") in ("Default", "Enhanced")]
+        if new_playing_cards:
+            _playing_card_joker_effects(gs, new_playing_cards)
 
     # ---- Economy ----
 
@@ -2666,6 +2680,7 @@ def _apply_consumable_result(
         from jackdaw.engine.card_factory import copy_card
 
         deck_list: list = gs.setdefault("deck", [])
+        added: list = []
         for card_spec in result.add_to_deck:
             # Cryptid: copy an existing card — copies are emplaced into the
             # HAND, not the draw pile (card.lua:1206-1213: copy_card +
@@ -2673,6 +2688,7 @@ def _apply_consumable_result(
             copy_source = card_spec.get("copy_of")
             if copy_source is not None:
                 new_card = copy_card(copy_source, game_state=gs)
+                added.append(new_card)
                 if gs.get("phase") == GamePhase.SELECTING_HAND:
                     gs.setdefault("hand", []).append(new_card)
                     _sort_hand_desc(gs.get("hand", []))
@@ -2689,6 +2705,10 @@ def _apply_consumable_result(
             if "enhancement" in card_spec:
                 new_card.set_ability(card_spec["enhancement"])
             deck_list.append(new_card)
+            added.append(new_card)
+        # Cryptid: playing_card_joker_effects(new_cards) (card.lua:1217)
+        if added:
+            _playing_card_joker_effects(gs, added)
 
     # ---- Joker effects ----
 
@@ -2728,12 +2748,12 @@ def _apply_consumable_result(
         gs["hand_size"] = gs.get("hand_size", 8) + result.hand_size_mod
 
 
-def _resolve_create_descriptors(gs: dict[str, Any], descriptors: list[dict[str, Any]]) -> None:
+def _resolve_create_descriptors(gs: dict[str, Any], descriptors: list[dict[str, Any]]) -> list[Any]:
     """Resolve card creation descriptors from ConsumableResult.create.
 
     Each descriptor is ``{'type': ..., 'count': ..., 'seed': ...,
     'forced_key': ...}``.  Creates the actual Card objects and adds
-    them to the appropriate area.
+    them to the appropriate area; returns the cards placed.
 
     Delegates to :func:`~jackdaw.engine.card_factory.resolve_create_descriptor`
     for actual card creation.
@@ -2750,6 +2770,7 @@ def _resolve_create_descriptors(gs: dict[str, Any], descriptors: list[dict[str, 
     jokers: list = gs.setdefault("jokers", [])
     joker_slots = gs.get("joker_slots", 5)
     deck: list = gs.setdefault("deck", [])
+    placed: list = []
 
     for desc in descriptors:
         count = desc.get("count", 1)
@@ -2782,12 +2803,14 @@ def _resolve_create_descriptors(gs: dict[str, Any], descriptors: list[dict[str, 
                 if len(jokers) < joker_slots + (1 if negative else 0):
                     jokers.append(card)
                     card.add_to_deck(gs)
+                    placed.append(card)
             elif card_set in ("Tarot", "Planet", "Spectral"):
                 negative = card.edition and card.edition.get("negative")
                 consumable_limit = gs.get("consumable_slots", 2)
                 if len(consumables) < consumable_limit + (1 if negative else 0):
                     consumables.append(card)
                     card.add_to_deck(gs)
+                    placed.append(card)
             elif card_set in ("Default", "Enhanced", ""):
                 # Playing card — add to hand if mid-round, otherwise deck.
                 # Matches Balatro which routes spectral-created cards to
@@ -2796,10 +2819,12 @@ def _resolve_create_descriptors(gs: dict[str, Any], descriptors: list[dict[str, 
                     gs.setdefault("hand", []).append(card)
                 else:
                     deck.append(card)
+                placed.append(card)
 
     # Re-sort hand if any cards were added during SELECTING_HAND
     if gs.get("phase") == GamePhase.SELECTING_HAND:
         _sort_hand_desc(gs.get("hand", []))
+    return placed
 
 
 # ---------------------------------------------------------------------------
@@ -3223,6 +3248,14 @@ def _close_pack(gs: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 # Blind:press_play — blind.lua:464
 # ---------------------------------------------------------------------------
+
+
+def _playing_card_joker_effects(gs: dict[str, Any], cards: list[Any]) -> None:
+    """``playing_card_joker_effects`` (misc_functions.lua:1580-1584) on the
+    live joker list — see :func:`jackdaw.engine.jokers.playing_card_joker_effects`."""
+    from jackdaw.engine.jokers import playing_card_joker_effects
+
+    playing_card_joker_effects(gs.get("jokers", []), cards)
 
 
 def _notify_cards_destroyed(gs: dict[str, Any], destroyed: list) -> None:

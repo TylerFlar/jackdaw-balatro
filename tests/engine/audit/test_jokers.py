@@ -201,6 +201,56 @@ class TestDollarBuffer:
         assert gs["dollars"] == dollars + 4
 
 
+class TestHologram:
+    """Every playing-card source calls playing_card_joker_effects
+    (misc_functions.lua:1580-1584), the playing_card_added context Hologram
+    grows on (+0.25 per card, card.lua:2456-2461)."""
+
+    def test_certificate(self):
+        """Certificate calls it at first_hand_drawn (card.lua:2481)."""
+        gs = new_run("AUDIT_HOLO_CERT")
+        holo = give_joker(gs, "j_hologram")
+        give_joker(gs, "j_certificate")
+        select_blind(gs)
+        assert holo.ability["x_mult"] == 1.25
+
+    def test_marble_joker(self):
+        """Marble Joker calls it at setting_blind (card.lua:2600)."""
+        gs = new_run("AUDIT_HOLO_MARBLE")
+        holo = give_joker(gs, "j_hologram")
+        give_joker(gs, "j_marble")
+        select_blind(gs)
+        assert holo.ability["x_mult"] == 1.25
+
+    def test_dna_counts_for_the_same_hand(self):
+        """DNA's playing_cards_created reaches it through card_eval_status_text
+        in the before pass (card.lua:3521, common_events.lua:922-923), so the
+        grown Hologram already scores that hand."""
+        gs = select_blind(new_run("AUDIT_HOLO_DNA"))
+        holo = give_joker(gs, "j_hologram")
+        give_joker(gs, "j_dna")
+        play(gs, give_card(gs, "S_2"))
+        assert holo.ability["x_mult"] == 1.25
+        assert gs["last_score_result"].total == int((5 + 2) * 1.25)
+
+    def test_cryptid(self):
+        """Cryptid calls it with its new cards (card.lua:1217)."""
+        gs = select_blind(new_run("AUDIT_HOLO_CRYPTID"))
+        holo = give_joker(gs, "j_hologram")
+        card = give_card(gs, "S_2")
+        give_consumable(gs, "c_cryptid")
+        step(gs, UseConsumable(card_index=0, target_indices=indices(gs, card)))
+        assert holo.ability["x_mult"] == 1.5
+
+    def test_familiar(self):
+        """Familiar / Grim / Incantation call it with their cards (card.lua:1338)."""
+        gs = select_blind(new_run("AUDIT_HOLO_FAMILIAR"))
+        holo = give_joker(gs, "j_hologram")
+        give_consumable(gs, "c_familiar")
+        step(gs, UseConsumable(card_index=0))
+        assert holo.ability["x_mult"] == 1.75
+
+
 class TestMrBones:
     def test_save_pays_no_blind_reward(self):
         """evaluate_round pays the blind only when G.GAME.chips >=
