@@ -397,6 +397,11 @@ def initialize_run(
     # hands (UI_definitions.lua:1506-1516), after the queued start events.
     ensure_orbital_choices(gs)
 
+    # A starting Astronomer's set_cost pass is one of those events (G261).
+    from jackdaw.engine.game import run_pending_reprice
+
+    run_pending_reprice(gs)
+
     return gs
 
 
