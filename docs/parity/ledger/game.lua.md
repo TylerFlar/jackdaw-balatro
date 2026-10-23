@@ -370,8 +370,8 @@ Source: `balatro_source/game.lua` (Balatro 1.0.1o). 436 rows: 20 function, 11 rn
 | game/entity/booster/p_buffoon_jumbo_1 | game.lua:695 | entity | Booster: Jumbo Buffoon Pack (`p_buffoon_jumbo_1`) | named in Card:open | unreviewed |  |  |  |  |
 | game/entity/booster/p_buffoon_mega_1 | game.lua:696 | entity | Booster: Mega Buffoon Pack (`p_buffoon_mega_1`) | named in Card:open | unreviewed |  |  |  |  |
 | game/fn/Game:delete_run | game.lua:1142-1189 | function | `Game:delete_run()` |  | unreviewed |  |  |  |  |
-| game/fn/Game:init_game_object | game.lua:1862-2016 | function | `Game:init_game_object()` |  | unreviewed |  |  |  |  |
-| game/fn/Game:start_run | game.lua:2018-2447 | function | `Game:start_run(args)` |  | gap |  |  | G03 |  |
+| game/fn/Game:init_game_object | game.lua:1862-2016 | function | `Game:init_game_object()` |  | verified | crates/jackdaw-core/src/run.rs::init_game_object | tests/parity/test_rust_new_run.py |  |  |
+| game/fn/Game:start_run | game.lua:2018-2447 | function | `Game:start_run(args)` |  | verified | crates/jackdaw-core/src/run.rs::Game::new_run | tests/parity/test_rust_new_run.py | G03, G129 |  |
 | game/event/Game:start_run/immediate:add_joker | game.lua:2069-2076 | event | `Event{}` → add_joker, :set_eternal | `not saveTable` & `args.challenge` & `_ch.jokers` | unreviewed |  |  |  |  |
 | game/event/Game:start_run/immediate:add_joker#2 | game.lua:2081-2086 | event | `Event{}` → add_joker | `not saveTable` & `args.challenge` & `_ch.consumeables` | unreviewed |  |  |  |  |
 | game/event/Game:start_run/immediate:card-apply_to_run | game.lua:2092-2098 | event | `Event{}` → Card.apply_to_run | `not saveTable` & `args.challenge` & `_ch.vouchers` | unreviewed |  |  |  |  |
@@ -407,7 +407,7 @@ Source: `balatro_source/game.lua` (Balatro 1.0.1o). 436 rows: 20 function, 11 rn
 | game/event/Game:update_hand_played/immediate | game.lua:3193-3204 | event | `Event{trigger='immediate'}` | `not G.STATE_COMPLETE` | unreviewed |  |  |  |  |
 | game/fn/Game:update_draw_to_hand | game.lua:3208-3246 | function | `Game:update_draw_to_hand(dt)` |  | unreviewed |  |  |  |  |
 | game/ctx/Game:update_draw_to_hand/apply_to_run:type-round_start_bonus | game.lua:3215 | context_call | `apply_to_run{type='round_start_bonus'}` | `not G.STATE_COMPLETE` | unreviewed |  |  |  |  |
-| game/event/Game:update_draw_to_hand/immediate:g-funcs-draw_from_deck_to_hand | game.lua:3219-3244 | event | `Event{trigger='immediate'}` → G.FUNCS.draw_from_deck_to_hand, :calculate_joker, :add_event | `not G.STATE_COMPLETE` | unreviewed |  |  |  |  |
+| game/event/Game:update_draw_to_hand/immediate:g-funcs-draw_from_deck_to_hand | game.lua:3219-3244 | event | `Event{trigger='immediate'}` → G.FUNCS.draw_from_deck_to_hand, :calculate_joker, :add_event | `not G.STATE_COMPLETE` | unreviewed |  |  | G105 |  |
 | game/ctx/Game:update_draw_to_hand/calculate_joker:first_hand_drawn | game.lua:3229 | context_call | `calculate_joker{first_hand_drawn}` | `not G.STATE_COMPLETE` & [event] & `G.GAME.current_round.hands_played == 0 and G.GAME.current_round.discard…` | gap |  |  | G14 |  |
 | game/event/Game:update_draw_to_hand/immediate:drawn_to_hand | game.lua:3233-3241 | event | `Event{trigger='immediate'}` → :drawn_to_hand | `not G.STATE_COMPLETE` & [event] | unreviewed |  |  |  |  |
 | game/fn/Game:update_new_round | game.lua:3248-3256 | function | `Game:update_new_round(dt)` |  | unreviewed |  |  |  |  |

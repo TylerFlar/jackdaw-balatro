@@ -242,7 +242,7 @@ impl Game {
     }
 
     /// `reset_idol_card()` (common_events.lua:2271-2286).
-    fn reset_idol_card(&mut self) {
+    pub(crate) fn reset_idol_card(&mut self) {
         use crate::card::{Rank, Suit};
         let cr = &mut self.gs.current_round;
         cr.idol_card = (Suit::Spades, Rank::Ace);
@@ -261,7 +261,7 @@ impl Game {
     }
 
     /// `reset_mail_rank()` (common_events.lua:2288-2301).
-    fn reset_mail_rank(&mut self) {
+    pub(crate) fn reset_mail_rank(&mut self) {
         self.gs.current_round.mail_card = crate::card::Rank::Ace;
         let valid = self.non_stone_cards();
         if !valid.is_empty() {
@@ -278,7 +278,7 @@ impl Game {
     }
 
     /// `reset_ancient_card()` (common_events.lua:2303-2310).
-    fn reset_ancient_card(&mut self) {
+    pub(crate) fn reset_ancient_card(&mut self) {
         use crate::card::Suit;
         let current = self.gs.current_round.ancient_card;
         let suits: Vec<Suit> = [Suit::Spades, Suit::Hearts, Suit::Clubs, Suit::Diamonds]
@@ -291,7 +291,7 @@ impl Game {
     }
 
     /// `reset_castle_card()` (common_events.lua:2312-2324).
-    fn reset_castle_card(&mut self) {
+    pub(crate) fn reset_castle_card(&mut self) {
         self.gs.current_round.castle_card = crate::card::Suit::Spades;
         let valid = self.non_stone_cards();
         if !valid.is_empty() {

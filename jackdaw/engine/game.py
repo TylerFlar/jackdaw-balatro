@@ -158,12 +158,14 @@ def _handle_select_blind(gs: dict[str, Any]) -> dict[str, Any]:
     ``set_blind`` → ``state_events.lua`` ``new_round``:
 
     1. Create Blind from blind_choices
-    2. Fire joker ``setting_blind`` context (Chicot, Madness, Burglar,
-       Marble Joker, Riff-raff, Cartomancer)
-    3. Process setting_blind side-effects
-    4. Apply boss blind set-time effects (Water, Needle, Manacle,
-       Amber Acorn) + debuff playing cards
-    5. Call ``start_round`` (reset counters, targeting cards)
+    2. Call ``start_round`` (reset counters, targeting cards) and set_blind's
+       debuff pass
+    3. Apply boss blind set-time effects (Water, Needle, Manacle,
+       Amber Acorn's flip)
+    4. Fire joker ``setting_blind`` context (Chicot, Madness, Burglar,
+       Marble Joker, Riff-raff, Cartomancer) and process its events in
+       Lua's order
+    5. Shuffle the deck, disable the boss for each Chicot
     6. Draw hand from deck
     7. Set phase → SELECTING_HAND
     """
@@ -215,43 +217,35 @@ def _handle_select_blind(gs: dict[str, Any]) -> dict[str, Any]:
     _set_blind_debuff_pass(gs)
 
     # ------------------------------------------------------------------
-    # 3. Fire joker setting_blind context
+    # 3. Boss blind set-time effects (blind.lua:157-205): set_blind runs
+    #    before the jokers' setting_blind context (state_events.lua:333-337).
+    #    The Water and The Needle count what they take now, and their eases
+    #    are events queued ahead of every joker's: Burglar sees no discards
+    #    left, and a later disable gives back the full count (G97).
     # ------------------------------------------------------------------
     jokers: list = gs.get("jokers", [])
     # Amber Acorn's set_blind flips the board face down BEFORE the jokers'
     # setting_blind context (blind.lua:190-194; state_events.lua:333-337),
     # so jokers that setting_blind effects create stay face up.  Its three
-    # shuffles are queued events that run after those effects (below).
+    # shuffles are queued events that run after those effects.
     amber_shuffles = blind.name == "Amber Acorn" and len(jokers) > 1
     if blind.name == "Amber Acorn":
         for j in jokers:
             j.facing = "back"
-    setting_mutations = _fire_setting_blind(gs, jokers, blind)
-
-    # ------------------------------------------------------------------
-    # 4. Process setting_blind side-effects
-    # ------------------------------------------------------------------
-    _apply_setting_blind_mutations(gs, setting_mutations, jokers)
-
-    # Amber Acorn: three queued G.jokers:shuffle('aajk') events
-    # (blind.lua:195-203), each advancing the 'aajk' stream.  They shuffle
-    # the board as it stands once the setting_blind effects have resolved
-    # (Riff-raff's new jokers included), and a disable does not cancel them.
-    if amber_shuffles and gs.get("rng") is not None:
-        rng = gs["rng"]
-        for _ in range(3):
-            rng.shuffle(jokers, rng.seed("aajk"))
-
-    # ------------------------------------------------------------------
-    # 5. Boss blind set-time effects (blind.lua:157-209)
-    #    In Lua, set_blind fires inside new_round BEFORE the shuffle.
-    #    Order: set_blind → joker setting_blind → shuffle → draw.
-    # ------------------------------------------------------------------
     if blind.boss and not blind.disabled:
         _apply_boss_blind_effects(gs, blind)
 
     # ------------------------------------------------------------------
-    # 6. Per-round deck shuffle (state_events.lua:344)
+    # 4. Fire joker setting_blind context, then its events in Lua's order
+    #    (Amber Acorn's three 'aajk' shuffles among them)
+    # ------------------------------------------------------------------
+    setting_mutations = _fire_setting_blind(gs, jokers, blind)
+    touched, sliced_hand_size = _apply_setting_blind_mutations(
+        gs, setting_mutations, jokers, amber_shuffles=amber_shuffles
+    )
+
+    # ------------------------------------------------------------------
+    # 5. Per-round deck shuffle (state_events.lua:344)
     #    Fires AFTER set_blind and joker setting_blind context,
     #    BEFORE draw_to_hand.  Key: 'nr' + str(ante).
     # ------------------------------------------------------------------
@@ -261,9 +255,8 @@ def _handle_select_blind(gs: dict[str, Any]) -> dict[str, Any]:
         nr_seed = rng.seed("nr" + str(ante))
         rng.shuffle(deck_list, nr_seed)
 
-    # Marble Joker stones join the pile only after the shuffle, at the
-    # bottom (drawn last) — see the pending_deck_bottom note in
-    # _apply_setting_blind_mutations.
+    # pending_deck_bottom stays in the snapshot schema but is always empty:
+    # Marble Joker's stones now join the deck before the shuffle (G55).
     pending_bottom = gs.pop("pending_deck_bottom", None)
     if pending_bottom:
         gs.setdefault("deck", [])[:0] = pending_bottom
@@ -274,6 +267,14 @@ def _handle_select_blind(gs: dict[str, Any]) -> dict[str, Any]:
     # deal — once per Chicot that fired.
     for _ in range(sum(1 for m in setting_mutations if m.get("disable_blind"))):
         disable_blind(gs)
+
+    # A joker or consumable added or removed by those events queued a
+    # set_blind(nil, true) re-debuff (card.lua:641, 698) that runs after
+    # every card they made, so Marble's Stone gets the boss's debuff too
+    # (Verdant Leaf; The Plant with Pareidolia).  Without one it keeps the
+    # state it was made with.
+    if touched:
+        reapply_blind_debuffs(gs)
 
     # ------------------------------------------------------------------
     # 6b. round_start_bonus tags (Juggle: +3 hand size for this round).
@@ -300,43 +301,59 @@ def _handle_select_blind(gs: dict[str, Any]) -> dict[str, Any]:
     #      (Cerulean Bell, Crimson Heart) — game.lua:3208-3245.
     # ------------------------------------------------------------------
     _draw_to_hand(gs)
+
+    # A sliced joker's G.hand:change_size (remove_from_deck, card.lua:648-650)
+    # is queued by its removal event, itself queued by the slicing joker's
+    # event: it runs after the deal counted its cards and while the hand is
+    # still empty, so it neither shrinks the deal nor draws (G105).
+    if sliced_hand_size:
+        gs["hand_size"] = gs.get("hand_size", 0) + sliced_hand_size
     return gs
 
 
 def _fire_new_blind_choice_tags(gs: dict[str, Any]) -> None:
-    """One ``new_blind_choice`` pass over the held tags.
+    """Fire new_blind_choice context for any awarded tags that need it.
 
-    Every pass stops at the first tag that fires: ``if
-    G.GAME.tags[i]:apply_to_run({type = 'new_blind_choice'}) then break end``
-    after a skip, a boss reroll and a pack's close (button_callbacks.lua:
-    2775-2777, 2847-2849, 2617-2619), and every tag that fires returns true
-    (tag.lua:206-301).  So a second pack tag (a Double Tag's copy) stays held
-    while the first one's pack is open and fires when that pack closes
-    (G160).  The Boss Tag rerolls through G.FUNCS.reroll_boss, whose event
-    runs a pass of its own after the new boss.
+    In Lua, new_blind_choice tags fire when entering the blind select screen
+    after a skip.  Pack-creating tags (buffoon, charm, ethereal, meteor,
+    standard) open a pack for the player to pick from.  The boss tag rerolls
+    the boss blind.
 
-    Pack-creating tags (Buffoon, Charm, Ethereal, Meteor, Standard) populate
-    ``gs["pack_cards"]`` and set the phase to PACK_OPENING so the caller (or
-    agent) can pick or skip.
+    Since the engine has no interactive player, pack-creating tags populate
+    ``gs["pack_cards"]`` and set the phase to PACK_OPENING so the caller
+    (or agent) can pick or skip.
     """
     from jackdaw.engine.tags import Tag
 
+    awarded: list[dict] = gs.get("awarded_tags", [])
     rng = gs.get("rng")
-    for entry in gs.get("awarded_tags", []):
+
+    for entry in awarded:
+        tag_key = entry.get("key", "")
+        # Only fire tags that haven't been processed for new_blind_choice yet
         if entry.get("nbc_fired"):
             continue
-        result = Tag(entry.get("key", "")).apply("new_blind_choice", gs, rng=rng)
-        # A tag of another type never fires here; marking it saves later passes the look.
+
+        tag = Tag(tag_key)
+        result = tag.apply("new_blind_choice", gs, rng=rng)
         entry["nbc_fired"] = True
+
         if result is None:
             continue
+
         if result.reroll_boss:
             # Boss Tag: G.from_boss_tag + G.FUNCS.reroll_boss (tag.lua:284-300).
+            # The loop goes on to the next pending tag, as reroll_boss's own
+            # new_blind_choice pass would.
             _reroll_boss(gs, from_tag=True)
-            _fire_new_blind_choice_tags(gs)
-        elif result.create_pack:
+
+        if result.create_pack:
             _open_tag_pack(gs, result.create_pack)
-        return
+            # Every pass stops at the first tag that fires (`then break end`):
+            # the next pack tag stays held until end_consumeable's own pass
+            # (button_callbacks.lua:2617-2619), so one pack is open at a time
+            # (G106).
+            return
 
 
 def _reroll_boss(gs: dict[str, Any], *, from_tag: bool) -> None:
@@ -393,7 +410,7 @@ def _open_tag_pack(gs: dict[str, Any], pack_key: str, force: bool = False) -> No
     """
     # A pack is already open: queue this one, to open (and roll its
     # contents) when the current one closes.  The tag passes never get here
-    # since G160: a second pack tag stays held until end_consumeable's pass.
+    # since G106: a second pack tag stays held until end_consumeable's pass.
     if not force and (gs.get("phase") == GamePhase.PACK_OPENING or gs.get("pack_cards")):
         gs.setdefault("pending_tag_packs", []).append(pack_key)
         return
@@ -693,6 +710,12 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
     played = [hand[i] for i in sorted(idx_set)]
     held = [c for i, c in enumerate(hand) if i not in idx_set]
     gs["hand"] = held
+    # G.play: the played cards stay in G.playing_cards while they are in
+    # play, so the passes over every playing card see them, e.g. the boss
+    # re-check that a joker or consumable's add_to_deck/remove_from_deck
+    # queues (set_blind(nil, true), blind.lua:207-210; G80).
+    resting_play = gs.get("played_cards_area")
+    gs["played_cards_area"] = played
     # Played cards are revealed (face-down draws from The House / The
     # Wheel / The Mark / The Fish flip up when they leave the hand).
     for c in played:
@@ -811,9 +834,11 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
     if result.dollars_earned:
         gs["dollars"] = gs.get("dollars", 0) + result.dollars_earned
 
-    # Joker self-destruction (Ice Cream, Popcorn, etc.)
+    # Joker self-destruction (Ice Cream, Popcorn, etc.).  A Mr. Bones that
+    # saves the run dissolves only after end_round's joker loop (below).
+    saver = _bones_saver(result)
     for removed in result.jokers_removed:
-        if removed in jokers:
+        if removed in jokers and removed is not saver:
             jokers.remove(removed)
             removed.remove_from_deck(gs)
             _release_used_key(gs, removed)
@@ -842,6 +867,12 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
     # ------------------------------------------------------------------
     discard_pile: list = gs.setdefault("discard_pile", [])
     discard_pile.extend(played)
+    # G.play is empty again; the key keeps its resting form (absent until a
+    # round ends, then an empty list).
+    if resting_play is None:
+        del gs["played_cards_area"]
+    else:
+        gs["played_cards_area"] = resting_play
 
     # ------------------------------------------------------------------
     # 9. Hand-type play counts are recorded INSIDE score_hand (Phase 4),
@@ -870,6 +901,7 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
             # win keeps it (state_events.lua:111-122).
         else:
             _round_won(gs)
+            _dissolve_saver(gs, saver)
     else:
         # ------------------------------------------------------------------
         # 11. More hands — draw to hand and stay in SELECTING_HAND
@@ -1313,7 +1345,7 @@ def _handle_buy_and_use(
     if idx < 0 or idx >= len(shop_cards):
         raise IllegalActionError(f"Invalid shop index {idx}")
     card = shop_cards[idx]
-    if not card.ability.get("consumeable"):
+    if "consumeable" not in card.ability:
         raise IllegalActionError("Only consumables can be bought and used")
     if not can_afford(gs, card.cost):
         raise IllegalActionError("Cannot afford card")
@@ -2186,6 +2218,25 @@ def _mr_bones_saver(gs: dict[str, Any]) -> Any:
     return None
 
 
+def _bones_saver(result: Any) -> Any:
+    """The Mr. Bones whose game_over check saved this play's round (score_hand
+    lists it among the jokers to remove), or None."""
+    if not result.saved:
+        return None
+    return next((j for j in result.jokers_removed if j.center_key == "j_mr_bones"), None)
+
+
+def _dissolve_saver(gs: dict[str, Any], saver: Any) -> None:
+    """Mr. Bones' save queues the event that dissolves it (card.lua:3049-3057);
+    it runs after end_round's joker loop, which still charges its rent and
+    ticks its perishable sticker (state_events.lua:99-110, G101)."""
+    jokers: list = gs.get("jokers", [])
+    if saver is not None and saver in jokers:
+        jokers.remove(saver)
+        saver.remove_from_deck(gs)
+        _release_used_key(gs, saver)
+
+
 def _end_round(gs: dict[str, Any]) -> None:
     """end_round() for a round left without a play (state_events.lua:87-120):
     won if the score already meets the target, saved by Mr. Bones, else lost
@@ -2195,12 +2246,8 @@ def _end_round(gs: dict[str, Any]) -> None:
         return
     saver = _mr_bones_saver(gs)
     if saver is not None:
-        jokers: list = gs.get("jokers", [])
-        if saver in jokers:
-            jokers.remove(saver)
-            saver.remove_from_deck(gs)
-            _release_used_key(gs, saver)
         _round_won(gs)
+        _dissolve_saver(gs, saver)
         return
     gs["phase"] = GamePhase.GAME_OVER
     _joker_end_of_round_effects(gs)
@@ -2452,29 +2499,24 @@ def _joker_end_of_round_effects(gs: dict[str, Any]) -> dict[str, Any]:
         # and Cavendish's yes_pool_flag admits Cavendish.
         if mut.get("pool_flag"):
             gs.setdefault("pool_flags", {})[mut["pool_flag"]] = True
-        # Egg's round-end bump runs self:set_cost() (card.lua:2940) —
-        # a set_cost trigger that restores a couponed buy cost too.
+        # Egg's round-end bump runs self:set_cost() (card.lua:2985-2988) —
+        # a set_cost trigger that restores a couponed buy cost too (the
+        # coupon zero applies only in shop areas, card.lua:383).  The
+        # card keeps ability.couponed: Lua never clears it (G99).
         for c in mut.get("set_cost_cards", []):
             if hasattr(c, "set_cost"):
-                c.set_cost(
-                    inflation=gs.get("inflation", 0),
-                    discount_percent=gs.get("discount_percent", 0),
-                    ante=gs.get("round_resets", {}).get("ante", 1),
-                )
+                _reprice(gs, c)
         if mut.get("gift_card_bump"):
-            # Gift Card (card.lua:3325-3341): +extra_value to every joker
+            # Gift Card (card.lua:2993-3010): +extra_value to every joker
             # AND consumable, each followed by set_cost — which also
             # restores a couponed card's real buy cost (the coupon zero
-            # applies only in shop areas, dump card.lua:511).
+            # applies only in shop areas, card.lua:383); couponed stays (G99).
+            # set_cost reads Astronomer for a held Planet (card.lua:380).
             bump = mut["gift_card_bump"]
             for c in gs.get("jokers", []) + gs.get("consumables", []):
                 c.ability["extra_value"] = c.ability.get("extra_value", 0) + bump
                 if hasattr(c, "set_cost"):
-                    c.set_cost(
-                        inflation=gs.get("inflation", 0),
-                        discount_percent=gs.get("discount_percent", 0),
-                        ante=gs.get("round_resets", {}).get("ante", 1),
-                    )
+                    _reprice(gs, c)
 
     # calculate_dollar_bonus runs later, in evaluate_round
     # (state_events.lua:1175-1182): after the perishable ticks — a joker
@@ -2873,26 +2915,40 @@ def _apply_setting_blind_mutations(
     gs: dict[str, Any],
     mutations: list[dict[str, Any]],
     jokers: list,
-) -> None:
-    """Process side-effects from setting_blind jokers, in event order."""
+    *,
+    amber_shuffles: bool = False,
+) -> tuple[bool, int]:
+    """Process the side-effects of the setting_blind (or first_hand_drawn)
+    jokers in Lua's event order.
+
+    The jokers decide at calc time and queue events, in board order
+    (state_events.lua:335-337); an event's own ``add_event`` calls land
+    behind everything already queued.  So the jokers' own events run first
+    (Burglar, Riff-raff's jokers, Marble's Stone, Certificate's card), and
+    the events those queue run after them all: Amber Acorn's three shuffles
+    first (set_blind queued their parent before any joker's, blind.lua:195-
+    204), then, in board order, the sliced jokers' removals (start_dissolve
+    from Madness's and the Dagger's events, card.lua:2513-2516, 2570-2576)
+    and Cartomancer's Tarot (card.lua:2547-2559).  The new cards take their
+    sort ids in that order, and the shuffles still see the sliced jokers.
+
+    Returns whether a joker or consumable was added or removed: each queues
+    ``G.GAME.blind:set_blind(nil, true)`` (card.lua:641, 698), which runs
+    after every card made here (Marble's Stone included); and the hand-size
+    change the sliced jokers' removals queue (``G.hand:change_size`` from
+    remove_from_deck, card.lua:648-650): it lands after the round's deal is
+    counted, so the caller applies it after the deal (G105).
+    """
     rng = gs.get("rng")
     # Cards dissolve over several frames (Card:remove runs after the
     # creation events of this batch), so the destroyed jokers' keys stay in
     # used_jokers while Riff-raff's create rolls.
     released: list = []
+    touched = False
+    hand_size_change = 0
 
     for mut in mutations:
         # (Chicot's disable_blind is deferred by _handle_select_blind.)
-
-        # Madness / Ceremonial Dagger: the victim was picked and marked
-        # getting_sliced when the joker was evaluated (card.lua:2503-2521,
-        # 2561-2579); the event dissolves it.  (Live-verified: LS5EUNSF's
-        # Madness pool, LSL9ZZUW's Dagger victim.)
-        victim = mut.get("destroy_joker")
-        if victim is not None and victim in jokers:
-            jokers.remove(victim)
-            victim.remove_from_deck(gs)
-            released.append(victim)
 
         # Burglar: set hands / remove discards
         if "set_hands" in mut:
@@ -2902,7 +2958,8 @@ def _apply_setting_blind_mutations(
             cr = gs.get("current_round", {})
             cr["discards_left"] = mut["set_discards"]
 
-        # Marble Joker / Certificate / Riff-raff / Cartomancer: create cards
+        # Marble Joker / Certificate / Riff-raff: create cards (Cartomancer's
+        # Tarot comes from a nested event, below)
         if "create" in mut:
             create = mut["create"]
             ctype = create.get("type", "")
@@ -2949,6 +3006,9 @@ def _apply_setting_blind_mutations(
                         inflation=gs.get("inflation", 0),
                         discount_percent=gs.get("discount_percent", 0),
                     )
+                    # Card:init ends with set_cost (card.lua:72), and
+                    # Certificate's set_seal repeats it (card.lua:498).
+                    _reprice(gs, c)
                     if ckey == "cert":
                         # create_playing_card(..., G.hand) — Certificate
                         # deals into the hand (first_hand_drawn is in-round)
@@ -2956,20 +3016,58 @@ def _apply_setting_blind_mutations(
                         # Certificate's event ends with G.hand:sort() (card.lua:2474)
                         _sort_hand(gs, gs.get("hand", []))
                     elif ckey == "marble":
-                        # Marble's stone is emplaced by a queued event that
-                        # runs AFTER new_round's 'nr' shuffle — it must not
-                        # participate in this round's shuffle, and lands at
-                        # the pile bottom (live-verified: LS86UJ9R, stone at
-                        # serialized index 0 while the dealt hand matches a
-                        # stone-less 52-card shuffle).
-                        gs.setdefault("pending_deck_bottom", []).append(c)
+                        # Marble's events (create in G.play, then draw_card
+                        # to G.deck) are queued during the setting_blind
+                        # loop, ahead of new_round's 'nr' shuffle event
+                        # (card.lua:2580-2601, state_events.lua:335-349): the
+                        # Stone joins the deck now and is shuffled in (G55).
+                        # Steamodded queues the draw inside the creation
+                        # event, after the shuffle (smods-diffs.md S01).
+                        _emplace_in_deck(gs, c)
                     else:
                         _emplace_in_deck(gs, c)
-            elif ctype in ("Joker", "Tarot", "Planet", "Spectral"):
-                # Riff-raff ('rif', Common), Cartomancer ('car'), 8 Ball
-                # ('8ba'), etc. — roll the real pool with the descriptor's
-                # append key instead of hardcoding a center.
-                _resolve_create_descriptors(gs, [create])
+            elif ctype == "Joker":
+                # Riff-raff ('rif', Common): its event makes the count it
+                # reserved at calc time with no further room check
+                # (card.lua:2532-2542) — a sliced joker still holds its slot.
+                from jackdaw.engine.card_factory import resolve_create_descriptor
+
+                ante = gs.get("round_resets", {}).get("ante", 1)
+                for _ in range(create.get("count", 1)):
+                    card = resolve_create_descriptor({**create, "count": 1}, rng, ante, gs)
+                    if card is not None:
+                        jokers.append(card)
+                        card.add_to_deck(gs)
+                        touched = True
+
+    # Amber Acorn's three G.jokers:shuffle('aajk') events (blind.lua:195-204)
+    # run on the board as the jokers' own events left it, sliced jokers
+    # included; a disable does not cancel them.
+    if amber_shuffles and rng is not None:
+        for _ in range(3):
+            rng.shuffle(jokers, rng.seed("aajk"))
+
+    for mut in mutations:
+        # Madness / Ceremonial Dagger: the victim was picked and marked
+        # getting_sliced when the joker was evaluated (card.lua:2503-2521,
+        # 2561-2579); start_dissolve, called from the joker's event, queues
+        # its removal.  (Live-verified: LS5EUNSF's Madness pool, LSL9ZZUW's
+        # Dagger victim.)
+        victim = mut.get("destroy_joker")
+        if victim is not None and victim in jokers:
+            jokers.remove(victim)
+            size = gs.get("hand_size", 0)
+            victim.remove_from_deck(gs)
+            hand_size_change += gs.get("hand_size", 0) - size
+            gs["hand_size"] = size
+            released.append(victim)
+            touched = True
+
+        # Cartomancer ('car'): its event queues the event that makes the Tarot.
+        create = mut.get("create") or {}
+        if create.get("type") in ("Tarot", "Planet", "Spectral"):
+            if _resolve_create_descriptors(gs, [create]):
+                touched = True
 
     # The creation events end with G.GAME.joker_buffer = 0 (card.lua:2539,
     # 2571) and consumeable_buffer = 0; the dissolved jokers leave play.
@@ -2977,6 +3075,7 @@ def _apply_setting_blind_mutations(
     gs["consumeable_buffer"] = 0
     for victim in released:
         _release_used_key(gs, victim)
+    return touched, hand_size_change
 
 
 # ---------------------------------------------------------------------------
@@ -3733,9 +3832,8 @@ def _close_pack(gs: dict[str, Any]) -> None:
     Matches ``end_consumeable`` in ``button_callbacks.lua:2565``:
     - Remove remaining pack cards
     - Return dealt hand cards to deck (Arcana/Spectral packs deal a hand)
+    - Fire ``new_blind_choice`` tags (deferred from skip)
     - Restore phase from ``shop_return_phase``
-    - Run a ``new_blind_choice`` pass: a pack tag still held (a Double Tag's
-      copy) opens its pack now (button_callbacks.lua:2612-2619, G160)
     """
     # Clear pack state (unpicked cards dissolve -> keys released)
     for c in gs.get("pack_cards", []):
@@ -3768,8 +3866,9 @@ def _close_pack(gs: dict[str, Any]) -> None:
         gs["hand"] = [c for c in hand if id(c) not in pack_ids]
         gs["pack_hand"] = []
 
-    # Queued tag packs (a pack opened while another was open) open
-    # back-to-back before the phase is restored.
+    # Queued tag packs open back-to-back before the phase is restored.  Only
+    # a state saved before G106 holds any: the held pack tags now wait for
+    # the new_blind_choice pass below.
     pending: list = gs.get("pending_tag_packs") or []
     if pending:
         next_key = pending.pop(0)
@@ -3780,8 +3879,10 @@ def _close_pack(gs: dict[str, Any]) -> None:
         gs["phase"] = GamePhase.PACK_OPENING
         return
 
-    # Restore phase (G.STATE = G.GAME.PACK_INTERRUPT), then the pass.
+    # Restore phase
     gs["phase"] = gs.get("shop_return_phase", GamePhase.SHOP)
+    # end_consumeable's new_blind_choice pass (button_callbacks.lua:2617-2619):
+    # the next held pack tag opens its pack, after the state is restored (G106).
     _fire_new_blind_choice_tags(gs)
 
 

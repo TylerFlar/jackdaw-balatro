@@ -442,7 +442,7 @@ def test_diet_cola_sold_gives_a_double_tag() -> None:
 
 
 def test_diet_colas_double_tag_doubles_a_pack_tag() -> None:
-    """G160: the Double Tag's copy of a Buffoon Tag waits while the first pack is open
+    """G106: the Double Tag's copy of a Buffoon Tag waits while the first pack is open
     (button_callbacks.lua:2775-2777) and opens its pack when that one closes (2612-2619). Tag
     packs run open_booster (G43): Hallucination rolls for each; Red Card counts each skip."""
     b = Board("BE_DIET_COLA_PACKS", "j_diet_cola", "j_red_card", "j_oops", "j_hallucination")

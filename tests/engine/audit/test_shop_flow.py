@@ -160,3 +160,21 @@ class TestTagPacks:
         before = card_module._sort_id_counter
         step(gs, SkipBlind())
         assert gs["pack_cards"][0].sort_id == before + 2
+
+
+class TestEmptyConfigConsumables:
+    """``ability.consumeable`` is the center's config table (card.lua:300-302):
+    truthy in Lua even when empty, as for Judgement, so it can be bought and
+    used (button_callbacks.lua:77-89)."""
+
+    def test_judgement_can_be_bought_and_used(self):
+        from jackdaw.engine.actions import BuyAndUse, get_legal_actions
+        from jackdaw.engine.card_factory import create_consumable
+
+        gs = to_shop(new_run("AUDIT_BUY_USE_JUDGEMENT"))
+        gs["dollars"] = 20
+        gs["shop_cards"] = [create_consumable("c_judgement")]
+        gs["shop_cards"][0].set_cost()
+        assert BuyAndUse(shop_index=0) in get_legal_actions(gs)
+        step(gs, BuyAndUse(shop_index=0))
+        assert len(gs["jokers"]) == 1

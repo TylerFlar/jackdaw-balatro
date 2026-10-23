@@ -26,6 +26,8 @@ def build_deck(
     rng: PseudoRandom,
     challenge: dict[str, Any] | None = None,
     starting_params: dict[str, Any] | None = None,
+    *,
+    apply_checkered: bool = True,
 ) -> list[Card]:
     """Build the starting deck for a run.
 
@@ -35,6 +37,8 @@ def build_deck(
         challenge: Challenge definition dict (with ``deck`` sub-dict) or None.
         starting_params: Effective starting parameters (needs ``no_faces``,
             ``erratic_suits_and_ranks``).  If None, derived from the back's config.
+        apply_checkered: Convert the Checkered Deck's suits here. ``initialize_run``
+            converts them later, as the queued event of Back:apply_to_run does.
 
     Returns:
         List of Card objects forming the starting deck.
@@ -140,7 +144,7 @@ def build_deck(
     # -------------------------------------------------------------------
 
     # Checkered Deck: Clubs→Spades, Diamonds→Hearts (back.lua:239-253)
-    if back_key == "b_checkered":
+    if back_key == "b_checkered" and apply_checkered:
         _apply_checkered(cards)
 
     return cards

@@ -1,5 +1,5 @@
-"""Joker batch E fidelity: the new_blind_choice pass (G160) and a sale that ends the round
-(G161), both found by the batch E parity runs."""
+"""Joker batch E fidelity: the new_blind_choice pass (G106, which the batch E parity runs found
+too) and a sale that ends the round (G161)."""
 
 from __future__ import annotations
 
@@ -18,14 +18,14 @@ def _pending(gs: dict[str, Any]) -> list[str]:
 
 
 class TestNewBlindChoicePass:
-    """G160: every new_blind_choice pass stops at the first tag that fires, ``if
+    """G106: every new_blind_choice pass stops at the first tag that fires, ``if
     G.GAME.tags[i]:apply_to_run({type = 'new_blind_choice'}) then break end``
     (button_callbacks.lua:2775-2777 after a skip, 2847-2849 after a boss reroll,
     2617-2619 when a pack closes), and every tag that fires returns true (tag.lua:206-301).
     A second tag waits for the next pass."""
 
     def test_a_double_tag_copy_of_a_pack_tag_waits_for_the_first_pack(self):
-        gs = new_run(seed="AUDIT_G160_DOUBLE")
+        gs = new_run(seed="AUDIT_BE_TAGS_DOUBLE")
         _award_tag(gs, "tag_double", source="test")
         gs["round_resets"]["blind_tags"]["Small"] = "tag_buffoon"
         step(gs, SkipBlind())
@@ -42,7 +42,7 @@ class TestNewBlindChoicePass:
         assert gs["phase"] == GamePhase.BLIND_SELECT
 
     def test_a_boss_tag_behind_a_pack_tag_waits_for_the_pack(self):
-        gs = new_run(seed="AUDIT_G160_BOSS")
+        gs = new_run(seed="AUDIT_BE_TAGS_BOSS")
         gs["awarded_tags"] = [
             {"key": "tag_charm", "result": None, "blind": "test"},
             {"key": "tag_boss", "result": None, "blind": "test"},
@@ -60,7 +60,7 @@ class TestNewBlindChoicePass:
     def test_a_boss_tag_reroll_runs_its_own_pass(self):
         """G.FUNCS.reroll_boss's event runs a pass after the new boss (2847-2849): two Boss
         Tags reroll twice in one skip."""
-        gs = new_run(seed="AUDIT_G160_TWO_BOSSES")
+        gs = new_run(seed="AUDIT_BE_TAGS_TWO_BOSSES")
         _award_tag(gs, "tag_double", source="test")
         gs["round_resets"]["blind_tags"]["Small"] = "tag_boss"
         step(gs, SkipBlind())

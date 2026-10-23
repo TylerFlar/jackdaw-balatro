@@ -340,7 +340,7 @@ def initialize_run(
     # -----------------------------------------------------------------------
     from jackdaw.engine.deck_builder import build_deck
 
-    deck = build_deck(back_key, rng, challenge, sp)
+    deck = build_deck(back_key, rng, challenge, sp, apply_checkered=False)
     gs["deck"] = deck
     gs["starting_deck_size"] = len(deck)
 
@@ -348,11 +348,22 @@ def initialize_run(
     # 10. Shuffle deck (RNG-driven, matches game.lua:2383)
     # -----------------------------------------------------------------------
     _shuffle_deck(deck, rng, gs["round_resets"]["ante"])
+    # start_run fills the first round's hands and discards (game.lua:2373-2374).
+    gs["current_round"]["discards_left"] = rr["discards"]
+    gs["current_round"]["hands_left"] = rr["hands"]
 
     # -----------------------------------------------------------------------
     # 12. Reset targeting cards
     # -----------------------------------------------------------------------
     reset_round_targets(rng, gs["round_resets"]["ante"], gs)
+
+    # The Checkered Deck's suit change is an event Back:apply_to_run queues
+    # (back.lua:233-247), so it runs after start_run has rolled the round
+    # targets from the unconverted deck.
+    if back_key == "b_checkered":
+        from jackdaw.engine.deck_builder import _apply_checkered
+
+        _apply_checkered(deck)
 
     # -----------------------------------------------------------------------
     # HandLevels (not in Lua start_run but needed for scoring)

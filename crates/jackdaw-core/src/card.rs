@@ -558,6 +558,8 @@ pub struct Ability {
 // Card
 // ---------------------------------------------------------------------------
 
+pub use jackdaw_data::center_by_key;
+
 /// `card.facing`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Facing {

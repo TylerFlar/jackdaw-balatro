@@ -200,7 +200,7 @@ def add_joker(
         ante=game_state.get("round_resets", {}).get("ante", 1),
         has_astronomer=astronomer_active(game_state),
     )
-    area = "consumables" if card.ability.get("consumeable") else "jokers"
+    area = "consumables" if "consumeable" in card.ability else "jokers"
     game_state.setdefault(area, []).append(card)
     card.add_to_deck(game_state)
     return card
