@@ -194,11 +194,13 @@ impl Areas {
     }
 
     /// `CardArea:shuffle(seed)` (cardarea.lua:572): `pseudoshuffle(self.cards, pseudoseed(seed))`.
+    /// The next frame's `align_cards` puts pinned jokers back in front (cardarea.lua:528; G200).
     pub fn shuffle(&mut self, id: AreaId, rng: &mut Rng, key: &str) {
         let seed = rng.seed(key);
         let cards = self.get_mut(id);
         // pseudoshuffle sorts by sort_id first when the entries carry one (misc_functions.lua).
         cards.sort_by_key(|c| c.sort_id);
         shuffle(cards, seed);
+        self.align(id);
     }
 }
