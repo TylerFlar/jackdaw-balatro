@@ -47,6 +47,25 @@ dev = [
     "pytest-cov>=7.1",
     "ruff>=0.17.2",
 ]
+# The training demo in examples/ (MaskablePPO): `uv sync --group train`. Not part of the
+# package's dependencies, and not installed by a plain `uv sync`.
+train = [
+    "matplotlib>=3.10",
+    "sb3-contrib>=2.9",
+    "stable-baselines3>=2.9",
+    "tensorboard>=2.20",
+    "torch>=2.9",
+]
+
+[tool.uv.sources]
+# CPU wheels for torch: the demo trains a small MLP on the CPU, and the PyPI wheels for Linux
+# pull in several GB of CUDA libraries.
+torch = [{ index = "pytorch-cpu" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [tool.uv]
 # Rebuild the extension on `uv sync` / `uv run` whenever the Rust side changes.
