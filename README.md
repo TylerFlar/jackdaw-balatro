@@ -51,6 +51,8 @@ while not info.get("done"):
 
 `BalatroGymnasiumEnv` exposes the game as a flat `Discrete(500)` action space with an `action_masks()` method, so it works with action-masking RL libraries such as sb3-contrib's MaskablePPO. Jackdaw doesn't depend on any RL library; install the one you use in your own project.
 
+[`examples/`](examples) has a complete MaskablePPO demo: training with TensorBoard logs and checkpoints, an evaluation against a random agent and the hand-written `smart_agent`, and its results. Its dependencies are the `train` dependency group (`uv sync --group train`), which isn't part of the package.
+
 See the [RL Project Guide](https://tylerflar.github.io/jackdaw-balatro/rl-guide) for details on the gymnasium wrapper, reward shaping, and writing custom agents.
 
 ## Live Validation
