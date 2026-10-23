@@ -187,6 +187,11 @@ class JokerContext:
     # dollars + dollar_buffer, card.lua:3936, 4046).  Set by score_hand.
     dollar_buffer: int = 0
 
+    # The live run state, for the shared buffers vanilla keeps on G.GAME
+    # (consumeable_buffer / joker_buffer) that change between jokers within
+    # one pass.  None for direct handler calls (they fall back to `game`).
+    game_state: dict[str, Any] | None = None
+
     # Shared game snapshot (built once per score_hand call)
     game: GameSnapshot = field(default_factory=lambda: _DEFAULT_GAME)
 
@@ -521,6 +526,31 @@ def _stuntman(card: Card, ctx: JokerContext) -> JokerResult | None:
         extra = card.ability.get("extra", {})
         return JokerResult(chip_mod=extra.get("chip_mod", 250))
     return None
+
+
+# ---------------------------------------------------------------------------
+# Helper: consumable room (G.GAME.consumeable_buffer)
+# ---------------------------------------------------------------------------
+
+
+def _consumable_room(ctx: JokerContext) -> bool:
+    """``#G.consumeables.cards + G.GAME.consumeable_buffer <
+    G.consumeables.config.card_limit`` — the gate every consumable creator
+    checks *before* deciding (and before any roll)."""
+    gs = ctx.game_state
+    if gs is None:
+        return ctx.game.consumable_count < ctx.game.consumable_slots
+    return len(gs.get("consumables", [])) + gs.get("consumeable_buffer", 0) < gs.get(
+        "consumable_slots", 2
+    )
+
+
+def _reserve_consumable(ctx: JokerContext) -> None:
+    """``G.GAME.consumeable_buffer += 1``: the slot is spoken for until the
+    creation event runs (and zeroes the buffer)."""
+    gs = ctx.game_state
+    if gs is not None:
+        gs["consumeable_buffer"] = gs.get("consumeable_buffer", 0) + 1
 
 
 # ---------------------------------------------------------------------------
@@ -2163,9 +2193,11 @@ def _riff_raff(card: Card, ctx: JokerContext) -> JokerResult | None:
 def _cartomancer(card: Card, ctx: JokerContext) -> JokerResult | None:
     """Cartomancer: create Tarot card on setting_blind.
 
-    Source: card.lua:2545. Checks consumable slot.
+    Source: card.lua:2545-2559 — gated on the consumable room including
+    G.GAME.consumeable_buffer, which it then increments.
     """
-    if ctx.setting_blind and not getattr(card, "getting_sliced", False):
+    if ctx.setting_blind and not getattr(card, "getting_sliced", False) and _consumable_room(ctx):
+        _reserve_consumable(ctx)
         return JokerResult(
             extra={
                 "create": {"type": "Tarot", "key": "car"},
@@ -2178,13 +2210,16 @@ def _cartomancer(card: Card, ctx: JokerContext) -> JokerResult | None:
 def _eight_ball(card: Card, ctx: JokerContext) -> JokerResult | None:
     """8 Ball: scored rank 8 → 1/4 chance → create Tarot.
 
-    Source: card.lua:3106. Seed: '8ball'. Probability: normal/extra (1/4).
+    Source: card.lua:3106-3125. Seed: '8ball'. Probability: normal/extra
+    (1/4).  The room check (with G.GAME.consumeable_buffer) gates the roll:
+    at full slots no '8ball' draw is made.  A hit reserves a slot.
     """
     if ctx.individual and ctx.cardarea == "play" and ctx.other_card is not None:
-        if ctx.other_card.get_id() == 8:
+        if _consumable_room(ctx) and ctx.other_card.get_id() == 8:
             odds = card.ability.get("extra", 4)
             if ctx.rng is not None:
                 if ctx.rng.random("8ball") < ctx.game.probabilities_normal / odds:
+                    _reserve_consumable(ctx)
                     return JokerResult(
                         extra={
                             "create": {"type": "Tarot", "key": "8ba"},
@@ -2195,9 +2230,14 @@ def _eight_ball(card: Card, ctx: JokerContext) -> JokerResult | None:
 
 @register("j_vagabond")
 def _vagabond(card: Card, ctx: JokerContext) -> JokerResult | None:
-    """Vagabond: create Tarot if money ≤ $4. Source: card.lua:3743."""
-    if ctx.joker_main:
+    """Vagabond: create Tarot if money ≤ $4.
+
+    Source: card.lua:3743-3761 — room (with consumeable_buffer) first; reads
+    G.GAME.dollars without the dollar buffer.
+    """
+    if ctx.joker_main and _consumable_room(ctx):
         if ctx.game.money <= card.ability.get("extra", 4):
+            _reserve_consumable(ctx)
             return JokerResult(
                 extra={
                     "create": {"type": "Tarot", "key": "vag"},
@@ -2210,13 +2250,14 @@ def _vagabond(card: Card, ctx: JokerContext) -> JokerResult | None:
 def _superposition(card: Card, ctx: JokerContext) -> JokerResult | None:
     """Superposition: Ace in hand + Straight → create Tarot.
 
-    Source: card.lua:3762. Checks scoring_hand for Ace and poker_hands
-    for Straight.
+    Source: card.lua:3762-3786. Checks scoring_hand for Ace and poker_hands
+    for Straight, behind the consumable room check (with consumeable_buffer).
     """
-    if ctx.joker_main and ctx.scoring_hand and ctx.poker_hands:
+    if ctx.joker_main and ctx.scoring_hand and ctx.poker_hands and _consumable_room(ctx):
         has_ace = any(c.get_id() == 14 for c in ctx.scoring_hand)
         has_straight = bool(ctx.poker_hands.get("Straight"))
         if has_ace and has_straight:
+            _reserve_consumable(ctx)
             return JokerResult(
                 extra={
                     "create": {"type": "Tarot", "key": "sup"},
@@ -2229,12 +2270,14 @@ def _superposition(card: Card, ctx: JokerContext) -> JokerResult | None:
 def _seance(card: Card, ctx: JokerContext) -> JokerResult | None:
     """Seance: hand matches target type → create Spectral.
 
-    Source: card.lua:3787. Default target: Straight Flush.
+    Source: card.lua:3787-3806. Default target: Straight Flush.  Behind
+    the consumable room check (with consumeable_buffer).
     """
-    if ctx.joker_main and ctx.poker_hands:
+    if ctx.joker_main and ctx.poker_hands and _consumable_room(ctx):
         extra = card.ability.get("extra", {})
         target = extra.get("poker_hand", "Straight Flush")
         if ctx.poker_hands.get(target):
+            _reserve_consumable(ctx)
             return JokerResult(
                 extra={
                     "create": {"type": "Spectral", "key": "sea"},
@@ -2247,7 +2290,9 @@ def _seance(card: Card, ctx: JokerContext) -> JokerResult | None:
 def _sixth_sense(card: Card, ctx: JokerContext) -> JokerResult | None:
     """Sixth Sense: rank 6, first hand, 1 card played → create Spectral + destroy.
 
-    Source: card.lua:2604. Fires in destroying_card context.
+    Source: card.lua:2603-2620. Fires in destroying_card context: the six
+    is destroyed either way; the Spectral only with room (counting
+    G.GAME.consumeable_buffer, which it then increments).
     """
     if ctx.destroying_card is not None and not ctx.blueprint:
         if (
@@ -2256,10 +2301,13 @@ def _sixth_sense(card: Card, ctx: JokerContext) -> JokerResult | None:
             and ctx.full_hand[0].get_id() == 6
             and ctx.game.hands_played == 0
         ):
-            return JokerResult(
-                remove=True,
-                extra={"create": {"type": "Spectral", "key": "sixth"}},
-            )
+            if _consumable_room(ctx):
+                _reserve_consumable(ctx)
+                return JokerResult(
+                    remove=True,
+                    extra={"create": {"type": "Spectral", "key": "sixth"}},
+                )
+            return JokerResult(remove=True)
     return None
 
 
@@ -2274,15 +2322,15 @@ def _hallucination(card: Card, ctx: JokerContext) -> JokerResult | None:
         # Vanilla room-gates BEFORE the roll: the slot check sits in the
         # OUTER if (card.lua:2336) and pseudorandom('halu'+ante) in the
         # INNER if (card.lua:2337) — at full consumable slots NO halu
-        # roll is consumed.  The old always-roll here desynced the halu
-        # stream after any full-slot pack open (live-verified:
-        # LSVRQFEU — sim fired The Moon at step 52, live's un-shifted
-        # roll stayed quiet).
-        if ctx.game.consumable_count >= ctx.game.consumable_slots:
+        # roll is consumed.  The check counts G.GAME.consumeable_buffer, so
+        # a second Hallucination (or a copy) sees the first one's
+        # reservation (live-verified: LSVRQFEU).
+        if not _consumable_room(ctx):
             return None
         if ctx.rng is not None:
             roll = ctx.rng.random("halu" + str(ctx.game.ante))
             if roll < ctx.game.probabilities_normal / odds:
+                _reserve_consumable(ctx)
                 return JokerResult(
                     extra={
                         "create": {"type": "Tarot", "count": 1, "seed": "hal"},

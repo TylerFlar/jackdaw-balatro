@@ -544,6 +544,7 @@ def score_hand(
             blind=blind,
             held_cards=held_cards,
             game=snapshot,
+            game_state=game_state,
         )
         # Phase 3a: Matador check on debuffed hands
         ctx = None
@@ -657,6 +658,10 @@ def score_hand(
         blind=blind,
         held_cards=held_cards,
         game=snapshot,
+        # live state: G.GAME.consumeable_buffer is shared by every creator
+        # in this evaluation (8 Ball, Vagabond, Superposition, Seance, Sixth
+        # Sense); game.py zeroes it when it makes the cards afterwards.
+        game_state=game_state,
     )
 
     joker_creates: list[dict] = []

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from jackdaw.engine.actions import GamePhase, NextRound, UseConsumable
+from jackdaw.engine.actions import GamePhase, NextRound, OpenBooster, UseConsumable
 from jackdaw.engine.game import step
 
 from ._helpers import (
@@ -13,6 +13,7 @@ from ._helpers import (
     indices,
     new_run,
     play,
+    rng_twin,
     select_blind,
     to_shop,
 )
@@ -249,6 +250,55 @@ class TestHologram:
         give_consumable(gs, "c_familiar")
         step(gs, UseConsumable(card_index=0))
         assert holo.ability["x_mult"] == 1.75
+
+
+class TestConsumableBuffer:
+    """Creators check #G.consumeables.cards + G.GAME.consumeable_buffer <
+    card_limit *before* rolling, reserve a slot in the buffer and create the
+    card in a later event that zeroes the buffer (8 Ball card.lua:3106-3120,
+    Hallucination 2335-2350, Purple Seal 2254-2265, Blue Seal 1040-1060,
+    Cartomancer 2545-2559, Sixth Sense 2605-2616, Vagabond 3743-3761,
+    Superposition 3762-3786, Seance 3787-3806)."""
+
+    def test_8_ball_does_not_roll_with_full_slots(self):
+        gs = select_blind(new_run("AUDIT_8BALL_FULL"))
+        give_joker(gs, "j_8_ball")
+        give_consumable(gs, "c_pluto")
+        give_consumable(gs, "c_mercury")
+        play(gs, give_card(gs, "S_8"))
+        assert "8ball" not in gs["rng"].state
+
+    def test_8_ball_copies_share_the_buffer(self):
+        """With one free slot, the first 8 Ball to hit reserves it; the copy
+        evaluated next fails the room check and does not roll."""
+        gs = select_blind(new_run("AUDIT_8BALL_BUF"))
+        give_joker(gs, "j_oops")
+        give_joker(gs, "j_oops")  # probabilities.normal = 4: every 1-in-4 hits
+        give_joker(gs, "j_blueprint")
+        give_joker(gs, "j_8_ball")
+        give_consumable(gs, "c_pluto")
+        oracle = rng_twin(gs)
+        oracle.seed("8ball")
+        play(gs, give_card(gs, "S_8"))
+        assert gs["rng"].state["8ball"] == oracle.state["8ball"]
+        assert len(gs["consumables"]) == 2
+        assert gs["consumeable_buffer"] == 0
+
+    def test_hallucinations_share_the_buffer(self):
+        """Two Hallucinations on one pack open, one free slot: the second sees
+        the first's reservation and does not roll 'halu'..ante."""
+        gs = to_shop(new_run("AUDIT_HALU_BUF"))
+        give_joker(gs, "j_oops")
+        give_joker(gs, "j_oops")
+        give_joker(gs, "j_hallucination")
+        give_joker(gs, "j_hallucination")
+        give_consumable(gs, "c_pluto")
+        gs["dollars"] = 50
+        oracle = rng_twin(gs)
+        oracle.seed("halu1")
+        step(gs, OpenBooster(card_index=0))
+        assert gs["rng"].state["halu1"] == oracle.state["halu1"]
+        assert gs["consumeable_buffer"] == 0
 
 
 class TestMrBones:

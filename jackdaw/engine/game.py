@@ -737,11 +737,14 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
     destroyed_set = set(id(c) for c in result.cards_destroyed)
     played = [c for c in played if id(c) not in destroyed_set]
 
-    # Joker card creation (Vagabond, 8-Ball, Superposition, etc.)
+    # Joker card creation (Vagabond, 8-Ball, Superposition, etc.): the
+    # events queued during evaluate_play make the cards, each zeroing
+    # G.GAME.consumeable_buffer (card.lua:3118, 3753, 3777, 3797, 2614).
     if result.joker_creates:
         _resolve_create_descriptors(
             gs, [{"type": c.get("type", "Tarot"), **c} for c in result.joker_creates]
         )
+    gs["consumeable_buffer"] = 0
 
     # The Ox: set money to $0 if most-played hand type is played
     # (blind.lua:debuff_hand fires during scoring in Lua)
@@ -982,17 +985,12 @@ def _handle_discard(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str, A
     dollars_earned = 0
     destroyed: list = []
     jokers_to_remove: list = []
+    purple_tarots: list = []
 
     for card in discarded:
-        # Seal: Purple Seal → create random Tarot with append '8ba'
-        # (card.lua:2254-2260; slot check gates the roll so no RNG is
-        # consumed when consumable slots are full).  calculate_seal returns
-        # at once for a debuffed card (card.lua:2243).
-        if getattr(card, "seal", None) == "Purple" and not card.debuff:
-            consumables: list = gs.setdefault("consumables", [])
-            consumable_limit = gs.get("consumable_slots", 2)
-            if len(consumables) < consumable_limit:
-                _resolve_create_descriptors(gs, [{"type": "Tarot", "count": 1, "seed": "8ba"}])
+        # Seal: Purple Seal → random Tarot, append '8ba' (card.lua:2253-2267).
+        # calculate_seal returns at once for a debuffed card (card.lua:2243).
+        _purple_seal(gs, card, purple_tarots)
 
         # Fire joker discard context per card
         card_destroyed = False
@@ -1028,8 +1026,11 @@ def _handle_discard(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str, A
             destroyed.append(card)
 
     # ------------------------------------------------------------------
-    # 5. Process side-effects
+    # 5. Process side-effects (the Purple Seal Tarots are made by events
+    #    queued during the loop, card.lua:2256-2265)
     # ------------------------------------------------------------------
+    if purple_tarots:
+        _resolve_create_descriptors(gs, purple_tarots)
     if dollars_earned:
         gs["dollars"] = gs.get("dollars", 0) + dollars_earned
 
@@ -1627,17 +1628,15 @@ def _handle_open_booster(gs: dict[str, Any], idx: int) -> dict[str, Any]:
         gs["hand"] = combined_hand
 
     # Fire open_booster joker context (Hallucination creates Tarot).
-    # Vanilla gates the creation on consumable room INSIDE the same
-    # condition chain (card.lua:2335) — the 'halu' roll is consumed
-    # either way (handler side), but at full slots no create fires and
-    # the Tarot pool streams stay untouched.
+    # Vanilla gates the roll on consumable room counting
+    # G.GAME.consumeable_buffer (card.lua:2336-2338, handler side); each
+    # hit reserves a slot and its event makes the Tarot and zeroes the
+    # buffer (card.lua:2339-2347).
     for mut in _fire_shop_joker_context(gs, open_booster=True):
         desc = mut.get("create")
-        if desc and (
-            desc.get("type") not in ("Tarot", "Planet", "Spectral")
-            or len(gs.get("consumables", [])) < gs.get("consumable_slots", 2)
-        ):
+        if desc:
             _resolve_create_descriptors(gs, [desc])
+    gs["consumeable_buffer"] = 0
 
     gs["phase"] = GamePhase.PACK_OPENING
     return gs
@@ -2301,6 +2300,7 @@ def _fire_setting_blind(
             blind=blind,
             jokers=jokers,
             game=game_snap,
+            game_state=gs,
         )
         result = calculate_joker(joker, ctx)
         if result and result.extra:
@@ -2824,6 +2824,9 @@ def _resolve_create_descriptors(gs: dict[str, Any], descriptors: list[dict[str, 
     # Re-sort hand if any cards were added during SELECTING_HAND
     if gs.get("phase") == GamePhase.SELECTING_HAND:
         _sort_hand_desc(gs.get("hand", []))
+    # Every vanilla creation event that consumed a reservation ends with
+    # G.GAME.consumeable_buffer = 0 (card.lua:1057, 2263, 2346, 2554, ...).
+    gs["consumeable_buffer"] = 0
     return placed
 
 
@@ -3134,6 +3137,7 @@ def _fire_shop_joker_context(gs: dict[str, Any], **context_flags: Any) -> list[d
             jokers=jokers,
             game=game_snap,
             rng=gs.get("rng"),
+            game_state=gs,
             **context_flags,
         )
         if cards_arg is not None:
@@ -3250,6 +3254,24 @@ def _close_pack(gs: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _consumable_room(gs: dict[str, Any]) -> bool:
+    """``#G.consumeables.cards + G.GAME.consumeable_buffer <
+    G.consumeables.config.card_limit``."""
+    return len(gs.get("consumables", [])) + gs.get("consumeable_buffer", 0) < gs.get(
+        "consumable_slots", 2
+    )
+
+
+def _purple_seal(gs: dict[str, Any], card: Any, queue: list[dict[str, Any]]) -> None:
+    """Card:calculate_seal({discard = true}) (card.lua:2242-2268): a
+    non-debuffed Purple Seal with consumable room (counting
+    G.GAME.consumeable_buffer) reserves a slot and queues an '8ba' Tarot,
+    which the caller makes after the discard loop like vanilla's event."""
+    if getattr(card, "seal", None) == "Purple" and not card.debuff and _consumable_room(gs):
+        gs["consumeable_buffer"] = gs.get("consumeable_buffer", 0) + 1
+        queue.append({"type": "Tarot", "count": 1, "seed": "8ba"})
+
+
 def _playing_card_joker_effects(gs: dict[str, Any], cards: list[Any]) -> None:
     """``playing_card_joker_effects`` (misc_functions.lua:1580-1584) on the
     live joker list — see :func:`jackdaw.engine.jokers.playing_card_joker_effects`."""
@@ -3296,14 +3318,12 @@ def _fire_discard_effects(gs: dict[str, Any], discarded: list, *, hook: bool) ->
     dollars_earned = 0
     destroyed: list = []
     jokers_to_remove: list = []
+    purple_tarots: list = []
 
     for card in discarded:
-        # Purple Seal → random Tarot ('8ba' append), slot-gated pre-roll;
-        # nothing for a debuffed card (card.lua:2243)
-        if getattr(card, "seal", None) == "Purple" and not card.debuff:
-            consumables: list = gs.setdefault("consumables", [])
-            if len(consumables) < gs.get("consumable_slots", 2):
-                _resolve_create_descriptors(gs, [{"type": "Tarot", "count": 1, "seed": "8ba"}])
+        # Purple Seal → random Tarot ('8ba' append); nothing for a debuffed
+        # card (card.lua:2243)
+        _purple_seal(gs, card, purple_tarots)
 
         card_destroyed = False
         for joker in jokers:
@@ -3334,6 +3354,8 @@ def _fire_discard_effects(gs: dict[str, Any], discarded: list, *, hook: bool) ->
                 card.shattered = True
             destroyed.append(card)
 
+    if purple_tarots:
+        _resolve_create_descriptors(gs, purple_tarots)
     if dollars_earned:
         gs["dollars"] = gs.get("dollars", 0) + dollars_earned
     for joker in jokers_to_remove:
