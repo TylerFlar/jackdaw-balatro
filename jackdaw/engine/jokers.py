@@ -173,6 +173,9 @@ class JokerContext:
     highlighted: list[Card] | None = None
     """Hand cards the consumable was used on (``G.hand.highlighted``)."""
     cards: list[Card] | None = None
+    card_effects: list[dict[str, Any]] | None = None
+    """A held card's first-pass effects (``context.card_effects``): the
+    card's own eval first, then one entry per joker that returned anything."""
 
     # Blueprint
     blueprint: int = 0
@@ -1058,10 +1061,20 @@ def _seltzer(card: Card, ctx: JokerContext) -> JokerResult | None:
     return None
 
 
+def has_card_effects(effects: list[dict[str, Any]] | None) -> bool:
+    """``next(effects[1]) or #effects > 1``: the held card's own eval
+    returned something, or some joker did (state_events.lua:193, 814)."""
+    return bool(effects) and (bool(effects[0]) or len(effects) > 1)
+
+
 @register("j_mime")
 def _mime(card: Card, ctx: JokerContext) -> JokerResult | None:
-    """Mime: +1 retrigger for held cards. Source: card.lua:3387."""
-    if ctx.repetition and ctx.cardarea == "hand":
+    """Mime: retrigger held cards that had an effect.
+
+    Source: card.lua:3386-3394 (scoring) and 2877-2886 (end of round): only
+    when ``next(context.card_effects[1]) or #context.card_effects > 1``.
+    """
+    if ctx.repetition and ctx.cardarea == "hand" and has_card_effects(ctx.card_effects):
         return JokerResult(repetitions=card.ability.get("extra", 1))
     return None
 

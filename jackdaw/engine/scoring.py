@@ -797,37 +797,24 @@ def score_hand(
                 dollars,
             )
 
-    # === Phase 8: Per held card (with retriggers) ===
+    # === Phase 8: Per held card (state_events.lua:784-872) ===
+    # Each repetition recomputes the card's effects; only the first pass
+    # decides the retriggers, and only if it produced something
+    # (``next(effects[1]) or #effects > 1``, state_events.lua:809-829): Red
+    # Seal and Mime then repeat it.  Debuffed held cards are skipped: all
+    # they can produce are message-only tables and they draw no RNG
+    # (Reserved Parking's is_face() is false for them), so nothing they do
+    # is observable.
+    from jackdaw.engine.jokers import has_card_effects
+
     for card in held_cards:
         if card.debuff:
             continue
 
-        # 8a: Collect retriggers
-        reps = [1]
-        seal_result = card.calculate_seal(repetition=True)
-        if seal_result and seal_result.get("repetitions"):
-            for _ in range(seal_result["repetitions"]):
-                reps.append(seal_result)
-
-        rep_ctx = None
-        for joker in jokers:
-            if joker.debuff:
-                continue
-            if rep_ctx is None:
-                rep_ctx = JokerContext(
-                    repetition=True,
-                    cardarea="hand",
-                    other_card=card,
-                    **_shared,
-                )
-            rep_result = calculate_joker(joker, rep_ctx)
-            if rep_result and rep_result.repetitions > 0:
-                for _ in range(rep_result.repetitions):
-                    reps.append(rep_result)
-
-        # 8b-c: Each repetition
+        reps: list[Any] = [1]
         ind_ctx = None
-        for _rep in reps:
+        rep_index = 0
+        while rep_index < len(reps):
             ev = eval_card(
                 card,
                 {"cardarea": "hand"},
@@ -836,7 +823,8 @@ def score_hand(
             )
             effects_h: list[dict[str, Any]] = [ev]
 
-            # Joker individual effects on held card
+            # Joker individual effects on held card (every non-nil return
+            # counts towards #effects, message-only ones included)
             for joker in jokers:
                 if joker.debuff:
                     continue
@@ -856,14 +844,36 @@ def score_hand(
                         eff_h["x_mult"] = ind_result.x_mult
                     if ind_result.dollars:
                         eff_h["dollars"] = ind_result.dollars
-                    if eff_h:
-                        effects_h.append(eff_h)
+                    effects_h.append(eff_h)
+
+            if rep_index == 0 and has_card_effects(effects_h):
+                # Red Seal (state_events.lua:812-818)
+                seal_result = card.calculate_seal(repetition=True)
+                if seal_result and seal_result.get("repetitions"):
+                    reps.extend([seal_result] * seal_result["repetitions"])
+                # Mime and its copies (state_events.lua:820-829)
+                rep_ctx = None
+                for joker in jokers:
+                    if joker.debuff:
+                        continue
+                    if rep_ctx is None:
+                        rep_ctx = JokerContext(
+                            repetition=True,
+                            cardarea="hand",
+                            other_card=card,
+                            card_effects=effects_h,
+                            **_shared,
+                        )
+                    rep_result = calculate_joker(joker, rep_ctx)
+                    if rep_result and rep_result.repetitions > 0:
+                        reps.extend([rep_result] * rep_result.repetitions)
 
             mult, dollars = _apply_held_joker_effects(
                 effects_h,
                 mult,
                 dollars,
             )
+            rep_index += 1
 
     # === Phase 8d: individual_hand_end (Obelisk check) ===
     ihe_ctx = None

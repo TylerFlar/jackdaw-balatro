@@ -2,7 +2,16 @@
 
 from __future__ import annotations
 
-from ._helpers import discard, give_card, give_joker, new_run, play, rng_twin, select_blind
+from ._helpers import (
+    discard,
+    give_card,
+    give_consumable,
+    give_joker,
+    new_run,
+    play,
+    rng_twin,
+    select_blind,
+)
 
 
 class TestDestructionPass:
@@ -38,6 +47,75 @@ class TestDestructionPass:
         glass.debuff = True
         play(gs, glass)
         assert "glass" not in gs["rng"].state
+
+
+class TestMimeWhileScoring:
+    """Held cards are retriggered (Red Seal, Mime) only when their first pass
+    produced something: next(effects[1]) or #effects > 1
+    (state_events.lua:809-829, card.lua:3386-3394)."""
+
+    def test_reserved_parking_is_only_retriggered_after_a_hit(self):
+        gs = select_blind(new_run("AUDIT_MIME_PARKING"))
+        give_joker(gs, "j_mime")
+        give_joker(gs, "j_reserved_parking")
+        for key in ("H_K", "S_Q", "D_J", "C_K"):
+            give_card(gs, key)
+        played = give_card(gs, "S_2")
+        oracle = rng_twin(gs)
+        held = [c for c in gs["hand"] if c is not played]
+        hits = misses = 0
+        for card in held:
+            if card.debuff or card.get_id() not in (11, 12, 13):
+                continue
+            if oracle.random("parking") < 1 / 2:  # paid: Mime retriggers it
+                hits += 1
+                hits += oracle.random("parking") < 1 / 2
+            else:
+                misses += 1  # nothing to repeat
+        assert misses, "seed must include a missed roll"
+        dollars = gs["dollars"]
+        play(gs, played)
+        assert gs["rng"].state["parking"] == oracle.state["parking"]
+        assert gs["dollars"] == dollars + hits
+
+
+class TestRoundEndRetriggers:
+    """end_round's held-card loop (state_events.lua:171-233) recomputes
+    get_end_of_round_effect (Gold Card $, Blue Seal Planet, card.lua:1033-1065)
+    for every repetition; Red Seal and Mime (card.lua:2877-2886) add
+    repetitions when the first pass had an effect."""
+
+    def test_mime_repeats_a_held_gold_card(self):
+        gs = select_blind(new_run("AUDIT_EOR_GOLD"))
+        give_joker(gs, "j_mime")
+        give_card(gs, "S_3", enhancement="m_gold")
+        played = give_card(gs, "S_2")
+        gs["blind"].chips = 1
+        dollars = gs["dollars"]
+        play(gs, played)
+        assert gs["dollars"] == dollars + 2 * 3
+
+    def test_mime_repeats_a_held_blue_seal(self):
+        gs = select_blind(new_run("AUDIT_EOR_BLUE"))
+        give_joker(gs, "j_mime")
+        give_card(gs, "S_3", seal="Blue")
+        played = give_card(gs, "S_2")
+        gs["blind"].chips = 1
+        play(gs, played)
+        assert [c.center_key for c in gs["consumables"]] == ["c_pluto", "c_pluto"]
+        assert gs["consumeable_buffer"] == 0
+
+    def test_blue_seal_and_mime_share_the_buffer(self):
+        """One free slot: the first pass reserves it, the Mime repeat finds no
+        room, so one Planet."""
+        gs = select_blind(new_run("AUDIT_EOR_BLUE1"))
+        give_joker(gs, "j_mime")
+        give_consumable(gs, "c_mercury")
+        give_card(gs, "S_3", seal="Blue")
+        played = give_card(gs, "S_2")
+        gs["blind"].chips = 1
+        play(gs, played)
+        assert [c.center_key for c in gs["consumables"]] == ["c_mercury", "c_pluto"]
 
 
 class TestPurpleSeal:

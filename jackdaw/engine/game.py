@@ -2104,40 +2104,7 @@ def _round_won(gs: dict[str, Any]) -> None:
     #    used_jokers and room-gates like vanilla's 'blusl' create_card.
     # ------------------------------------------------------------------
     hand: list = gs.get("hand", [])
-
-    # h_dollars: Gold CARD enhancement pays $3 per copy HELD at round
-    # end (get_end_of_round_effect, card.lua:1036-38), eased IMMEDIATELY
-    # in the end_round loop (state_events.lua:221-24) — not part of the
-    # cash-out earnings.  Was never paid anywhere in the sim
-    # (live-verified: LSSFHWWS — live +$3 for a held Midas-golded
-    # Queen at the round-win compare).  Red seal retriggers the held
-    # effect (the reps loop above the payout).  Mime retriggers are
-    # not modelled here yet — no such collision observed live.
-    for c in hand:
-        if getattr(c, "debuff", False):
-            continue
-        _ab = getattr(c, "ability", None)
-        _hd = _ab.get("h_dollars", 0) if isinstance(_ab, dict) else 0
-        if _hd:
-            _reps = 2 if getattr(c, "seal", None) == "Red" else 1
-            gs["dollars"] = gs.get("dollars", 0) + _hd * _reps
-
-    last_hand = gs.get("last_hand_played")
-    if last_hand:
-        from jackdaw.engine.consumables import _PLANET_HAND
-
-        planet_key = None
-        for pk, ht in _PLANET_HAND.items():
-            if ht == last_hand:
-                planet_key = pk
-                break
-        if planet_key:
-            for c in hand:
-                if getattr(c, "seal", None) == "Blue" and not getattr(c, "debuff", False):
-                    _resolve_create_descriptors(
-                        gs,
-                        [{"type": "Planet", "forced_key": planet_key, "seed": "blusl"}],
-                    )
+    _held_cards_end_of_round(gs, hand, jokers)
 
     # ------------------------------------------------------------------
     # 4. Return all cards to deck
@@ -2249,6 +2216,79 @@ def _round_won(gs: dict[str, Any]) -> None:
     # 11. Phase → ROUND_EVAL
     # ------------------------------------------------------------------
     gs["phase"] = GamePhase.ROUND_EVAL
+
+
+def _end_of_round_effect(
+    gs: dict[str, Any], card: Any, planet_key: str | None, planets: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Card:get_end_of_round_effect (card.lua:1033-1065).
+
+    A debuffed card gives ``{}``.  A Gold Card gives its ``h_dollars``.  A
+    Blue Seal with consumable room (counting G.GAME.consumeable_buffer)
+    reserves a slot and queues the Planet for G.GAME.last_hand_played
+    (append 'blusl'); its event makes the card and zeroes the buffer.
+    """
+    if getattr(card, "debuff", False):
+        return {}
+    ret: dict[str, Any] = {}
+    h_dollars = card.ability.get("h_dollars", 0)
+    if h_dollars > 0:
+        ret["h_dollars"] = h_dollars
+    if getattr(card, "seal", None) == "Blue" and _consumable_room(gs):
+        gs["consumeable_buffer"] = gs.get("consumeable_buffer", 0) + 1
+        if planet_key:
+            planets.append({"type": "Planet", "forced_key": planet_key, "seed": "blusl"})
+        ret["effect"] = True
+    return ret
+
+
+def _held_cards_end_of_round(gs: dict[str, Any], hand: list, jokers: list) -> None:
+    """end_round's held-card loop (state_events.lua:171-233).
+
+    Every repetition recomputes get_end_of_round_effect; after the first
+    pass, a card that produced something is repeated by its Red Seal
+    (``eval_card`` repetition_only, card.lua:2244-2251) and by Mime and
+    its Blueprint/Brainstorm copies (card.lua:2877-2886).  Gold Card
+    dollars are eased as they come (before cash-out's interest); the Blue
+    Seal Planets are made by the queued events afterwards.  No joker has an
+    individual end-of-round effect on held cards (card.lua:2875-2876).
+    """
+    from jackdaw.engine.consumables import _PLANET_HAND
+    from jackdaw.engine.jokers import JokerContext, calculate_joker, has_card_effects
+
+    last_hand = gs.get("last_hand_played")
+    planet_key = next((pk for pk, ht in _PLANET_HAND.items() if ht == last_hand), None)
+    planets: list[dict[str, Any]] = []
+    for card in hand:
+        reps: list[Any] = [1]
+        rep_index = 0
+        while rep_index < len(reps):
+            effects = [_end_of_round_effect(gs, card, planet_key, planets)]
+            if rep_index == 0 and has_card_effects(effects):
+                seal = card.calculate_seal(repetition=True)
+                if seal and seal.get("repetitions"):
+                    reps.extend([seal] * seal["repetitions"])
+                ctx = JokerContext(
+                    repetition=True,
+                    cardarea="hand",
+                    other_card=card,
+                    card_effects=effects,
+                    jokers=jokers,
+                    game_state=gs,
+                )
+                for joker in jokers:
+                    if getattr(joker, "debuff", False):
+                        continue
+                    result = calculate_joker(joker, ctx)
+                    if result and result.repetitions > 0:
+                        reps.extend([result] * result.repetitions)
+            for effect in effects:
+                if effect.get("h_dollars"):
+                    gs["dollars"] = gs.get("dollars", 0) + effect["h_dollars"]
+            rep_index += 1
+    if planets:
+        _resolve_create_descriptors(gs, planets)
+    gs["consumeable_buffer"] = 0
 
 
 def _advance_ante(gs: dict[str, Any]) -> None:
