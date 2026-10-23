@@ -1211,8 +1211,10 @@ def _ankh(_card: Card, ctx: ConsumableContext) -> ConsumableResult:
 def _soul(_card: Card, ctx: ConsumableContext) -> ConsumableResult:
     """Soul: create 1 Legendary joker.
 
-    Source: card.lua:1455.  Rarity 4 = Legendary.  Seed: 'soul'.
+    Source: card.lua:1415-1423 — create_card('Joker', G.jokers, true, ...,
+    'sou').  The legendary pool key ignores the append; the edition poll is
+    'edi'..'sou'..ante (common_events.lua:2149).
     """
     return ConsumableResult(
-        create=[{"type": "Joker", "count": 1, "seed": "soul", "rarity": 4}],
+        create=[{"type": "Joker", "count": 1, "seed": "sou", "rarity": 4}],
     )

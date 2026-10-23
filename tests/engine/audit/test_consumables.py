@@ -101,6 +101,19 @@ class TestEctoplasm:
         assert gs["ecto_minus"] == 3
 
 
+class TestTheSoul:
+    def test_edition_poll_uses_the_sou_append(self):
+        """The Soul creates with create_card('Joker', G.jokers, true, nil, nil,
+        nil, nil, 'sou') (card.lua:1418), so its edition is polled on
+        'edi'..'sou'..ante (common_events.lua:2149)."""
+        gs = select_blind(new_run("AUDIT_SOUL"))
+        give_consumable(gs, "c_soul")
+        step(gs, UseConsumable(card_index=0))
+        assert gs["jokers"] and gs["jokers"][0].ability["set"] == "Joker"
+        assert "edisou1" in gs["rng"].state
+        assert "edisoul1" not in gs["rng"].state
+
+
 class TestDebuffedJokersAreEligible:
     """The Wheel's eligible_strength_jokers and Ectoplasm/Hex's
     eligible_editionless_jokers are every editionless G.jokers card, debuffed
