@@ -181,6 +181,23 @@ def _floor_score(score: float) -> int | float:
     return math.floor(score) if math.isfinite(score) else score
 
 
+def _chip_cap(game_state: dict[str, Any]) -> float | None:
+    """The cap ``mod_chips`` applies to chips this hand, or ``None``.
+
+    Rich get Richer (``chips_dollar_cap``, misc_functions.lua:684-689) caps
+    every chip value at ``max(G.GAME.dollars, 0)``.  The dollars do not move
+    during evaluate_play (every ease_dollars there is a queued event).
+    """
+    if not (game_state.get("modifiers") or {}).get("chips_dollar_cap"):
+        return None
+    return float(max(game_state.get("dollars", 0), 0))
+
+
+def _mod_chips(chips: float, cap: float | None) -> float:
+    """``mod_chips`` (misc_functions.lua:684): ``min(chips, cap)`` under a cap."""
+    return chips if cap is None or chips <= cap else cap
+
+
 # ---------------------------------------------------------------------------
 # Base scoring pipeline (Phases 1-4, 6-8, 12 without joker effects)
 # ---------------------------------------------------------------------------
@@ -359,15 +376,17 @@ def _apply_individual_joker_effects(
     hand_chips: float,
     mult: float,
     dollars: int,
+    chip_cap: float | None = None,
 ) -> tuple[float, float, int]:
     """Apply a list of individual-context joker results to running totals.
 
     Matches the effect application order from state_events.lua:704-776:
-    chips → mult → p_dollars → dollars → extra → x_mult → edition.
+    chips → mult → p_dollars → dollars → extra → x_mult → edition.  Chip
+    additions go through ``mod_chips`` (state_events.lua:706/760).
     """
     for eff in effects:
         if "chips" in eff:
-            hand_chips += eff["chips"]
+            hand_chips = _mod_chips(hand_chips + eff["chips"], chip_cap)
         if "mult" in eff:
             mult += eff["mult"]
         if "p_dollars" in eff:
@@ -378,7 +397,7 @@ def _apply_individual_joker_effects(
             mult *= eff["x_mult"]
         if "edition" in eff:
             ed = eff["edition"]
-            hand_chips += ed.get("chip_mod", 0)
+            hand_chips = _mod_chips(hand_chips + ed.get("chip_mod", 0), chip_cap)
             mult += ed.get("mult_mod", 0)
             mult *= ed.get("x_mult_mod", 1)
     return hand_chips, mult, dollars
@@ -627,8 +646,11 @@ def score_hand(
         scoring_cards = list(played_cards)
 
     # === Phase 4: Base chips/mult from hand level ===
+    # Every chip value below goes through mod_chips (Rich get Richer's cap,
+    # state_events.lua:616-948).
+    chip_cap = _chip_cap(gs)
     base_chips, base_mult = hand_levels.get(hand_type)
-    hand_chips = float(base_chips)
+    hand_chips = _mod_chips(float(base_chips), chip_cap)
     mult = float(base_mult)
     breakdown.append(
         f"Base: {hand_type} L{hand_levels[hand_type].level}"
@@ -671,7 +693,7 @@ def score_hand(
         if result and result.level_up:
             hand_levels.level_up(hand_type)
             base_chips, base_mult = hand_levels.get(hand_type)
-            hand_chips = float(base_chips)
+            hand_chips = _mod_chips(float(base_chips), chip_cap)
             mult = float(base_mult)
         # DNA's playing-card copy is a before-context create
         # (card.lua:3501-13) — this pass used to drop extra entirely.
@@ -688,6 +710,7 @@ def score_hand(
         mult = float(new_mult)
         hand_chips = float(new_chips)
         breakdown.append(f"Blind modify: {int(hand_chips)} chips, {int(mult)} mult")
+    hand_chips = _mod_chips(hand_chips, chip_cap)  # state_events.lua:646
     # === Phase 7: Per scored card (with retriggers) ===
     for card in scoring_cards:
         if card.debuff:
@@ -770,6 +793,7 @@ def score_hand(
                 hand_chips,
                 mult,
                 dollars,
+                chip_cap,
             )
 
     # === Phase 8: Per held card (with retriggers) ===
@@ -868,7 +892,7 @@ def score_hand(
         # 9a: Edition additive (chip_mod, mult_mod) BEFORE joker effect
         edition = card.get_edition()
         if edition:
-            hand_chips += edition.get("chip_mod", 0)
+            hand_chips = _mod_chips(hand_chips + edition.get("chip_mod", 0), chip_cap)
             mult += edition.get("mult_mod", 0)
 
         # 9b: Main joker effect
@@ -882,7 +906,7 @@ def score_hand(
             if result.mult_mod:
                 mult += result.mult_mod
             if result.chip_mod:
-                hand_chips += result.chip_mod
+                hand_chips = _mod_chips(hand_chips + result.chip_mod, chip_cap)
             if result.Xmult_mod:
                 mult *= result.Xmult_mod
             if result.dollars:
@@ -902,7 +926,7 @@ def score_hand(
                 if j2j.mult_mod:
                     mult += j2j.mult_mod
                 if j2j.chip_mod:
-                    hand_chips += j2j.chip_mod
+                    hand_chips = _mod_chips(hand_chips + j2j.chip_mod, chip_cap)
                 if j2j.Xmult_mod:
                     mult *= j2j.Xmult_mod
 
@@ -925,6 +949,7 @@ def score_hand(
                 f"Plasma: ({prev_chips + prev_mult:.0f}) / 2"
                 f" -> {hand_chips:.0f} chips, {mult:.0f} mult"
             )
+    hand_chips = _mod_chips(hand_chips, chip_cap)  # state_events.lua:948
 
     # === Phase 11: Card destruction ===
     cards_destroyed: list[Card] = []

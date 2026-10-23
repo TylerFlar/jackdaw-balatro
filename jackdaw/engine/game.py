@@ -19,6 +19,7 @@ Usage::
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from jackdaw.engine.actions import (
@@ -63,8 +64,10 @@ def step(game_state: dict[str, Any], action: Action) -> dict[str, Any]:
     """
     result = _dispatch(game_state, action)
     # The joker area re-sorts pinned cards to the left every frame
-    # (cardarea.lua:528).
+    # (cardarea.lua:528), and Luxury Tax re-checks the hand size against
+    # the dollars every frame (cardarea.lua:245).
     _align_pinned_jokers(result.get("jokers") or [])
+    _sync_hand_size_to_dollars(result)
     # Vanilla recomputes shop prices continuously while shopping
     # (Card:update → set_cost each frame), so cost-relevant changes —
     # buying/selling Astronomer, coupon tags — reflect immediately.
@@ -399,23 +402,35 @@ def _open_tag_pack(gs: dict[str, Any], pack_key: str, force: bool = False) -> No
     gs["shop_return_phase"] = gs.get("phase", GamePhase.BLIND_SELECT)
 
     # For Arcana/Spectral packs: deal hand from deck for targeting
-    # Matches _handle_open_booster behavior
     if pack_kind in ("Arcana", "Spectral"):
-        deck: list = gs.get("deck", [])
-        hand: list = gs.get("hand", [])
-        hand_size = gs.get("hand_size", 8)
-        to_deal = min(len(deck), hand_size - len(hand))
-        pack_hand: list = []
-        for _ in range(to_deal):
-            if deck:
-                card = deck.pop()
-                pack_hand.append(card)
-        gs["pack_hand"] = pack_hand
-        combined_hand = hand + pack_hand
-        _sort_hand_desc(combined_hand)
-        gs["hand"] = combined_hand
+        _deal_pack_hand(gs)
 
     gs["phase"] = GamePhase.PACK_OPENING
+
+
+def _deal_pack_hand(gs: dict[str, Any]) -> None:
+    """Deal the hand an Arcana or Spectral pack's picks target.
+
+    update_arcana_pack / update_spectral_pack (game.lua:3374/3425) call
+    draw_from_deck_to_hand: up to the hand size, each card drawn from the
+    END of the deck through draw_card_from, so X-ray Vision's roll applies
+    (cardarea.lua:601-605).  Between rounds the blind is the reset one, so
+    no boss flip applies.  The dealt cards go back to the deck when the
+    pack closes (_close_pack).
+    """
+    _sync_hand_size_to_dollars(gs)
+    deck: list = gs.get("deck", [])
+    hand: list = gs.get("hand", [])
+    to_deal = min(len(deck), gs.get("hand_size", 8) - len(hand))
+    pack_hand: list = []
+    for _ in range(to_deal):
+        card = deck.pop()
+        card.facing = "back" if _x_ray_flip(gs) else "front"
+        pack_hand.append(card)
+    gs["pack_hand"] = pack_hand
+    combined_hand = hand + pack_hand
+    _sort_hand_desc(combined_hand)
+    gs["hand"] = combined_hand
 
 
 def _award_tag(gs: dict[str, Any], tag_key: str, source: str) -> None:
@@ -712,6 +727,15 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
     gs["hands_played"] = gs.get("hands_played", 0) + 1
     gs["current_round_hands_played"] = cr["hands_played"]
 
+    # Double or Nothing: every card of the scoring hand is debuffed for the
+    # rest of the run (state_events.lua:1077-1084 — past the debuffed-hand
+    # branch, so a blocked hand counts too); Card:update applies
+    # perma_debuff on the next frame (card.lua:4158).
+    if (gs.get("modifiers") or {}).get("debuff_played_cards"):
+        for c in result.scoring_cards:
+            c.ability["perma_debuff"] = True
+            c.debuff = True
+
     # ------------------------------------------------------------------
     # 7. Process scoring side-effects
     # ------------------------------------------------------------------
@@ -802,15 +826,7 @@ def _handle_play_hand(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str,
         serpent_play = getattr(blind, "name", "") == "The Serpent" and not getattr(
             blind, "disabled", False
         )
-        if serpent_play:
-            deck: list = gs.get("deck", [])
-            hand_out: list = gs.get("hand", [])
-            for _ in range(min(3, len(deck))):
-                if deck:
-                    hand_out.append(deck.pop())
-            _sort_hand_desc(hand_out)
-        else:
-            _draw_hand(gs)
+        _draw_hand(gs, count=3 if serpent_play else None)
 
         # Re-debuff hand cards for boss blind (new cards from deck)
         if blind.boss and not blind.disabled:
@@ -1078,17 +1094,8 @@ def _handle_discard(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str, A
         and not getattr(blind, "disabled", False)
         and (cr.get("hands_played", 0) > 0 or cr.get("discards_used", 0) > 0)
     )
-    if serpent:
-        # The Serpent: draw only 3 after first action
-        # Lua's draw_card(G.deck, G.hand) pops LAST card from deck
-        deck: list = gs.get("deck", [])
-        hand_out: list = gs.get("hand", [])
-        for _ in range(min(3, len(deck))):
-            if deck:
-                hand_out.append(deck.pop())
-        _sort_hand_desc(hand_out)
-    else:
-        _draw_hand(gs)
+    # The Serpent: draw only 3 after the first action
+    _draw_hand(gs, count=3 if serpent else None)
 
     # ------------------------------------------------------------------
     # 11. Re-debuff drawn cards for boss blind
@@ -1278,6 +1285,7 @@ def _handle_buy_card(gs: dict[str, Any], idx: int) -> dict[str, Any]:
     if added_playing_card:
         _fire_shop_joker_context(gs, playing_card_added=True, cards=[card])
 
+    _inflate(gs)
     return gs
 
 
@@ -1524,6 +1532,9 @@ def _handle_redeem_voucher(gs: dict[str, Any], idx: int) -> dict[str, Any]:
     gs["used_vouchers"][card.center_key] = True
     _slots_before = gs.get("shop", {}).get("joker_max", 2)
     apply_voucher(card.center_key, gs)
+    # Inflation goes up in Card:redeem itself (card.lua:1858), before the
+    # queued Overstock refill below creates its card.
+    _inflate(gs)
 
     # ONLY Clearance Sale / Liquidation run vanilla's ALL-cards set_cost
     # pass (card.lua:1917-1923) — that pass also restores couponed OWNED
@@ -1577,6 +1588,9 @@ def _handle_open_booster(gs: dict[str, Any], idx: int) -> dict[str, Any]:
     gs["dollars"] -= pack.cost
     boosters.pop(idx)
     _release_used_key(gs, pack)
+    # Card:open raises the inflation before the pack's contents are made
+    # (card.lua:1800), so they are priced with it.
+    _inflate(gs)
 
     # Generate pack cards
     from jackdaw.engine.data.prototypes import BOOSTERS
@@ -1599,24 +1613,8 @@ def _handle_open_booster(gs: dict[str, Any], idx: int) -> dict[str, Any]:
     gs["shop_return_phase"] = GamePhase.SHOP
 
     # For Arcana/Spectral packs: deal hand from deck for targeting
-    # Cards are drawn from the END of deck (top of visual stack),
-    # matching Lua's draw_card(G.deck, G.hand) which pops last card.
-    pack_kind = gs.get("pack_type", "")
-    if pack_kind in ("Arcana", "Spectral"):
-        deck: list = gs.get("deck", [])
-        hand: list = gs.get("hand", [])
-        hand_size = gs.get("hand_size", 8)
-        to_deal = min(len(deck), hand_size - len(hand))
-        pack_hand: list = []
-        for _ in range(to_deal):
-            if deck:
-                card = deck.pop()
-                pack_hand.append(card)
-        gs["pack_hand"] = pack_hand
-        # These cards serve as targets for Tarot/Spectral use
-        combined_hand = hand + pack_hand
-        _sort_hand_desc(combined_hand)
-        gs["hand"] = combined_hand
+    if gs.get("pack_type", "") in ("Arcana", "Spectral"):
+        _deal_pack_hand(gs)
 
     # Fire open_booster joker context (Hallucination creates Tarot).
     # Vanilla gates the creation on consumable room INSIDE the same
@@ -1923,21 +1921,23 @@ def _sort_hand_desc(hand: list) -> None:
     hand.sort(key=lambda c: c.get_nominal() if hasattr(c, "get_nominal") else -1e9, reverse=True)
 
 
-def _draw_hand(gs: dict[str, Any]) -> None:
+def _draw_hand(gs: dict[str, Any], count: int | None = None) -> None:
     """Draw cards from deck to fill the hand up to hand_size.
 
     Cards are drawn from the END of the deck list (top of the visual
     stack), matching Lua's ``draw_card(G.deck, G.hand, ...)`` which
-    pops from the last position.
+    pops from the last position.  *count* overrides the number drawn
+    (The Serpent's 3, state_events.lua:363-368).
 
     After drawing, the hand is sorted descending by nominal value
     (matching Lua's ``draw_from_deck_to_hand`` which passes ``sort=true``
     to ``draw_card``, triggering ``CardArea:sort()`` with default 'desc').
     """
+    _sync_hand_size_to_dollars(gs)
     deck: list = gs.get("deck", [])
     hand: list = gs.setdefault("hand", [])
     hand_size: int = gs.get("hand_size", 8)
-    to_draw = min(len(deck), hand_size - len(hand))
+    to_draw = min(len(deck), hand_size - len(hand) if count is None else count)
 
     # Boss face-down draws (Blind:stay_flipped, blind.lua:605-622): The
     # Wheel (seeded 'wheel' roll per drawn card), The House (first hand of
@@ -1958,18 +1958,51 @@ def _draw_hand(gs: dict[str, Any]) -> None:
     for _ in range(to_draw):
         if deck:
             card = deck.pop()
-            if check_flip and blind.stay_flipped(
+            flip = bool(check_flip) and blind.stay_flipped(
                 card,
                 rng=gs.get("rng"),
                 probabilities_normal=gs.get("probabilities", {}).get("normal", 1.0),
                 hands_played=gs.get("current_round", {}).get("hands_played", 0),
                 discards_used=gs.get("current_round", {}).get("discards_used", 0),
                 pareidolia=pareidolia,
-            ):
-                card.facing = "back"
+            )
+            flip = _x_ray_flip(gs) or flip
+            # CardArea:emplace (cardarea.lua:38) turns a face-down card face
+            # up unless it stays flipped.
+            card.facing = "back" if flip else "front"
             hand.append(card)
     # Sort hand descending by nominal (matches Lua CardArea:sort 'desc')
     _sort_hand_desc(hand)
+
+
+def _x_ray_flip(gs: dict[str, Any]) -> bool:
+    """X-ray Vision's roll for one card drawn into the hand.
+
+    cardarea.lua:601-605 (and common_events.lua:403-407 for a named card):
+    after the boss's stay_flipped check, under ``modifiers.flipped_cards``
+    every card drawn to G.hand rolls ``'flipped_card'`` and stays face down
+    below ``1/flipped_cards``.
+    """
+    n = (gs.get("modifiers") or {}).get("flipped_cards")
+    return bool(n) and gs["rng"].random("flipped_card") < 1 / n
+
+
+def _sync_hand_size_to_dollars(gs: dict[str, Any]) -> None:
+    """Luxury Tax: -1 hand size per ``minus_hand_size_per_X_dollar`` dollars.
+
+    cardarea.lua:245-251: G.hand's update compares ``floor(dollars/X)``
+    with ``config.last_poll_size`` (nil = 0) every frame and changes the
+    hand size by the difference.  The sim checks after every action and
+    before every draw, which is where vanilla's frames would have caught up.
+    """
+    x = (gs.get("modifiers") or {}).get("minus_hand_size_per_X_dollar")
+    if not x:
+        return
+    poll = math.floor(gs.get("dollars", 0) / x)
+    last = gs.get("hand_last_poll_size", 0)
+    if poll != last:
+        gs["hand_size"] = gs.get("hand_size", 8) + (last - poll)
+        gs["hand_last_poll_size"] = poll
 
 
 def _joker_end_of_round_effects(gs: dict[str, Any]) -> dict[str, Any]:
@@ -2179,9 +2212,13 @@ def _round_won(gs: dict[str, Any]) -> None:
     #    Bell's forced flag goes too (state_events.lua:279).
     # ------------------------------------------------------------------
     for card in deck:
-        # Only clear blind-applied debuffs; perishable debuffs are permanent
+        # Only clear blind-applied debuffs; perishable and Double or
+        # Nothing (perma_debuff, card.lua:4158) debuffs are permanent
         if getattr(card, "debuff", False):
-            if not (getattr(card, "perishable", False) and getattr(card, "perish_tally", 1) <= 0):
+            if not (
+                (getattr(card, "perishable", False) and getattr(card, "perish_tally", 1) <= 0)
+                or card.ability.get("perma_debuff")
+            ):
                 card.debuff = False
         card.facing = "front"
     for j in jokers:
@@ -2227,6 +2264,17 @@ def _round_won(gs: dict[str, Any]) -> None:
             ability = getattr(card, "ability", None)
             if isinstance(ability, dict):
                 ability.pop("played_this_ante", None)
+        # Typecast (state_events.lua:240-247), before the ante goes up: at
+        # the boss of set_eternal_ante every joker turns Eternal (if it can,
+        # card.lua:506), and at set_joker_slots_ante the slots drop to 0.
+        mods = gs.get("modifiers") or {}
+        if mods.get("set_eternal_ante") == rr["ante"]:
+            from jackdaw.engine.card_factory import set_eternal_checked
+
+            for j in jokers:
+                set_eternal_checked(j)
+        if mods.get("set_joker_slots_ante") == rr["ante"]:
+            gs["joker_slots"] = 0
         _advance_ante(gs)
         gs["blind_on_deck"] = "Small"
 
@@ -2331,9 +2379,9 @@ def _apply_setting_blind_mutations(
             blind = gs.get("blind")
             if blind:
                 blind.disabled = True
-                # Un-debuff all playing cards
+                # Un-debuff all playing cards (a perma_debuff stays)
                 for card in gs.get("deck", []):
-                    card.debuff = False
+                    card.set_debuff(False)
 
         # Madness: destroy a random OTHER joker.  Vanilla's pool excludes
         # SELF, eternals, and getting_sliced cards, in board order
@@ -3064,6 +3112,19 @@ def _all_cards_set_cost_pass(gs: dict[str, Any]) -> None:
     from jackdaw.engine.shop import reprice_shop
 
     reprice_shop(gs)
+
+
+def _inflate(gs: dict[str, Any]) -> None:
+    """Inflation challenge: every purchase raises all prices by $1.
+
+    buy_from_shop (button_callbacks.lua:2455-2462), Card:open (card.lua:1800,
+    tag packs included) and Card:redeem (card.lua:1858): under
+    ``modifiers.inflation``, ``G.GAME.inflation`` goes up by 1 and every
+    card re-runs set_cost (card.lua:370 adds the inflation to extra_cost).
+    """
+    if (gs.get("modifiers") or {}).get("inflation"):
+        gs["inflation"] = gs.get("inflation", 0) + 1
+        _all_cards_set_cost_pass(gs)
 
 
 def _get_card_set(card: Any) -> str:

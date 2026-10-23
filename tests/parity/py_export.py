@@ -340,6 +340,7 @@ def export_state(gs: dict[str, Any]) -> dict[str, Any]:
             "pending_tag_packs": list(gs.get("pending_tag_packs") or []),
             "pending_deck_bottom": [export_card(c) for c in gs.get("pending_deck_bottom") or []],
             "shop_d6ed": bool(gs.get("shop_d6ed", False)),
+            "hand_last_poll_size": gs.get("hand_last_poll_size", 0),
             "last_blind_was_boss": bool(gs.get("last_blind_was_boss", False)),
             "pending_cashout": earnings.total
             if earnings is not None and phase == GamePhase.ROUND_EVAL

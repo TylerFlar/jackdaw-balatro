@@ -145,6 +145,19 @@ def create_joker(
     return card
 
 
+def set_eternal_checked(card: Card, eternal: bool = True) -> None:
+    """``Card:set_eternal`` with vanilla's eligibility rules (card.lua:506-511).
+
+    The sticker is cleared, then set only on an ``eternal_compat`` center
+    that is not Perishable.  Used where a rule makes jokers Eternal
+    wholesale (Non-Perishable, Typecast), which must skip ineligible ones.
+    """
+    from jackdaw.engine.card import _resolve_center
+
+    compat = bool(_resolve_center(card.center_key).get("eternal_compat"))
+    card.eternal = bool(eternal) and compat and not card.perishable
+
+
 def add_joker(
     key: str,
     game_state: dict[str, Any],
@@ -513,6 +526,10 @@ def create_card(
     # 3. Joker modifiers
     # ------------------------------------------------------------------
     if card.ability.get("set") == "Joker":
+        # Non-Perishable: every created Joker is Eternal, before the
+        # shop/pack sticker rolls (common_events.lua:2134-2136).
+        if gs.get("modifiers", {}).get("all_eternal"):
+            set_eternal_checked(card)
         # Eternal / Perishable / Rental rolls are SHOP/PACK-area-gated
         # (common_events.lua:2137-2146)...
         if area in ("shop", "pack"):

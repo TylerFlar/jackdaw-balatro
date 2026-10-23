@@ -419,7 +419,9 @@ class Card:
         self.rental = rental
 
     def set_debuff(self, should_debuff: bool) -> None:
-        self.debuff = should_debuff
+        # Double or Nothing's perma_debuff: Card:update re-debuffs the card
+        # every frame (card.lua:4158), so nothing can clear it.
+        self.debuff = should_debuff or bool(self.ability.get("perma_debuff"))
 
     def set_cost(
         self,
