@@ -3,6 +3,8 @@
 //! A std-only command line (no argument-parsing dependency) so it builds in seconds.
 #![forbid(unsafe_code)]
 
+mod codegen;
+
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -69,6 +71,13 @@ fn main() -> ExitCode {
             print!("{USAGE}");
             ExitCode::SUCCESS
         }
+        Ok(Command::Codegen { check }) => match codegen::run(&repo_root(), check) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(message) => {
+                eprintln!("xtask codegen: {message}");
+                ExitCode::FAILURE
+            }
+        },
         Ok(Command::LuaOracles) => match lua_oracles() {
             Ok(()) => ExitCode::SUCCESS,
             Err(message) => {
@@ -103,6 +112,16 @@ fn lua_oracles() -> Result<(), String> {
         .is_file()
     {
         return Err("balatro_source/ (the local Balatro 1.0.1o source) is missing".to_owned());
+    }
+    // The game-table extract writes its own files (jackdaw/engine/data/{hands,challenges,
+    // blind_amounts}.json); `cargo xtask codegen` turns them into Rust.
+    let status = process::Command::new("luajit")
+        .arg(root.join("scripts/extract_game_tables.lua"))
+        .current_dir(&root)
+        .status()
+        .map_err(|e| format!("cannot run luajit: {e}"))?;
+    if !status.success() {
+        return Err("scripts/extract_game_tables.lua failed".to_owned());
     }
     let oracles = [(
         "scripts/luajit_rng_oracle.lua",

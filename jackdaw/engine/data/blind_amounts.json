@@ -1,0 +1,1238 @@
+{
+  "1": [
+    {
+      "ante": -1,
+      "bits": "4059000000000000",
+      "value": "100"
+    },
+    {
+      "ante": 0,
+      "bits": "4059000000000000",
+      "value": "100"
+    },
+    {
+      "ante": 1,
+      "bits": "4072c00000000000",
+      "value": "300"
+    },
+    {
+      "ante": 2,
+      "bits": "4089000000000000",
+      "value": "800"
+    },
+    {
+      "ante": 3,
+      "bits": "409f400000000000",
+      "value": "2000"
+    },
+    {
+      "ante": 4,
+      "bits": "40b3880000000000",
+      "value": "5000"
+    },
+    {
+      "ante": 5,
+      "bits": "40c57c0000000000",
+      "value": "11000"
+    },
+    {
+      "ante": 6,
+      "bits": "40d3880000000000",
+      "value": "20000"
+    },
+    {
+      "ante": 7,
+      "bits": "40e1170000000000",
+      "value": "35000"
+    },
+    {
+      "ante": 8,
+      "bits": "40e86a0000000000",
+      "value": "50000"
+    },
+    {
+      "ante": 9,
+      "bits": "40fadb0000000000",
+      "value": "110000"
+    },
+    {
+      "ante": 10,
+      "bits": "4121170000000000",
+      "value": "560000"
+    },
+    {
+      "ante": 11,
+      "bits": "415b774000000000",
+      "value": "7200000"
+    },
+    {
+      "ante": 12,
+      "bits": "41b1e1a300000000",
+      "value": "300000000"
+    },
+    {
+      "ante": 13,
+      "bits": "4225e2d62c000000",
+      "value": "47000000000"
+    },
+    {
+      "ante": 14,
+      "bits": "42ba6016b2d00000",
+      "value": "29000000000000"
+    },
+    {
+      "ante": 15,
+      "bits": "437118f178fb4800",
+      "value": "7.7e+16"
+    },
+    {
+      "ante": 16,
+      "bits": "44474f72e1c329f8",
+      "value": "8.6e+20"
+    },
+    {
+      "ante": 17,
+      "bits": "45415eec47f6cf7e",
+      "value": "4.2e+25"
+    },
+    {
+      "ante": 18,
+      "bits": "465d07b368abd53f",
+      "value": "9.2e+30"
+    },
+    {
+      "ante": 19,
+      "bits": "479baf6c14fe7f6b",
+      "value": "9.2e+36"
+    },
+    {
+      "ante": 20,
+      "bits": "48fed9da488dd782",
+      "value": "4.3e+43"
+    },
+    {
+      "ante": 21,
+      "bits": "4a84bd9b82a94060",
+      "value": "9.7e+50"
+    },
+    {
+      "ante": 22,
+      "bits": "4c2fdca16e04b86d",
+      "value": "1e+59"
+    },
+    {
+      "ante": 23,
+      "bits": "4e0135f184e48bb8",
+      "value": "5.8e+67"
+    },
+    {
+      "ante": 24,
+      "bits": "4ff61bcca7119916",
+      "value": "1.6e+77"
+    },
+    {
+      "ante": 25,
+      "bits": "52134da7c0d0e81c",
+      "value": "2.4e+87"
+    },
+    {
+      "ante": 26,
+      "bits": "54563ceb1f5cd524",
+      "value": "1.9e+98"
+    },
+    {
+      "ante": 27,
+      "bits": "56c1e2288e362b3c",
+      "value": "8.4e+109"
+    },
+    {
+      "ante": 28,
+      "bits": "59535ceaeb2d28c1",
+      "value": "2e+122"
+    },
+    {
+      "ante": 29,
+      "bits": "5c0db7bd6d5c451f",
+      "value": "2.7e+135"
+    },
+    {
+      "ante": 30,
+      "bits": "5ef06c5fdf397456",
+      "value": "2.1e+149"
+    },
+    {
+      "ante": 31,
+      "bits": "61fb81b320be3616",
+      "value": "9.9e+163"
+    },
+    {
+      "ante": 32,
+      "bits": "6530a849252d9a4e",
+      "value": "2.7e+179"
+    },
+    {
+      "ante": 33,
+      "bits": "688e232b3d968ca8",
+      "value": "4.4e+195"
+    },
+    {
+      "ante": 34,
+      "bits": "6c14e9794e475495",
+      "value": "4.4e+212"
+    },
+    {
+      "ante": 35,
+      "bits": "6fc715c79e65b322",
+      "value": "2.8e+230"
+    },
+    {
+      "ante": 36,
+      "bits": "73a3aa61f30e9a19",
+      "value": "1.1e+249"
+    },
+    {
+      "ante": 37,
+      "bits": "77aa2acf06cc36e6",
+      "value": "2.7e+268"
+    },
+    {
+      "ante": 38,
+      "bits": "7bdd8d7b7390feef",
+      "value": "4.5e+288"
+    },
+    {
+      "ante": 39,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 40,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 41,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 42,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 43,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 44,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 45,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 46,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 47,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 48,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 49,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 50,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 51,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 52,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 53,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 54,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 55,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 56,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 57,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 58,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 59,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 60,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 61,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 62,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 63,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 64,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 65,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 66,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 67,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 68,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 69,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 70,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 71,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 72,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 73,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 74,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 75,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 76,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 77,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 78,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 79,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 80,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    }
+  ],
+  "2": [
+    {
+      "ante": -1,
+      "bits": "4059000000000000",
+      "value": "100"
+    },
+    {
+      "ante": 0,
+      "bits": "4059000000000000",
+      "value": "100"
+    },
+    {
+      "ante": 1,
+      "bits": "4072c00000000000",
+      "value": "300"
+    },
+    {
+      "ante": 2,
+      "bits": "408c200000000000",
+      "value": "900"
+    },
+    {
+      "ante": 3,
+      "bits": "40a4500000000000",
+      "value": "2600"
+    },
+    {
+      "ante": 4,
+      "bits": "40bf400000000000",
+      "value": "8000"
+    },
+    {
+      "ante": 5,
+      "bits": "40d3880000000000",
+      "value": "20000"
+    },
+    {
+      "ante": 6,
+      "bits": "40e1940000000000",
+      "value": "36000"
+    },
+    {
+      "ante": 7,
+      "bits": "40ed4c0000000000",
+      "value": "60000"
+    },
+    {
+      "ante": 8,
+      "bits": "40f86a0000000000",
+      "value": "100000"
+    },
+    {
+      "ante": 9,
+      "bits": "410c138000000000",
+      "value": "230000"
+    },
+    {
+      "ante": 10,
+      "bits": "4130c8e000000000",
+      "value": "1100000"
+    },
+    {
+      "ante": 11,
+      "bits": "416ab3f000000000",
+      "value": "14000000"
+    },
+    {
+      "ante": 12,
+      "bits": "41c1e1a300000000",
+      "value": "600000000"
+    },
+    {
+      "ante": 13,
+      "bits": "4235e2d62c000000",
+      "value": "94000000000"
+    },
+    {
+      "ante": 14,
+      "bits": "42ca6016b2d00000",
+      "value": "58000000000000"
+    },
+    {
+      "ante": 15,
+      "bits": "4380a741a4627800",
+      "value": "1.5e+17"
+    },
+    {
+      "ante": 16,
+      "bits": "44570a0f5040e504",
+      "value": "1.7e+21"
+    },
+    {
+      "ante": 17,
+      "bits": "45515eec47f6cf7e",
+      "value": "8.4e+25"
+    },
+    {
+      "ante": 18,
+      "bits": "466c662460d49e87",
+      "value": "1.8e+31"
+    },
+    {
+      "ante": 19,
+      "bits": "47ab1559096844ff",
+      "value": "1.8e+37"
+    },
+    {
+      "ante": 20,
+      "bits": "490ed9da488dd782",
+      "value": "8.6e+43"
+    },
+    {
+      "ante": 21,
+      "bits": "4a9450218a861777",
+      "value": "1.9e+51"
+    },
+    {
+      "ante": 22,
+      "bits": "4c40ba3b268f4739",
+      "value": "2.1e+59"
+    },
+    {
+      "ante": 23,
+      "bits": "4e10520cc039d3f1",
+      "value": "1.1e+68"
+    },
+    {
+      "ante": 24,
+      "bits": "5006ccab0c4a25df",
+      "value": "3.3e+77"
+    },
+    {
+      "ante": 25,
+      "bits": "5223b49b3f7fecf1",
+      "value": "4.9e+87"
+    },
+    {
+      "ante": 26,
+      "bits": "5466d2bb6a4b10a5",
+      "value": "3.9e+98"
+    },
+    {
+      "ante": 27,
+      "bits": "56d108269fd210cb",
+      "value": "1.6e+110"
+    },
+    {
+      "ante": 28,
+      "bits": "59635ceaeb2d28c1",
+      "value": "4e+122"
+    },
+    {
+      "ante": 29,
+      "bits": "5c1e449fbffa6c54",
+      "value": "5.5e+135"
+    },
+    {
+      "ante": 30,
+      "bits": "5f00d07a891c58a1",
+      "value": "4.3e+149"
+    },
+    {
+      "ante": 31,
+      "bits": "620a652fc4ea3e3e",
+      "value": "1.9e+164"
+    },
+    {
+      "ante": 32,
+      "bits": "6540a849252d9a4e",
+      "value": "5.4e+179"
+    },
+    {
+      "ante": 33,
+      "bits": "689e7ad75e49b6fb",
+      "value": "8.9e+195"
+    },
+    {
+      "ante": 34,
+      "bits": "6c25264f0c4252a2",
+      "value": "8.9e+212"
+    },
+    {
+      "ante": 35,
+      "bits": "6fd715c79e65b322",
+      "value": "5.6e+230"
+    },
+    {
+      "ante": 36,
+      "bits": "73b3aa61f30e9a19",
+      "value": "2.2e+249"
+    },
+    {
+      "ante": 37,
+      "bits": "77baa6dc578424f4",
+      "value": "5.5e+268"
+    },
+    {
+      "ante": 38,
+      "bits": "7bed8d7b7390feef",
+      "value": "9e+288"
+    },
+    {
+      "ante": 39,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 40,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 41,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 42,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 43,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 44,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 45,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 46,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 47,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 48,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 49,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 50,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 51,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 52,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 53,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 54,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 55,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 56,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 57,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 58,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 59,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 60,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 61,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 62,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 63,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 64,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 65,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 66,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 67,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 68,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 69,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 70,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 71,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 72,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 73,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 74,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 75,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 76,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 77,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 78,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 79,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 80,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    }
+  ],
+  "3": [
+    {
+      "ante": -1,
+      "bits": "4059000000000000",
+      "value": "100"
+    },
+    {
+      "ante": 0,
+      "bits": "4059000000000000",
+      "value": "100"
+    },
+    {
+      "ante": 1,
+      "bits": "4072c00000000000",
+      "value": "300"
+    },
+    {
+      "ante": 2,
+      "bits": "408f400000000000",
+      "value": "1000"
+    },
+    {
+      "ante": 3,
+      "bits": "40a9000000000000",
+      "value": "3200"
+    },
+    {
+      "ante": 4,
+      "bits": "40c1940000000000",
+      "value": "9000"
+    },
+    {
+      "ante": 5,
+      "bits": "40d86a0000000000",
+      "value": "25000"
+    },
+    {
+      "ante": 6,
+      "bits": "40ed4c0000000000",
+      "value": "60000"
+    },
+    {
+      "ante": 7,
+      "bits": "40fadb0000000000",
+      "value": "110000"
+    },
+    {
+      "ante": 8,
+      "bits": "41086a0000000000",
+      "value": "200000"
+    },
+    {
+      "ante": 9,
+      "bits": "411c138000000000",
+      "value": "460000"
+    },
+    {
+      "ante": 10,
+      "bits": "4140c8e000000000",
+      "value": "2200000"
+    },
+    {
+      "ante": 11,
+      "bits": "417ba81400000000",
+      "value": "29000000"
+    },
+    {
+      "ante": 12,
+      "bits": "41d1e1a300000000",
+      "value": "1200000000"
+    },
+    {
+      "ante": 13,
+      "bits": "4244f46b04000000",
+      "value": "180000000000"
+    },
+    {
+      "ante": 14,
+      "bits": "42d902d7bb380000",
+      "value": "1.1e+14"
+    },
+    {
+      "ante": 15,
+      "bits": "4390a741a4627800",
+      "value": "3e+17"
+    },
+    {
+      "ante": 16,
+      "bits": "44670a0f5040e504",
+      "value": "3.4e+21"
+    },
+    {
+      "ante": 17,
+      "bits": "45608b2a2c280291",
+      "value": "1.6e+26"
+    },
+    {
+      "ante": 18,
+      "bits": "467d30172aa1a2ef",
+      "value": "3.7e+31"
+    },
+    {
+      "ante": 19,
+      "bits": "47bbd5f0d7e40e06",
+      "value": "3.7e+37"
+    },
+    {
+      "ante": 20,
+      "bits": "491e7e04657a5501",
+      "value": "1.7e+44"
+    },
+    {
+      "ante": 21,
+      "bits": "4aa450218a861777",
+      "value": "3.8e+51"
+    },
+    {
+      "ante": 22,
+      "bits": "4c50ba3b268f4739",
+      "value": "4.2e+59"
+    },
+    {
+      "ante": 23,
+      "bits": "4e210ff60ec817c2",
+      "value": "2.3e+68"
+    },
+    {
+      "ante": 24,
+      "bits": "5016ccab0c4a25df",
+      "value": "6.6e+77"
+    },
+    {
+      "ante": 25,
+      "bits": "5233b49b3f7fecf1",
+      "value": "9.8e+87"
+    },
+    {
+      "ante": 26,
+      "bits": "5476d2bb6a4b10a5",
+      "value": "7.8e+98"
+    },
+    {
+      "ante": 27,
+      "bits": "56e19067d4d0a151",
+      "value": "3.3e+110"
+    },
+    {
+      "ante": 28,
+      "bits": "59739ae10e1db944",
+      "value": "8.1e+122"
+    },
+    {
+      "ante": 29,
+      "bits": "5c2e449fbffa6c54",
+      "value": "1.1e+136"
+    },
+    {
+      "ante": 30,
+      "bits": "5f10d07a891c58a1",
+      "value": "8.6e+149"
+    },
+    {
+      "ante": 31,
+      "bits": "621b1701de4eb925",
+      "value": "3.9e+164"
+    },
+    {
+      "ante": 32,
+      "bits": "654ed8d34e547314",
+      "value": "1e+180"
+    },
+    {
+      "ante": 33,
+      "bits": "68ad1c26db7d0dae",
+      "value": "1.7e+196"
+    },
+    {
+      "ante": 34,
+      "bits": "6c3432f814565a6d",
+      "value": "1.7e+213"
+    },
+    {
+      "ante": 35,
+      "bits": "6fe6ac3f7b919914",
+      "value": "1.1e+231"
+    },
+    {
+      "ante": 36,
+      "bits": "73c3aa61f30e9a19",
+      "value": "4.4e+249"
+    },
+    {
+      "ante": 37,
+      "bits": "77caa6dc578424f4",
+      "value": "1.1e+269"
+    },
+    {
+      "ante": 38,
+      "bits": "7bfd8d7b7390feef",
+      "value": "1.8e+289"
+    },
+    {
+      "ante": 39,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 40,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 41,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 42,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 43,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 44,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 45,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 46,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 47,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 48,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 49,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 50,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 51,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 52,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 53,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 54,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 55,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 56,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 57,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 58,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 59,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 60,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 61,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 62,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 63,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 64,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 65,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 66,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 67,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 68,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 69,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 70,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 71,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 72,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 73,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 74,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 75,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 76,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 77,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 78,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 79,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    },
+    {
+      "ante": 80,
+      "bits": "fff8000000000000",
+      "value": "nan"
+    }
+  ]
+}
