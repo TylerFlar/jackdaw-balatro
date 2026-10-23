@@ -4,9 +4,12 @@
 #![forbid(unsafe_code)]
 
 pub mod action;
+pub mod env;
 pub mod gym;
 pub mod mask;
 pub mod observation;
+pub mod reward;
+pub mod vector;
 
 #[cfg(test)]
 mod tests {

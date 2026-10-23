@@ -1,9 +1,9 @@
 """Tests for the unified game interface layer.
 
 Covers:
-- DirectAdapter reset/step/legal_actions cycle
-- DirectAdapter runs to completion with random_agent
-- BridgeAdapter(SimBackend) produces identical behavior to DirectAdapter
+- OracleAdapter reset/step/legal_actions cycle
+- OracleAdapter runs to completion with random_agent
+- BridgeAdapter(SimBackend) produces identical behavior to OracleAdapter
 - done/won flags set correctly on game over and win
 - GameAdapter protocol compliance
 """
@@ -31,9 +31,9 @@ from jackdaw.engine.actions import (
 )
 from jackdaw.env.game_interface import (
     BridgeAdapter,
-    DirectAdapter,
     GameAdapter,
     GameState,
+    OracleAdapter,
 )
 
 # ---------------------------------------------------------------------------
@@ -154,7 +154,7 @@ class TestGameState:
 
 class TestProtocol:
     def test_direct_adapter_satisfies_protocol(self):
-        assert isinstance(DirectAdapter(), GameAdapter)
+        assert isinstance(OracleAdapter(), GameAdapter)
 
     def test_bridge_adapter_satisfies_protocol(self):
         from jackdaw.bridge.backend import SimBackend
@@ -163,13 +163,13 @@ class TestProtocol:
 
 
 # ---------------------------------------------------------------------------
-# DirectAdapter tests
+# OracleAdapter tests
 # ---------------------------------------------------------------------------
 
 
 class TestDirectAdapter:
     def test_reset_returns_game_state(self):
-        adapter = DirectAdapter()
+        adapter = OracleAdapter()
         state = adapter.reset(BACK, STAKE, SEED)
         assert isinstance(state, GameState)
         assert state.phase == GamePhase.BLIND_SELECT
@@ -179,7 +179,7 @@ class TestDirectAdapter:
         assert not state.won
 
     def test_reset_sets_raw_state(self):
-        adapter = DirectAdapter()
+        adapter = OracleAdapter()
         adapter.reset(BACK, STAKE, SEED)
         gs = adapter.raw_state
         assert gs["phase"] == GamePhase.BLIND_SELECT
@@ -188,43 +188,43 @@ class TestDirectAdapter:
         assert "rng" in gs
 
     def test_step_select_blind(self):
-        adapter = DirectAdapter()
+        adapter = OracleAdapter()
         adapter.reset(BACK, STAKE, SEED)
         state = adapter.step(SelectBlind())
         assert state.phase == GamePhase.SELECTING_HAND
         assert state.hands_left > 0
 
     def test_legal_actions_blind_select(self):
-        adapter = DirectAdapter()
+        adapter = OracleAdapter()
         adapter.reset(BACK, STAKE, SEED)
         legal = adapter.get_legal_actions()
         assert any(isinstance(a, SelectBlind) for a in legal)
 
     def test_legal_actions_selecting_hand(self):
-        adapter = DirectAdapter()
+        adapter = OracleAdapter()
         adapter.reset(BACK, STAKE, SEED)
         adapter.step(SelectBlind())
         legal = adapter.get_legal_actions()
         assert any(isinstance(a, PlayHand) for a in legal)
 
     def test_done_false_initially(self):
-        adapter = DirectAdapter()
+        adapter = OracleAdapter()
         adapter.reset(BACK, STAKE, SEED)
         assert not adapter.done
         assert not adapter.won
 
     def test_raw_state_is_zero_copy(self):
         """raw_state must return the same dict object (no copies)."""
-        adapter = DirectAdapter()
+        adapter = OracleAdapter()
         adapter.reset(BACK, STAKE, SEED)
         gs1 = adapter.raw_state
         gs2 = adapter.raw_state
         assert gs1 is gs2
 
     def test_run_to_completion_random(self):
-        """DirectAdapter completes a full run with random agent."""
+        """OracleAdapter completes a full run with random agent."""
         random.seed(12345)
-        adapter = DirectAdapter()
+        adapter = OracleAdapter()
         adapter.reset(BACK, STAKE, SEED)
         actions = _run_to_completion(adapter, max_actions=5000)
         assert actions > 0
@@ -232,7 +232,7 @@ class TestDirectAdapter:
         assert adapter.done or adapter.won
 
     def test_reset_clears_previous_run(self):
-        adapter = DirectAdapter()
+        adapter = OracleAdapter()
         adapter.reset(BACK, STAKE, SEED)
         adapter.step(SelectBlind())
         # Reset should start fresh
@@ -315,7 +315,7 @@ class TestBridgeFollowsBalatrobot:
         from jackdaw.bridge.backend import SimBackend
         from jackdaw.engine.actions import SellCard, UseConsumable
 
-        for adapter, offered in ((DirectAdapter(), True), (BridgeAdapter(SimBackend()), False)):
+        for adapter, offered in ((OracleAdapter(), True), (BridgeAdapter(SimBackend()), False)):
             adapter.reset(BACK, STAKE, SEED)
             _open_celestial_pack_with_tray_planet(adapter)
             legal = adapter.get_legal_actions()
@@ -328,7 +328,7 @@ class TestBridgeFollowsBalatrobot:
         from jackdaw.env.balatro_env import BalatroEnvironment
 
         for factory, offered in (
-            (DirectAdapter, True),
+            (OracleAdapter, True),
             (lambda: BridgeAdapter(SimBackend()), False),
         ):
             env = BalatroEnvironment(adapter_factory=factory)
@@ -365,12 +365,12 @@ class TestBridgeFollowsBalatrobot:
 
 
 # ---------------------------------------------------------------------------
-# DirectAdapter vs BridgeAdapter(SimBackend) equivalence
+# OracleAdapter vs BridgeAdapter(SimBackend) equivalence
 # ---------------------------------------------------------------------------
 
 
 class TestEquivalence:
-    """DirectAdapter and BridgeAdapter(SimBackend) must produce identical
+    """OracleAdapter and BridgeAdapter(SimBackend) must produce identical
     behavior for the same seed when driven by the same deterministic agent.
     """
 
@@ -412,7 +412,7 @@ class TestEquivalence:
         """Both adapters produce the same state sequence with greedy agent."""
         from jackdaw.bridge.backend import SimBackend
 
-        direct = DirectAdapter()
+        direct = OracleAdapter()
         bridge = BridgeAdapter(SimBackend())
 
         ds = direct.reset(BACK, STAKE, SEED)
@@ -497,7 +497,7 @@ class TestTerminalFlags:
     def test_game_over_sets_done(self):
         """When the game reaches GAME_OVER, done must be True."""
         random.seed(99999)
-        adapter = DirectAdapter()
+        adapter = OracleAdapter()
         adapter.reset(BACK, STAKE, SEED)
         _run_to_completion(adapter, max_actions=5000)
 
@@ -509,7 +509,7 @@ class TestTerminalFlags:
         # Use a deterministic greedy agent that may or may not win —
         # we just verify the flag is consistent with raw state.
         random.seed(77777)
-        adapter = DirectAdapter()
+        adapter = OracleAdapter()
         adapter.reset(BACK, STAKE, SEED)
         _run_to_completion(adapter, max_actions=5000)
 
@@ -517,7 +517,7 @@ class TestTerminalFlags:
 
     def test_done_consistent_with_phase(self):
         """adapter.done must match phase == GAME_OVER."""
-        adapter = DirectAdapter()
+        adapter = OracleAdapter()
         adapter.reset(BACK, STAKE, SEED)
         # Not done at start
         assert not adapter.done

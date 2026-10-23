@@ -1,7 +1,7 @@
 """Integration tests for the Balatro RL environment.
 
 End-to-end tests that exercise the full stack:
-- Full episode runs with RandomAgent through DirectAdapter and BridgeAdapter
+- Full episode runs with RandomAgent through OracleAdapter and BridgeAdapter
 - Multi-seed stress testing for crash resilience
 - Observation consistency with engine state
 - Action roundtrip fidelity
@@ -19,7 +19,7 @@ from jackdaw.env.action_space import (
     get_action_mask,
 )
 from jackdaw.env.agents import RandomAgent
-from jackdaw.env.game_interface import BridgeAdapter, DirectAdapter
+from jackdaw.env.game_interface import BridgeAdapter, OracleAdapter
 from jackdaw.env.observation import (
     D_CONSUMABLE,
     D_GLOBAL,
@@ -108,15 +108,15 @@ def _run_episode_collecting(
 
 
 # ---------------------------------------------------------------------------
-# (a) Full episode test — DirectAdapter
+# (a) Full episode test — OracleAdapter
 # ---------------------------------------------------------------------------
 
 
 class TestFullEpisodeDirectAdapter:
-    """Run RandomAgent through a complete episode via DirectAdapter."""
+    """Run RandomAgent through a complete episode via OracleAdapter."""
 
     def test_episode_terminates(self):
-        adapter = DirectAdapter()
+        adapter = OracleAdapter()
         adapter.reset(BACK, STAKE, SEED)
         agent = RandomAgent()
         result = _run_episode_collecting(adapter, agent, collect_obs=True)
@@ -126,7 +126,7 @@ class TestFullEpisodeDirectAdapter:
         assert result["steps"] > 0, "No steps taken"
 
     def test_observations_valid(self):
-        adapter = DirectAdapter()
+        adapter = OracleAdapter()
         adapter.reset(BACK, STAKE, SEED)
         agent = RandomAgent()
         result = _run_episode_collecting(adapter, agent, collect_obs=True)
@@ -159,7 +159,7 @@ class TestFullEpisodeDirectAdapter:
                 assert np.isfinite(obs.shop_cards).all(), "NaN/Inf in shop_cards"
 
     def test_action_masking_consistent(self):
-        adapter = DirectAdapter()
+        adapter = OracleAdapter()
         adapter.reset(BACK, STAKE, SEED)
         agent = RandomAgent()
         result = _run_episode_collecting(adapter, agent, collect_obs=True)
@@ -179,8 +179,8 @@ class TestBridgeAdapterIdenticalTrajectory:
     def test_identical_trajectory(self):
         from jackdaw.bridge.backend import SimBackend
 
-        # Run DirectAdapter episode
-        direct = DirectAdapter()
+        # Run OracleAdapter episode
+        direct = OracleAdapter()
         direct.reset(BACK, STAKE, SEED)
 
         bridge = BridgeAdapter(SimBackend())
@@ -243,7 +243,7 @@ class TestMultiSeedStress:
         step_counts: list[int] = []
 
         for seed in seeds:
-            adapter = DirectAdapter()
+            adapter = OracleAdapter()
             adapter.reset(BACK, STAKE, seed)
             agent = RandomAgent()
             agent.reset()
@@ -308,7 +308,7 @@ class TestObservationConsistency:
     """At each step, observation entity counts must match game state."""
 
     def test_entity_counts_match(self):
-        adapter = DirectAdapter()
+        adapter = OracleAdapter()
         adapter.reset(BACK, STAKE, SEED)
         agent = RandomAgent()
         agent.reset()
@@ -390,7 +390,7 @@ class TestActionRoundtrip:
     """engine_action -> factored -> engine_action must be lossless for representable actions."""
 
     def test_roundtrip_across_episode(self):
-        adapter = DirectAdapter()
+        adapter = OracleAdapter()
         adapter.reset(BACK, STAKE, SEED)
         agent = RandomAgent()
         agent.reset()
@@ -446,7 +446,7 @@ class TestActionRoundtrip:
             SortHand,
         )
 
-        adapter = DirectAdapter()
+        adapter = OracleAdapter()
         adapter.reset(BACK, STAKE, SEED)
         gs = adapter.raw_state
 
@@ -571,7 +571,7 @@ class TestFullEpisodeRandomAgent:
     def test_no_crashes(self):
         """Primary goal: no crashes across 20 episodes."""
         for seed in self._seeds():
-            adapter = DirectAdapter()
+            adapter = OracleAdapter()
             adapter.reset(BACK, STAKE, seed)
             agent = RandomAgent()
             result = _run_full_episode(adapter, agent)
@@ -581,7 +581,7 @@ class TestFullEpisodeRandomAgent:
     def test_observations_valid(self):
         """Every observation has correct shapes and no NaN."""
         for seed in self._seeds():
-            adapter = DirectAdapter()
+            adapter = OracleAdapter()
             adapter.reset(BACK, STAKE, seed)
             agent = RandomAgent()
             result = _run_full_episode(adapter, agent)
@@ -604,7 +604,7 @@ class TestFullEpisodeRandomAgent:
     def test_masks_have_legal_type(self):
         """Every ActionMask has at least one legal type until game over."""
         for seed in self._seeds():
-            adapter = DirectAdapter()
+            adapter = OracleAdapter()
             adapter.reset(BACK, STAKE, seed)
             agent = RandomAgent()
             result = _run_full_episode(adapter, agent)
@@ -616,7 +616,7 @@ class TestFullEpisodeRandomAgent:
     def test_action_conversions_valid(self):
         """Every FactoredAction converts to engine action without ValueError."""
         for seed in self._seeds():
-            adapter = DirectAdapter()
+            adapter = OracleAdapter()
             adapter.reset(BACK, STAKE, seed)
             agent = RandomAgent()
             result = _run_full_episode(adapter, agent)
@@ -626,7 +626,7 @@ class TestFullEpisodeRandomAgent:
     def test_episodes_terminate(self):
         """Every episode terminates within max_steps."""
         for seed in self._seeds():
-            adapter = DirectAdapter()
+            adapter = OracleAdapter()
             adapter.reset(BACK, STAKE, seed)
             agent = RandomAgent()
             result = _run_full_episode(adapter, agent)
@@ -644,7 +644,7 @@ class TestActionRoundtripFidelity:
     @pytest.mark.slow
     def test_all_legal_actions_roundtrip(self):
         """For every legal action at every step, convert to factored and back."""
-        adapter = DirectAdapter()
+        adapter = OracleAdapter()
         adapter.reset(BACK, STAKE, "ROUNDTRIP_FULL")
         agent = RandomAgent()
         agent.reset()
@@ -723,7 +723,7 @@ class TestObservationEncodingStress:
         total_obs_checked = 0
 
         for seed in seeds:
-            adapter = DirectAdapter()
+            adapter = OracleAdapter()
             adapter.reset(BACK, STAKE, seed)
             agent = RandomAgent()
             agent.reset()
@@ -840,7 +840,7 @@ class TestMultiDeckMultiStake:
             for seed_idx in range(self.N_SEEDS_PER_DECK):
                 seed = f"DECK_{deck}_{seed_idx}"
                 try:
-                    adapter = DirectAdapter()
+                    adapter = OracleAdapter()
                     adapter.reset(deck, STAKE, seed)
                     agent = RandomAgent()
                     result = _run_full_episode(adapter, agent, max_steps=MAX_STEPS)

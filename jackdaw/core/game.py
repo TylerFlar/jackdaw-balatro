@@ -119,6 +119,17 @@ class Game:
         """An independent copy of the run."""
         return Game(self._g.clone())
 
+    def freeze(self) -> Game:
+        """A copy that later steps of this run don't change (the env hands out its live run;
+        freeze it to keep a state)."""
+        return Game(self._g.clone())
+
+    def legal_actions(self) -> list[Any]:
+        """The legal actions here (dataclasses from :mod:`jackdaw.engine.actions`), in the
+        Python engine's order: marker ``PlayHand`` / ``Discard`` with an empty selection, and
+        each usable consumable with its default selection."""
+        return [decode_action(a) for a in json.loads(self._g.legal_actions())]
+
     def state_hash(self) -> str:
         """The SHA-256 hex digest of the canonical snapshot (``tests/parity/canon.py``)."""
         return self._g.state_hash()

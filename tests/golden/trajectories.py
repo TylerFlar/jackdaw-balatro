@@ -19,7 +19,7 @@ Kinds:
   mid-round creation with enhancement-gated pools).  Each step also
   fingerprints ``encode_observation``, ``get_action_mask``, the legal
   action list and the Gym wrapper's flat action table for that state.
-* ``factored``: :class:`BalatroEnvironment` end to end over DirectAdapter
+* ``factored``: :class:`BalatroEnvironment` end to end over OracleAdapter
   and BridgeAdapter(SimBackend), fingerprinting the complete reset/step
   return values, the reward ``Transition`` and the built-in rewards.
 * ``gym``: :class:`BalatroGymnasiumEnv` end to end (uniform and smart
@@ -60,7 +60,7 @@ from jackdaw.env.action_space import (
     get_action_mask,
 )
 from jackdaw.env.balatro_env import BalatroEnvironment, _action_mask_to_game
-from jackdaw.env.game_interface import BridgeAdapter, DirectAdapter
+from jackdaw.env.game_interface import BridgeAdapter, OracleAdapter
 from jackdaw.env.game_spec import GameActionMask
 from jackdaw.env.gymnasium_wrapper import BalatroGymnasiumEnv
 from jackdaw.env.observation import encode_observation
@@ -491,7 +491,7 @@ def run_engine(spec: EngineSpec, tape: list[Any] | None = None) -> Result:
         taken = 0
 
         # A wrapper instance only for its action-table builder.
-        gym = BalatroGymnasiumEnv(adapter_factory=DirectAdapter)
+        gym = BalatroGymnasiumEnv(adapter_factory=OracleAdapter)
         gym._rng = Xoshiro256(zlib.crc32(spec.seed.encode()))
 
         for _ in range(spec.max_steps):
@@ -536,7 +536,7 @@ def run_engine(spec: EngineSpec, tape: list[Any] | None = None) -> Result:
 
 def _adapter_factory(kind: str) -> Callable[[], Any]:
     if kind == "direct":
-        return DirectAdapter
+        return OracleAdapter
     return lambda: BridgeAdapter(SimBackend())
 
 
@@ -618,7 +618,7 @@ def run_gym(spec: GymSpec, tape: list[Any] | None = None) -> Result:
     choose = _Chooser(tape, res)
     with _fresh_sort_ids():
         env = BalatroGymnasiumEnv(
-            adapter_factory=DirectAdapter,
+            adapter_factory=OracleAdapter,
             back_keys=[spec.back],
             stakes=[spec.stake],
             seed_prefix=f"GOLD_G_{spec.name}",
@@ -887,7 +887,7 @@ def _enumerate_probe(res: Result) -> None:
     ]
     pack = [create_consumable("c_lovers"), create_joker("j_joker"), create_consumable("c_sigil")]
     raw = {"consumables": consumables, "pack_cards": pack}
-    gym = BalatroGymnasiumEnv(adapter_factory=DirectAdapter)
+    gym = BalatroGymnasiumEnv(adapter_factory=OracleAdapter)
     gen = random.Random(5)
     for n in range(0, 16):
         for lo, hi in ((1, 5), (1, 1), (2, 3), (0, 0), (5, 5), (3, 2)):

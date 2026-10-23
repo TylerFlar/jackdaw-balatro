@@ -35,7 +35,7 @@ from jackdaw.env.action_space import (
     get_consumable_target_info,
 )
 from jackdaw.env.balatro_env import _action_mask_to_game
-from jackdaw.env.game_interface import DirectAdapter
+from jackdaw.env.game_interface import OracleAdapter
 from jackdaw.env.game_spec import FactoredAction, GameActionMask
 from jackdaw.env.gymnasium_wrapper import BalatroGymnasiumEnv
 from jackdaw.env.observation import encode_observation
@@ -51,7 +51,7 @@ from tests.parity.pyengine import PyEngine
 
 _SPECS = load_specs()
 # A wrapper instance only for its action-table builder.
-_GYM = BalatroGymnasiumEnv(adapter_factory=DirectAdapter)
+_GYM = BalatroGymnasiumEnv(adapter_factory=OracleAdapter)
 
 
 def assert_mask_same(py: ActionMask, rs: ActionMask, where: str) -> None:

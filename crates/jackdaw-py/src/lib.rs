@@ -7,6 +7,7 @@
 //! so a Rust panic reaches Python as an exception instead of aborting the interpreter.
 
 mod env;
+mod gym;
 
 use jackdaw_core::area::AreaId;
 use jackdaw_env::mask::ActionMask;
@@ -71,8 +72,28 @@ fn game_from_snapshot(text: &str) -> PyResult<jackdaw_core::game::Game> {
     jackdaw_core::game::Game::from_snapshot(&value).map_err(value_error)
 }
 
+/// A refused step as the Python exception for it.
+fn step_error(e: jackdaw_core::game::StepError) -> PyErr {
+    use jackdaw_core::game::StepError;
+    match e {
+        StepError::Illegal(m) => IllegalActionError::new_err(m),
+        StepError::Unported(m) => NotPortedError::new_err(m),
+    }
+}
+
 /// Row counts of the five entity arrays (hand, jokers, consumables, shop, pack).
 type ObservationRows = (usize, usize, usize, usize, usize);
+
+/// Everything `BalatroEnvironment` reads from a run: the observation (as `observation()`), the
+/// action mask (as `action_mask()`), the state summary and the shop's (cards, vouchers,
+/// boosters) counts.
+type EnvView<'py> = (
+    Bound<'py, PyByteArray>,
+    ObservationRows,
+    env::MaskParts<'py>,
+    gym::StateParts,
+    (usize, usize, usize),
+);
 
 /// An encoded observation for Python: its `f32` values in native byte order, in a fresh
 /// `bytearray` (so `np.frombuffer` gives writable arrays without another copy), and the row
@@ -98,22 +119,7 @@ impl Game {
     #[staticmethod]
     #[pyo3(signature = (back, stake, seed, challenge=None))]
     fn new(back: &str, stake: u8, seed: &str, challenge: Option<&str>) -> PyResult<Self> {
-        use jackdaw_core::run::RunSpec;
-        let back = jackdaw_core::card::center_by_key(back)
-            .ok_or_else(|| value_error(format!("unknown back {back:?}")))?;
-        let challenge = match challenge {
-            Some(id) => Some(
-                jackdaw_core::run::challenge_id(id)
-                    .ok_or_else(|| value_error(format!("unknown challenge {id:?}")))?,
-            ),
-            None => None,
-        };
-        let spec = RunSpec {
-            back,
-            stake,
-            seed: seed.to_owned(),
-            challenge,
-        };
+        let spec = gym::run_spec(back, stake, seed, challenge)?;
         let inner = jackdaw_core::game::Game::new_run(&spec).map_err(value_error)?;
         Ok(Game::wrap(inner))
     }
@@ -217,13 +223,52 @@ impl Game {
     /// On an error the game is unchanged.
     fn step(&mut self, action: &str) -> PyResult<()> {
         use jackdaw_core::action::Action;
-        use jackdaw_core::game::StepError;
         let value: serde_json::Value = serde_json::from_str(action).map_err(value_error)?;
         let action = Action::from_json(&value).map_err(value_error)?;
-        self.inner.step(&action).map_err(|e| match e {
-            StepError::Illegal(m) => IllegalActionError::new_err(m),
-            StepError::Unported(m) => NotPortedError::new_err(m),
-        })
+        self.inner.step(&action).map_err(step_error)
+    }
+
+    /// What ``BalatroEnvironment`` reads from the run: ``(obs, rows, mask, state, shop_splits)``,
+    /// the observation and mask as ``observation()`` and ``action_mask()`` give them, the
+    /// ``GameState`` summary, and the shop's card, voucher and booster counts.
+    #[pyo3(signature = (legality="vanilla"))]
+    fn env_view<'py>(&mut self, py: Python<'py>, legality: &str) -> PyResult<EnvView<'py>> {
+        let legality = env::legality(legality)?;
+        let obs = observation_to_py(py, self.encoder.encode(&self.inner.gs))?;
+        self.mask.compute(&self.inner, legality);
+        let mask = env::mask_to_py(py, &self.mask)?;
+        let state = gym::state_to_py(&jackdaw_env::reward::StateSummary::of(&self.inner));
+        let areas = &self.inner.gs.areas;
+        let splits = (
+            areas.shop_jokers.len(),
+            areas.shop_vouchers.len(),
+            areas.shop_booster.len(),
+        );
+        Ok((obs.0, obs.1, mask, state, splits))
+    }
+
+    /// One ``BalatroEnvironment`` step: the factored action's engine form taken, then
+    /// ``env_view``. Raises ``ValueError`` for a factored action with no engine form,
+    /// ``IllegalActionError`` or ``NotPortedError`` when the step is refused (the run is
+    /// unchanged).
+    #[pyo3(signature = (action_type, entity_target=None, card_target=None, legality="vanilla"))]
+    fn env_step<'py>(
+        &mut self,
+        py: Python<'py>,
+        action_type: i64,
+        entity_target: Option<i64>,
+        card_target: Option<Vec<i64>>,
+        legality: &str,
+    ) -> PyResult<EnvView<'py>> {
+        let fa = env::factored_from_py(action_type, entity_target, card_target)?;
+        let action = jackdaw_env::action::to_engine(&fa, &self.inner).map_err(value_error)?;
+        self.inner.step(&action).map_err(step_error)?;
+        self.env_view(py, legality)
+    }
+
+    /// The ``GameState`` summary of the run (``jackdaw.env.game_interface.GameState``).
+    fn env_state(&self) -> gym::StateParts {
+        gym::state_to_py(&jackdaw_env::reward::StateSummary::of(&self.inner))
     }
 
     /// The legal actions here, as a JSON list of tape-form actions, in the Python engine's
@@ -311,6 +356,26 @@ mod _core {
 
     #[pymodule_export]
     use super::{Game, IllegalActionError, NotPortedError};
+
+    #[pymodule_export]
+    use super::gym::{GymEnv, VectorEnv};
+
+    /// The Gym observation's flattened length (global context, padded entity arrays, counts).
+    #[allow(non_upper_case_globals)]
+    #[pymodule_export]
+    const GYM_OBS_LEN: usize = jackdaw_env::env::GYM_OBS_LEN;
+
+    /// The Gym action space's size.
+    #[allow(non_upper_case_globals)]
+    #[pymodule_export]
+    const MAX_ACTIONS: usize = jackdaw_env::gym::MAX_ACTIONS;
+
+    /// The Gym observation's rows per entity array (hand cards, jokers, consumables, shop
+    /// items, pack cards).
+    #[pyfunction]
+    fn _gym_max_counts() -> [usize; 5] {
+        jackdaw_env::env::MAX_COUNTS
+    }
 
     /// Version of the Rust crates; matches the `jackdaw` distribution version.
     #[allow(non_upper_case_globals)]

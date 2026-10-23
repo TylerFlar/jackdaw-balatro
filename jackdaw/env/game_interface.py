@@ -1,27 +1,34 @@
 """Unified game interface layer for agents and Gymnasium environments.
 
-Provides a single abstraction over both the direct in-process engine
-(for training) and the balatrobot bridge (for validation against real
-Balatro).  Agents interact exclusively through :class:`GameInterface`-
-compatible adapters — they never touch raw ``game_state`` dicts or
-JSON-RPC directly.
+Provides a single abstraction over the in-process engines (for training)
+and the balatrobot bridge (for validation against real Balatro).  Agents
+interact exclusively through :class:`GameAdapter`-compatible adapters —
+they never touch raw ``game_state`` dicts or JSON-RPC directly.
 
 Architecture::
 
-                    ┌─ DirectAdapter(engine step/get_legal_actions)  ← training
-    [Agent/Model] → │
-                    └─ BridgeAdapter(SimBackend or LiveBackend)      ← validation
+                    ┌─ DirectAdapter(Rust engine, jackdaw.core.Game)   ← training
+    [Agent/Model] → ├─ OracleAdapter(Python engine, raw_state dict)    ← parity checks
+                    └─ BridgeAdapter(SimBackend or LiveBackend)        ← validation
+
+:class:`DirectAdapter` exposes its run as ``game`` (a live
+:class:`jackdaw.core.Game`); the Python-engine adapters expose the engine's
+dict as ``raw_state``.  The Python engine is the reference the Rust one is
+checked against until it is retired.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 import numpy as np
 
 from jackdaw.engine.actions import Action, GamePhase
 from jackdaw.env.action_space import ActionMask, ActionType
+
+if TYPE_CHECKING:
+    from jackdaw.core import Game
 
 # ---------------------------------------------------------------------------
 # GameState — lightweight frozen snapshot
@@ -96,6 +103,42 @@ def _snapshot(gs: dict[str, Any]) -> GameState:
     )
 
 
+_PHASES: dict[str, GamePhase] = {p.value: p for p in GamePhase}
+
+StateParts = tuple[str, str | None, bool, bool, list[Any], float]
+
+
+def game_state_from_parts(parts: StateParts) -> GameState:
+    """A :class:`GameState` from ``jackdaw._core``'s summary of a Rust run.
+
+    Whole numbers come back as ``int`` and ``won`` follows :func:`run_won`, as
+    in :func:`_snapshot`.
+    """
+    phase, blind_on_deck, won, done, nums, chips = parts
+    ante, rnd, dollars, hands, discards, hand_size, jokers, consumables, blind_chips = nums
+    return GameState(
+        phase=_PHASES[phase],
+        ante=ante,
+        round=rnd,
+        dollars=dollars,
+        hands_left=hands,
+        discards_left=discards,
+        hand_size=hand_size,
+        joker_slots=jokers,
+        consumable_slots=consumables,
+        blind_on_deck=blind_on_deck,
+        blind_chips=blind_chips,
+        chips=chips,
+        won=won,
+        done=done,
+    )
+
+
+def game_state(game: Game) -> GameState:
+    """The :class:`GameState` of a Rust run."""
+    return game_state_from_parts(game._g.env_state())
+
+
 # ---------------------------------------------------------------------------
 # GameAdapter protocol
 # ---------------------------------------------------------------------------
@@ -105,9 +148,10 @@ def _snapshot(gs: dict[str, Any]) -> GameState:
 class GameAdapter(Protocol):
     """Backend-agnostic game adapter.
 
-    Both :class:`DirectAdapter` and :class:`BridgeAdapter` satisfy this
-    protocol.  Agents and the Gymnasium env program against this
-    interface exclusively.
+    :class:`DirectAdapter`, :class:`OracleAdapter` and :class:`BridgeAdapter`
+    satisfy this protocol.  Agents and the Gymnasium env program against
+    this interface exclusively.  An adapter also exposes its run, as
+    ``game`` (the Rust engine) or ``raw_state`` (the Python engine's dict).
     """
 
     def reset(
@@ -130,11 +174,6 @@ class GameAdapter(Protocol):
         ...
 
     @property
-    def raw_state(self) -> dict[str, Any]:
-        """Access the underlying engine dict (for observation encoding)."""
-        ...
-
-    @property
     def done(self) -> bool:
         """True if game is over (won or lost)."""
         ...
@@ -146,15 +185,78 @@ class GameAdapter(Protocol):
 
 
 # ---------------------------------------------------------------------------
-# DirectAdapter — wraps the engine directly (fast path for training)
+# DirectAdapter — the Rust engine in process (fast path for training)
 # ---------------------------------------------------------------------------
 
 
 class DirectAdapter:
-    """Zero-overhead adapter that wraps the in-process engine.
+    """Adapter over the Rust engine (:class:`jackdaw.core.Game`), in process.
 
-    No serialization, no IPC, no copies.  ``raw_state`` returns the
-    live engine dict directly.
+    ``game`` is the live run: the next step moves it on, so read what you
+    need or ``game.freeze()`` a copy.  There is no ``raw_state`` dict; the
+    Python engine's adapter (:class:`OracleAdapter`) keeps one.
+    """
+
+    def __init__(self) -> None:
+        self._game: Game | None = None
+
+    def reset(
+        self,
+        back_key: str,
+        stake: int,
+        seed: str,
+        *,
+        challenge: dict[str, Any] | str | None = None,
+    ) -> GameState:
+        from jackdaw.core import Game
+
+        challenge_id = challenge.get("id") if isinstance(challenge, dict) else challenge
+        self._game = Game.new(back_key, stake, seed, challenge_id)
+        return game_state(self._game)
+
+    def step(self, action: Action) -> GameState:
+        self.game.step(action)
+        return game_state(self.game)
+
+    def get_legal_actions(self) -> list[Action]:
+        # Every legal action has a factored form (RerollBoss and BuyAndUse are
+        # action types 21 and 22).
+        return self.game.legal_actions()
+
+    @property
+    def game(self) -> Game:
+        """The live run (:class:`jackdaw.core.Game`)."""
+        if self._game is None:
+            raise RuntimeError("DirectAdapter: call reset() first")
+        return self._game
+
+    @property
+    def raw_state(self) -> dict[str, Any]:
+        raise AttributeError(
+            "DirectAdapter runs the Rust engine: read adapter.game (a jackdaw.core.Game); "
+            "OracleAdapter keeps the Python engine's raw_state dict"
+        )
+
+    @property
+    def done(self) -> bool:
+        return self.game.phase == GamePhase.GAME_OVER
+
+    @property
+    def won(self) -> bool:
+        return game_state(self.game).won
+
+
+# ---------------------------------------------------------------------------
+# OracleAdapter — the Python engine, the reference the Rust one is checked against
+# ---------------------------------------------------------------------------
+
+
+class OracleAdapter:
+    """Adapter over the Python engine (the oracle), in process.
+
+    ``raw_state`` returns the live engine dict directly.  It plays exactly
+    as :class:`DirectAdapter` wherever the Rust engine matches the oracle;
+    the parity tests run both.
     """
 
     def __init__(self) -> None:

@@ -15,7 +15,7 @@ import pytest
 from jackdaw.engine.actions import Discard, PlayHand
 from jackdaw.env.action_space import engine_action_to_factored, get_action_mask
 from jackdaw.env.balatro_env import BalatroEnvironment
-from jackdaw.env.game_interface import DirectAdapter
+from jackdaw.env.game_interface import OracleAdapter
 from jackdaw.env.gymnasium_wrapper import BalatroGymnasiumEnv
 from jackdaw.env.observation import encode_observation
 
@@ -36,11 +36,11 @@ def _resolve_action(action, gs: dict, rng=random):
     return action
 
 
-def _make_adapter_at_hand_phase() -> tuple[DirectAdapter, dict]:
+def _make_adapter_at_hand_phase() -> tuple[OracleAdapter, dict]:
     """Create an adapter and advance to SELECTING_HAND phase."""
     from jackdaw.engine.actions import GamePhase, SelectBlind
 
-    adapter = DirectAdapter()
+    adapter = OracleAdapter()
     adapter.reset("b_red", 1, "BENCH_SEED_42")
 
     # Advance to selecting_hand
@@ -65,7 +65,7 @@ def _collect_game_states(n: int) -> list[dict]:
     so each sample is deep-copied; otherwise every sample in an episode
     would alias that episode's final state.
     """
-    adapter = DirectAdapter()
+    adapter = OracleAdapter()
     adapter.reset("b_red", 1, "BENCH_COLLECT_0")
     states = []
     seed_counter = 0
@@ -89,11 +89,11 @@ def _collect_game_states(n: int) -> list[dict]:
 
 @pytest.mark.benchmark
 class TestEnvStepsPerSecond:
-    """Assert that DirectAdapter env steps run fast enough for training."""
+    """Assert that OracleAdapter env steps run fast enough for training."""
 
     def test_env_steps_per_second(self):
         """Full env step loop (engine + encode + mask) > 500 steps/sec."""
-        adapter = DirectAdapter()
+        adapter = OracleAdapter()
         adapter.reset("b_red", 1, "BENCH_SPS_0")
         n = 500
         done_count = 0
@@ -213,13 +213,13 @@ class TestWrapperThroughput:
     """End-to-end throughput of the two env wrappers (resets included)."""
 
     def test_gymnasium_env_steps_per_second(self):
-        env = BalatroGymnasiumEnv(adapter_factory=DirectAdapter)
+        env = BalatroGymnasiumEnv(adapter_factory=OracleAdapter)
         sps = _random_gym_steps(env, 2000, seed=1)
         print(f"\nBalatroGymnasiumEnv: {sps:.0f} steps/sec")
         assert sps > 300, f"Only {sps:.0f} steps/sec (target: >300)"
 
     def test_balatro_environment_steps_per_second(self):
-        env = BalatroEnvironment(adapter_factory=DirectAdapter, seed_prefix="BENCH_FACTORED")
+        env = BalatroEnvironment(adapter_factory=OracleAdapter, seed_prefix="BENCH_FACTORED")
         rng = random.Random(1)
         _, _, info = env.reset()
         n = 2000
