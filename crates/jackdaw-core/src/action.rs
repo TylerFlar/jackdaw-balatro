@@ -199,6 +199,9 @@ impl Game {
         let mut next = self.clone();
         next.apply(action)?;
         next.settle();
+        if next.poll_hand_size() {
+            next.settle();
+        }
         if let Some(what) = next.rt.unported.take() {
             return unported(what);
         }
@@ -262,15 +265,6 @@ impl Game {
         Ok(())
     }
 
-    /// Refuse a step in a run whose rules the port doesn't have yet. Jokers and tags that
-    /// aren't ported refuse the step themselves when the step consults them.
-    fn check_ported(&self) -> Result<(), StepError> {
-        if self.gs.modifier("minus_hand_size_per_X_dollar").is_some() {
-            return unported("the minus_hand_size_per_X_dollar challenge rule");
-        }
-        Ok(())
-    }
-
     /// A card in a shop area: its sort id and price.
     fn shop_card(&self, area: AreaId, i: usize) -> Result<&Card, StepError> {
         match self.gs.areas.get(area).get(i) {
@@ -321,7 +315,6 @@ impl Game {
         match action {
             Action::SelectBlind => {
                 self.require(LuaState::BlindSelect)?;
-                self.check_ported()?;
                 self.select_blind();
             }
             Action::PlayHand(cards) => {
@@ -330,7 +323,6 @@ impl Game {
                     return illegal("no hands left");
                 }
                 let ids = self.select(cards)?;
-                self.check_ported()?;
                 self.rt.highlighted = ids;
                 self.play_cards_from_highlighted();
             }
@@ -340,7 +332,6 @@ impl Game {
                     return illegal("no discards left");
                 }
                 let ids = self.select(cards)?;
-                self.check_ported()?;
                 self.rt.highlighted = ids;
                 self.parse_highlighted();
                 self.discard_cards_from_highlighted(false);
@@ -383,7 +374,6 @@ impl Game {
             }
             Action::SkipBlind => {
                 self.require(LuaState::BlindSelect)?;
-                self.check_ported()?;
                 // Only the Small and Big blinds have a tag to skip for (UI_definitions.lua:1519-1523).
                 let slot = match self.gs.blind_on_deck {
                     Some(s @ (BlindSlot::Small | BlindSlot::Big)) => s,
@@ -393,17 +383,14 @@ impl Game {
             }
             Action::CashOut => {
                 self.require(LuaState::RoundEval)?;
-                self.check_ported()?;
                 self.cash_out();
             }
             Action::NextRound => {
                 self.require(LuaState::Shop)?;
-                self.check_ported()?;
                 self.toggle_shop();
             }
             Action::Reroll => {
                 self.require(LuaState::Shop)?;
-                self.check_ported()?;
                 // G.FUNCS.can_reroll (button_callbacks.lua:2076-2090).
                 let cost = self.gs.current_round.reroll_cost;
                 if self.spendable() - cost < 0.0 && cost != 0.0 {
@@ -413,7 +400,6 @@ impl Game {
             }
             Action::BuyCard(i) => {
                 self.require(LuaState::Shop)?;
-                self.check_ported()?;
                 let card = self.shop_card(AreaId::ShopJokers, *i)?;
                 // G.FUNCS.can_buy and check_for_buy_space (button_callbacks.lua:55-60, 2392).
                 if card.cost > self.spendable() && card.cost > 0.0 {
@@ -427,7 +413,6 @@ impl Game {
             }
             Action::SellCard { area, index } => {
                 self.require_sell_state()?;
-                self.check_ported()?;
                 let card = match self.gs.areas.get(*area).get(*index) {
                     Some(c) => c,
                     None => return illegal(format!("{area:?} index {index} out of range")),
@@ -444,7 +429,6 @@ impl Game {
             }
             Action::RerollBoss => {
                 self.require(LuaState::BlindSelect)?;
-                self.check_ported()?;
                 if !self.can_reroll_boss() {
                     return illegal("the boss can't be rerolled");
                 }
@@ -452,7 +436,6 @@ impl Game {
             }
             Action::BuyAndUse { index, targets } => {
                 self.require(LuaState::Shop)?;
-                self.check_ported()?;
                 let card = self.shop_card(AreaId::ShopJokers, *index)?;
                 let id = card.sort_id;
                 if !card.center().consumeable {
@@ -468,7 +451,6 @@ impl Game {
             }
             Action::RedeemVoucher(i) => {
                 self.require(LuaState::Shop)?;
-                self.check_ported()?;
                 let card = self.shop_card(AreaId::ShopVouchers, *i)?;
                 // G.FUNCS.can_redeem: no free-item exemption (button_callbacks.lua:96-104).
                 if card.cost > self.spendable() {
@@ -479,7 +461,6 @@ impl Game {
             }
             Action::OpenBooster(i) => {
                 self.require(LuaState::Shop)?;
-                self.check_ported()?;
                 let card = self.shop_card(AreaId::ShopBooster, *i)?;
                 // G.FUNCS.can_open (button_callbacks.lua:111-119).
                 if card.cost > 0.0 && card.cost > self.spendable() {
@@ -490,7 +471,6 @@ impl Game {
             }
             Action::PickPackCard { index, targets } => {
                 self.require_pack()?;
-                self.check_ported()?;
                 let card = self.shop_card(AreaId::PackCards, *index)?;
                 let id = card.sort_id;
                 if card.center().consumeable {
@@ -511,7 +491,6 @@ impl Game {
             }
             Action::SkipPack => {
                 self.require_pack()?;
-                self.check_ported()?;
                 // G.FUNCS.can_skip_booster (button_callbacks.lua:2132-2141).
                 let dealt_or_none = matches!(
                     self.rt.state,
@@ -524,7 +503,6 @@ impl Game {
                 self.skip_booster();
             }
             Action::UseConsumable { index, targets } => {
-                self.check_ported()?;
                 let card = match self.gs.areas.consumables.get(*index) {
                     Some(c) => c,
                     None => return illegal(format!("consumable index {index} out of range")),

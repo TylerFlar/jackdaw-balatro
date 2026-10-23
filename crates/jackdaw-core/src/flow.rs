@@ -136,9 +136,29 @@ impl Game {
     // Drawing
     // -----------------------------------------------------------------------
 
+    /// Luxury Tax (`modifiers.minus_hand_size_per_X_dollar`): every frame, `G.hand`'s update
+    /// compares `floor(dollars / X)` with `config.last_poll_size` (nil = 0) and changes the
+    /// hand size by the difference (cardarea.lua:245-251). There are no frames here: as in the
+    /// oracle, the poll runs after every action and before every draw, where vanilla's frames
+    /// would have caught up. True when the hand size changed.
+    pub(crate) fn poll_hand_size(&mut self) -> bool {
+        let Some(x) = self.modifier_num("minus_hand_size_per_X_dollar") else {
+            return false;
+        };
+        let poll = (self.gs.dollars / x).floor();
+        let last = self.gs.sim.hand_last_poll_size;
+        if poll == last {
+            return false;
+        }
+        self.gs.hand_size += last - poll;
+        self.gs.sim.hand_last_poll_size = poll;
+        true
+    }
+
     /// `G.FUNCS.draw_from_deck_to_hand(e)` (state_events.lua:355-377). True when the game is
     /// lost because the hand can hold no cards.
     pub(crate) fn draw_from_deck_to_hand(&mut self, e: Option<i64>) -> bool {
+        self.poll_hand_size();
         let pack = matches!(
             self.rt.state,
             LuaState::TarotPack | LuaState::SpectralPack | LuaState::PlanetPack
