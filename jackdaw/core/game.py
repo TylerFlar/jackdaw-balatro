@@ -125,6 +125,24 @@ class Game:
         """The canonical snapshot (``jackdaw.snapshot/1``)."""
         return _from_json(json.loads(self._g.snapshot()))
 
+    def replace_state(self, snapshot: dict[str, Any]) -> None:
+        """Replace the run's state with ``snapshot`` (an edited :meth:`to_dict`) at the same
+        decision point. Unlike :meth:`from_dict`, the runtime no snapshot carries stays: the
+        card-area settings BalatroBot's view reports (the deck's limit, a removed shop's
+        areas) and the hand's highlights (Cerulean Bell's forced card follows the snapshot).
+        The live lockstep reconciles its shadow run this way (``jackdaw.bridge.live``)."""
+        self._g.replace_state(json.dumps(_to_json(snapshot)))
+
+    def scoring_cards(self, positions: Any) -> tuple[str, list[int]] | None:
+        """What playing the hand cards at ``positions`` would score: ``(hand name, scoring
+        positions)``, the scoring hand ``evaluate_play`` builds (the best hand's cards, every
+        Stone Card, or every card with Splash). ``None`` for no cards."""
+        out = self._g.scoring_cards([int(p) for p in positions])
+        if out is None:
+            return None
+        name, scoring = out
+        return name, list(scoring)
+
     def step(self, action: Any) -> None:
         """Take one action (a dataclass from :mod:`jackdaw.engine.actions`, or its
         tape form) and play until the game waits for the next decision."""
