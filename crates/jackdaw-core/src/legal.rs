@@ -116,6 +116,8 @@ impl Game {
         out
     }
 
+    /// A pack's joker can be taken (`G.FUNCS.can_select_card`, button_callbacks.lua:2112):
+    /// a Negative one always, any other with a free slot.
     fn joker_fits(&self, card: &crate::card::Card) -> bool {
         let negative = card
             .edition
@@ -133,7 +135,8 @@ impl Game {
             if !self.spend_ok(card.cost) {
                 continue;
             }
-            // G.FUNCS.check_for_buy_space: a Negative card raises the limit by one (G201).
+            // The same check the purchase makes (G.FUNCS.check_for_buy_space): a Negative card
+            // raises the limit by one (G201, G264).
             if !self.check_for_buy_space(card) {
                 continue;
             }

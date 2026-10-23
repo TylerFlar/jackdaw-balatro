@@ -890,13 +890,16 @@ fn encode_shop(gs: &GameState, out: &mut [f32]) {
         row[2] = log_scale(c.cost) as f32;
         // can_afford: free, or within dollars - bankrupt_at.
         row[3] = flag(c.cost <= 0.0 || c.cost <= gs.dollars - gs.bankrupt_at);
+        // check_for_buy_space: a Negative card raises the limit by one (G264).
+        let bonus = if c.edition.is_some_and(|e| e.kind == EditionKind::Negative) {
+            1.0
+        } else {
+            0.0
+        };
         row[4] = flag(match set {
-            CenterSet::Joker => {
-                let negative = c.edition.is_some_and(|e| e.kind == EditionKind::Negative);
-                (areas.jokers.len() as f64) < gs.joker_slots || negative
-            }
+            CenterSet::Joker => (areas.jokers.len() as f64) < gs.joker_slots + bonus,
             CenterSet::Tarot | CenterSet::Planet | CenterSet::Spectral => {
-                (areas.consumables.len() as f64) < gs.consumable_slots
+                (areas.consumables.len() as f64) < gs.consumable_slots + bonus
             }
             _ => true,
         });

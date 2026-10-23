@@ -237,8 +237,14 @@ def run_case(case: Case, tape: list[list[Any]] | None = None) -> Outcome:
             py_ok = True
         except Exception:
             py_ok = False
+        if not py_ok and not rs_ok:
+            if tape is not None:  # a saved tape's action that is no longer legal
+                out.stop = "tape action refused"
+                return out
+            out.stop, out.divergence = "divergence", f"both refused the legal {action}"
+            return out
         if not py_ok:
-            out.stop, out.divergence = "divergence", f"oracle refused its own legal {action}"
+            out.stop, out.divergence = "divergence", f"only the oracle refused {action}"
             return out
         if not rs_ok:
             out.stop, out.divergence = "divergence", f"rust refused {action} at step {pos}"

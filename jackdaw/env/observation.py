@@ -562,11 +562,12 @@ def encode_shop_item(
     consumables: list[Card] = gs.get("consumables", [])
     consumable_slots: int = gs.get("consumable_slots", 2)
 
+    # check_for_buy_space: a Negative card raises the limit by one (G264).
+    bonus = 1 if isinstance(card.edition, dict) and card.edition.get("negative") else 0
     if card_set == "Joker":
-        is_negative = isinstance(card.edition, dict) and bool(card.edition.get("negative"))
-        v[4] = float(len(jokers) < joker_slots or is_negative)
+        v[4] = float(len(jokers) < joker_slots + bonus)
     elif card_set in ("Tarot", "Planet", "Spectral"):
-        v[4] = float(len(consumables) < consumable_slots)
+        v[4] = float(len(consumables) < consumable_slots + bonus)
     else:
         v[4] = 1.0  # Vouchers, boosters, playing cards always "have slot"
 

@@ -505,7 +505,8 @@ def _legal_shop(gs: dict[str, Any]) -> list[Action]:
     for i, card in enumerate(shop_cards):
         if not can_afford(gs, card.cost):
             continue
-        # Check slot availability
+        # check_for_buy_space (button_callbacks.lua:2392-2402): a Negative card
+        # raises the area's limit by one, on an over-full board too (G201, G264).
         if not buy_space(card, gs):
             continue  # No room — agent must use/sell a card first
         actions.append(BuyCard(shop_index=i))

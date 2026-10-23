@@ -1281,12 +1281,14 @@ def _handle_buy_card(gs: dict[str, Any], idx: int) -> dict[str, Any]:
         raise IllegalActionError("Cannot afford card")
 
     # check_for_buy_space (button_callbacks.lua:2392-2402): a Negative card
-    # raises the limit by one, it doesn't lift it (G201).
+    # raises the area's limit by one, so an over-full board takes none (G201, G264).
     from jackdaw.engine.actions import buy_space
 
     card_set = _get_card_set(card)
     if not buy_space(card, gs):
-        raise IllegalActionError(f"No room for the {card_set}")
+        raise IllegalActionError(
+            "No room for joker" if card_set == "Joker" else "No room for consumable"
+        )
 
     gs["dollars"] -= card.cost
     shop_cards.pop(idx)
