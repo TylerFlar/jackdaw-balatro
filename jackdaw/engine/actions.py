@@ -522,7 +522,9 @@ def _legal_shop(gs: dict[str, Any]) -> list[Action]:
 
     for i, card in enumerate(shop_cards):
         ability = card.ability if isinstance(card.ability, dict) else {}
-        if not ability.get("consumeable") or not can_afford(gs, card.cost):
+        # ``ability.consumeable`` is the center's config, a Lua table: present
+        # (and truthy) even when empty, as for Judgement or The Soul.
+        if "consumeable" not in ability or not can_afford(gs, card.cost):
             continue
         if consumable_block_reason(card, gs) is None:
             actions.append(BuyAndUse(shop_index=i, target_indices=default_use_targets(card, gs)))

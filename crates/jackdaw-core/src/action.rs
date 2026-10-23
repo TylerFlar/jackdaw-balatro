@@ -130,6 +130,53 @@ impl Action {
     }
 }
 
+impl Action {
+    /// The action's tape form (the inverse of [`Action::from_json`]).
+    pub fn to_json(&self) -> Value {
+        use serde_json::json;
+        let targets = |t: &Option<Vec<usize>>| t.as_ref().map_or(Value::Null, |v| json!(v));
+        match self {
+            Action::SelectBlind => json!(["SelectBlind"]),
+            Action::SkipBlind => json!(["SkipBlind"]),
+            Action::PlayHand(c) => json!(["PlayHand", c]),
+            Action::Discard(c) => json!(["Discard", c]),
+            Action::BuyCard(i) => json!(["BuyCard", i]),
+            Action::SellCard { area, index } => {
+                let area = match area {
+                    AreaId::Jokers => "jokers",
+                    _ => "consumables",
+                };
+                json!(["SellCard", area, index])
+            }
+            Action::UseConsumable { index, targets: t } => {
+                json!(["UseConsumable", index, targets(t)])
+            }
+            Action::RedeemVoucher(i) => json!(["RedeemVoucher", i]),
+            Action::OpenBooster(i) => json!(["OpenBooster", i]),
+            Action::Reroll => json!(["Reroll"]),
+            Action::NextRound => json!(["NextRound"]),
+            Action::PickPackCard { index, targets: t } => {
+                json!(["PickPackCard", index, targets(t)])
+            }
+            Action::SkipPack => json!(["SkipPack"]),
+            Action::CashOut => json!(["CashOut"]),
+            Action::SortHand(mode) => json!([
+                "SortHand",
+                match mode {
+                    HandSort::Desc => "rank",
+                    HandSort::SuitDesc => "suit",
+                }
+            ]),
+            Action::SwapHandLeft(i) => json!(["SwapHandLeft", i]),
+            Action::SwapHandRight(i) => json!(["SwapHandRight", i]),
+            Action::SwapJokersLeft(i) => json!(["SwapJokersLeft", i]),
+            Action::SwapJokersRight(i) => json!(["SwapJokersRight", i]),
+            Action::RerollBoss => json!(["RerollBoss"]),
+            Action::BuyAndUse { index, targets: t } => json!(["BuyAndUse", index, targets(t)]),
+        }
+    }
+}
+
 fn illegal<T>(msg: impl Into<String>) -> Result<T, StepError> {
     Err(StepError::Illegal(msg.into()))
 }

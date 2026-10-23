@@ -88,6 +88,18 @@ impl Game {
         })
     }
 
+    /// The legal actions here, as a JSON list of tape-form actions, in the Python engine's
+    /// order (`jackdaw.engine.actions.get_legal_actions`).
+    fn legal_actions(&self) -> String {
+        let list: Vec<serde_json::Value> = self
+            .inner
+            .legal_actions()
+            .iter()
+            .map(jackdaw_core::action::Action::to_json)
+            .collect();
+        serde_json::Value::Array(list).to_string()
+    }
+
     /// An independent copy of the run.
     #[pyo3(name = "clone")]
     fn py_clone(&self) -> Self {

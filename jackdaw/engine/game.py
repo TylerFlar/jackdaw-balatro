@@ -1330,7 +1330,7 @@ def _handle_buy_and_use(
     if idx < 0 or idx >= len(shop_cards):
         raise IllegalActionError(f"Invalid shop index {idx}")
     card = shop_cards[idx]
-    if not card.ability.get("consumeable"):
+    if "consumeable" not in card.ability:
         raise IllegalActionError("Only consumables can be bought and used")
     if not can_afford(gs, card.cost):
         raise IllegalActionError("Cannot afford card")
