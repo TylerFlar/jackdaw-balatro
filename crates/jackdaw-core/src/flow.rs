@@ -139,7 +139,10 @@ impl Game {
     /// `G.FUNCS.draw_from_deck_to_hand(e)` (state_events.lua:355-377). True when the game is
     /// lost because the hand can hold no cards.
     pub(crate) fn draw_from_deck_to_hand(&mut self, e: Option<i64>) -> bool {
-        let pack = matches!(self.rt.state, LuaState::TarotPack | LuaState::SpectralPack);
+        let pack = matches!(
+            self.rt.state,
+            LuaState::TarotPack | LuaState::SpectralPack | LuaState::PlanetPack
+        );
         if !pack && self.hand_limit() <= 0.0 && self.gs.areas.hand.is_empty() {
             self.set_state(LuaState::GameOver, false);
             return true;
@@ -478,9 +481,13 @@ impl Game {
             }
             LuaState::GameOver => false,
             LuaState::Shop => self.update_shop(),
+            LuaState::TarotPack
+            | LuaState::PlanetPack
+            | LuaState::SpectralPack
+            | LuaState::StandardPack
+            | LuaState::BuffoonPack => self.update_pack(),
             LuaState::BlindSelect => self.update_blind_select(),
             _ => {
-                // The pack states arrive with the rest of the run.
                 if self.rt.state_complete {
                     return false;
                 }

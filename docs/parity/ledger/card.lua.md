@@ -26,7 +26,7 @@ Source: `balatro_source/card.lua` (Balatro 1.0.1o). 605 rows: 67 function, 310 b
 | card/branch/Card:set_ability/caino | card.lua:324-325 | branch | Caino — `self.ability.name == 'Caino'` |  | unreviewed |  |  |  |  |
 | card/branch/Card:set_ability/yorick | card.lua:327-328 | branch | Yorick — `self.ability.name == 'Yorick'` |  | unreviewed |  |  |  |  |
 | card/branch/Card:set_ability/loyalty-card | card.lua:330-332 | branch | Loyalty Card — `self.ability.name == 'Loyalty Card'` |  | unreviewed |  |  |  |  |
-| card/fn/Card:set_cost | card.lua:369-385 | function | `Card:set_cost()` |  | unreviewed |  |  |  |  |
+| card/fn/Card:set_cost | card.lua:369-385 | function | `Card:set_cost()` |  | verified | crates/jackdaw-core/src/card.rs::Card::set_cost | tests/parity/test_rust_step.py | G122, G126 |  |
 | card/branch/Card:set_cost/modifiers-booster_ante_scaling | card.lua:376 | branch | modifiers.booster_ante_scaling — `self.ability.set == 'Booster' and G.GAME.modifiers.booster_ante_scaling` |  | unreviewed |  |  |  |  |
 | card/branch/Card:set_cost/celestial+astronomer | card.lua:380 | branch | *Celestial*, Astronomer — `(self.ability.set == 'Planet' or (self.ability.set == 'Booster' and self.ability.name:find('Celesti…` |  | unreviewed |  |  |  |  |
 | card/fn/Card:set_edition | card.lua:387-462 | function | `Card:set_edition(edition, immediate, silent)` |  | gap |  |  | G26 |  |
@@ -200,7 +200,7 @@ Source: `balatro_source/card.lua` (Balatro 1.0.1o). 605 rows: 67 function, 310 b
 | card/branch/Card:use_consumeable/ectoplasm/ectoplasm#2 | card.lua:1494-1497 | branch | Ectoplasm — `self.ability.name == 'Ectoplasm'` | `self.ability.name == 'The Wheel of Fortune' or self.ability.name == 'Ec…` & `self.ability.name == 'Ectoplasm' or self.ability.name == 'Hex' or pseud…` & [event] | gap |  |  | G27 |  |
 | card/event/Card:use_consumeable/the-wheel-of-fortune/after:attention_text | card.lua:1502-1517 | event | `Event{trigger='after'}` → attention_text, localize, :add_event, play_sound +1 | `self.ability.name == 'The Wheel of Fortune' or self.ability.name == 'Ec…` & else(`self.ability.name == 'Ectoplasm' or self.ability.name == 'H…`) | unreviewed |  |  |  |  |
 | card/event/Card:use_consumeable/the-wheel-of-fortune/after:play_sound | card.lua:1513-1514 | event | `Event{trigger='after', blockable=false, blocking=false}` → play_sound | `self.ability.name == 'The Wheel of Fortune' or self.ability.name == 'Ec…` & else(`self.ability.name == 'Ectoplasm' or self.ability.name == 'H…`) & [event] | unreviewed |  |  |  |  |
-| card/fn/Card:can_use_consumeable | card.lua:1523-1579 | function | `Card:can_use_consumeable(any_state, skip_check)` |  | unreviewed |  |  |  |  |
+| card/fn/Card:can_use_consumeable | card.lua:1523-1579 | function | `Card:can_use_consumeable(any_state, skip_check)` |  | ported | crates/jackdaw-core/src/consumables.rs::can_use_consumeable |  |  |  |
 | card/branch/Card:can_use_consumeable/the-hermit+temperance+black-hole | card.lua:1530-1531 | branch | The Hermit, Temperance, Black Hole — `self.ability.name == 'The Hermit' or self.ability.consumeable.hand_type or self.ability.name == 'Te…` | `G.STATE ~= G.STATES.HAND_PLAYED and G.STATE ~= G.STATES.DRAW_TO_HAND an…` | unreviewed |  |  |  |  |
 | card/branch/Card:can_use_consumeable/the-wheel-of-fortune | card.lua:1533-1534 | branch | The Wheel of Fortune — `self.ability.name == 'The Wheel of Fortune'` | `G.STATE ~= G.STATES.HAND_PLAYED and G.STATE ~= G.STATES.DRAW_TO_HAND an…` | unreviewed |  |  |  |  |
 | card/branch/Card:can_use_consumeable/ankh | card.lua:1536-1542 | branch | Ankh — `self.ability.name == 'Ankh'` | `G.STATE ~= G.STATES.HAND_PLAYED and G.STATE ~= G.STATES.DRAW_TO_HAND an…` | unreviewed |  |  |  |  |
@@ -228,7 +228,7 @@ Source: `balatro_source/card.lua` (Balatro 1.0.1o). 605 rows: 67 function, 310 b
 | card/branch/Card:calculate_dollar_bonus/rocket | card.lua:1664-1665 | branch | Rocket — `self.ability.name == 'Rocket'` | `self.ability.set == "Joker"` | unreviewed |  |  |  |  |
 | card/branch/Card:calculate_dollar_bonus/satellite | card.lua:1667-1673 | branch | Satellite — `self.ability.name == 'Satellite'` | `self.ability.set == "Joker"` | gap |  |  | G17 |  |
 | card/branch/Card:calculate_dollar_bonus/delayed-gratification | card.lua:1675-1676 | branch | Delayed Gratification — `self.ability.name == 'Delayed Gratification' and G.GAME.current_round.discards_used == 0 and G.GAME…` | `self.ability.set == "Joker"` | unreviewed |  |  |  |  |
-| card/fn/Card:open | card.lua:1681-1811 | function | `Card:open()` |  | unreviewed |  |  |  |  |
+| card/fn/Card:open | card.lua:1681-1811 | function | `Card:open()` |  | verified | crates/jackdaw-core/src/packs.rs::open_booster | tests/parity/test_rust_step.py | G43, G44, G124 |  |
 | card/branch/Card:open/arcana | card.lua:1692-1694 | branch | *Arcana* — `self.ability.name:find('Arcana')` | `self.ability.set == "Booster"` | unreviewed |  |  |  |  |
 | card/branch/Card:open/celestial | card.lua:1695-1697 | branch | *Celestial* — `self.ability.name:find('Celestial')` | `self.ability.set == "Booster"` | unreviewed |  |  |  |  |
 | card/branch/Card:open/spectral | card.lua:1698-1700 | branch | *Spectral* — `self.ability.name:find('Spectral')` | `self.ability.set == "Booster"` | unreviewed |  |  |  |  |
@@ -260,14 +260,14 @@ Source: `balatro_source/card.lua` (Balatro 1.0.1o). 605 rows: 67 function, 310 b
 | card/ctx/Card:open/calculate_joker:open_booster | card.lua:1797 | context_call | `calculate_joker{open_booster, card}` | `self.ability.set == "Booster"` & [event] | unreviewed |  |  |  |  |
 | card/branch/Card:open/modifiers-inflation | card.lua:1800-1806 | branch | modifiers.inflation — `G.GAME.modifiers.inflation` | `self.ability.set == "Booster"` & [event] | gap |  |  | G04 |  |
 | card/event/Card:open/modifiers-inflation/immediate:set_cost | card.lua:1802-1806 | event | `Event{}` → :set_cost | `self.ability.set == "Booster"` & [event] & `G.GAME.modifiers.inflation` | unreviewed |  |  |  |  |
-| card/fn/Card:redeem | card.lua:1813-1878 | function | `Card:redeem()` |  | unreviewed |  |  |  |  |
+| card/fn/Card:redeem | card.lua:1813-1878 | function | `Card:redeem()` |  | verified | crates/jackdaw-core/src/vouchers.rs::redeem_voucher | tests/parity/test_rust_step.py | G125 |  |
 | card/event/Card:redeem/after:dynatext | card.lua:1826-1844 | event | `Event{trigger='after'}` → DynaText, localize, :juice_up, play_sound +1 | `self.ability.set == "Voucher"` | unreviewed |  |  |  |  |
 | card/ctx/Card:redeem/calculate_joker:buying_card | card.lua:1856 | context_call | `calculate_joker{buying_card, card}` | `self.ability.set == "Voucher"` | unreviewed |  |  |  |  |
 | card/branch/Card:redeem/modifiers-inflation | card.lua:1858-1864 | branch | modifiers.inflation — `G.GAME.modifiers.inflation` | `self.ability.set == "Voucher"` | gap |  |  | G04 |  |
 | card/event/Card:redeem/modifiers-inflation/immediate:set_cost | card.lua:1860-1864 | event | `Event{}` → :set_cost | `self.ability.set == "Voucher"` & `G.GAME.modifiers.inflation` | unreviewed |  |  |  |  |
 | card/event/Card:redeem/after:pop_out | card.lua:1866-1869 | event | `Event{trigger='after'}` → :pop_out | `self.ability.set == "Voucher"` | unreviewed |  |  |  |  |
 | card/event/Card:redeem/after:remove | card.lua:1871-1876 | event | `Event{trigger='after'}` → :remove | `self.ability.set == "Voucher"` | unreviewed |  |  |  |  |
-| card/fn/Card:apply_to_run | card.lua:1880-1971 | function | `Card:apply_to_run(center)` |  | unreviewed |  |  |  |  |
+| card/fn/Card:apply_to_run | card.lua:1880-1971 | function | `Card:apply_to_run(center)` |  | verified | crates/jackdaw-core/src/vouchers.rs::apply_voucher | tests/parity/test_rust_step.py | G127 |  |
 | card/branch/Card:apply_to_run/overstock+overstock-plus | card.lua:1885-1888 | branch | Overstock, Overstock Plus — `center_table.name == 'Overstock' or center_table.name == 'Overstock Plus'` |  | gap |  |  | G47 |  |
 | card/event/Card:apply_to_run/overstock/immediate:change_shop_size | card.lua:1886-1888 | event | `Event{}` → change_shop_size | `center_table.name == 'Overstock' or center_table.name == 'Overstock Plu…` | unreviewed |  |  |  |  |
 | card/branch/Card:apply_to_run/tarot-merchant+tarot-tycoon | card.lua:1890-1893 | branch | Tarot Merchant, Tarot Tycoon — `center_table.name == 'Tarot Merchant' or center_table.name == 'Tarot Tycoon'` |  | unreviewed |  |  |  |  |

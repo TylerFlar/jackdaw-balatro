@@ -17,12 +17,14 @@ pub mod area;
 mod blind;
 pub mod card;
 mod cards;
+mod consumables;
 pub mod event;
 mod flow;
 pub mod game;
 pub mod hand_eval;
 pub mod joker;
 pub mod lua;
+mod packs;
 pub mod pools;
 pub mod rng;
 mod round;
@@ -33,6 +35,7 @@ mod shop;
 pub mod snapshot;
 pub mod state;
 mod tags;
+mod vouchers;
 
 /// The generated data tables the engine runs on.
 pub use jackdaw_data as data;

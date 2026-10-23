@@ -153,6 +153,22 @@ def get_next_voucher_key(
 # ---------------------------------------------------------------------------
 
 
+def _ease_hands_played(game_state: dict[str, Any], mod: int) -> None:
+    """``ease_hands_played(mod)`` (common_events.lua:152-189): the round's hands."""
+    cr = game_state.setdefault("current_round", {})
+    cr["hands_left"] = cr.get("hands_left", 0) + mod
+
+
+def _ease_discard(game_state: dict[str, Any], mod: int) -> None:
+    """``ease_discard(mod)`` (common_events.lua:111-150): the round's discards,
+    never below zero, and nothing at all when both are zero."""
+    cr = game_state.setdefault("current_round", {})
+    left = cr.get("discards_left", 0)
+    if abs(max(left, mod)) == 0:
+        return
+    cr["discards_left"] = left + max(-left, mod)
+
+
 def apply_voucher(key: str, game_state: dict[str, Any]) -> dict[str, Any]:
     """Apply a voucher's permanent effect to *game_state* in-place.
 
@@ -265,6 +281,7 @@ def apply_voucher(key: str, game_state: dict[str, Any]) -> dict[str, Any]:
         rr = game_state.setdefault("round_resets", {})
         rr["hands"] = rr.get("hands", 4) + extra
         mutations["round_resets.hands"] = rr["hands"]
+        _ease_hands_played(game_state, extra)
 
     # -----------------------------------------------------------------------
     # Hand size — G.hand:change_size(1)
@@ -282,6 +299,7 @@ def apply_voucher(key: str, game_state: dict[str, Any]) -> dict[str, Any]:
         rr = game_state.setdefault("round_resets", {})
         rr["discards"] = rr.get("discards", 3) + extra
         mutations["round_resets.discards"] = rr["discards"]
+        _ease_discard(game_state, extra)
 
     # -----------------------------------------------------------------------
     # Joker slots — jokers.config.card_limit += 1
@@ -302,6 +320,7 @@ def apply_voucher(key: str, game_state: dict[str, Any]) -> dict[str, Any]:
             rr["blind_ante"] = rr["ante"] + extra  # retroactively set before decrement
         rr["blind_ante"] = rr["blind_ante"] - extra
         rr["hands"] = rr.get("hands", 4) - extra
+        _ease_hands_played(game_state, -extra)
         mutations["round_resets.ante"] = rr["ante"]
         mutations["round_resets.blind_ante"] = rr["blind_ante"]
         mutations["round_resets.hands"] = rr["hands"]
@@ -317,6 +336,7 @@ def apply_voucher(key: str, game_state: dict[str, Any]) -> dict[str, Any]:
             rr["blind_ante"] = rr["ante"] + extra
         rr["blind_ante"] = rr["blind_ante"] - extra
         rr["discards"] = rr.get("discards", 3) - extra
+        _ease_discard(game_state, -extra)
         mutations["round_resets.ante"] = rr["ante"]
         mutations["round_resets.blind_ante"] = rr["blind_ante"]
         mutations["round_resets.discards"] = rr["discards"]

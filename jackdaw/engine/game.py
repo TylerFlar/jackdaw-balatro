@@ -440,6 +440,9 @@ def _open_pack(gs: dict[str, Any], pack_key: str) -> None:
 
     rng = gs.get("rng")
     ante = gs.get("round_resets", {}).get("ante", 1)
+    if pack_key in BOOSTERS:
+        # G.GAME.pack_size = self.ability.extra (card.lua:1691-1705).
+        gs["pack_size"] = BOOSTERS[pack_key].config["extra"]
     if rng and pack_key in BOOSTERS:
         cards, choose = generate_pack_cards(pack_key, rng, ante, gs)
         gs["pack_cards"] = cards
@@ -1617,6 +1620,9 @@ def _handle_redeem_voucher(gs: dict[str, Any], idx: int) -> dict[str, Any]:
 
     gs["dollars"] -= card.cost
     vouchers.pop(idx)
+    # The redeemed card dissolves, and with it its used_jokers mark
+    # (Card:remove, card.lua:4741-4748).
+    _release_used_key(gs, card)
 
     from jackdaw.engine.vouchers import apply_voucher
 
@@ -1633,9 +1639,9 @@ def _handle_redeem_voucher(gs: dict[str, Any], idx: int) -> dict[str, Any]:
     # Clearance Sale flipped two $0 tag jokers to $2/$3, while
     # LS1Z615Y's non-price voucher left a foil-tag $0 joker untouched).
     if card.center_key in ("v_clearance_sale", "v_liquidation"):
-        for _owned in gs.get("jokers", []) + gs.get("consumables", []):
-            if hasattr(_owned, "ability"):
-                _owned.ability.pop("couponed", None)
+        # G.I.CARD: every card, playing cards included. The coupon zeroes a
+        # price only in the shop areas (card.lua:383); the flag stays.
+        _all_cards_set_cost_pass(gs)
 
     # Overstock / Overstock Plus trigger a FULL shop refill to the new
     # limit (purchase-emptied slots refill too — live rolled two cards
@@ -2412,7 +2418,6 @@ def _joker_end_of_round_effects(gs: dict[str, Any]) -> dict[str, Any]:
         # a set_cost trigger that restores a couponed buy cost too.
         for c in mut.get("set_cost_cards", []):
             if hasattr(c, "set_cost"):
-                c.ability.pop("couponed", None)
                 c.set_cost(
                     inflation=gs.get("inflation", 0),
                     discount_percent=gs.get("discount_percent", 0),
@@ -2427,7 +2432,6 @@ def _joker_end_of_round_effects(gs: dict[str, Any]) -> dict[str, Any]:
             for c in gs.get("jokers", []) + gs.get("consumables", []):
                 c.ability["extra_value"] = c.ability.get("extra_value", 0) + bump
                 if hasattr(c, "set_cost"):
-                    c.ability.pop("couponed", None)
                     c.set_cost(
                         inflation=gs.get("inflation", 0),
                         discount_percent=gs.get("discount_percent", 0),
@@ -3538,12 +3542,14 @@ def _all_cards_set_cost_pass(gs: dict[str, Any]) -> None:
     (handled inline), and Astronomer joining/leaving the board
     (dump card.lua:786-793 / :850; live-verified: LSVFB5K8's couponed
     foil Astronomer flipped $0 -> $10 the moment it was bought)."""
-    for owned in gs.get("jokers", []) + gs.get("consumables", []):
-        if hasattr(owned, "ability"):
-            owned.ability.pop("couponed", None)
     from jackdaw.engine.shop import reprice_shop
 
     reprice_shop(gs)
+    # Owned cards too: the coupon zeroes a price only in the shop areas
+    # (card.lua:383), so this restores a couponed card's real price and
+    # leaves its ``couponed`` flag, as Lua does.
+    for owned in gs.get("jokers", []) + gs.get("consumables", []):
+        _reprice(gs, owned)
     # G.I.CARD holds the playing cards too.
     for area in ("deck", "hand", "discard_pile", "played_cards_area"):
         for card in gs.get(area, []):

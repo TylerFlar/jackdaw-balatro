@@ -150,6 +150,32 @@ pub enum Event {
     BlindSelectBuild,
     /// `skip_blind`'s event: the jokers and tags see the skip (button_callbacks.lua:2762-2773).
     SkipBlindBody,
+    /// `Card:open`'s event: the jokers see the pack, then it fills (card.lua:1724-1803).
+    OpenBooster(u32),
+    /// The pack's contents (card.lua:1731-1787).
+    PackContents(u32),
+    /// An Arcana or Spectral pack screen's event, which queues the deal (game.lua:3348-3386).
+    PackScreen,
+    /// The pack screen's nested event: `G.FUNCS.draw_from_deck_to_hand()`.
+    PackDeal,
+    /// After the deal: the dealt cards, for `pack.dealt`.
+    PackDealt,
+    /// `end_consumeable`'s first event: `G.booster_pack:remove()` takes the leftover cards
+    /// (button_callbacks.lua:2574-2579).
+    PackClose,
+    /// `end_consumeable`'s second event: the hand returns to the deck (2589-2632).
+    PackHandToDeck,
+    /// `end_consumeable`'s nested event: `G.STATE = G.GAME.PACK_INTERRUPT` (2592-2613).
+    PackReturn,
+    /// `use_card`'s timed event: the used card dissolves (button_callbacks.lua:2252-2254).
+    UseCardAfter {
+        card: u32,
+        dissolve: bool,
+        prev: LuaState,
+        from: AreaId,
+    },
+    /// `use_card`'s nested event: the state comes back and a pack counts the pick (2255-2310).
+    UseCardDone { prev: LuaState, from: AreaId },
     /// A card's own queued work: `f(game, card, value)`. Jokers and consumables use it for
     /// event closures no other card shares, so their code stays in one place.
     Call(fn(&mut Game, u32, f64), u32, f64),
@@ -317,6 +343,25 @@ impl Game {
             Event::BlindSelectOpen => self.queue(Event::BlindSelectBuild),
             Event::BlindSelectBuild => self.blind_select_build(),
             Event::SkipBlindBody => self.skip_blind_body(),
+            Event::OpenBooster(id) => self.open_booster_body(id),
+            Event::PackContents(id) => self.pack_contents(id),
+            Event::PackScreen => self.queue(Event::PackDeal),
+            Event::PackDeal => self.pack_deal(),
+            Event::PackDealt => self.pack_dealt(),
+            Event::PackClose => {
+                for id in self.gs.areas.ids(AreaId::PackCards) {
+                    self.remove_card(id);
+                }
+            }
+            Event::PackHandToDeck => self.pack_hand_to_deck(),
+            Event::PackReturn => self.pack_return(),
+            Event::UseCardAfter {
+                card,
+                dissolve,
+                prev,
+                from,
+            } => self.use_card_after(card, dissolve, prev, from),
+            Event::UseCardDone { prev, from } => self.use_card_done(prev, from),
             Event::Dissolve(id) => self.queue(Event::RemoveCard(id)),
             Event::Call(f, card, value) => f(self, card, value),
             Event::PermaDebuff(ids) => {

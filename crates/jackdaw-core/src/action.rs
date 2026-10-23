@@ -159,6 +159,46 @@ impl Game {
         Ok(())
     }
 
+    /// The game rests in a pack.
+    fn require_pack(&self) -> Result<(), StepError> {
+        match self.rt.state {
+            LuaState::TarotPack
+            | LuaState::PlanetPack
+            | LuaState::SpectralPack
+            | LuaState::StandardPack
+            | LuaState::BuffoonPack => Ok(()),
+            other => illegal(format!("no pack is open (now {other:?})")),
+        }
+    }
+
+    /// Highlight the hand cards a consumable targets (`G.hand.highlighted`), in the given
+    /// order; the forced card (Cerulean Bell) stays highlighted.
+    fn highlight_targets(&mut self, targets: Option<&[usize]>) -> Result<(), StepError> {
+        let hand = self.gs.areas.ids(AreaId::Hand);
+        let mut ids: Vec<u32> = self
+            .gs
+            .areas
+            .hand
+            .iter()
+            .filter(|c| c.ability.forced_selection)
+            .map(|c| c.sort_id)
+            .collect();
+        for &i in targets.unwrap_or(&[]) {
+            let Some(&id) = hand.get(i) else {
+                return illegal(format!("hand index {i} out of range"));
+            };
+            if ids.contains(&id) {
+                continue;
+            }
+            ids.push(id);
+        }
+        if ids.len() > HAND_HIGHLIGHT_LIMIT {
+            return illegal("select at most five cards");
+        }
+        self.rt.highlighted = ids;
+        Ok(())
+    }
+
     /// Cards can be sold whenever the game waits for input with nothing being played: in a
     /// round, the shop, the blind-select screen, round evaluation and packs.
     fn require_sell_state(&self) -> Result<(), StepError> {
@@ -354,6 +394,76 @@ impl Game {
                 }
                 let id = card.sort_id;
                 self.sell_card(id);
+            }
+            Action::RedeemVoucher(i) => {
+                self.require(LuaState::Shop)?;
+                self.check_ported()?;
+                let card = self.shop_card(AreaId::ShopVouchers, *i)?;
+                // G.FUNCS.can_redeem: no free-item exemption (button_callbacks.lua:96-104).
+                if card.cost > self.spendable() {
+                    return illegal("can't afford the voucher");
+                }
+                let id = card.sort_id;
+                self.redeem_voucher(id);
+            }
+            Action::OpenBooster(i) => {
+                self.require(LuaState::Shop)?;
+                self.check_ported()?;
+                let card = self.shop_card(AreaId::ShopBooster, *i)?;
+                // G.FUNCS.can_open (button_callbacks.lua:111-119).
+                if card.cost > 0.0 && card.cost > self.spendable() {
+                    return illegal("can't afford the pack");
+                }
+                let id = card.sort_id;
+                self.open_booster(id);
+            }
+            Action::PickPackCard { index, targets } => {
+                self.require_pack()?;
+                self.check_ported()?;
+                let card = self.shop_card(AreaId::PackCards, *index)?;
+                let id = card.sort_id;
+                if card.center().consumeable {
+                    self.highlight_targets(targets.as_deref())?;
+                    if !self.can_use_consumeable(id) || self.check_use(id) {
+                        return illegal("the card can't be used now");
+                    }
+                } else if card.set() == jackdaw_data::CenterSet::Joker {
+                    // G.FUNCS.can_select_card (button_callbacks.lua:2112-2120).
+                    let negative = card
+                        .edition
+                        .is_some_and(|e| e.kind == crate::card::EditionKind::Negative);
+                    if !negative && (self.gs.areas.jokers.len() as f64) >= self.gs.joker_slots {
+                        return illegal("no room for the joker");
+                    }
+                }
+                self.pick_pack_card(id);
+            }
+            Action::SkipPack => {
+                self.require_pack()?;
+                self.check_ported()?;
+                // G.FUNCS.can_skip_booster (button_callbacks.lua:2132-2141).
+                let dealt_or_none = matches!(
+                    self.rt.state,
+                    LuaState::PlanetPack | LuaState::StandardPack | LuaState::BuffoonPack
+                ) || !self.gs.areas.hand.is_empty()
+                    || self.hand_limit() <= 0.0;
+                if self.gs.areas.pack_cards.is_empty() || !dealt_or_none {
+                    return illegal("the pack can't be skipped now");
+                }
+                self.skip_booster();
+            }
+            Action::UseConsumable { index, targets } => {
+                self.check_ported()?;
+                let card = match self.gs.areas.consumables.get(*index) {
+                    Some(c) => c,
+                    None => return illegal(format!("consumable index {index} out of range")),
+                };
+                let id = card.sort_id;
+                self.highlight_targets(targets.as_deref())?;
+                if !self.can_use_consumeable(id) || self.check_use(id) {
+                    return illegal("the consumable can't be used now");
+                }
+                self.use_consumable_card(id, AreaId::Consumables);
             }
             other => return unported(format!("action {other:?}")),
         }

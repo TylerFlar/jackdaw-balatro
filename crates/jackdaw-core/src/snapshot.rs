@@ -711,7 +711,8 @@ pub fn export(gs: &GameState) -> Value {
         json!({
             "kind": p.kind,
             "choices_remaining": num(p.choices_remaining),
-            "dealt": p.dealt,
+            // The dealt cards still held: a consumable may have destroyed some.
+            "dealt": p.dealt.iter().filter(|&&id| gs.areas.hand.iter().any(|c| c.sort_id == id)).collect::<Vec<_>>(),
             "return_phase": p.return_phase.name(),
         })
     });

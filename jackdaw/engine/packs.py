@@ -239,7 +239,9 @@ def _gen_standard(rng: PseudoRandom, ante: int, gs: dict) -> Card:
     else:
         enhancement_key = "c_base"
 
-    card = create_playing_card(suit, rank, enhancement=enhancement_key)
+    card = create_playing_card(
+        suit, rank, enhancement=enhancement_key, hands_played=gs.get("hands_played", 0)
+    )
 
     # Edition
     edition = poll_edition(

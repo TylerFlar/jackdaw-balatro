@@ -164,7 +164,7 @@ Source: `balatro_source/functions/button_callbacks.lua` (Balatro 1.0.1o). 249 ro
 | button_callbacks/fn/G.FUNCS.can_sell_card | button_callbacks.lua:2122-2130 | function | `G.FUNCS.can_sell_card(e)` |  | unreviewed |  |  |  |  |
 | button_callbacks/fn/G.FUNCS.can_skip_booster | button_callbacks.lua:2132-2141 | function | `G.FUNCS.can_skip_booster(e)` |  | unreviewed |  |  |  |  |
 | button_callbacks/fn/G.FUNCS.show_infotip | button_callbacks.lua:2143-2152 | function | `G.FUNCS.show_infotip(e)` |  | n/a-ui |  |  |  | auto: touches only UI/sound/animation state |
-| button_callbacks/fn/G.FUNCS.use_card | button_callbacks.lua:2155-2316 | function | `G.FUNCS.use_card(e, mute, nosave)` |  | unreviewed |  |  |  |  |
+| button_callbacks/fn/G.FUNCS.use_card | button_callbacks.lua:2155-2316 | function | `G.FUNCS.use_card(e, mute, nosave)` |  | ported | crates/jackdaw-core/src/consumables.rs::use_consumable_card |  |  |  |
 | button_callbacks/event/G.FUNCS.use_card/immediate | button_callbacks.lua:2164-2167 | event | `Event{}` | `card:check_use()` | unreviewed |  |  |  |  |
 | button_callbacks/ctx/G.FUNCS.use_card/calculate_joker:consumeable+using_consumeable | button_callbacks.lua:2220 | context_call | `calculate_joker{using_consumeable, consumeable}` | `card.ability.consumeable` | unreviewed |  |  |  |  |
 | button_callbacks/event/G.FUNCS.use_card/after:start_dissolve | button_callbacks.lua:2258-2314 | event | `Event{trigger='after'}` → :start_dissolve, :add_event | else(`card.ability.set == 'Booster'`) | unreviewed |  |  |  |  |
@@ -195,9 +195,9 @@ Source: `balatro_source/functions/button_callbacks.lua` (Balatro 1.0.1o). 249 ro
 | button_callbacks/event/G.FUNCS.select_blind/before | button_callbacks.lua:2522-2529 | event | `Event{trigger='before'}` | `G.blind_select` | n/a-ui |  |  |  | auto: event only animates, plays sound or waits |
 | button_callbacks/event/G.FUNCS.select_blind/immediate:ease_round | button_callbacks.lua:2530-2547 | event | `Event{trigger='immediate'}` → ease_round, inc_career_stat, inc_steam_stat, :save_settings +2 | `G.blind_select` | unreviewed |  |  |  |  |
 | button_callbacks/event/G.FUNCS.select_blind/immediate:new_round | button_callbacks.lua:2548-2554 | event | `Event{trigger='immediate'}` → new_round | `G.blind_select` | unreviewed |  |  |  |  |
-| button_callbacks/fn/G.FUNCS.skip_booster | button_callbacks.lua:2558-2563 | function | `G.FUNCS.skip_booster(e)` |  | unreviewed |  |  |  |  |
+| button_callbacks/fn/G.FUNCS.skip_booster | button_callbacks.lua:2558-2563 | function | `G.FUNCS.skip_booster(e)` |  | verified | crates/jackdaw-core/src/packs.rs::skip_booster | tests/parity/test_rust_step.py |  |  |
 | button_callbacks/ctx/G.FUNCS.skip_booster/calculate_joker:skipping_booster | button_callbacks.lua:2560 | context_call | `calculate_joker{skipping_booster}` |  | unreviewed |  |  |  |  |
-| button_callbacks/fn/G.FUNCS.end_consumeable | button_callbacks.lua:2565-2629 | function | `G.FUNCS.end_consumeable(e, delayfac)` |  | unreviewed |  |  |  |  |
+| button_callbacks/fn/G.FUNCS.end_consumeable | button_callbacks.lua:2565-2629 | function | `G.FUNCS.end_consumeable(e, delayfac)` |  | ported | crates/jackdaw-core/src/packs.rs::end_consumeable |  |  |  |
 | button_callbacks/event/G.FUNCS.end_consumeable/after:remove | button_callbacks.lua:2574-2579 | event | `Event{trigger='after', blocking=false, blockable=false}` → :remove | `G.booster_pack` | unreviewed |  |  |  |  |
 | button_callbacks/event/G.FUNCS.end_consumeable/after:remove#2 | button_callbacks.lua:2580-2586 | event | `Event{trigger='after', blocking=false, blockable=false}` → :remove | `G.booster_pack` | unreviewed |  |  |  |  |
 | button_callbacks/event/G.FUNCS.end_consumeable/after:g-funcs-draw_from_hand_to_deck | button_callbacks.lua:2590-2628 | event | `Event{trigger='after'}` → G.FUNCS.draw_from_hand_to_deck, :add_event, :apply_to_run |  | unreviewed |  |  |  |  |
