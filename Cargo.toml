@@ -33,6 +33,8 @@ jackdaw-data = { path = "crates/jackdaw-data" }
 jackdaw-env = { path = "crates/jackdaw-env" }
 # `float_roundtrip` parses floats exactly; the default parser can be 1 ulp off.
 serde_json = { version = "1.0.154", features = ["float_roundtrip"] }
+# The canonical snapshot digest (`jackdaw_core::canon`).
+sha2 = "0.10"
 
 # `unsafe_code` is forbidden per crate (`#![forbid(unsafe_code)]`) rather than here, because the
 # PyO3 macros in jackdaw-py expand to unsafe code.

@@ -11,7 +11,7 @@ Source: `balatro_source/functions/button_callbacks.lua` (Balatro 1.0.1o). 249 ro
 | button_callbacks/fn/G.FUNCS.sort_hand_suit | button_callbacks.lua:36-39 | function | `G.FUNCS.sort_hand_suit(e)` |  | gap |  |  | G39 |  |
 | button_callbacks/fn/G.FUNCS.sort_hand_value | button_callbacks.lua:45-48 | function | `G.FUNCS.sort_hand_value(e)` |  | gap |  |  | G39 |  |
 | button_callbacks/fn/G.FUNCS.can_buy | button_callbacks.lua:55-70 | function | `G.FUNCS.can_buy(e)` |  | unreviewed |  |  |  |  |
-| button_callbacks/fn/G.FUNCS.can_buy_and_use | button_callbacks.lua:77-89 | function | `G.FUNCS.can_buy_and_use(e)` |  | verified | crates/jackdaw-core/src/action.rs::Game::apply | tests/parity/test_consumables_rust.py::test_buy_and_use | G46, G135, G138 |  |
+| button_callbacks/fn/G.FUNCS.can_buy_and_use | button_callbacks.lua:77-89 | function | `G.FUNCS.can_buy_and_use(e)` |  | verified | crates/jackdaw-core/src/legal.rs::shop_actions | tests/parity/test_rust_legal.py, tests/parity/test_consumables_rust.py::test_buy_and_use_ankh_with_full_slots | G46, G138, G180 |  |
 | button_callbacks/fn/G.FUNCS.can_redeem | button_callbacks.lua:96-104 | function | `G.FUNCS.can_redeem(e)` |  | unreviewed |  |  |  |  |
 | button_callbacks/fn/G.FUNCS.can_open | button_callbacks.lua:111-119 | function | `G.FUNCS.can_open(e)` |  | unreviewed |  |  |  |  |
 | button_callbacks/fn/G.FUNCS.HUD_blind_visible | button_callbacks.lua:125-131 | function | `G.FUNCS.HUD_blind_visible(e)` |  | unreviewed |  |  |  |  |

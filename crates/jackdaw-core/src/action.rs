@@ -130,6 +130,53 @@ impl Action {
     }
 }
 
+impl Action {
+    /// The action's tape form (the inverse of [`Action::from_json`]).
+    pub fn to_json(&self) -> Value {
+        use serde_json::json;
+        let targets = |t: &Option<Vec<usize>>| t.as_ref().map_or(Value::Null, |v| json!(v));
+        match self {
+            Action::SelectBlind => json!(["SelectBlind"]),
+            Action::SkipBlind => json!(["SkipBlind"]),
+            Action::PlayHand(c) => json!(["PlayHand", c]),
+            Action::Discard(c) => json!(["Discard", c]),
+            Action::BuyCard(i) => json!(["BuyCard", i]),
+            Action::SellCard { area, index } => {
+                let area = match area {
+                    AreaId::Jokers => "jokers",
+                    _ => "consumables",
+                };
+                json!(["SellCard", area, index])
+            }
+            Action::UseConsumable { index, targets: t } => {
+                json!(["UseConsumable", index, targets(t)])
+            }
+            Action::RedeemVoucher(i) => json!(["RedeemVoucher", i]),
+            Action::OpenBooster(i) => json!(["OpenBooster", i]),
+            Action::Reroll => json!(["Reroll"]),
+            Action::NextRound => json!(["NextRound"]),
+            Action::PickPackCard { index, targets: t } => {
+                json!(["PickPackCard", index, targets(t)])
+            }
+            Action::SkipPack => json!(["SkipPack"]),
+            Action::CashOut => json!(["CashOut"]),
+            Action::SortHand(mode) => json!([
+                "SortHand",
+                match mode {
+                    HandSort::Desc => "rank",
+                    HandSort::SuitDesc => "suit",
+                }
+            ]),
+            Action::SwapHandLeft(i) => json!(["SwapHandLeft", i]),
+            Action::SwapHandRight(i) => json!(["SwapHandRight", i]),
+            Action::SwapJokersLeft(i) => json!(["SwapJokersLeft", i]),
+            Action::SwapJokersRight(i) => json!(["SwapJokersRight", i]),
+            Action::RerollBoss => json!(["RerollBoss"]),
+            Action::BuyAndUse { index, targets: t } => json!(["BuyAndUse", index, targets(t)]),
+        }
+    }
+}
+
 fn illegal<T>(msg: impl Into<String>) -> Result<T, StepError> {
     Err(StepError::Illegal(msg.into()))
 }
@@ -176,6 +223,13 @@ impl Game {
     /// highlights the first forced card of the hand (cardarea.lua:252-256), so a Cryptid copy
     /// of it, forced too, stays unhighlighted.
     fn highlight_targets(&mut self, targets: Option<&[usize]>) -> Result<(), StepError> {
+        self.rt.highlighted = self.consumable_highlight(targets.unwrap_or(&[]))?;
+        Ok(())
+    }
+
+    /// `G.hand.highlighted` for a consumable used on these hand indices: the first forced card,
+    /// then the targets in order, repeats skipped.
+    pub(crate) fn consumable_highlight(&self, targets: &[usize]) -> Result<Vec<u32>, StepError> {
         let hand = self.gs.areas.ids(AreaId::Hand);
         let mut ids: Vec<u32> = self
             .gs
@@ -186,7 +240,7 @@ impl Game {
             .map(|c| c.sort_id)
             .into_iter()
             .collect();
-        for &i in targets.unwrap_or(&[]) {
+        for &i in targets {
             let Some(&id) = hand.get(i) else {
                 return illegal(format!("hand index {i} out of range"));
             };
@@ -198,8 +252,7 @@ impl Game {
         if ids.len() > HAND_HIGHLIGHT_LIMIT {
             return illegal("select at most five cards");
         }
-        self.rt.highlighted = ids;
-        Ok(())
+        Ok(ids)
     }
 
     /// Cards can be sold whenever the game waits for input with nothing being played: in a

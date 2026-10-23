@@ -5,23 +5,28 @@ cards, which join the hand), writes the few values play would take long to reach
 into the oracle's state, and checks every action against the Rust engine: the oracle's
 snapshot goes into Rust, both engines take the action, and the snapshots must match.
 
-Every step must be checked (none refused as unported); the assertions after a step confirm
-that the branch under test was taken.  The recorded tapes rarely reach most consumables with
-only ported jokers on the board, so these cases are the consumables' main parity gate.
+Every step must be checked (none refused as unported), and before each step Rust must list the
+oracle's legal actions in its order; the assertions after a step confirm that the branch under
+test was taken.  The recorded tapes rarely reach most consumables with only ported jokers on
+the board, so these cases are the consumables' main parity gate.
 """
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pytest
 
-from jackdaw.engine.actions import GamePhase
+from jackdaw import _core
+from jackdaw.engine.actions import GamePhase, get_legal_actions
 from jackdaw.engine.card import Card
 from jackdaw.engine.card_factory import create_consumable
 from jackdaw.engine.game import _reprice, blind_debuff_card
+from tests.golden.trajectories import encode_action
+from tests.parity import canon
 from tests.parity.pyengine import PyEngine
-from tests.parity.rust_step import Report, check_step
+from tests.parity.rust_step import Report, check_step, plain
 
 
 class Table:
@@ -90,10 +95,20 @@ class Table:
 
     # -- steps --------------------------------------------------------------
 
+    def legal_actions_match(self, where: str) -> None:
+        """Rust lists the oracle's legal actions, in its order (``get_legal_actions``)."""
+        with self.engine._ids():
+            py = [encode_action(a) for a in get_legal_actions(self.gs)]
+        snap = canon.to_json_compatible(plain(self.engine.snapshot()))
+        game = _core.Game.from_snapshot(json.dumps(snap))
+        rs = json.loads(game.legal_actions())
+        assert rs == py, f"{where}: legal actions differ:\n  rust {rs}\n  py   {py}"
+
     def _check(self, action: list[Any]) -> tuple[str, bool]:
         """Step both engines; fail on a mismatch or an unported step."""
         where = f"{self.seed}@{self.steps}"
         self.steps += 1
+        self.legal_actions_match(where)
         ok = check_step(self.engine, action, where, self.report)
         found = [
             f"{w}: {'; '.join(d[:10])}"

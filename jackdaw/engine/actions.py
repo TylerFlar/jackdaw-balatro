@@ -522,9 +522,9 @@ def _legal_shop(gs: dict[str, Any]) -> list[Action]:
 
     for i, card in enumerate(shop_cards):
         ability = card.ability if isinstance(card.ability, dict) else {}
-        # ability.consumeable is the center's config table, truthy in Lua even
-        # when empty (UI_definitions.lua:335; G135).
-        if ability.get("consumeable") is None or not can_afford(gs, card.cost):
+        # ``ability.consumeable`` is the center's config, a Lua table: present
+        # (and truthy) even when empty, as for Judgement or The Soul.
+        if "consumeable" not in ability or not can_afford(gs, card.cost):
             continue
         # can_buy_and_use asks can_use_consumeable alone: Card:check_use (Ankh
         # with every joker slot taken) stops the use after the purchase (G138).

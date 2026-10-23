@@ -242,10 +242,14 @@ class Blind:
         if self.disabled:
             return False
 
-        # Config-driven debuffs (self.debuff in Lua — always a table for bosses)
+        # ``self.debuff`` is a table for every blind (``blind and blind.debuff
+        # or {}``, blind.lua:85; the Small and Big Blinds' is empty), so every
+        # call resets the flag (blind.lua:521-522; G81).
+        self.triggered = False
+
+        # Config-driven debuffs (only bosses have any)
         if self.boss:
             cfg = self.debuff_config
-            self.triggered = False
 
             # Hand-type debuff (not used by vanilla blinds, but supported)
             if "hand" in cfg:

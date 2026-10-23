@@ -1,4 +1,4 @@
-"""Consumable fidelity found by the Rust port (G130-G140).
+"""Consumable fidelity found by the Rust port (G130-G142).
 
 Each test drives the oracle through its public ``step`` and checks the behaviour the vanilla
 Lua source fixes; the Lua lines are cited in each docstring.
@@ -149,22 +149,6 @@ class TestTheSoulRollsItsRarity:
         twin.random("rarity1sou")
         assert gs["rng"].state["rarity1sou"] == twin.state["rarity1sou"]
         assert gs["jokers"][0].ability["set"] == "Joker"
-
-
-class TestBuyAndUseEveryConsumable:
-    def test_wraith_can_be_bought_and_used(self):
-        """G135: the shop gives every consumable a buy-and-use button
-        (UI_definitions.lua:335: ``card.ability.consumeable`` is the center's
-        config, a table, truthy even when empty)."""
-        gs = to_shop(new_run("AUDIT_G135"))
-        wraith = create_consumable("c_wraith", hands_played=gs["hands_played"])
-        _reprice(gs, wraith)
-        gs["shop_cards"][0] = wraith
-        gs["dollars"] = 20
-        action = BuyAndUse(shop_index=0, target_indices=None)
-        assert action in get_legal_actions(gs)
-        step(gs, action)
-        assert len(gs["jokers"]) == 1 and gs["dollars"] == 0
 
 
 class TestBuyAndUseAnkhWithFullSlots:
