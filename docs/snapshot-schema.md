@@ -185,7 +185,7 @@ Stream insertion order is not part of the state.
 |---|---|
 | `next_sort_id` | `sort_id` the next created card receives |
 | `pending_tag_packs` | Booster keys queued by tags (Double Tag), opened when the current pack closes |
-| `pending_deck_bottom` | Cards (Marble Joker stones) that join the bottom of the deck after the next round-start shuffle |
+| `pending_deck_bottom` | Cards that join the bottom of the deck after the next round-start shuffle. Always empty: Marble Joker's Stones, which used to wait here, are shuffled in since G55 |
 | `shop_d6ed` | D6 Tag already applied this shop |
 | `shop_free` | A Coupon Tag already applied this shop (`G.GAME.shop_free`, tag.lua:448); a second one waits for the next shop |
 | `hand_last_poll_size` | Luxury Tax: `floor(dollars / minus_hand_size_per_X_dollar)` when the hand size was last adjusted (`G.hand.config.last_poll_size`, cardarea.lua:245); 0 in every other run |
