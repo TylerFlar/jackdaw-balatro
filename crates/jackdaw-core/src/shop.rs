@@ -284,6 +284,33 @@ impl Game {
         }
     }
 
+    /// `buy_from_shop`'s event for the "buy and use" button (button_callbacks.lua:2414-2475,
+    /// G46): the consumable is paid for and used at once, never landing in the consumables.
+    pub(crate) fn buy_and_use(&mut self, id: u32) {
+        let card = self
+            .gs
+            .areas
+            .remove_card(AreaId::ShopJokers, Some(id))
+            .expect("the bought card");
+        let cost = card.cost;
+        self.gs.areas.emplace(AreaId::Play, card, false, false);
+        self.add_to_deck(id, false);
+        if self.gs.modifier("inflation").is_some() {
+            self.gs.inflation += 1.0;
+            self.queue(Event::SetCostAll);
+        }
+        if cost != 0.0 {
+            self.ease_dollars(-cost);
+        }
+        // `G.FUNCS.use_card(e, true)`. Ankh's check_use stops it after the purchase: the card
+        // is in no area and never removed, so it is simply gone.
+        if self.check_use(id) {
+            self.gs.areas.remove_card(AreaId::Play, Some(id));
+            return;
+        }
+        self.use_consumable_card(id, AreaId::Play);
+    }
+
     /// `G.FUNCS.sell_card`: `card:sell_card()`, then the other jokers see the sale.
     pub(crate) fn sell_card(&mut self, id: u32) {
         let mut ctx = Ctx::new(Kind::SellingSelf);

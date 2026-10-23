@@ -6,7 +6,7 @@
 //! queue (tag.lua:24-100); its own effect, when it has one, is the event `yep` queues before
 //! that. The UI events of `yep` and `nope` are not queued.
 
-use jackdaw_data::{TagId, tags};
+use jackdaw_data::{CenterId, TagId, centers, tags};
 
 use crate::area::AreaId;
 use crate::card::{Card, EditionKind};
@@ -175,14 +175,38 @@ impl Game {
     }
 
     /// `apply_to_run({type = 'new_blind_choice'})` for the held tags until one fires
-    /// (tag.lua:207-300): the pack tags open their pack, the Boss Tag rerolls the boss.
+    /// (tag.lua:207-300): the pack tags open a free pack, the Boss Tag rerolls the boss.
     pub(crate) fn apply_tags_new_blind_choice(&mut self) {
         for i in 0..self.gs.tags.len() {
-            if self.tag_ready(i, "new_blind_choice") {
-                let name = self.gs.tags[i].id.get().name;
-                return self.unported(&format!("tag {name} (new_blind_choice)"));
+            if !self.tag_ready(i, "new_blind_choice") {
+                continue;
             }
+            // Charm and Meteor pick their pack with the unseeded `math.random(1, 2)`; the sim
+            // takes the first, as the oracle does.
+            let pack = match self.gs.tags[i].id.get().name {
+                "Charm Tag" => centers::P_ARCANA_MEGA_1,
+                "Meteor Tag" => centers::P_CELESTIAL_MEGA_1,
+                "Ethereal Tag" => centers::P_SPECTRAL_NORMAL_1,
+                "Standard Tag" => centers::P_STANDARD_MEGA_1,
+                "Buffoon Tag" => centers::P_BUFFOON_MEGA_1,
+                "Boss Tag" => {
+                    self.tag_yep(i, Some(Event::Call(|g, _, _| g.reroll_boss(true), 0, 0.0)));
+                    return;
+                }
+                other => return self.unported(&format!("tag {other} (new_blind_choice)")),
+            };
+            self.tag_yep(i, Some(Event::TagPack(pack)));
+            return;
         }
+    }
+
+    /// A pack tag's event: a free booster, opened at once (`G.FUNCS.use_card`, tag.lua:211-221).
+    pub(crate) fn tag_pack(&mut self, pack: CenterId) {
+        let mut card = self.new_card(pack, None, AreaId::Play);
+        card.cost = 0.0;
+        let id = card.sort_id;
+        self.gs.areas.emplace(AreaId::Play, card, false, false);
+        self.open_booster(id);
     }
 
     /// `apply_to_run({type = 'shop_start'})` for every held tag (game.lua:3095-3097): the D6

@@ -174,6 +174,12 @@ pub enum Event {
         prev: LuaState,
         from: AreaId,
     },
+    /// `reroll_boss`'s timed event (button_callbacks.lua:2734-2763).
+    RerollBossBody,
+    /// A pack tag's free booster (tag.lua:211-221).
+    TagPack(CenterId),
+    /// `buy_from_shop`'s event for "buy and use" (button_callbacks.lua:2414-2475).
+    BuyAndUse(u32),
     /// `use_card`'s nested event: the state comes back and a pack counts the pick (2255-2310).
     UseCardDone { prev: LuaState, from: AreaId },
     /// A card's own queued work: `f(game, card, value)`. Jokers and consumables use it for
@@ -362,6 +368,9 @@ impl Game {
                 from,
             } => self.use_card_after(card, dissolve, prev, from),
             Event::UseCardDone { prev, from } => self.use_card_done(prev, from),
+            Event::RerollBossBody => self.reroll_boss_body(),
+            Event::TagPack(pack) => self.tag_pack(pack),
+            Event::BuyAndUse(id) => self.buy_and_use(id),
             Event::Dissolve(id) => self.queue(Event::RemoveCard(id)),
             Event::Call(f, card, value) => f(self, card, value),
             Event::PermaDebuff(ids) => {

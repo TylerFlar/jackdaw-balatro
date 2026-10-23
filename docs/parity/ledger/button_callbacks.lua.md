@@ -208,7 +208,7 @@ Source: `balatro_source/functions/button_callbacks.lua` (Balatro 1.0.1o). 249 ro
 | button_callbacks/fn/G.FUNCS.blind_choice_handler | button_callbacks.lua:2631-2716 | function | `G.FUNCS.blind_choice_handler(e)` |  | unreviewed |  |  |  |  |
 | button_callbacks/event/G.FUNCS.blind_choice_handler/immediate:snap_to | button_callbacks.lua:2665-2667 | event | `Event{}` → :snap_to | `not e.config.ref_table.run_info and G.blind_select and G.blind_select.V…` & `(e.config.ref_table.deck ~= 'on' and e.config.id == G.GAME.blind_on_dec…` & `e.config.id == G.GAME.blind_on_deck` & `_top_button` | unreviewed |  |  |  |  |
 | button_callbacks/fn/G.FUNCS.hover_tag_proxy | button_callbacks.lua:2718-2738 | function | `G.FUNCS.hover_tag_proxy(e)` |  | n/a-ui |  |  |  | auto: touches only UI/sound/animation state |
-| button_callbacks/fn/G.FUNCS.skip_blind | button_callbacks.lua:2740-2782 | function | `G.FUNCS.skip_blind(e)` |  | unreviewed |  |  |  |  |
+| button_callbacks/fn/G.FUNCS.skip_blind | button_callbacks.lua:2740-2782 | function | `G.FUNCS.skip_blind(e)` |  | verified | crates/jackdaw-core/src/select.rs::skip_blind | tests/parity/test_rust_step.py |  |  |
 | button_callbacks/event/G.FUNCS.skip_blind/after | button_callbacks.lua:2743-2753 | event | `Event{trigger='after', blocking=false, blockable=false}` |  | n/a-ui |  |  |  | auto: event only animates, plays sound or waits |
 | button_callbacks/event/G.FUNCS.skip_blind/immediate:delay | button_callbacks.lua:2764-2780 | event | `Event{trigger='immediate'}` → delay, :calculate_joker, save_run, :apply_to_run | `_tag` | unreviewed |  |  |  |  |
 | button_callbacks/ctx/G.FUNCS.skip_blind/calculate_joker:skip_blind | button_callbacks.lua:2769 | context_call | `calculate_joker{skip_blind}` | `_tag` & [event] | unreviewed |  |  |  |  |
@@ -216,7 +216,7 @@ Source: `balatro_source/functions/button_callbacks.lua` (Balatro 1.0.1o). 249 ro
 | button_callbacks/ctx/G.FUNCS.skip_blind/apply_to_run:type-new_blind_choice | button_callbacks.lua:2776 | context_call | `apply_to_run{type='new_blind_choice'}` | `_tag` & [event] | unreviewed |  |  |  |  |
 | button_callbacks/fn/G.FUNCS.reroll_boss_button | button_callbacks.lua:2784-2798 | function | `G.FUNCS.reroll_boss_button(e)` |  | unreviewed |  |  |  |  |
 | button_callbacks/branch/G.FUNCS.reroll_boss_button/v_retcon+v_directors_cut | button_callbacks.lua:2785-2791 | branch | v_retcon, v_directors_cut — `((G.GAME.dollars - G.GAME.bankrupt_at) - 10 >= 0) and (G.GAME.used_vouchers["v_retcon"] or (G.GAME.…` |  | gap |  |  | G45 |  |
-| button_callbacks/fn/G.FUNCS.reroll_boss | button_callbacks.lua:2800-2853 | function | `G.FUNCS.reroll_boss(e)` |  | gap |  |  | G45 |  |
+| button_callbacks/fn/G.FUNCS.reroll_boss | button_callbacks.lua:2800-2853 | function | `G.FUNCS.reroll_boss(e)` |  | verified | crates/jackdaw-core/src/select.rs::reroll_boss | tests/parity/test_rust_step.py | G45 |  |
 | button_callbacks/event/G.FUNCS.reroll_boss/immediate:play_sound | button_callbacks.lua:2806-2814 | event | `Event{trigger='immediate'}` → play_sound, :set_role |  | unreviewed |  |  |  |  |
 | button_callbacks/event/G.FUNCS.reroll_boss/after:get_new_boss | button_callbacks.lua:2815-2852 | event | `Event{trigger='after'}` → get_new_boss, :remove, UIBox, UIBox_dyn_container +7 |  | unreviewed |  |  |  |  |
 | button_callbacks/rng/G.FUNCS.reroll_boss/get_new_boss | button_callbacks.lua:2820 | rng | `get_new_boss()` | [event] | unreviewed |  |  |  |  |

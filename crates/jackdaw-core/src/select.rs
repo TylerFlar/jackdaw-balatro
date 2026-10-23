@@ -90,6 +90,35 @@ impl Game {
         self.apply_tags_new_blind_choice();
     }
 
+    /// `G.FUNCS.reroll_boss` (button_callbacks.lua:2718-2765): Director's Cut or Retcon for $10,
+    /// or a Boss Tag for free; an event then picks the new boss.
+    pub(crate) fn reroll_boss(&mut self, from_tag: bool) {
+        self.gs.round_resets.boss_rerolled = true;
+        if !from_tag {
+            self.ease_dollars(-10.0);
+        }
+        self.queue(Event::RerollBossBody);
+    }
+
+    /// `reroll_boss`'s timed event: the new boss, its blind choice rebuilt (which marks the
+    /// blind on deck again), then the tags' `new_blind_choice` pass.
+    pub(crate) fn reroll_boss_body(&mut self) {
+        let boss = self.get_new_boss();
+        self.gs.round_resets.blind_choices[BlindSlot::Boss.index()] = Some(boss);
+        if let Some(on_deck) = self.gs.blind_on_deck {
+            self.gs.round_resets.set_blind_state(on_deck, "Select");
+        }
+        self.apply_tags_new_blind_choice();
+    }
+
+    /// `G.FUNCS.reroll_boss_button` (button_callbacks.lua:2784-2797).
+    pub(crate) fn can_reroll_boss(&self) -> bool {
+        let used = &self.gs.sets.used_vouchers;
+        self.gs.dollars - self.gs.bankrupt_at - 10.0 >= 0.0
+            && (used.contains("v_retcon")
+                || (used.contains("v_directors_cut") && !self.gs.round_resets.boss_rerolled))
+    }
+
     /// The Orbital Tag hand rolled for `slot` this ante, if any.
     pub(crate) fn orbital_choice(&self, slot: BlindSlot) -> Option<crate::hand_eval::HandType> {
         let ante = crate::lua::tostring_number(self.gs.round_resets.ante);

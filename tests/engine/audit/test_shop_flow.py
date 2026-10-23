@@ -145,3 +145,18 @@ class TestCouponedFlag:
         # floor((base 2 + 0.5) * 75%), and a foil playing card floor((1 + 2 + 0.5) * 75%).
         assert owned.cost == 1
         assert foil.cost == 2
+
+
+class TestTagPacks:
+    """A pack tag's booster is a Card (tag.lua:211-216): it takes the next
+    sort_id before the pack's contents are made."""
+
+    def test_the_tag_booster_takes_a_sort_id(self):
+        from jackdaw.engine import card as card_module
+        from jackdaw.engine.actions import SkipBlind
+
+        gs = new_run("AUDIT_TAG_PACK")
+        gs["round_resets"]["blind_tags"]["Small"] = "tag_buffoon"
+        before = card_module._sort_id_counter
+        step(gs, SkipBlind())
+        assert gs["pack_cards"][0].sort_id == before + 2

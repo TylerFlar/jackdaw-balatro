@@ -395,6 +395,30 @@ impl Game {
                 let id = card.sort_id;
                 self.sell_card(id);
             }
+            Action::RerollBoss => {
+                self.require(LuaState::BlindSelect)?;
+                self.check_ported()?;
+                if !self.can_reroll_boss() {
+                    return illegal("the boss can't be rerolled");
+                }
+                self.reroll_boss(false);
+            }
+            Action::BuyAndUse { index, targets } => {
+                self.require(LuaState::Shop)?;
+                self.check_ported()?;
+                let card = self.shop_card(AreaId::ShopJokers, *index)?;
+                let id = card.sort_id;
+                if !card.center().consumeable {
+                    return illegal("only a consumable can be bought and used");
+                }
+                // G.FUNCS.can_buy_and_use (button_callbacks.lua:77-89).
+                let cost = card.cost;
+                self.highlight_targets(targets.as_deref())?;
+                if (cost > self.spendable() && cost > 0.0) || !self.can_use_consumeable(id) {
+                    return illegal("the card can't be bought and used now");
+                }
+                self.queue(Event::BuyAndUse(id));
+            }
             Action::RedeemVoucher(i) => {
                 self.require(LuaState::Shop)?;
                 self.check_ported()?;
@@ -465,7 +489,6 @@ impl Game {
                 }
                 self.use_consumable_card(id, AreaId::Consumables);
             }
-            other => return unported(format!("action {other:?}")),
         }
         Ok(())
     }

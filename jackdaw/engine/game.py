@@ -405,6 +405,11 @@ def _open_tag_pack(gs: dict[str, Any], pack_key: str, force: bool = False) -> No
 
     # Save current phase and switch to pack opening
     gs["shop_return_phase"] = gs.get("phase", GamePhase.BLIND_SELECT)
+    # The tag's booster is a Card (tag.lua:213-216): it takes the next sort_id
+    # before the pack's contents do.
+    from jackdaw.engine.card import _next_sort_id
+
+    _next_sort_id()
     _open_pack(gs, pack_key)
 
 

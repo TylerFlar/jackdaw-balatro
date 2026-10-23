@@ -18,7 +18,7 @@ Source: `balatro_source/tag.lua` (Balatro 1.0.1o). 53 rows: 12 function, 25 bran
 | tag/event/Tag:yep/after:remove | tag.lua:93-100 | event | `Event{trigger='after'}` → :remove |  | unreviewed |  |  |  |  |
 | tag/fn/Tag:set_ability | tag.lua:103-113 | function | `Tag:set_ability()` |  | unreviewed |  |  |  |  |
 | tag/branch/Tag:set_ability/orbital-tag | tag.lua:104-111 | branch | Orbital Tag — `self.name == 'Orbital Tag'` |  | gap |  |  | G40 |  |
-| tag/fn/Tag:apply_to_run | tag.lua:115-468 | function | `Tag:apply_to_run(_context)` |  | unreviewed |  |  |  |  |
+| tag/fn/Tag:apply_to_run | tag.lua:115-468 | function | `Tag:apply_to_run(_context)` |  | verified | crates/jackdaw-core/src/tags.rs | tests/parity/test_rust_step.py | G128 |  |
 | tag/branch/Tag:apply_to_run/investment-tag | tag.lua:118-129 | branch | Investment Tag — `self.name == 'Investment Tag' and G.GAME.last_blind and G.GAME.last_blind.boss` | `not self.triggered and self.config.type == _context.type` & `_context.type == 'eval'` | unreviewed |  |  |  |  |
 | tag/branch/Tag:apply_to_run/top-up-tag | tag.lua:134-147 | branch | Top-up Tag — `self.name == 'Top-up Tag'` | `not self.triggered and self.config.type == _context.type` & `_context.type == 'immediate'` | unreviewed |  |  |  |  |
 | tag/rng/Tag:apply_to_run/top-up-tag/create_card:top | tag.lua:138 | rng | `create_card('Joker', G.jokers, nil, 0, nil, nil, nil, 'top')` | `not self.triggered and self.config.type == _context.type` & `_context.type == 'immediate'` & `self.name == 'Top-up Tag'` & `G.jokers and #G.jokers.cards < G.jokers.config.card_limit` | unreviewed |  |  |  |  |
