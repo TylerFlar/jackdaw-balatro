@@ -520,7 +520,9 @@ impl Game {
             chips: hand_chips,
             mult,
             total,
-            dollars: 0.0,
+            // Every payout of this hand went through `G.GAME.dollar_buffer` (seals, Lucky
+            // Cards, jokers), which only queued events clear: it holds the hand's money.
+            dollars: self.rt.dollar_buffer,
             debuffed,
         });
     }
