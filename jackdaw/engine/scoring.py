@@ -452,7 +452,7 @@ def score_hand(
             jokers in Phase 9 (Observatory's held-Planet X1.5).
     """
     from jackdaw.engine.hand_eval import evaluate_hand
-    from jackdaw.engine.jokers import GameSnapshot, JokerContext, calculate_joker
+    from jackdaw.engine.jokers import GameSnapshot, JokerContext, calculate_joker, effect_flags
 
     gs = game_state or {}
     dollars = 0
@@ -463,9 +463,10 @@ def score_hand(
     if joker_count == 0:
         joker_count = len(jokers)  # fallback: count all
 
-    # Check for meta-jokers
-    smeared = any(j.ability.get("name") == "Smeared Joker" and not j.debuff for j in jokers)
-    pareidolia = any(j.ability.get("name") == "Pareidolia" and not j.debuff for j in jokers)
+    # Check for meta-jokers (find_joker semantics: debuffed ones don't count)
+    flags = effect_flags(jokers)
+    smeared = flags["smeared"]
+    pareidolia = flags["pareidolia"]
 
     # Build GameSnapshot once — shared across all JokerContext instances
     snapshot = GameSnapshot(

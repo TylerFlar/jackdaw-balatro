@@ -10,6 +10,7 @@ from ._helpers import (
     give_card,
     give_consumable,
     give_joker,
+    indices,
     new_run,
     play,
     select_blind,
@@ -80,6 +81,83 @@ class TestBlueprintGuards:
         discard(gs, card)
         assert gs["dollars"] == dollars + 3
         assert card not in gs["discard_pile"]
+
+
+class TestEffectFlags:
+    """Card:is_face and Card:is_suit consult find_joker('Pareidolia') /
+    find_joker('Smeared Joker') themselves (card.lua:964-970, 4064-4089), and
+    evaluate_poker_hand reads Four Fingers / Shortcut / Smeared, so every
+    caller sees them."""
+
+    def test_ride_the_bus_sees_pareidolia(self):
+        """Ride the Bus resets when a scoring card is_face() (card.lua:3525-3541)."""
+        gs = select_blind(new_run("AUDIT_BUS"))
+        give_joker(gs, "j_pareidolia")
+        bus = give_joker(gs, "j_ride_the_bus")
+        play(gs, give_card(gs, "S_2"))
+        assert bus.ability["mult"] == 0
+
+    def test_caino_sees_pareidolia(self):
+        """Caino counts destroyed cards that is_face() (card.lua:2672-2684)."""
+        gs = select_blind(new_run("AUDIT_CAINO"))
+        give_joker(gs, "j_pareidolia")
+        caino = give_joker(gs, "j_caino")
+        card = give_card(gs, "S_2")
+        give_consumable(gs, "c_hanged_man")
+        step(gs, UseConsumable(card_index=0, target_indices=indices(gs, card)))
+        assert caino.ability["caino_xmult"] == 2
+
+    def test_flower_pot_sees_smeared(self):
+        """Flower Pot's is_suit (card.lua:3807-3839): with Smeared a Heart also
+        fills Diamonds and a Spade also fills Clubs."""
+        gs = select_blind(new_run("AUDIT_FLOWER"))
+        give_joker(gs, "j_smeared")
+        give_joker(gs, "j_flower_pot")
+        cards = [give_card(gs, k) for k in ("H_2", "H_3", "S_2", "S_3")]
+        play(gs, *cards)
+        # Two Pair L1: 20 chips x2; 2+3+2+3 chips; Flower Pot x3
+        assert gs["last_score_result"].total == (20 + 10) * 2 * 3
+
+    def test_seeing_double_sees_smeared(self):
+        """Seeing Double (card.lua:3840-3872): with Smeared a Spade counts as a
+        Club."""
+        gs = select_blind(new_run("AUDIT_DOUBLE"))
+        give_joker(gs, "j_smeared")
+        give_joker(gs, "j_seeing_double")
+        cards = [give_card(gs, "S_5"), give_card(gs, "H_5")]
+        play(gs, *cards)
+        # Pair L1: 10 chips x2; 5+5 chips; Seeing Double x2
+        assert gs["last_score_result"].total == (10 + 10) * 2 * 2
+
+    def test_faceless_joker_sees_pareidolia(self):
+        """Faceless Joker counts discarded cards that is_face() (card.lua:2858-2872)."""
+        gs = select_blind(new_run("AUDIT_FACELESS"))
+        give_joker(gs, "j_pareidolia")
+        give_joker(gs, "j_faceless")
+        cards = [give_card(gs, k) for k in ("S_2", "S_3", "S_4")]
+        dollars = gs["dollars"]
+        discard(gs, *cards)
+        assert gs["dollars"] == dollars + 5
+
+    def test_castle_sees_smeared(self):
+        """Castle's discard check is_suit(castle_card.suit) (card.lua:2814-2824)."""
+        gs = select_blind(new_run("AUDIT_CASTLE"))
+        give_joker(gs, "j_smeared")
+        castle = give_joker(gs, "j_castle")
+        suit = gs["current_round"]["castle_card"]["suit"]
+        twin = {"Spades": "C", "Clubs": "S", "Hearts": "D", "Diamonds": "H"}[suit]
+        discard(gs, give_card(gs, f"{twin}_2"))
+        assert castle.ability["extra"]["chips"] == 3
+
+    def test_burnt_joker_detection_sees_four_fingers(self):
+        """Burnt Joker levels the hand get_poker_hand_info finds
+        (card.lua:2750), which honours Four Fingers."""
+        gs = select_blind(new_run("AUDIT_BURNT_FF"))
+        give_joker(gs, "j_four_fingers")
+        give_joker(gs, "j_burnt")
+        cards = [give_card(gs, k) for k in ("H_2", "H_5", "H_9", "H_K")]
+        discard(gs, *cards)
+        assert gs["hand_levels"]["Flush"].level == 2
 
 
 class TestMrBones:

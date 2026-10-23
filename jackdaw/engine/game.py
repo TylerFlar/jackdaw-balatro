@@ -934,12 +934,15 @@ def _handle_discard(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str, A
     # ------------------------------------------------------------------
     # 3. Fire joker pre_discard context (Burnt Joker: level up hand)
     # ------------------------------------------------------------------
-    from jackdaw.engine.jokers import JokerContext, calculate_joker
+    from jackdaw.engine.jokers import JokerContext, calculate_joker, effect_flags
 
     jokers: list = gs.get("jokers", [])
     rng = gs.get("rng")
     game_snap = _build_discard_snapshot(gs, jokers)
 
+    # is_face / is_suit read Pareidolia / Smeared (card.lua:964, 4064):
+    # Faceless Joker, Castle.
+    flags = effect_flags(jokers)
     pre_discard_effects: list = []
     for joker in jokers:
         if getattr(joker, "debuff", False):
@@ -950,6 +953,7 @@ def _handle_discard(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str, A
             jokers=jokers,
             rng=rng,
             game=game_snap,
+            **flags,
         )
         result = calculate_joker(joker, ctx)
         if result:
@@ -998,6 +1002,7 @@ def _handle_discard(gs: dict[str, Any], indices: tuple[int, ...]) -> dict[str, A
                 jokers=jokers,
                 rng=rng,
                 game=game_snap,
+                **flags,
             )
             result = calculate_joker(joker, ctx)
             if result:
@@ -3229,13 +3234,14 @@ def _notify_cards_destroyed(gs: dict[str, Any], destroyed: list) -> None:
     a tarot ate two face cards — live Caino x3, sim stuck at x1)."""
     if not destroyed:
         return
-    from jackdaw.engine.jokers import JokerContext, calculate_joker
+    from jackdaw.engine.jokers import JokerContext, calculate_joker, effect_flags
 
     jokers = gs.get("jokers", [])
+    flags = effect_flags(jokers)  # Caino counts is_face() cards (card.lua:2676)
     for joker in jokers:
         if getattr(joker, "debuff", False):
             continue
-        calculate_joker(joker, JokerContext(cards_destroyed=destroyed, jokers=jokers))
+        calculate_joker(joker, JokerContext(cards_destroyed=destroyed, jokers=jokers, **flags))
 
 
 def _fire_discard_effects(gs: dict[str, Any], discarded: list, *, hook: bool) -> None:
@@ -3247,11 +3253,12 @@ def _fire_discard_effects(gs: dict[str, Any], discarded: list, *, hook: bool) ->
     counter block (discards_left/discards_used/redraw) is ``not hook``
     guarded there and is NOT applied here.
     """
-    from jackdaw.engine.jokers import JokerContext, calculate_joker
+    from jackdaw.engine.jokers import JokerContext, calculate_joker, effect_flags
 
     jokers: list = gs.get("jokers", [])
     rng = gs.get("rng")
     game_snap = _build_discard_snapshot(gs, jokers)
+    flags = effect_flags(jokers)  # Faceless / Castle: is_face, is_suit
 
     dollars_earned = 0
     destroyed: list = []
@@ -3277,6 +3284,7 @@ def _fire_discard_effects(gs: dict[str, Any], discarded: list, *, hook: bool) ->
                 jokers=jokers,
                 rng=rng,
                 game=game_snap,
+                **flags,
             )
             result = calculate_joker(joker, ctx)
             if result:
