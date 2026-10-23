@@ -10,8 +10,9 @@ stays oracle-compatible behind an `// AUDIT-Gxx` marker. The ledger rows that ca
 their `gap` column (status `gap`) show where the logic lives; see [README.md](README.md).
 
 Columns: `python fix` and `rust` take the PR or commit and code location of each fix, `test` the
-regression test id. Status is one of `open`, `in-progress`, `fixed` (both engines, test landed)
-or `wontfix` (with the reason in the summary).
+regression test id. Status is one of `open`, `in-progress`, `python-fixed` (fixed in the Python
+oracle with its regression test; Rust still pending), `fixed` (both engines, test landed) or
+`wontfix` (with the reason in the summary).
 
 ## Gameplay gaps
 

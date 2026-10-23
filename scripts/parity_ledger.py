@@ -56,7 +56,7 @@ KIND_KEYS = {
 }
 STATUSES = ("unreviewed", "ported", "verified", "gap", "smods-diff", "n/a-ui", "n/a-meta")
 GAP_COLUMNS = ("id", "area", "summary", "lua", "python fix", "rust", "test", "status")
-GAP_STATUSES = ("open", "in-progress", "fixed", "wontfix")
+GAP_STATUSES = ("open", "in-progress", "python-fixed", "fixed", "wontfix")
 GAP_ID_RE = re.compile(r"^[GB]\d{2}$")
 SUMMARY_BEGIN = "<!-- BEGIN GENERATED SUMMARY (scripts/parity_ledger.py generate) -->"
 SUMMARY_END = "<!-- END GENERATED SUMMARY -->"
