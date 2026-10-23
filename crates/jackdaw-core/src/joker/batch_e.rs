@@ -56,9 +56,9 @@ fn hallucination(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
     if ctx.kind != Kind::OpenBooster || !g.consumable_room() {
         return None;
     }
-    let ante = crate::lua::tostring_number(g.gs.round_resets.ante);
+    let ante = g.gs.round_resets.ante;
     let odds = g.extra(id);
-    if g.roll(&format!("halu{ante}"), odds) {
+    if g.roll(&crate::rng::Key::new("halu").n(ante), odds) {
         g.create_consumable_later(PoolType::Tarot, "hal", None);
     }
     None

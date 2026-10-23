@@ -40,8 +40,8 @@ impl Game {
         // `create_UIBox_blind_choice` for each blind: the blind on deck is the one to select,
         // and this ante's Orbital Tag hands are rolled once (UI_definitions.lua:1486-1516).
         self.gs.round_resets.set_blind_state(on_deck, "Select");
-        let ante = crate::lua::tostring_number(self.gs.round_resets.ante);
-        if !self.gs.orbital_choices.contains_key(&ante) {
+        let ante = crate::rng::Key::new("").n(self.gs.round_resets.ante);
+        if !self.gs.orbital_choices.contains_key(&*ante) {
             let visible: Vec<_> = PAIRS_ORDER
                 .into_iter()
                 .filter(|&h| self.gs.hand(h).visible)
@@ -51,7 +51,7 @@ impl Game {
                 visible[crate::rng::element_index(visible.len(), seed)]
             };
             let hands = [roll(), roll(), roll()];
-            self.gs.orbital_choices.insert(ante, hands);
+            self.gs.orbital_choices.insert(ante.to_string(), hands);
         }
         self.apply_tags_immediate();
         self.apply_tags_new_blind_choice();
@@ -121,8 +121,8 @@ impl Game {
 
     /// The Orbital Tag hand rolled for `slot` this ante, if any.
     pub(crate) fn orbital_choice(&self, slot: BlindSlot) -> Option<crate::hand_eval::HandType> {
-        let ante = crate::lua::tostring_number(self.gs.round_resets.ante);
-        self.gs.orbital_choices.get(&ante).map(|h| h[slot.index()])
+        let ante = crate::rng::Key::new("").n(self.gs.round_resets.ante);
+        self.gs.orbital_choices.get(&*ante).map(|h| h[slot.index()])
     }
 
     /// `reset_blinds()` (common_events.lua:2326-2336): after a boss, the next ante's blinds.
@@ -195,13 +195,16 @@ impl Game {
         if size == 0 {
             entries = vec![Some(tags::TAG_HANDY)];
         }
-        let key = format!("Tag{append}{}", crate::lua::tostring_number(ante));
+        let key = crate::rng::Key::new("Tag").s(append).n(ante);
         let n = entries.len();
         let mut pick = entries[crate::rng::element_index(n, self.gs.rng.seed(&key))];
         let mut it = 1;
         while pick.is_none() {
             it += 1;
-            let seed = self.gs.rng.seed(&format!("{key}_resample{it}"));
+            let seed = self
+                .gs
+                .rng
+                .seed(&crate::rng::Key::new(&key).s("_resample").i(it));
             pick = entries[crate::rng::element_index(n, seed)];
         }
         pick.expect("resampled")
