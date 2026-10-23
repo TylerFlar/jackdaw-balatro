@@ -103,6 +103,10 @@ def add_card(
         # future rounds via round_resets.
         old_hand_size = gs.get("hand_size", 8)
         card.add_to_deck(gs)
+        from jackdaw.engine.game import run_pending_reprice
+
+        # add waits for the events the new card queued (add.lua:450-490).
+        run_pending_reprice(gs)
         # A bigger hand mid-round fills up to the new size at once.
         if gs.get("hand_size", 8) > old_hand_size and phase == GamePhase.SELECTING_HAND:
             from jackdaw.engine.game import _draw_hand

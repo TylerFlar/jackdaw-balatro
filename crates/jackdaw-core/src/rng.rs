@@ -12,7 +12,9 @@
 //! All floating-point steps go through [`crate::lua`] so NaNs carry the bits LuaJIT produces:
 //! a string whose hash reaches exactly zero ("bugged seeds") seeds TW223 from a NaN pattern.
 
+use std::borrow::Borrow;
 use std::collections::HashMap;
+use std::hash::{BuildHasherDefault, Hash, Hasher};
 
 use crate::lua;
 
@@ -178,12 +180,112 @@ fn advance(state: f64) -> f64 {
     lua::truncate13(raw).abs()
 }
 
+/// Keys up to this long are stored inline. The longest the game builds is about 27 bytes
+/// (`'Spectral'..'spe'..ante..'_resample'..n` at a four-digit ante).
+const KEY_CAP: usize = 30;
+
+/// A stream key. Game keys are stored inline, so copying the stream table allocates nothing
+/// per key (a `Game` is cloned on every step); longer keys go to the heap.
+#[derive(Clone)]
+enum StreamKey {
+    Inline { len: u8, bytes: [u8; KEY_CAP] },
+    Heap(Box<str>),
+}
+
+impl StreamKey {
+    fn new(key: &str) -> Self {
+        if key.len() > KEY_CAP {
+            return StreamKey::Heap(key.into());
+        }
+        let mut bytes = [0; KEY_CAP];
+        bytes[..key.len()].copy_from_slice(key.as_bytes());
+        StreamKey::Inline {
+            len: key.len() as u8,
+            bytes,
+        }
+    }
+
+    fn as_str(&self) -> &str {
+        match self {
+            StreamKey::Inline { len, bytes } => {
+                std::str::from_utf8(&bytes[..usize::from(*len)]).expect("a str's bytes")
+            }
+            StreamKey::Heap(s) => s,
+        }
+    }
+}
+
+impl PartialEq for StreamKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
+impl Eq for StreamKey {}
+
+/// Hashes as its `str`, so the table can be searched with a `&str`.
+impl Hash for StreamKey {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.as_str().hash(state);
+    }
+}
+
+impl Borrow<str> for StreamKey {
+    fn borrow(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl std::fmt::Debug for StreamKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.as_str().fmt(f)
+    }
+}
+
+/// FxHash (rustc's hasher): the keys are short and not attacker-controlled.
+#[derive(Default, Clone, Copy)]
+struct FxHasher {
+    hash: u64,
+}
+
+impl FxHasher {
+    #[inline]
+    fn add(&mut self, word: u64) {
+        self.hash = (self.hash.rotate_left(5) ^ word).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
+    }
+}
+
+impl Hasher for FxHasher {
+    #[inline]
+    fn write(&mut self, bytes: &[u8]) {
+        let (words, rest) = bytes.as_chunks::<8>();
+        for &w in words {
+            self.add(u64::from_le_bytes(w));
+        }
+        for &b in rest {
+            self.add(u64::from(b));
+        }
+    }
+
+    #[inline]
+    fn write_u8(&mut self, i: u8) {
+        self.add(u64::from(i));
+    }
+
+    #[inline]
+    fn finish(&self) -> u64 {
+        self.hash
+    }
+}
+
+type StreamMap = HashMap<StreamKey, f64, BuildHasherDefault<FxHasher>>;
+
 /// `G.GAME.pseudorandom`: the run seed and one state per named stream.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Rng {
     seed: String,
     hashed_seed: f64,
-    streams: HashMap<String, f64>,
+    streams: StreamMap,
 }
 
 impl Rng {
@@ -192,7 +294,7 @@ impl Rng {
         Self {
             seed: seed.to_owned(),
             hashed_seed: pseudohash(seed.as_bytes()),
-            streams: HashMap::new(),
+            streams: StreamMap::default(),
         }
     }
 
@@ -201,7 +303,10 @@ impl Rng {
         Self {
             seed,
             hashed_seed,
-            streams,
+            streams: streams
+                .iter()
+                .map(|(k, &v)| (StreamKey::new(k), v))
+                .collect(),
         }
     }
 
@@ -213,9 +318,19 @@ impl Rng {
         self.hashed_seed
     }
 
-    /// Stream key -> current state.
-    pub fn streams(&self) -> &HashMap<String, f64> {
-        &self.streams
+    /// Each stream's key and current state, in no particular order.
+    pub fn streams(&self) -> impl Iterator<Item = (&str, f64)> {
+        self.streams.iter().map(|(k, &v)| (k.as_str(), v))
+    }
+
+    /// The current state of stream `key`, if it has been drawn from.
+    pub fn stream(&self, key: &str) -> Option<f64> {
+        self.streams.get(key).copied()
+    }
+
+    /// How many streams have been drawn from.
+    pub fn stream_count(&self) -> usize {
+        self.streams.len()
     }
 
     /// `pseudoseed(key)`: advance stream `key` and return the double that seeds TW223.
@@ -227,7 +342,7 @@ impl Rng {
         }
         // First use: G.GAME.pseudorandom[key] = pseudohash(key .. seed), then advance.
         let state = advance(pseudohash_parts(key.as_bytes(), self.seed.as_bytes()));
-        self.streams.insert(key.to_owned(), state);
+        self.streams.insert(StreamKey::new(key), state);
         lua::div(lua::add(state, hashed), 2.0)
     }
 
@@ -334,7 +449,10 @@ mod tests {
         // stream state the positive NaN, which then wins the (state + hashed_seed) addition.
         let mut rng = Rng::new("7LB2WVPK");
         let s = rng.seed("erratic");
-        assert_eq!(rng.streams()["erratic"].to_bits(), lua::POSITIVE_NAN_BITS);
+        assert_eq!(
+            rng.stream("erratic").unwrap().to_bits(),
+            lua::POSITIVE_NAN_BITS
+        );
         assert_eq!(s.to_bits(), lua::POSITIVE_NAN_BITS);
         let tw = Tw223::seeded(s);
         assert_eq!(

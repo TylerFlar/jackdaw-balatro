@@ -535,6 +535,19 @@ class TestGlassJoker:
         snap = check(eng, ["Discard", last(eng)])
         assert snap_joker(snap, "j_glass")["ability"]["x_mult"] == 1.75
 
+    def test_counts_the_glass_cards_the_hanged_man_destroys(self):
+        # using_consumeable counts the highlighted Glass Cards (card.lua:2709-2720).
+        cards = ({"key": "H_K", "enhancement": "m_glass"}, {"key": "D_K", "enhancement": "m_glass"})
+        eng = in_round("PD_GLASS_HANGED", ("j_glass", "c_hanged_man"), cards)
+        snap = check(eng, ["UseConsumable", 0, last(eng, 2)])
+        assert snap_joker(snap, "j_glass")["ability"]["x_mult"] == 1 + 0.75 * 2
+
+    def test_the_hanged_man_counts_only_glass_cards(self):
+        cards = ({"key": "H_K", "enhancement": "m_glass"}, {"key": "D_K"})
+        eng = in_round("PD_GLASS_HANGED_2", ("j_glass", "c_hanged_man"), cards)
+        snap = check(eng, ["UseConsumable", 0, last(eng, 2)])
+        assert snap_joker(snap, "j_glass")["ability"]["x_mult"] == 1.75
+
 
 # ---------------------------------------------------------------------------
 # Discards

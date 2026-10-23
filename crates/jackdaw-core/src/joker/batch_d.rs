@@ -439,14 +439,29 @@ fn glass_joker(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
             None
         }
         Kind::UsingConsumeable => {
-            // Lua takes the used card out of its area first (button_callbacks.lua:2209), so a
-            // card no area holds may be The Hanged Man too.
-            let other = ctx
+            // The Hanged Man: the highlighted Glass Cards it is about to destroy; its own events
+            // run after the jokers see the use (card.lua:2709-2720). The used card waits in the
+            // play area.
+            let hanged = ctx
                 .consumeable
                 .and_then(|c| g.gs.areas.card(c))
-                .is_some_and(|c| c.name() != "The Hanged Man");
-            if !other {
-                g.unported("Glass Joker's using_consumeable branch (The Hanged Man)");
+                .is_some_and(|c| c.center == jackdaw_data::centers::C_HANGED_MAN);
+            if hanged {
+                let glasses =
+                    g.rt.highlighted
+                        .iter()
+                        .filter(|&&h| {
+                            g.gs.areas
+                                .card(h)
+                                .is_some_and(|c| c.center == jackdaw_data::centers::M_GLASS)
+                        })
+                        .count();
+                if glasses > 0
+                    && let Some(c) = g.gs.areas.card_mut(id)
+                {
+                    let extra = c.ability.extra.num().unwrap_or(0.0);
+                    c.ability.x_mult += extra * glasses as f64;
+                }
             }
             None
         }

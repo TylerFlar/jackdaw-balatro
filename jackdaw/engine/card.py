@@ -940,6 +940,10 @@ class Card:
         if name == "To the Moon":
             amount = extra if isinstance(extra, int) else 0
             game_state["interest_amount"] = game_state.get("interest_amount", 0) + amount
+        if name == "Astronomer":
+            # card.lua:616-622: an event re-runs set_cost on every card; the
+            # step runs it when the action is done (game.run_pending_reprice).
+            game_state["astronomer_reprice"] = True
         if name == "Troubadour" and isinstance(extra, dict):
             _change_hand_size(game_state, extra.get("h_size", 0))
             rr = game_state.get("round_resets")
@@ -1011,6 +1015,9 @@ class Card:
         if name == "To the Moon":
             amount = extra if isinstance(extra, int) else 0
             game_state["interest_amount"] = game_state.get("interest_amount", 0) - amount
+        if name == "Astronomer":
+            # card.lua:673-679, whether the card leaves or is debuffed (G261).
+            game_state["astronomer_reprice"] = True
         if name == "Troubadour" and isinstance(extra, dict):
             _change_hand_size(game_state, -extra.get("h_size", 0))
             rr = game_state.get("round_resets")

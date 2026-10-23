@@ -55,6 +55,21 @@ class GameState:
     done: bool
 
 
+def run_won(gs: dict[str, Any]) -> bool:
+    """Whether the run was won, for agents and rewards.
+
+    ``G.GAME.won`` is set by end_round for the boss of exactly ``win_ante``
+    before its game-over test, so losing that boss sets it too (G260); the
+    ante only goes up on a win, so such a loss ends the run at ``win_ante``.
+    A loss later in endless mode (a higher ante) keeps the win.
+    """
+    if not gs.get("won", False):
+        return False
+    phase = gs.get("phase")
+    lost = phase == GamePhase.GAME_OVER or phase == "game_over"
+    return not (lost and gs.get("round_resets", {}).get("ante") == gs.get("win_ante", 8))
+
+
 def _snapshot(gs: dict[str, Any]) -> GameState:
     """Build a :class:`GameState` snapshot from an engine game_state dict."""
     phase = gs.get("phase", GamePhase.GAME_OVER)
@@ -77,7 +92,7 @@ def _snapshot(gs: dict[str, Any]) -> GameState:
         blind_on_deck=gs.get("blind_on_deck"),
         blind_chips=blind_chips,
         chips=gs.get("chips", 0),
-        won=gs.get("won", False),
+        won=run_won(gs),
         done=phase == GamePhase.GAME_OVER,
     )
 
@@ -188,7 +203,7 @@ class DirectAdapter:
 
     @property
     def won(self) -> bool:
-        return bool(self._gs.get("won", False))
+        return run_won(self._gs)
 
 
 # ---------------------------------------------------------------------------
@@ -393,7 +408,7 @@ class BridgeAdapter:
 
     @property
     def won(self) -> bool:
-        return bool(self._last_response.get("won", False))
+        return run_won(self._last_gs)
 
     # -- internal -----------------------------------------------------------
 
