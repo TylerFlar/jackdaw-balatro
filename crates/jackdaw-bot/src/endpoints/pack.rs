@@ -11,7 +11,7 @@
 //! - BalatroBot then calls `G.FUNCS.use_card` directly, skipping the button's
 //!   `can_use_consumeable` / `can_select_card` gate. The sim keeps vanilla's gate: a pick the
 //!   game greys out (Judgement at full joker slots, The Emperor at full consumable slots, ...)
-//!   is refused with `NOT_ALLOWED` (`docs/balatrobot.md`, smods-diffs.md B01).
+//!   is refused with `NOT_ALLOWED` (`docs/balatrobot.md`; `docs/live.md`, B01).
 //!
 //! Targets are highlighted the vanilla way, as for `use`. `skip` runs `G.FUNCS.skip_booster`.
 

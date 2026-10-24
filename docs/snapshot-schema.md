@@ -1,3 +1,8 @@
+---
+layout: default
+title: Snapshot schema
+---
+
 # Canonical snapshot schema (`jackdaw.snapshot/1`)
 
 A snapshot is the complete, engine-agnostic state of a run. One format serves

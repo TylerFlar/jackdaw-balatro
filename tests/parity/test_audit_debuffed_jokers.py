@@ -1,8 +1,8 @@
 """Debuffed jokers in Card:update's per-frame values, the editionless-joker pool and
 ``find_joker``, on the Rust engine.
 
-gaps.md lists these fixes without a gap id ("Related fixes"). Their regression tests were the
-oracle's own (``tests/engine/audit/``) and went with it; the rest of that list is covered by
+These fixes had no gap id. Their regression tests were the oracle's own
+(``tests/engine/audit/``) and went with it; the rest of them are covered by
 ``test_consumables_rust.py`` (The Wheel of Fortune and Ectoplasm on debuffed jokers) and
 ``test_jokers_batch_b.py`` (Swashbuckler). A debuffed joker is written as ``set_debuff(true)``
 leaves it: debuffed and out of the deck (card.lua:526-538).
@@ -26,7 +26,7 @@ def _debuff_joker(game: Game, index: int, **stickers: Any) -> None:
 
 
 def _plain_jokers(game: Game) -> None:
-    # The debug add polls an edition (B15); these seeds poll none.
+    # The debug add polls an edition (the live game doesn't); these seeds poll none.
     assert all(j.edition is None for j in game.jokers), [j.edition for j in game.jokers]
 
 

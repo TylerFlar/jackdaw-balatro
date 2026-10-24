@@ -1,7 +1,14 @@
+---
+layout: default
+title: Development
+---
+
 # Development
 
 Jackdaw is a mixed Python/Rust project. The Python package lives in `jackdaw/`, and the Rust
 workspace in `crates/` builds the native module `jackdaw._core` with [PyO3] and [maturin].
+Pull requests go to the `dev` branch; [CONTRIBUTING.md](https://github.com/TylerFlar/jackdaw-balatro/blob/main/CONTRIBUTING.md)
+has the branch flow, the checklist and how a release is cut.
 
 | Path | Role |
 |---|---|
@@ -95,7 +102,7 @@ builds the release wheels for Linux, macOS and Windows on `v*` tags.
 targets, `BALATRO_VERSION` in `crates/jackdaw-data` (`1.0.1o-FULL`). CI has no copy of the
 source, so these two commands run only locally.
 
-## Parity fixtures
+## Frozen fixtures
 
 The Rust engine was checked step by step against a Python reference engine until that engine
 was retired. Its verdicts are frozen in `tests/fixtures`: golden v2's digest chains along the
@@ -116,35 +123,30 @@ uv run python scripts/refreeze.py golden_v2 cases    # some of them
 It replays every tape as recorded and recomputes its digests; a step the engine now refuses
 ends that tape there.
 
-## Profiling
+## Gap numbers in comments
 
-`crates/jackdaw-env/examples/profile.rs` samples the engine's hot paths. It needs no profiler
-and no admin rights, but it runs only on Windows x64 with an MSVC build, whose PDB carries the
-symbols:
+Comments and tests cite gap numbers such as `G206` or `G13`. They are rows of the gap register
+the port kept while it audited the engine against the Lua source (G for gameplay, B for the
+rest; not the deviation catalog's `B01`-`B04`). Every gap was fixed, and the register was
+removed in 0.2.0; it is in the repository's history:
 
 ```bash
-cargo run --release -p jackdaw-env --example profile -- env 10            # the Gym loop, 10 s
-cargo run --release -p jackdaw-env --example profile -- new_run 5 stacks.folded
+git show d176884:docs/parity/gaps.md
 ```
 
-The workloads:
+## Timings
 
-- `env`: the Gym loop (observation, mask, a random legal action, the step), with a new run when
-  an episode ends.
-- `new_run`.
-- `play`: a 5-card play on a copy of a dealt round.
-- `shop`: cash out, three rerolls, leave.
+`cargo test --release -p jackdaw-core --test perf -- --ignored --nocapture` prints the
+engine's main operations (a new run, a copy, plays, the shop, an RNG draw), timed as an env runs
+them, and `uv run pytest -m benchmark` the environments' steps per second. For a profiler
+(`perf`, `samply`, VTune), `cargo build --profile profiling` builds release code with full
+debug info.
 
-A thread suspends the workload every millisecond, reads its registers and unwinds its stack with
-`RtlVirtualUnwind`. The report lists functions by self time and by total time, and source lines
-by self time (inlined code counts at its own line). A third argument writes the stacks in the
-folded format that flame-graph tools (inferno, speedscope) read.
+## Versions
 
-The example uses Rust's default allocator, while the extension uses mimalloc, so allocation
-shows up larger here. On Linux and macOS, use `perf` or `samply` instead.
-
-`cargo test --release -p jackdaw-core --test perf -- --ignored --nocapture` prints rough timings
-of the engine's main operations.
+`pyproject.toml` and `Cargo.toml`'s `[workspace.package]` both hold the version, and
+CHANGELOG.md needs a section for it; `uv run python scripts/check_version.py` checks that they
+agree (CI runs it, and the Wheels workflow checks a release tag against it).
 
 ## Windows: the `.pyd` is locked while Python has it loaded
 

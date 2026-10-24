@@ -1,3 +1,8 @@
+---
+layout: default
+title: Validation Scenarios
+---
+
 # Validation Scenarios
 
 Jackdaw validates its engine by playing scenarios on live Balatro in **lockstep** with a shadow
@@ -249,7 +254,7 @@ Card key naming:
   - Ranks: `2`-`9`, `T` (10), `J`, `Q`, `K`, `A`
 
 `add` is a debug command: the game builds the card through Steamodded, which differs from the
-simulator in a few documented ways (smods-diffs.md B03; catalog entries `B03`, `B03-EDITION`).
+simulator in a few documented ways ([B03](live#b03); catalog entries `B03`, `B03-EDITION`).
 
 ### `set` — modify game state
 

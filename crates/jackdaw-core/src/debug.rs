@@ -7,13 +7,13 @@
 //! that engine gave, which `tests/parity/test_rust_setup.py` checks against the frozen digests.
 //! Where the Python engine had no behaviour (vouchers, packs, consumable editions, sticker
 //! counts) they follow BalatroBot and Steamodded's `SMODS.add_card`. The known differences
-//! from the live game are rows in `docs/parity/gaps.md`:
+//! from the live game are listed in `docs/balatrobot.md` and `docs/live.md` (B03):
 //!
 //! - a joker's `'edi'..ante` edition poll runs even when an edition is given (the live game
-//!   skips it, B15);
+//!   skips it);
 //! - an added playing card draws no `'front'..ante` card (Steamodded's `create_card('Base')`
-//!   draws one, B18) and is not checked against the boss (an enhancement passed to `SMODS.add_card`
-//!   goes through a non-initial `set_ability`, which calls `Blind:debuff_card`, B19).
+//!   draws one) and is not checked against the boss (an enhancement passed to `SMODS.add_card`
+//!   goes through a non-initial `set_ability`, which calls `Blind:debuff_card`).
 //!
 //! Stickers are forced, as `force_stickers` does in the live game: eternal and perishable
 //! together, on any joker, even ones vanilla never makes eternal (`docs/balatrobot.md`).
@@ -141,7 +141,7 @@ impl Game {
                     card.set_rental(true, &cost);
                 }
                 // create_card's poll, which the Python engine ran even when an edition was given
-                // (B15).
+                // (the live game skips it).
                 let ante = crate::lua::tostring_number(self.gs.round_resets.ante);
                 let polled = self.poll_edition(&format!("edi{ante}"), 1.0, false, false);
                 if spec.edition.is_none() {
@@ -154,7 +154,7 @@ impl Game {
                 self.add_to_deck(id, false);
                 self.settle();
                 // A bigger hand mid-round fills up to the new size at once, as Steamodded's
-                // `handle_card_limit` does (smods-diffs.md S04).
+                // `handle_card_limit` does (docs/live.md, S04).
                 if in_round && self.gs.hand_size > old_hand_size {
                     self.fill_hand();
                 }

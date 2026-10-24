@@ -59,10 +59,10 @@ def test_docs_live_lists_every_entry_with_its_mode() -> None:
         assert re.search(row, doc, re.MULTILINE), f"{d.id} ({d.mode}) is not in docs/live.md"
 
 
-def test_every_smods_entry_is_in_the_catalog() -> None:
-    text = (ROOT / "docs/parity/smods-diffs.md").read_text(encoding="utf-8")
-    documented = set(re.findall(r"^\| \[([SB]\d\d)\]", text, re.MULTILINE))
-    assert documented >= {"S01", "S13", "B01", "B04"}
+def test_every_documented_difference_is_in_the_catalog() -> None:
+    text = (ROOT / "docs/live.md").read_text(encoding="utf-8")
+    documented = {a.upper() for a in re.findall(r'<a id="([sb]\d\d)"></a>', text)}
+    assert documented >= {"S01", "S14", "B01", "B04"}
     assert documented <= set(by_id())
 
 

@@ -20,11 +20,10 @@ stake. For every request:
 
 Differences the catalog explains are dropped or *reconciled* (the shadow takes the live value).
 Anything else stops the game with a **divergence**: a repro bundle is written, and
-`jackdaw lockstep replay` reruns it on the simulator alone. This is the scaled-up form of the
-lockstep runs that found the engine's bugs #15–#74.
+`jackdaw lockstep replay` reruns it on the simulator alone.
 
-The same machinery is a Python adapter, `LiveAdapter`, and `jackdaw validate` runs its scenarios
-on it (see [From Python](#from-python) and [validation.md](validation)).
+The same machinery is a Python adapter, `LiveAdapter` (see [From Python](#from-python)), and
+`jackdaw validate` runs its scenarios on it ([validation](validation)).
 
 ## What you need
 
@@ -32,7 +31,8 @@ on it (see [From Python](#from-python) and [validation.md](validation)).
   [Lovely](https://github.com/ethangreen-dev/lovely-injector),
   [Steamodded](https://github.com/Steamodded/smods) and **BalatroBot v1.5.2** installed. No
   other mods: the catalog covers Steamodded `1.0.0~BETA-1503a` and BalatroBot 1.5.2
-  (`docs/parity/smods-diffs.md`); anything else changes the game in ways nothing accounts for.
+  ([the differences](#where-the-live-game-isnt-vanilla)); anything else changes the game in ways
+  nothing accounts for.
 - **A fully unlocked profile.** Shop and pack pools leave out locked cards, and the simulator
   assumes everything is unlocked. A partly locked profile diverges at its first shop.
 - This repository installed (`uv sync --dev`), so `jackdaw` is on the path.
@@ -69,9 +69,9 @@ BalatroBot):
 | `BALATROBOT_HEADLESS` | `0` | `1`: no window |
 | `BALATROBOT_GAMESPEED` | `4` | the game speed |
 
-Fast mode only changes timing (smods-diffs.md B04). Whatever the speed, an endpoint answers once
-the game reaches the state it waits for, which can come before the game's queued events have
-all run; the lockstep allows for that (see [timing](#timing)).
+Fast mode only changes timing ([B04](#b04)). Whatever the speed, an endpoint answers once the game
+reaches the state it waits for, which can come before the game's queued events have all run; the
+lockstep allows for that (see [timing](#timing)).
 
 Check that it answers:
 
@@ -187,8 +187,8 @@ To triage:
    - **A view bug** (the game state agrees but the simulator reports it differently): fix
      `crates/jackdaw-bot/src/view.rs`.
    - **A Steamodded or BalatroBot difference** (the live game is not vanilla here): describe it
-     in `docs/parity/smods-diffs.md` or `docs/balatrobot.md` and add a catalog entry (below).
-     The simulator keeps following vanilla.
+     [below](#where-the-live-game-isnt-vanilla) or in [balatrobot.md](balatrobot) and add a
+     catalog entry ([how](#adding-a-deviation-entry)). The simulator keeps following vanilla.
 4. Run the seed again: `jackdaw lockstep --seeds <SEED> --decks <DECK> --stakes <STAKE>`.
 
 ### Timing
@@ -197,9 +197,9 @@ BalatroBot answers a request once the game reaches the state it waits for: `play
 the game is back in `SELECTING_HAND` (or at the round's evaluation, or at game over), `select`
 once the hand is dealt, `cash_out` once the shop has its cards. Work the game queues behind that
 point can still be pending when the answer is built: Steamodded runs some contexts in trailing
-events (smods-diffs.md S02), the boss's debuffs outlast the `play` that beats it
-(BB-BOSS-DEFEAT), and a tag's shop effect (the D6 Tag's free reroll, the Voucher Tag's voucher,
-the edition tags) runs in its own animated events after `cash_out` answers.
+events ([S02](#s02)), the boss's debuffs outlast the `play` that beats it (BB-BOSS-DEFEAT), and
+a tag's shop effect (the D6 Tag's free reroll, the Voucher Tag's voucher, the edition tags) runs
+in its own animated events after `cash_out` answers.
 
 So when a live answer differs from the shadow in a way the catalog doesn't explain, the lockstep
 reads `gamestate` again, every 0.1 s for up to `--recheck` seconds (2 by default against a live
@@ -222,7 +222,7 @@ compares a fresh `gamestate`.
 ## The deviation catalog
 
 `jackdaw/bridge/deviations.py` lists every known difference between the live game and the
-simulator, each under the id of the document that describes it, with what the lockstep does
+simulator, each under the id of the section that describes it, with what the lockstep does
 about it:
 
 - **ignore**: a difference on its paths is dropped (and counted);
@@ -238,32 +238,32 @@ repair is a *classified* divergence.
 
 | id | mode | what |
 |---|---|---|
-| [S01](parity/smods-diffs#s01) | reconcile | Marble Joker's Stone joins the deck after the round's shuffle: the shadow takes the live deal order |
-| [S02](parity/smods-diffs#s02) | reconcile | Certificate's card comes after Cerulean Bell's pick: the shadow takes the live hand and forced card |
-| [S03](parity/smods-diffs#s03) | reconcile | Certificate draws from `'stdseal'..ante`: a Standard pack opened in that ante takes the live seals |
-| [S04](parity/smods-diffs#s04) | reconcile | hand-size changes refill the hand; The Manacle's disable draws 1: the shadow takes the live hand/deck split |
-| [S04-GAME-OVER](parity/smods-diffs#s04) | ignore | a lost round's hand-size changes: Steamodded applies them, vanilla's never run (the game pauses at GAME_OVER) |
-| [S05](parity/smods-diffs#s05) | reconcile | Invisible Joker's and Ankh's copies: their prices and a stripped Negative's slot take the live values (for the rest of the run) |
-| [S06](parity/smods-diffs#s06) | reconcile | Seeing Double with one Wild Card: the live chips |
-| [S07](parity/smods-diffs#s07) | veto | Four Fingers with three or more Wild Cards: plays not taken |
-| [S08](parity/smods-diffs#s08) | reconcile | Sigil, Grim, Familiar, Incantation: the live fronts |
-| [S09](parity/smods-diffs#s09) | reconcile | perishable stickers of debuffed jokers don't tick: the live tally |
-| [S10](parity/smods-diffs#s10) | reconcile | xMult rounding: a play's chips within 1 of the live value |
-| [S11](parity/smods-diffs#s11) | ignore | the unseeded `_1`/`_2` variant of the first shop's Buffoon pack and the Charm/Meteor packs |
-| [S12](parity/smods-diffs#s12) | ignore | `pseudoseed` while paused (BalatroBot never pauses) |
-| [S13](parity/smods-diffs#s13) | veto | Crimson Heart with every joker debuffed: plays and discards not taken |
-| [S14](parity/smods-diffs#s14) | ignore | the deck's card limit (`cards.limit`) follows the playing cards live |
-| [B01](parity/smods-diffs#b01) | veto | pack picks vanilla greys out (refused by the simulator's `pack` endpoint) |
-| [B02](parity/smods-diffs#b02) | veto | play/discard/use leaving out Cerulean Bell's forced card |
-| [B03](parity/smods-diffs#b03) | reconcile | debug `add` of an enhanced card: the live debuff |
-| B03-EDITION | reconcile | debug `add` with an edition skips the edition poll (gaps.md B15): later shop/pack editions and prices (sticky) |
-| [B04](parity/smods-diffs#b04) | ignore | BalatroBot's runtime settings (no gameplay effect) |
+| [S01](#s01) | reconcile | Marble Joker's Stone joins the deck after the round's shuffle: the shadow takes the live deal order |
+| [S02](#s02) | reconcile | Certificate's card comes after Cerulean Bell's pick: the shadow takes the live hand and forced card |
+| [S03](#s03) | reconcile | Certificate draws from `'stdseal'..ante`: a Standard pack opened in that ante takes the live seals |
+| [S04](#s04) | reconcile | hand-size changes refill the hand; The Manacle's disable draws 1: the shadow takes the live hand/deck split |
+| [S04-GAME-OVER](#s04) | ignore | a lost round's hand-size changes: Steamodded applies them, vanilla's never run (the game pauses at GAME_OVER) |
+| [S05](#s05) | reconcile | Invisible Joker's and Ankh's copies: their prices and a stripped Negative's slot take the live values (for the rest of the run) |
+| [S06](#s06) | reconcile | Seeing Double with one Wild Card: the live chips |
+| [S07](#s07) | veto | Four Fingers with three or more Wild Cards: plays not taken |
+| [S08](#s08) | reconcile | Sigil, Grim, Familiar, Incantation: the live fronts |
+| [S09](#s09) | reconcile | perishable stickers of debuffed jokers don't tick: the live tally |
+| [S10](#s10) | reconcile | xMult rounding: a play's chips within 1 of the live value |
+| [S11](#s11) | ignore | the unseeded `_1`/`_2` variant of the first shop's Buffoon pack and the Charm/Meteor packs |
+| [S12](#s12) | ignore | `pseudoseed` while paused (BalatroBot never pauses) |
+| [S13](#s13) | veto | Crimson Heart with every joker debuffed: plays and discards not taken |
+| [S14](#s14) | ignore | the deck's card limit (`cards.limit`) follows the playing cards live |
+| [B01](#b01) | veto | pack picks vanilla greys out (refused by the simulator's `pack` endpoint) |
+| [B02](#b02) | veto | play/discard/use leaving out Cerulean Bell's forced card |
+| [B03](#b03) | reconcile | debug `add` of an enhanced card: the live debuff |
+| B03-EDITION | reconcile | debug `add` with an edition: the live game skips the edition poll ([B03](#b03)), so later shop/pack editions and prices take the live values (sticky) |
+| [B04](#b04) | ignore | BalatroBot's runtime settings (no gameplay effect) |
 | BB-SIM-ONLY | veto | sim-only moves: RerollBoss, BuyAndUse, and what vanilla allows but the bot refuses ([command-space policy](balatrobot#command-space-policy)) |
 | BB-ETERNAL | veto | selling an eternal joker |
 | BB-SKIP-PACK | veto | skipping for a tag that opens a pack: the live `skip` never answers |
 | BB-NONFINITE | veto | a step whose view would hold NaN or infinity: the live server sends nothing |
 | BB-TEXT | ignore | text fields (never compared) |
-| BB-SHOP-AREAS | ignore | the shop's areas after leaving the shop (gaps.md B21, read from the code; the count settles it) |
+| BB-SHOP-AREAS | ignore | the shop's areas after leaving the shop ([the view](balatrobot#the-view): read from the code, not yet captured live; the count settles it) |
 | BB-BOSS-DEFEAT | ignore | the `play` that beats a boss answers before `Blind:defeat` has undone the boss ([timing](balatrobot#differences-from-the-live-game)): the cards it debuffed, Crimson Heart's joker and its passive, The Manacle's hand size, Amber Acorn's face-down jokers; at the win screen, which pauses the game, a later `gamestate` check too |
 | BB-CASHOUT-RACE | reconcile | a `cash_out` sent as soon as `play` answers can pay the previous round's total ([timing](balatrobot#differences-from-the-live-game)); `LiveBackend` waits before `cash_out` so it doesn't, and the shadow takes the live money if it does |
 | BB-REARRANGE-ORDER | ignore | `rearrange` writes `ability.order` (not in the view) |
@@ -271,24 +271,176 @@ repair is a *classified* divergence.
 
 A reconcile's edits are recorded in the action log, so a later divergence still replays.
 
+## Where the live game isn't vanilla
+
+The live game runs Lovely 0.9.0, Steamodded `1.0.0~BETA-1503a` and BalatroBot 1.5.2 on top of
+Balatro 1.0.1o. All 940 of Steamodded's Lovely patches were reviewed, and the patched game
+(Lovely's dump) was diffed against the vanilla source, file by file. Most changes keep vanilla's
+outcomes: the calculation pipeline, the pools and polls, boosters, stickers, card limits, the
+probabilities. The entries below are the ones that can show in a run. At each of them the
+simulator keeps vanilla's behaviour, and the [catalog](#the-deviation-catalog) says what the
+lockstep does.
+
+### Steamodded
+
+<a id="s01"></a>
+#### S01: Marble Joker's Stone joins the deck after the round's shuffle
+
+In vanilla, Marble Joker's `setting_blind` events (make the Stone, draw it to the deck) are
+queued ahead of `new_round`'s `'nr'..ante` shuffle, so the deck is shuffled with the Stone in it.
+Steamodded queues the draw from inside the creation event, behind the shuffle: the shuffle
+permutes 52 cards and the Stone, at the bottom, is drawn last. The whole deal order differs in
+every round in which Marble (or a copy of it) fires.
+
+<a id="s02"></a>
+#### S02: Certificate's card comes after Cerulean Bell's pick
+
+Vanilla runs the jokers' `first_hand_drawn` right after the deal is queued, before the blind's
+`drawn_to_hand`, on every pass through `DRAW_TO_HAND` before the first play or discard.
+Steamodded fires it from a trailing event, once per round. With Certificate against Cerulean
+Bell, vanilla's forced card is picked from 9 cards (Certificate's included) and Steamodded's
+from 8. When consumables empty the hand before the first play, vanilla's Certificate fires again.
+
+<a id="s03"></a>
+#### S03: Certificate's seal roll also draws from `'stdseal'..ante`
+
+Steamodded's `poll_seal` draws once from `'stdseal'..ante` before the `'certsl'` draw that
+picks the seal. A Standard pack opened later in the same ante rolls its seals from that stream,
+one draw further along per Certificate trigger.
+
+<a id="s04"></a>
+#### S04: hand-size changes apply at once and refill the hand
+
+Vanilla's `CardArea:change_size` queues an event that draws exactly the increase, and disabling
+The Manacle draws twice (`change_size(1)`, then `draw_from_deck_to_hand(1)`). In Steamodded,
+`change_size` only moves the limit and a per-frame check fills the hand to it; The Manacle's
+disable draws once. The Hanged Man leaving 6 of 8 cards, then Juggler: vanilla draws 1 card (7 of
+9), Steamodded fills to 9. A hand-size cut at blind select (Madness destroying Turtle Bean)
+applies before the deal live, after it in vanilla. At a lost round's game over, Steamodded has
+applied the round's hand-size changes; vanilla pauses before they run (S04-GAME-OVER).
+
+<a id="s05"></a>
+#### S05: copies are priced before their abilities are copied
+
+Steamodded's `copy_card` copies the abilities last, so the copy's price ignores the source's
+`extra_value`, rental and coupon until the next `set_cost` (Invisible Joker copying a grown
+Egg). A copy stripped of Negative (Ankh, Invisible Joker) keeps the Negative's extra joker slot.
+
+<a id="s06"></a>
+#### S06: Seeing Double counts one Wild Card as every suit
+
+Vanilla's Wild Card fills only the first empty suit (Clubs, Diamonds, Spades, Hearts);
+Steamodded's fills them all. A scoring hand whose only suited card is a Wild Card gets X2 live
+and nothing in vanilla.
+
+<a id="s07"></a>
+#### S07: `get_flush` tries the suits in another order
+
+Vanilla tries Spades, Hearts, Clubs, Diamonds; Steamodded Diamonds, Clubs, Hearts, Spades. It
+matters when two suits make the flush with different cards (Four Fingers with three or more Wild
+Cards, or Smeared Joker): different cards score.
+
+<a id="s08"></a>
+#### S08: Sigil, Grim, Familiar and Incantation roll suits differently
+
+Steamodded's suit list puts Clubs before Diamonds (vanilla: Spades, Hearts, Diamonds, Clubs), and
+Familiar and Incantation draw the suit before the rank. The streams are drawn as often; the cards
+made differ.
+
+<a id="s09"></a>
+#### S09: end-of-round stickers run first, and not on debuffed jokers
+
+Vanilla runs each joker's end-of-round effect, then its rent, then its perishable tick, debuffed
+jokers included. Steamodded ticks the perishable and charges the rent before the effect, and a
+debuffed joker's perishable doesn't tick (Crimson Heart's last victim). An expiring perishable
+Turtle Bean costs one more hand size live.
+
+<a id="s10"></a>
+#### S10: ×Mult arithmetic
+
+Steamodded computes `m + m*(X-1)` where vanilla computes `m*X`. Factors like ×1.1 or ×1.3 and
+fractional mults round differently in the last bit, which changes the score by a chip in about
+0.45% of random chains of +Mult and ×Mult.
+
+<a id="s11"></a>
+#### S11: no unseeded draws in `Card:init`
+
+Vanilla's `Card:init` draws three unseeded `math.random()` numbers. Only the game's unseeded picks
+see the difference: the `_1`/`_2` variant of the first shop's Buffoon pack and of the Charm and
+Meteor Tags' packs (the same contents, another key and art). The simulator always picks `_1`.
+
+<a id="s12"></a>
+#### S12: `pseudoseed` while the game is paused
+
+While a menu pauses the game, Steamodded's seeded draws (other than To Do List's) return unseeded
+numbers. BalatroBot never pauses.
+
+<a id="s13"></a>
+#### S13: Crimson Heart with no joker left to pick
+
+With two or more jokers, all debuffed, vanilla's pick draws from an empty list and the game
+errors; Steamodded picks the previous joker again; the simulator skips the pick.
+
+<a id="s14"></a>
+#### S14: the deck's card limit follows the playing cards
+
+Steamodded sets the deck's `card_limit` to the number of playing cards every frame; vanilla only
+lowers it to that count (and raises it for an overfull deck, Cryptid, Marble Joker and DNA). No
+rule reads it; BalatroBot's view shows it as `cards.limit`.
+
+### BalatroBot
+
+<a id="b01"></a>
+#### B01: the `pack` endpoint skips the pick gates
+
+`pack` calls `G.FUNCS.use_card` directly, without the button's `can_use_consumeable` /
+`can_select_card` gates: Judgement, Wraith or The Soul at full joker slots make a sixth joker, and
+The Emperor, The High Priestess or The Fool at full consumable slots spend the pick for nothing.
+Its own slot check has no Negative exception, so a Negative joker at full slots is refused. The
+simulator refuses the picks vanilla greys out (`NOT_ALLOWED`).
+
+<a id="b02"></a>
+#### B02: `play` and `discard` under Cerulean Bell
+
+A request that leaves out the forced card isn't refused: the forced card stays highlighted, the
+requested cards are added up to five and the last one is dropped. The simulator's `play` and
+`discard` click the same way. `use` differs: BalatroBot clears the highlight with `force`,
+dropping the forced card, which the simulator keeps. The lockstep takes none of these requests.
+
+<a id="b03"></a>
+#### B03: the debug `add`
+
+`SMODS.add_card` skips the `'edi'..ante` edition poll when an edition is given, draws a random
+front from `'front'..ante` before setting a playing card's rank and suit, lets the boss debuff an
+enhanced card at once, and refills the hand to a new limit (S04). The simulator's `add` keeps the
+behaviour the test fixtures' setups were built with: it polls the edition, draws no front and
+doesn't check the boss. After such an `add`, those streams differ between the two games.
+
+<a id="b04"></a>
+#### B04: runtime settings
+
+BalatroBot fixes the frame time and the game speed, turns on reduced motion and turns off audio:
+timing only, since the event queue's order doesn't depend on it. The installed `balatrobot.lua`
+also overrides `CardArea:shuffle` with a debug copy that shuffles exactly as vanilla does.
+
 ## Adding a deviation entry
 
 When triage shows a new Steamodded or BalatroBot difference:
 
-1. **Document it** in `docs/parity/smods-diffs.md` (a Steamodded patch: the next `S` id, with an
-   `<a id="sNN">` anchor) or `docs/balatrobot.md` (BalatroBot's command space or view). The entry
-   says what differs, when, and why the simulator keeps vanilla.
+1. **Document it** [above](#where-the-live-game-isnt-vanilla) (a Steamodded patch: the next `S`
+   id, with an `<a id="sNN"></a>` anchor) or in [balatrobot.md](balatrobot) (BalatroBot's command
+   space or view). Say what differs, when, and what the live game does instead.
 2. **Add the entry** to `CATALOG` in `jackdaw/bridge/deviations.py`:
 
    ```python
    Deviation(
-       "S14",
+       "S15",
        "What differs, in one line",
-       "docs/parity/smods-diffs.md#s14",
+       "docs/live.md#s15",
        Mode.RECONCILE,
        paths=("hand.cards[*].modifier.seal",),   # view paths it can make differ
-       trigger=_s14_trigger,                     # StepContext -> bool: may this step be affected?
-       reconcile=_s14_reconcile,                 # the snapshot edits that copy the live values
+       trigger=_s15_trigger,                     # StepContext -> bool: may this step be affected?
+       reconcile=_s15_reconcile,                 # the snapshot edits that copy the live values
        note="How the lockstep handles it.",
    ),
    ```
@@ -311,7 +463,7 @@ When triage shows a new Steamodded or BalatroBot difference:
 3. **Test it**: `tests/live/test_live_adapter.py` makes `FakeLive` (the simulator's BalatroBot
    session) show the deviation after a request, and checks that the step is reconciled (or
    vetoed, or ignored) and the run goes on in step. `tests/live/test_deviations.py` checks that
-   every entry's source and anchor exist.
+   every entry's section exists and that the table above lists it.
 
 ## From Python
 
@@ -365,9 +517,10 @@ Against the real game (Balatro 1.0.1o, Steamodded 1.0.0~BETA-1503a, BalatroBot 1
 unlocked profile, four instances in fast headless mode), October 2026:
 
 - `jackdaw lockstep --instances 4 --seeds 200 --rng-seed 2026 --decks RED,BLUE --stakes
-  WHITE,GOLD`: 200 games, 11,446 steps, 0 unclassified divergences. The first runs found G265
-  and G266 (two engine bugs, both fixed) and the timing allowances and Steamodded entries above.
+  WHITE,GOLD`: 200 games, 11,446 steps, 0 unclassified divergences. The first runs found two
+  engine bugs (both fixed), the timing allowances and the Steamodded entries above.
 - `jackdaw validate`: 269 of 269 scenarios pass. Six are skipped: five skips for a tag that opens
   a pack (BB-SKIP-PACK), and Luchador, which BalatroBot sells only in the shop.
-- G182 (the order `pairs(G.GAME.hands)` visits the hands): To Do List's hand is the game's on all
-  12 seeds tried.
+- The order `pairs(G.GAME.hands)` visits the hands in, which the source doesn't fix (the
+  simulator takes it from the game's own LuaJIT): To Do List's hand is the game's on all 12 seeds
+  tried.

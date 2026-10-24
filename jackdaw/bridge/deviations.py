@@ -5,9 +5,10 @@ in ways a player can't; the simulator follows vanilla Balatro 1.0.1o. Every
 known difference is an entry here, with the id of the document that describes
 it:
 
-- ``S01``-``S13`` and ``B01``-``B04``: ``docs/parity/smods-diffs.md``;
+- ``S01``-``S14`` and ``B01``-``B04``: ``docs/live.md`` (where the live game
+  isn't vanilla);
 - ``BB-*``: ``docs/balatrobot.md`` (the command-space policy, the view, the
-  timing differences) and ``docs/parity/gaps.md`` (``B21``).
+  timing differences).
 
 Each entry has a mode that says what the live lockstep
 (:class:`jackdaw.bridge.live.LiveAdapter`) does about it:
@@ -263,10 +264,10 @@ class Deviation:
 
 
 # ---------------------------------------------------------------------------
-# Steamodded (docs/parity/smods-diffs.md)
+# Steamodded (docs/live.md)
 # ---------------------------------------------------------------------------
 
-_SMODS = "docs/parity/smods-diffs.md"
+_SMODS = "docs/live.md"
 _PLAYING = ("hand", "cards")  # the view's hand and deck areas
 
 
@@ -530,7 +531,7 @@ def _s13_veto(ctx: StepContext) -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# BalatroBot (smods-diffs.md B01-B04)
+# BalatroBot (docs/live.md, B01-B04)
 # ---------------------------------------------------------------------------
 
 
@@ -625,7 +626,7 @@ def _b03_edition_reconcile(rctx: ReconcileContext, ctx: StepContext) -> list[dic
 
 
 # ---------------------------------------------------------------------------
-# The command space, timing and the view (docs/balatrobot.md, gaps.md)
+# The command space, timing and the view (docs/balatrobot.md)
 # ---------------------------------------------------------------------------
 
 _PACK_TAGS = frozenset({"tag_charm", "tag_meteor", "tag_buffoon", "tag_ethereal", "tag_standard"})
@@ -822,7 +823,7 @@ CATALOG: tuple[Deviation, ...] = (
         paths=("hand.limit",),
         trigger=_lost_round,
         note="end_round queues them (Turtle Bean's decay, a perishing Juggler) and the game pauses "
-        "at GAME_OVER before they run (gaps.md G265); Steamodded's change_size has already "
+        "at GAME_OVER before they run (G265); Steamodded's change_size has already "
         "changed the limit. The run is over: the difference is dropped.",
     ),
     Deviation(
@@ -958,7 +959,7 @@ CATALOG: tuple[Deviation, ...] = (
         paths=("hand.cards[*].state.debuff", "cards.cards[*].state.debuff"),
         trigger=_b03_trigger,
         reconcile=_b03_reconcile,
-        note="gaps.md B19: SMODS.create_card applies the enhancement with a second set_ability, "
+        note="SMODS.create_card applies the enhancement with a second set_ability, "
         "which lets the boss debuff the card; the added card takes the live debuff.",
     ),
     Deviation(
@@ -977,7 +978,7 @@ CATALOG: tuple[Deviation, ...] = (
         observe=_b03_edition_observe,
         trigger=lambda ctx: False,
         reconcile=_b03_edition_reconcile,
-        note="gaps.md B15: the simulator still draws from 'edi'..ante, so after such an `add` "
+        note="The simulator still draws from 'edi'..ante, so after such an `add` "
         "(sticky for the run) a shop or pack card takes the live edition and prices. An owned "
         "card's edition can't be copied: classified.",
     ),
@@ -1036,13 +1037,13 @@ CATALOG: tuple[Deviation, ...] = (
     Deviation(
         "BB-SHOP-AREAS",
         "The shop's areas in the view after leaving the shop",
-        "docs/parity/gaps.md",
+        "docs/balatrobot.md#the-view",
         Mode.IGNORE,
         paths=("shop", "vouchers", "packs"),
         trigger=_outside_shop,
-        note="gaps.md B21: the simulator reports the removed areas (no cards, the last count) "
-        "from a reading of the code. Outside the shop they carry nothing; a difference is "
-        "counted, which settles B21.",
+        note="The simulator reports the removed areas (no cards, the last count) from a "
+        "reading of the code, not a live capture. Outside the shop they carry nothing; a "
+        "difference is counted, which settles it.",
     ),
     Deviation(
         "BB-BOSS-DEFEAT",

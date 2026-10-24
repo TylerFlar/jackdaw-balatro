@@ -49,7 +49,7 @@ for _key, _name, _seal in _SEAL_SPECTRALS:
 #
 # NOTE on familiar / grim / incantation (and sigil): Steamodded takes these
 # over and rolls suits in another order, and Familiar and Incantation draw the
-# suit before the rank (smods-diffs.md S08). The streams are drawn as often, so
+# suit before the rank (docs/live.md, S08). The streams are drawn as often, so
 # the lockstep reconciles the shadow: the created or converted cards take the
 # live fronts, and the scenario passes with S08 among its explained deviations.
 # The simulator keeps vanilla's rolls (card.lua:1316-1337).

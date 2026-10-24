@@ -7,13 +7,15 @@
 
 ---
 
-Jackdaw is a Balatro simulator built for RL research. It features a bit-exact Balatro 1.0.1o engine written in Rust with a Python interface, Gymnasium-style environments (single and vectorized) with entity-based observations and a factored action space, and a bridge that plays live Balatro in lockstep through [BalatroBot](https://github.com/coder/balatrobot). The engine is checked against the game's own Lua source, line by line, in a [parity ledger](docs/parity).
+Jackdaw is a Balatro simulator built for RL research: a bit-exact Balatro 1.0.1o engine written in Rust with a Python interface, Gymnasium-style environments (single and vectorized) with entity-based observations and a factored action space, and a bridge that plays live Balatro in lockstep through [BalatroBot](https://github.com/coder/balatrobot).
 
 ## Motivation
 
 With [BalatroBot](https://github.com/coder/balatrobot) already existing, why build a separate simulator?
 
-While BalatroBot lets you input actions with no latency (minus network time), this can cause race conditions and actually crash the game. Parallelizing is also important for RL training: you can run multiple instances of BalatroBot, but a simulator steps hundreds of thousands of times a second (`BalatroVectorEnv` does over 400K steps/s on 8 threads). Finally, the Python API exposes every part of the game, with read-only views, snapshots, exact score previews and a state builder, which helps with debugging and research. See the [Python API](https://tylerflar.github.io/jackdaw-balatro/api).
+BalatroBot drives the real game, which runs at the game's speed and can race or crash when pushed. RL training needs many fast, parallel environments: one jackdaw environment steps about 180,000 times a second, and `BalatroVectorEnv` over a million times a second on 8 threads. And the Python API exposes every part of the game, with read-only views, snapshots, exact score previews and a state builder, which helps with debugging and research. See the [Python API](https://tylerflar.github.io/jackdaw-balatro/api).
+
+The engine follows the game's Lua source function by function, down to the RNG. It was checked step by step against a Python reference engine, against LuaJIT for the RNG and hand evaluation, and in lockstep against the live game: 200 organic games and every validation scenario without an unexplained difference.
 
 ## Install
 
@@ -23,6 +25,8 @@ While BalatroBot lets you input actions with no latency (minus network time), th
 uv add git+https://github.com/TylerFlar/jackdaw-balatro.git
 ```
 
+Installing from git compiles the Rust engine, so it needs a Rust toolchain ([rustup](https://rustup.rs)).
+
 ### For development
 
 ```bash
@@ -31,8 +35,7 @@ cd jackdaw-balatro
 uv sync --dev
 ```
 
-Building from source compiles the Rust engine, so it needs a Rust toolchain
-([rustup](https://rustup.rs)); `uv sync` builds the `jackdaw._core` extension with maturin.
+`uv sync` builds the `jackdaw._core` extension with maturin. See [development](https://tylerflar.github.io/jackdaw-balatro/development) for the toolchain and [CONTRIBUTING.md](CONTRIBUTING.md) for the branch flow.
 
 ## Quick Start
 
@@ -42,18 +45,19 @@ from jackdaw.env import BalatroEnvironment, DirectAdapter
 env = BalatroEnvironment(adapter_factory=DirectAdapter)
 obs, mask, info = env.reset()
 
-while not info.get("done"):
+terminated = truncated = False
+while not (terminated or truncated):
     action = your_model.act(obs, mask)
     obs, terminated, truncated, mask, info = env.step(action)
 ```
 
 ## Gymnasium Wrapper
 
-`BalatroGymnasiumEnv` exposes the game as a flat `Discrete(500)` action space with an `action_masks()` method, so it works with action-masking RL libraries such as sb3-contrib's MaskablePPO. Jackdaw doesn't depend on any RL library; install the one you use in your own project.
+`BalatroGymnasiumEnv` exposes the game as a flat `Discrete(500)` action space with an `action_masks()` method, so it works with action-masking RL libraries such as sb3-contrib's MaskablePPO. `BalatroVectorEnv` steps many of them at once in Rust. Jackdaw doesn't depend on any RL library; install the one you use in your own project.
 
 [`examples/`](examples) has a complete MaskablePPO demo: training with TensorBoard logs and checkpoints, an evaluation against a random agent and the hand-written `smart_agent`, and its results. Its dependencies are the `train` dependency group (`uv sync --group train`), which isn't part of the package.
 
-See the [RL Project Guide](https://tylerflar.github.io/jackdaw-balatro/rl-guide) for details on the gymnasium wrapper, reward shaping, and writing custom agents.
+See the [RL Project Guide](https://tylerflar.github.io/jackdaw-balatro/rl-guide) for the observations, actions, rewards and environments.
 
 ## Live Validation
 
@@ -85,49 +89,39 @@ crates/
 jackdaw/
   core/             The Python API: Game, read-only views, GameBuilder
   engine/           The action types and the game's data tables (codegen input)
-
-  env/              RL environment
-    balatro_env.py    BalatroEnvironment — factored action interface
-    gymnasium_wrapper.py  BalatroGymnasiumEnv — SB3-compatible flat Discrete + action masking
-    observation.py    Entity-based encoding (235-dim global + variable entities)
-    vector_env.py     BalatroVectorEnv — many envs stepped in parallel in Rust
-    action_space.py   23-type factored action space
-    game_interface.py GameAdapter protocol (DirectAdapter, BridgeAdapter)
-    agents.py         Agent protocol + RandomAgent baseline
-
+  env/              BalatroEnvironment, BalatroGymnasiumEnv, BalatroVectorEnv, rewards, agents
   bridge/           BalatroBot backends; LiveAdapter, the deviation catalog, lockstep
-  cli/              CLI tools & 250+ validation scenarios
+  cli/              The jackdaw command and its validation scenarios
 ```
 
 ## CLI
 
 ```bash
-jackdaw validate                          # Run all ~250 validation scenarios
-jackdaw validate --category jokers        # Joker scenarios only
-jackdaw validate --scenario joker_jolly   # Single scenario
-jackdaw validate --host 127.0.0.1 --port 12346
-jackdaw lockstep --instances 4 --seeds 200  # Organic games on 4 BalatroBot instances
-jackdaw lockstep replay BUNDLE            # Rerun a divergence on the simulator
-jackdaw serve                             # BalatroBot's API on the simulator
+jackdaw validate                            # all validation scenarios against live Balatro
+jackdaw validate --category jokers          # joker scenarios only
+jackdaw validate --scenario joker_jolly     # one scenario
+jackdaw lockstep --instances 4 --seeds 200  # organic games on 4 BalatroBot instances
+jackdaw lockstep replay BUNDLE              # rerun a divergence on the simulator
+jackdaw serve                               # BalatroBot's API on the simulator
 ```
 
-> One of the biggest ways to contribute is by writing custom validation scenarios! See the [validation docs](https://tylerflar.github.io/jackdaw-balatro/validation) to get started.
+> One of the biggest ways to contribute is by writing validation scenarios! See the [validation docs](https://tylerflar.github.io/jackdaw-balatro/validation) to get started.
 
 ## Development
 
-Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/).
+Requires Python 3.12+, [uv](https://docs.astral.sh/uv/) and Rust.
 
 ```bash
 uv sync --dev          # install with dev dependencies (builds the Rust extension)
+uv run pytest          # Python tests
 cargo test             # Rust tests
-pytest                 # run tests
-pytest --cov=jackdaw   # with coverage
-pytest -m benchmark    # performance benchmarks
-pytest -m live         # live validation (needs BalatroBot)
-pytest -m lockstep     # long sim-against-sim lockstep runs over jackdaw serve
-ruff check .           # lint
-ruff format .          # format
+uv run pytest -m benchmark   # performance benchmarks
+uv run pytest -m live        # against live Balatro (needs BalatroBot)
+uv run pytest -m lockstep    # long sim-against-sim lockstep runs over jackdaw serve
+uv run ruff check . && uv run ruff format --check .
 ```
+
+Pull requests go to the `dev` branch; `main` holds the releases. See [CONTRIBUTING.md](CONTRIBUTING.md) and the [changelog](CHANGELOG.md).
 
 ## License
 

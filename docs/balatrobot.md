@@ -26,8 +26,9 @@ What "the same API" covers:
 
 Game rules follow vanilla Balatro 1.0.1o, as the engine does everywhere. Where BalatroBot pushes
 the game past a gate a player can't (selling an eternal joker, a greyed-out pack pick), the
-simulator refuses; where Steamodded changes vanilla, the difference is documented in
-[smods-diffs.md](parity/smods-diffs) rather than imitated.
+simulator refuses; where Steamodded changes vanilla, the difference is documented
+([Where the live game isn't vanilla](live#where-the-live-game-isnt-vanilla)) rather than
+imitated.
 
 ## Entry points
 
@@ -92,8 +93,8 @@ drawn later are still placed by rank, in the live game and in the simulator alik
 - buying, or picking from a pack, a Negative joker at full joker slots (the bot compares the count
   with the limit and has no Negative exception);
 - reordering the jokers at blind select and on the cash-out screen: vanilla's drag works at every
-  decision point (`CardArea:align_cards` re-sorts the jokers by position in any state; gaps.md
-  G206), but `rearrange` requires `SELECTING_HAND`, `SHOP` or `SMODS_BOOSTER_OPENED`. Inside a pack
+  decision point (`CardArea:align_cards` re-sorts the jokers by position in any state), but
+  `rearrange` requires `SELECTING_HAND`, `SHOP` or `SMODS_BOOSTER_OPENED`. Inside a pack
   the two agree: the jokers, and an Arcana or Spectral pack's dealt hand, can be reordered. The
   consumables can be dragged too, and `rearrange` takes them, but no rule reads their order, so
   the engine has no move for it.
@@ -105,11 +106,11 @@ UI gates. The simulator keeps vanilla's rules and refuses, with `NOT_ALLOWED`:
   refuses it)`;
 - a pack pick the game greys out (Judgement or The Soul at full joker slots, The Emperor at full
   consumable slots, ...): `Cannot select '<name>' from the pack: vanilla greys this pick out (it
-  cannot be used now)` ([smods-diffs.md B01](parity/smods-diffs#b01)).
+  cannot be used now)` ([B01](live#b01)).
 
 `play` and `discard` click the requested cards as BalatroBot does: under Cerulean Bell the forced
 card stays highlighted and the selection stops at five, so a request that leaves the forced card
-out plays what the live game plays ([B02](parity/smods-diffs#b02)). A request whose clicks end
+out plays what the live game plays ([B02](live#b02)). A request whose clicks end
 with no card highlighted (one index given twice) is refused: vanilla never plays an empty hand.
 
 **Debug only.** `add`, `set`, `save`, `load` and `menu` change the run in ways no move does;
@@ -163,8 +164,7 @@ card; for the requests the legal list makes (the forced card among the targets) 
   frame, plus one for Marble Joker, Cryptid and DNA).
 - **Leftover shop areas.** After the shop closes, `G.shop_jokers`, `G.shop_vouchers` and
   `G.shop_booster` still point at the removed areas: the view keeps reporting them with no cards
-  and the last frame's count, until the run ends (read from the code, not yet a live capture:
-  [gaps.md](parity/gaps) B21).
+  and the last frame's count, until the run ends (read from the code, not yet captured live).
 - **Cards.** `label` is the center's label (`Glass Card`, `Joker`, `The Fool`); playing cards
   cost 1 to buy and to sell; `modifier.enhancement` is `ability.effect` upper-cased for every
   card, so jokers and consumables report theirs (`"MULT"`, `"ENHANCE"`); flags that are false
@@ -189,7 +189,8 @@ saves, so files don't move between the simulator and the live game. As in the li
 deletes the run before reading the file: a bad file leaves no run (`UNKNOWN`) until `menu` or a
 good `load`. With `--fs-root` (required off loopback) every path must stay inside that
 directory. The runtime-only parts of the view restart on `load`: the deck limit becomes the
-playing-card count and the leftover shop areas are gone (B20).
+playing-card count and the leftover shop areas are gone. The live game rebuilds its card areas
+from the save, limits included; this difference hasn't been captured live.
 
 ## The server
 
@@ -230,13 +231,12 @@ Besides the policy above:
   (BB-CASHOUT-RACE). A player can't cash out before the button is up, and the simulator
   pays the round's own total.
 - **`screenshot`** always fails with `Failed to encode screenshot` (nothing is drawn).
-- **`add`** (debug) follows the retired Python engine, whose parity setups are frozen, so they
-  stay exact: a joker's `'edi'..ante` poll runs even when an edition is given (live skips it,
-  gaps.md B15); a playing card draws no `'front'..ante` card (live draws one, B18); an enhanced
-  playing card isn't checked against the boss (live debuffs it at once, B19). Stickers are
-  forced as `force_stickers` does: eternal and perishable together, on any joker. A voucher
-  `add` puts in the shop has no buy button live, so buying it raises in `buy.lua`; the simulator
-  reports the same Lua error (`INTERNAL_ERROR`).
+- **`add`** (debug) keeps the behaviour the test fixtures' setups were built with ([B03](live#b03)):
+  a joker's `'edi'..ante` poll runs even when an edition is given (live skips it); a playing card
+  draws no `'front'..ante` card (live draws one); an enhanced playing card isn't checked against
+  the boss (live debuffs it at once). Stickers are forced as `force_stickers` does: eternal and
+  perishable together, on any joker. A voucher `add` puts in the shop has no buy button live, so
+  buying it raises in `buy.lua`; the simulator reports the same Lua error (`INTERNAL_ERROR`).
 - **`rearrange`** also writes the new positions into `ability.order` and the shared
   `config.center.order` live; no rule reads them during a run, and the simulator doesn't.
 - **Test endpoints** (`--debug`) are BalatroBot's `test_endpoint`, `test_state_endpoint`,

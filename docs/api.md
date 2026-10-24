@@ -7,8 +7,10 @@ title: Python API
 
 The game engine is written in Rust (`crates/jackdaw-core`) and runs in-process through the
 `jackdaw._core` extension. `jackdaw.core` is its Python face. It reproduces Balatro 1.0.1o
-exactly, down to the RNG, and checks itself against the game's Lua source (see
-[the parity ledger](https://github.com/TylerFlar/jackdaw-balatro/tree/main/docs/parity)).
+exactly, down to the RNG: it was ported function by function from the game's Lua source, checked
+step by step against a Python reference engine (whose results are frozen in the test fixtures),
+against LuaJIT itself for the RNG and the hand evaluation, and in lockstep against the live game
+([Lockstep against the live game](live)).
 
 For reinforcement learning, start with the [RL Project Guide](rl-guide): the environments wrap
 this API. Use `jackdaw.core` directly for scripting, analysis, search, or your own environment.
@@ -86,7 +88,7 @@ Views are frozen: they describe the run when they were read.
 score = game.preview_play((0, 1, 2, 3, 4))   # the real play on a copy
 print(score.hand_type, score.total)
 
-branch = game.clone()                        # an independent copy, a few microseconds
+branch = game.clone()                        # an independent copy, well under a microsecond
 branch.step(Discard(card_indices=(5, 6, 7)))
 ```
 
@@ -144,16 +146,42 @@ See [BalatroBot on the simulator](balatrobot).
 gives the action mask. The environments in `jackdaw.env` (`BalatroEnvironment`,
 `BalatroGymnasiumEnv`, `BalatroVectorEnv`) build on these; see the [RL Project Guide](rl-guide).
 
+## Where the source doesn't decide
+
+A few things the Lua source leaves open, and the engine's choices:
+
+- **`pairs()` over the poker hands.** To Do List's hand, the Orbital Tag's hand and The Ox's
+  tie-break follow the order `pairs(G.GAME.hands)` visits the hands in, which Lua doesn't
+  define. The engine uses the order the game's own LuaJIT 2.0.5 gives (probed in its
+  `lua51.dll`), confirmed against the live game.
+- **Unseeded draws.** The first shop's Buffoon pack and the Charm and Meteor Tags' packs pick
+  their `_1` or `_2` variant with an unseeded `math.random`. The variants hold the same cards; the
+  engine always picks `_1`.
+- **`unique_val`**, the last tie-break between two identical cards, is the creation order.
+- **The profile.** Shop and pack pools leave out locked cards; the engine assumes a fully
+  unlocked profile.
+- **Where vanilla stops.** With two or more jokers, all debuffed, Crimson Heart's pick draws from
+  an empty list and the game errors; the engine skips the pick. When the hand, the deck and the
+  play area are all empty, vanilla queues `end_round` again every frame; the engine runs it once.
+
 ## Speed
 
-Typical costs on a desktop CPU, release build:
+On one core of a Ryzen 9 9950X3D (Windows, MSVC release build):
 
 | Operation | Time |
 |---|---|
-| A play step | 4–8 µs |
-| `clone()` | 1–2 µs |
-| A new run | about 27 µs |
-| Encoding an observation | 1 µs, 2.5–3 µs with its numpy arrays |
+| A new run | 4 µs |
+| `clone()` | 0.3 µs |
+| A play, no jokers | 1.0 µs |
+| A play with five jokers | 2.1 µs |
+| Cash out and fill the shop | 2.2 µs |
+| Opening a booster pack | 1.7 µs |
+| A reroll | 1.1 µs |
+| An RNG draw | 0.05 µs |
 
-The single-threaded environments step at about 130K steps/s. `BalatroVectorEnv` steps at
-about 580K steps/s on 8 threads (256 envs).
+`cargo test --release -p jackdaw-core --test perf -- --ignored --nocapture` prints these.
+
+The environments step about 155,000 times a second (`BalatroEnvironment`) and 180,000 times a
+second (`BalatroGymnasiumEnv`) on one core, and `BalatroVectorEnv` about 1.1 million times a
+second on 8 threads (256 envs), counting the time inside the environment, not the policy's
+(`uv run pytest -m benchmark`).

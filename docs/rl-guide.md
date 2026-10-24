@@ -1,3 +1,8 @@
+---
+layout: default
+title: RL Project Guide
+---
+
 # RL Project Guide
 
 How to set up an RL project using Jackdaw as the environment.
@@ -7,6 +12,9 @@ How to set up an RL project using Jackdaw as the environment.
 ```bash
 uv add git+https://github.com/TylerFlar/jackdaw-balatro.git
 ```
+
+Installing from git compiles the Rust extension, so it needs a Rust toolchain
+([rustup](https://rustup.rs)).
 
 ## The Loop
 
@@ -125,11 +133,13 @@ action = FactoredAction(
 | 21 | RerollBoss | — | Blind select, with Director's Cut or Retcon ($10) |
 | 22 | BuyAndUse | entity_target (shop index) | Shop: buy a consumable and use it at once |
 
-Types 21 and 22 were added after the first 21, so ids 0-20 keep their meaning; a policy with one logit per type needs two more outputs.
-
 The swaps follow the game's drag and drop: the jokers can be reordered whenever the game waits for a move, the hand whenever it holds cards (while choosing a hand, and in an Arcana or Spectral pack, where the order decides which card Death copies and the order the cards go back into the deck). The sort buttons exist only while choosing a hand. Consumables can be dragged in the game too, but their order changes nothing, so there is no action for it. Under BALATROBOT legality (the live bot) the jokers can't be reordered at blind select or on the cash-out screen: BalatroBot's `rearrange` refuses there.
 
 `UseConsumable` and `PickPackCard` take a `card_target` when the consumable works on hand cards (The Magician, Death, Aura...). Bound it with `get_consumable_target_info(info["game"], "consumables", index)` (or `"pack_cards"`), which returns `(min_cards, max_cards, needs_targets)`. Leave `card_target` as `None` to get the engine's default selection: the lowest-index legal cards.
+
+### Free moves
+
+The swaps and sorts (types 15-20, `FREE_ACTION_TYPES`) cost nothing in the game, so a policy could take them forever. After `max_free_moves` of them in a row (10 by default, enough to put five jokers in any order) the mask offers none until another action. `max_free_moves=None` turns the cap off. Every env applies it the same way.
 
 ## Environment Config
 
@@ -141,10 +151,14 @@ env = BalatroEnvironment(
     max_steps=10_000,          # steps before truncation
     seed_prefix="TRAIN",       # prefix for deterministic seed generation
     end_on_win=True,           # end the episode when ante 8 is beaten
+    max_free_moves=10,         # free moves in a row before the mask holds none; None: no cap
+    on_refusal="truncate",     # an action the engine refuses: "truncate" or "raise"
 )
 ```
 
 With `end_on_win=True` (the default) a won run ends the episode, as vanilla stops at its win screen. Pass `end_on_win=False` to keep playing into endless mode until the run is lost or truncated.
+
+An action the masks allow but the engine refuses would be an env bug. By default it ends the episode as truncated, with the run unchanged and the reason in `info["refused"]` (`info["balatro/refused"]` in the Gym envs), so a bug can't stop a long training run; `on_refusal="raise"` raises the engine's `IllegalActionError` instead. A step the Rust engine can't take yet ends the episode the same way, with the reason in `info["not_ported"]`; every rule is ported, so none should.
 
 ## Reward
 
@@ -157,8 +171,6 @@ info["game"]        # the run itself, a jackdaw.core.Game
 ```
 
 `GameState` is a small frozen snapshot: `phase`, `ante`, `round`, `dollars`, `hands_left`, `discards_left`, `hand_size`, `joker_slots`, `consumable_slots`, `blind_on_deck`, `blind_chips`, `chips`, `won`, `done`. Compare `prev_state` with `state` for before/after deltas. `info["game"]` is the live run, which the next step moves on, so read from it immediately or keep `info["game"].freeze()`.
-
-A step the Rust engine can't take yet leaves the run unchanged and ends the episode as truncated, with the reason in `info["not_ported"]`.
 
 The easiest route is a reward function from `jackdaw.env.rewards` (see [Rewards](#rewards)). Wrap each step in a `Transition`:
 
@@ -297,6 +309,8 @@ action = int(np.random.choice(legal))
 obs, reward, terminated, truncated, info = env.step(action)
 ```
 
+`BalatroGymnasiumEnv` takes `max_free_moves` and `on_refusal` like `BalatroEnvironment`.
+
 ### With MaskablePPO
 
 Jackdaw doesn't depend on any RL library. Install [sb3-contrib](https://sb3-contrib.readthedocs.io/) in your own project, then:
@@ -312,7 +326,7 @@ model.learn(total_timesteps=500_000)
 model.save("balatro_ppo")
 ```
 
-The repository's [`examples/`](https://github.com/TylerFlar/jackdaw-balatro/tree/main/examples) trains this setup for real: 32 envs in SB3's `DummyVecEnv`, TensorBoard logs, checkpoints, and an evaluation against a random agent and the hand-written `smart_agent` on the same seeds. In a clone, `uv sync --group train` installs what it needs.
+The repository's [`examples/`](https://github.com/TylerFlar/jackdaw-balatro/tree/main/examples) trains this setup for real: 32 envs in a `BalatroVectorEnv` behind a small SB3 `VecEnv` adapter (`examples/balatro_sb3.py`), TensorBoard logs, checkpoints, and an evaluation against a random agent and the hand-written `smart_agent` on the same seeds. In a clone, `uv sync --group train` installs what it needs.
 
 ### Rewards
 
@@ -376,7 +390,7 @@ A reward function that keeps per-episode state can define a `reset()` method, wh
 
 `ante` is the ante of the blind just beaten. Override any weight by keyword: `ShapedReward(win=1.0, step_cost=0.0)`. The penalties (`step_cost`, `shop_step_cost`, `loss`) are positive magnitudes that get subtracted, so write `loss=0.5`, not `-0.5`. The step cost discourages stalling in shops and menus, while the blind-beaten and score-progress signals give credit for partial progress even when the agent fails to clear a blind.
 
-Mind the discount factor: a policy that puts off the end of a lost run gains `loss * (1 - gamma)` per step from the discounted `loss`, and free moves (sorting or swapping cards) can put it off forever. With the default weights that gain matches `step_cost` at `gamma = 0.995` and exceeds it below, so stalling costs nothing or pays. A higher `gamma`, a smaller `loss` or a larger `step_cost` removes the incentive; the [training demo](https://github.com/TylerFlar/jackdaw-balatro/tree/main/examples) uses `loss=0`.
+Mind the discount factor: a policy that puts off the end of a lost run gains `loss * (1 - gamma)` per step from the discounted `loss`. With the default weights that gain matches `step_cost` at `gamma = 0.995` and exceeds it below, so stalling costs nothing or pays. The [free-move cap](#free-moves) keeps a policy from stalling on swaps and sorts alone, but a higher `gamma`, a smaller `loss` or a larger `step_cost` removes the incentive itself; the [training demo](https://github.com/TylerFlar/jackdaw-balatro/tree/main/examples) uses `loss=0`.
 
 By default, beating ante 8 ends the episode (`end_on_win=True`), so `run_won` and `done` arrive on the same step. With `end_on_win=False`, play continues into endless mode: `run_won` still fires once on the winning step, and a run that dies later in endless mode still counts as won.
 
@@ -388,6 +402,7 @@ At episode end, the `info` dict returned by `step()` includes:
 info["balatro/ante_reached"]    # int — highest ante reached this episode
 info["balatro/rounds_beaten"]   # int — blinds beaten (skipped blinds don't count)
 info["balatro/won"]             # bool — whether the run was won
+info["balatro/refused"]         # str — only when the engine refused the action (an env bug)
 info["balatro/not_ported"]      # str — only when the Rust engine couldn't take the step
 ```
 
@@ -395,7 +410,7 @@ These are tracked the same way whatever reward function is in use, and are usefu
 
 ## Vector Environment
 
-`BalatroVectorEnv` is a `gymnasium.vector.VectorEnv` of `num_envs` Gym environments stepped together in Rust: one `step` runs them all on worker threads with the GIL released and writes the observations and action masks straight into numpy arrays. On a 16-core machine it runs about 350K steps per second on 8 threads, against about 75K for one `BalatroGymnasiumEnv`.
+`BalatroVectorEnv` is a `gymnasium.vector.VectorEnv` of `num_envs` Gym environments stepped together in Rust: one `step` runs them all on worker threads with the GIL released and writes the observations and action masks straight into numpy arrays. On a 16-core machine it runs about 1.1 million steps per second on 8 threads (256 envs), against about 180,000 for one `BalatroGymnasiumEnv`.
 
 ```python
 import numpy as np
@@ -412,10 +427,26 @@ for _ in range(1000):
 ```
 
 - Sub-env `i` plays exactly as `BalatroGymnasiumEnv(DirectAdapter, seed_prefix=f"{seed_prefix}_{i}")` with the same arguments; `reset(seed=s)` gives it seed `s + i`. The results don't depend on the number of threads.
-- Episodes reset on the step after they end (gymnasium's `AutoresetMode.NEXT_STEP`): that step ignores the env's action and returns the new episode's first observation with reward 0. Until then the ended env's mask is all False.
+- **Autoreset.** By default an episode resets on the step after it ends (gymnasium's `AutoresetMode.NEXT_STEP`): that step ignores the env's action and returns the new episode's first observation with reward 0. Until then the ended env's mask is all False. With `autoreset_mode=AutoresetMode.SAME_STEP`, the step that ends an episode returns the next episode's first observation and mask, with the last observation in `info["final_obs"]` and the episode-end metrics in `info["final_info"]` (both with gymnasium's `_` masks). That is what Stable-Baselines3 expects; the [training demo](https://github.com/TylerFlar/jackdaw-balatro/tree/main/examples) wraps it this way.
+- **Partial resets.** `reset(seed=..., options={"reset_mask": mask})` resets only the envs `mask` selects; the others keep their runs.
 - The rewards are computed in Rust, so only the built-in ones are available: `sparse_reward` (the default), `blind_progress_reward` and `ShapedReward` with any weights.
 - The episode-end metrics come as arrays with gymnasium's `_key` masks: `info["balatro/won"]` and `info["_balatro/won"]`, and so on.
+- `max_free_moves` and `on_refusal` work as in the other envs; a refusal shows in the episode-end metrics as `info["balatro/refused"]`, a bool per env.
 - `copy=False` returns views of buffers the next step overwrites, skipping a copy per step.
+
+## Saving a Policy: the Action Version
+
+A trained policy only knows the masks it was trained with: when a new release makes more moves legal, table slots it never saw unmasked appear, and it may take them often. `jackdaw.env.ACTION_VERSION` numbers the action space (also `env.action_version`, and in the Gym and vector envs' `metadata`). Save it with a model, and retrain or fine-tune when it changes. The training demo records it in its `config.json`, and its evaluation refuses a model trained on another version.
+
+| Version | Release | What changed |
+|---|---|---|
+| 1 | 0.1 | the first action space |
+| 2 | 0.2 | joker swaps at every decision point, as the game's drag and drop allows; the free-move cap |
+
+## Known Limitations
+
+- **Two dead global features.** `global[26]` (the blind's key) and `global[29]` (the Four Fingers, Shortcut, Smeared Joker and Splash flags) are always 0, and a playing card's `is_scoring` feature is just "not debuffed". Encoder v1 keeps the original Python encoder's output bit for bit, quirks included. The jokers themselves are visible in the `joker` rows.
+- **Observation rows past the maximum counts.** The Gym observation holds at most 8 hand cards, 5 jokers, 2 consumables, 10 shop items and 5 pack cards. Rows past those are dropped (`entity_counts` is capped too), but the action table can still target them: a sixth joker (Negative), a ninth hand card (a bigger hand size), a third consumable. A policy then picks such an action without seeing its target. The factored `BalatroEnvironment` has no such limit.
 
 ## Live Validation Adapter
 
