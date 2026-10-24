@@ -22,10 +22,11 @@ The engine follows the game's Lua source function by function, down to the RNG. 
 ### Add to your project
 
 ```bash
-uv add git+https://github.com/TylerFlar/jackdaw-balatro.git
+uv add git+https://github.com/TylerFlar/jackdaw-balatro.git --branch main   # the latest release
+uv add git+https://github.com/TylerFlar/jackdaw-balatro.git --tag v0.2.0    # a given release
 ```
 
-Installing from git compiles the Rust engine, so it needs a Rust toolchain ([rustup](https://rustup.rs)).
+`main` holds the releases; the default branch, `dev`, is the work toward the next one. Installing from git compiles the Rust engine, so it needs a Rust toolchain ([rustup](https://rustup.rs)). The [releases](https://github.com/TylerFlar/jackdaw-balatro/releases) also have prebuilt wheels for Linux, macOS and Windows (CPython 3.12+), which don't.
 
 ### For development
 

@@ -10,7 +10,8 @@ on:
 permissions: {}
 
 jobs:
-  base:
+  # main's branch protection requires this check by its name.
+  pr-target:
     runs-on: ubuntu-latest
     steps:
       - name: Only dev and hotfix/* merge into main

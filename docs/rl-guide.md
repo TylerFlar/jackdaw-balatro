@@ -10,11 +10,13 @@ How to set up an RL project using Jackdaw as the environment.
 ## Install
 
 ```bash
-uv add git+https://github.com/TylerFlar/jackdaw-balatro.git
+uv add git+https://github.com/TylerFlar/jackdaw-balatro.git --branch main   # the latest release
 ```
 
-Installing from git compiles the Rust extension, so it needs a Rust toolchain
-([rustup](https://rustup.rs)).
+`--tag v0.2.0` pins a given release instead. Installing from git compiles the Rust extension, so
+it needs a Rust toolchain ([rustup](https://rustup.rs)); the
+[releases](https://github.com/TylerFlar/jackdaw-balatro/releases) also have prebuilt wheels for
+Linux, macOS and Windows.
 
 ## The Loop
 

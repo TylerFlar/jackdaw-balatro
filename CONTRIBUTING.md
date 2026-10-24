@@ -11,12 +11,13 @@ commands.
 | `main` | the releases: each release is a merge from `dev`, tagged `vX.Y.Z` | `dev` (a release) or `hotfix/*` |
 | `dev` | the next release | your branch |
 
-**Open pull requests against `dev`.** Branch from `dev`, and pick `dev` as the base when you
-open the pull request. A check (`PR target`) fails any pull request into `main` from another
-branch; if it fails on yours, change the base to `dev` (Edit, next to the title).
+**Open pull requests against `dev`**, the repository's default branch: branch from `dev`, and a
+new pull request targets it. A required check (`pr-target`) fails any pull request into `main`
+from another branch; if it fails on yours, change the base to `dev` (Edit, next to the title).
 
-`main` is what `uv add git+https://github.com/TylerFlar/jackdaw-balatro.git` installs, so it
-only moves at a release.
+`main` only moves at a release, so installing from it gives the latest release
+(`uv add git+https://github.com/TylerFlar/jackdaw-balatro.git --branch main`, or `--tag vX.Y.Z`
+for a given one). An install from the bare URL gets `dev`.
 
 ## A pull request
 
@@ -69,4 +70,4 @@ that breaks something (an action-version change, an API change) bumps the minor 
 
 A fix that can't wait for the next release goes on a `hotfix/<name>` branch from `main`, with the
 patch version bump and a changelog entry; open its pull request against `main`, tag it as above,
-then merge `main` into `dev`.
+then merge `main` into `dev`. A fix to the docs or the workflows alone needs no version or tag.
