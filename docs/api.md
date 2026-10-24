@@ -152,8 +152,8 @@ Typical costs on a desktop CPU, release build:
 |---|---|
 | A play step | 4–8 µs |
 | `clone()` | 1–2 µs |
-| A new run | about 25 µs |
-| Encoding an observation | 1.4 µs |
+| A new run | about 27 µs |
+| Encoding an observation | 1 µs, 2.5–3 µs with its numpy arrays |
 
-The single-threaded environments step at about 90–100K steps/s. `BalatroVectorEnv` exceeds
-400K steps/s on 8 threads.
+The single-threaded environments step at about 130K steps/s. `BalatroVectorEnv` steps at
+about 580K steps/s on 8 threads (256 envs).
