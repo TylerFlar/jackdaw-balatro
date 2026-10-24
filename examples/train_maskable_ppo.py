@@ -24,13 +24,14 @@ VALIDATION_SEED_BASE = 20_000_000
 
 #: ShapedReward, progress-heavy and without the loss penalty.  With the default weights a
 #: policy gains loss * (1 - gamma) per step by putting off the end of a lost run, which
-#: matches step_cost at gamma = 0.995: free moves (swapping or sorting cards) stall for nothing.
+#: matches step_cost at gamma = 0.995: stalling (on free moves, before the env capped them)
+#: costs nothing.
 REWARD = "shaped:loss=0,score_progress=0.1,blind_beaten=0.5,boss_beaten=0.3"
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    p.add_argument("--timesteps", type=int, default=60_000_000, help="env steps to train for")
+    p.add_argument("--timesteps", type=int, default=30_000_000, help="env steps to train for")
     p.add_argument("--n-envs", type=int, default=32, help="parallel envs (BalatroVectorEnv)")
     p.add_argument("--n-steps", type=int, default=256, help="steps per env per rollout")
     p.add_argument("--batch-size", type=int, default=2048)

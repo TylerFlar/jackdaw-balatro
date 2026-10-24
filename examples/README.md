@@ -1,21 +1,20 @@
 # Training demo: MaskablePPO on jackdaw
 
 This folder trains [sb3-contrib](https://sb3-contrib.readthedocs.io/)'s MaskablePPO on the
-simulator's `BalatroGymnasiumEnv` (Rust engine, flat `Discrete(500)` actions with masks), then
-plays the trained policy against two baselines on the same runs: a random legal action at every
-step, and `jackdaw.cli.smart_agent`, the repo's hand-written heuristic player.
+simulator's `BalatroVectorEnv` (Rust engine, flat `Discrete(500)` actions with masks), then plays
+the trained policy against two baselines on the same runs: a random legal action at every step,
+and `jackdaw.cli.smart_agent`, the repo's hand-written heuristic player.
 
 ## Results
 
-The demo run trained for 30.2M environment steps in 65 min on 6 CPU threads, and was stopped
-once learning had slowed to about 0.1 more blinds per 10M steps (see the curves). Every agent
-then played the same 1,000 runs (seeds 10,000,000 to 10,000,999, Red Deck, stake 1), which
-training and validation never saw:
+The demo run trained for 30.0M environment steps in 40 min on 6 CPU threads for torch
+and 2 for the envs. Every agent then played the same 1,000 runs (seeds 10,000,000 to
+10,000,999, Red Deck, stake 1), which training and validation never saw:
 
 | Agent | Mean ante reached | Blinds beaten per run | Win rate | Mean episode reward | Mean episode length (steps) |
 |---|---:|---:|---:|---:|---:|
-| MaskablePPO, sampled | 1.83 | 3.74 ± 0.11 | 0% | +0.96 | 57 |
-| MaskablePPO, greedy | 1.48 | 2.65 ± 0.07 | 0% | -0.72 | 984 |
+| MaskablePPO, greedy | 2.08 | 4.52 ± 0.13 | 0% | +1.23 | 65 |
+| MaskablePPO, sampled | 1.99 | 4.18 ± 0.12 | 0% | +1.11 | 58 |
 | `smart_agent` | 2.31 | 5.38 ± 0.13 | 0% | +1.48 | 50 |
 | Random legal action | 1.00 | 0.001 ± 0.001 | 0% | +0.02 | 9 |
 
@@ -25,20 +24,19 @@ training and validation never saw:
   summed over the episode.
 - Episodes end when the run is lost or won, or after 2,000 steps.
 
-From beating essentially no blind, PPO learns to clear almost four per run and reaches ante 6 at
-best. The hand-written `smart_agent` is still better: 1.6 more blinds per run, and ante 7 at
-best. No agent wins a run.
+From beating essentially no blind, PPO learns to clear about four and a half per run, and
+its best runs reach ante 8 (`smart_agent`'s best: ante 7). The hand-written `smart_agent`
+is still better on average, by almost a blind per run, and no agent wins a run. Learning
+hadn't stopped: the training rollouts gained 0.3 blinds per episode over the last 10M
+steps.
 
-The greedy policy is weaker than the sampled one because it loops. In some states its most
-likely action is a free move (here mostly swapping two cards in the hand, or two jokers in the
-shop), and from the next state another free move, and so on: 48% of its episodes run into the
-2,000-step cap.
-Sampling breaks such cycles (no sampled episode reached the cap), and the sampled policy is the
-one PPO optimizes.
+Playing the most likely action (greedy) is the stronger way to use the policy here. The
+previous demo's greedy policy looped on free moves until the step cap; the cap on free
+moves in a row (below) ended that, and no episode reaches the step cap now.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="results/learning_curve_dark.png">
-  <img src="results/learning_curve.png" alt="Learning curves over 30M environment steps. Blinds beaten per episode rises from 0 to about 3 in the first 5M steps, then slowly to about 3.7 by 20M steps, where it levels off; the sampled evaluation tracks the training rollouts, the greedy evaluation sits lower, and smart_agent's 5.4 stays above both. Ante reached and episode reward follow the same pattern; the greedy episodes run to several hundred steps.">
+  <img src="results/learning_curve.png" alt="Learning curves over 30M environment steps. Blinds beaten per episode rises from 0 to about 3 in the first 3M steps, then slowly to about 4.1 by 30M; the greedy evaluation sits above the sampled one and the training rollouts, and smart_agent's 5.4 stays above all three. Ante reached and episode reward follow the same pattern; episodes settle around 60 steps.">
 </picture>
 
 The four panels show the training rollouts (episodes that ended in each rollout, smoothed), and
@@ -68,14 +66,12 @@ CUDA libraries.
 ## Train
 
 ```bash
-uv run --group train python examples/train_maskable_ppo.py --timesteps 30154752
+uv run --group train python examples/train_maskable_ppo.py
 ```
 
-The defaults are the demo run's settings, except that it ran up to 60M steps and was stopped
-after 3,681 updates of 8,192 steps; `--timesteps 30154752` ends at the same update. Training is
-seeded (the envs' runs, the action-table sampler, torch, numpy), but floating-point results can
-still differ with the hardware and the thread count. Everything goes to
-`runs/maskable_ppo/<run>/`, which is gitignored:
+The defaults are the demo run's settings. Training is seeded (the envs' runs, the action-table
+sampler, torch, numpy), but floating-point results can still differ with the hardware and the
+thread count. Everything goes to `runs/maskable_ppo/<run>/`, which is gitignored:
 
 | Path | What |
 |---|---|
@@ -83,7 +79,7 @@ still differ with the hardware and the thread count. Everything goes to
 | `checkpoints/` | the model every 5M steps |
 | `best_model.zip` | the model with the most blinds beaten on the 64 validation seeds (sampled) |
 | `final_model.zip` | the model at the end of training |
-| `config.json` | the command-line settings |
+| `config.json` | the command-line settings and the action space's version |
 
 Create a file named `STOP` in the run directory to end training early: the script still saves
 `final_model.zip`. `--resume <model.zip>` continues from a saved model. `--help` lists the
@@ -107,49 +103,41 @@ uv run --group train python examples/plot_learning_curve.py runs/maskable_ppo/<r
 
 `evaluate_agents.py` plays one episode per test seed for each agent, with the reward and
 episode cap from the `config.json` next to the model, prints the table above and writes the JSON
-summary. The first command reproduces the table from the committed model in about two minutes.
+summary. The first command reproduces the table from the committed model in under a minute.
 
 ## How the training is set up
 
-**Environments.** 32 `BalatroGymnasiumEnv`s on the Rust engine (`DirectAdapter`) in SB3's
-`DummyVecEnv`, wrapped in `VecMonitor` for episode statistics. Sub-env `i` starts from seed
-`seed + i` and then plays runs `TRAIN<seed>_<i>_<n>`, so no two envs replay the same run.
-`DummyVecEnv` resets an env within the step that ends its episode, puts the final observation in
-`infos[i]["terminal_observation"]` (SB3 bootstraps truncated episodes from it) and returns the
-new episode's first observation. MaskablePPO then reads the masks with
-`env_method("action_masks")`, which asks each env for the mask of the observation it just
-returned, so the policy always picks from the legal actions of the state it sees. A check over
-17,415 automatic resets found every returned observation and mask equal to those of a fresh env
-starting the same run.
-
-**Why not `BalatroVectorEnv`.** The vector env steps several times faster than 32 Gym envs in a
-`DummyVecEnv`, but it resets an ended episode on the *following* step (gymnasium's
-`AutoresetMode.NEXT_STEP`): that step ignores the env's action and returns the new episode's
-first observation with reward 0, and until then the env's mask is all False. An SB3 `VecEnv`
-must return the new episode's first observation, and its mask, from the step that ended the last
-one, and the vector env can reset a sub-env only by stepping all the others with it (or by
-resetting them all). Wrapping it would put one fake transition per episode into PPO's rollout
-buffer: an action chosen with every action masked, which the env ignores, scored as a real step
-in the advantages, the value targets and the episode statistics. The env is not the bottleneck
-anyway: on 6 threads MaskablePPO trains at up to about 10K steps/s (7.8K on average over the demo
-run, on a machine shared with other work), half in rollouts and half in updates. Stepping the 32
-envs takes about a fifth of the time (they run at about 46K steps/s on their own), so even an
-instant env would save at most a fifth of the wall clock.
+**Environments.** One `BalatroVectorEnv` of 32 envs on 2 worker threads, with same-step
+autoreset (`AutoresetMode.SAME_STEP`), behind `BalatroSB3VecEnv` (`balatro_sb3.py`), a small
+Stable-Baselines3 `VecEnv`, and `VecMonitor` for the episode statistics. Sub-env `i` starts from
+seed `seed + i` and then plays runs `TRAIN<seed>_<i>_<n>`, so no two envs replay the same run. The
+step that ends an episode returns the next episode's first observation and mask, with the final
+observation in `infos[i]["terminal_observation"]` (SB3 bootstraps truncated episodes from it).
+MaskablePPO reads the masks with `env_method("action_masks")`, which the adapter answers from the
+vector env: the masks of the observations it just returned, so the policy always picks from the
+legal actions of the state it sees.
 
 **Reward.** `ShapedReward(score_progress=0.1, blind_beaten=0.5, boss_beaten=0.3, loss=0)`: the
 built-in dense reward (computed in Rust) with heavier progress terms and no loss penalty.
 `step_cost` (0.001), `shop_step_cost` (0.002), `hands_left` (0.01) and `win` (0.5) keep their
 defaults. With the default weights, putting off the end of a lost run saves
 `loss * (1 - gamma)` per step, which equals `step_cost` at `gamma = 0.995`, so stalling is free.
-In a pilot with the defaults, the greedy policy learned to alternate sorting and swapping cards
-until the 2,000-step cap and beat no blind. Pilots with the same settings otherwise (on the
-engine before G206, see below):
+In a pilot with the defaults (before the free-move cap below), the greedy policy learned to
+alternate sorting and swapping cards until the 2,000-step cap and beat no blind. Pilots with the
+same settings otherwise:
 
 | Reward | Blinds beaten on the validation seeds (greedy / sampled) |
 |---|---|
 | `ShapedReward()`, after 0.3M steps | 0.00 / 0.00, greedy episodes of 1,627 steps |
 | `ShapedReward(loss=0)`, after 1M steps | 1.30 / 1.02 |
 | the demo's reward, after 1M steps | 2.56 / 1.55 |
+
+**Free moves.** The envs allow at most 10 free moves (swaps and sorts) in a row, the default
+`max_free_moves`. The previous demo was trained without the cap, and its greedy policy looped:
+in some states its most likely action was a free move (mostly swapping two cards in the hand,
+or two jokers in the shop), and from the next state another one. 48% of its greedy episodes ran
+into the 2,000-step cap, and it beat 2.65 blinds per run against 3.74 sampled. With the cap, no
+episode reaches the step cap.
 
 **Hyperparameters.**
 
@@ -160,23 +148,24 @@ engine before G206, see below):
 | Updates | 4 epochs, minibatches of 2,048, Adam at 3e-4 (constant) |
 | PPO | gamma 0.995, GAE lambda 0.95, clip 0.2, entropy 0.01, value 0.5, max grad norm 0.5 |
 | Episodes | Red Deck, stake 1, ended by a loss, a win or 2,000 steps |
-| Threads | `--threads 6` caps torch's and the BLAS libraries' thread pools |
+| Threads | `--threads 6` caps torch's and the BLAS libraries' thread pools; `--env-threads 2` the vector env's |
 
-torch's OpenMP threads spin between calls, so training keeps its 6 cores busy throughout. With
-`KMP_BLOCKTIME=0` in the environment they sleep instead: about 2.3 cores on average, but training
-runs about a third slower.
+MaskablePPO trained at 12.4K steps/s on average (30.0M steps in 40 min), against 7.8K for
+the previous demo, which ran 32 `BalatroGymnasiumEnv`s in SB3's `DummyVecEnv`. torch's
+OpenMP threads spin between calls, so training keeps its cores busy throughout. With
+`KMP_BLOCKTIME=0` in the environment they sleep instead, at the cost of speed.
 
-**Refusals.** `BalatroGymnasiumEnv` raises `IllegalActionError` if the engine refuses an
-action from its own table, where `BalatroVectorEnv` ends that episode instead. The
-`EndOnRefusal` wrapper does the same here, so that an env bug can't stop a long run, and prints
-the refusal. None happened in the demo run or its evaluations.
+**Refusals.** An action the engine refuses (the masks and the engine disagree: an env bug) ends
+its episode as truncated and is flagged in `infos[i]["balatro/refused"]`, so a bug can't stop a
+long run. None happened in the demo run or its evaluations.
 
-**Engine versions.** A trained policy is tied to the action masks it was trained with. G206 (a
-fix to follow the game's drag and drop) made joker swaps legal at blind select and on the
-cash-out screen. A first demo model, trained just before it, had never seen those table slots
-unmasked there: on the engine with G206, 97% of its sampled moves were those swaps, and its
-blinds beaten per run fell from 4.1 to 2.2. The model here was trained after the change. Retrain
-(or fine-tune) a policy when the masks change.
+**The action space's version.** A trained policy is tied to the masks it was trained with: when
+a release makes more moves legal, table slots the policy never saw unmasked appear, and it may
+take them often. (An earlier demo model, trained before joker swaps became legal at blind select
+and on the cash-out screen, spent 97% of its sampled moves on those swaps on the newer engine,
+and its blinds beaten per run fell from 4.1 to 2.2.) `config.json` records
+`jackdaw.env.ACTION_VERSION`, and `evaluate_agents.py` refuses a model trained on another
+version. Retrain (or fine-tune) a policy when it changes.
 
 ## Files
 
@@ -185,5 +174,5 @@ blinds beaten per run fell from 4.1 to 2.2. The model here was trained after the
 | `train_maskable_ppo.py` | training |
 | `evaluate_agents.py` | the evaluation against the baselines |
 | `plot_learning_curve.py` | the learning curves from the TensorBoard logs |
-| `balatro_sb3.py` | what the scripts share: envs, callbacks, the evaluation loop |
+| `balatro_sb3.py` | what the scripts share: the SB3 adapter, callbacks, the evaluation loop |
 | `results/` | the demo run's summary, curves, settings and model |

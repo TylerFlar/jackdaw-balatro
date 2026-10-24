@@ -1,5 +1,5 @@
 {
-  "timesteps": 60000000,
+  "timesteps": 30000000,
   "n_envs": 32,
   "n_steps": 256,
   "batch_size": 2048,
@@ -15,10 +15,12 @@
   "max_steps": 2000,
   "seed": 0,
   "threads": 6,
+  "env_threads": 2,
   "run_dir": "runs/maskable_ppo",
-  "run_name": "demo2-seed0",
+  "run_name": "demo-seed0",
   "checkpoint_freq": 5000000,
   "eval_freq": 2000000,
   "eval_episodes": 64,
-  "resume": null
+  "resume": null,
+  "action_version": 2
 }
