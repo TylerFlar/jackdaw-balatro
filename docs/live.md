@@ -360,3 +360,14 @@ in-process `FakeLive` with live-style card ids), where nothing may diverge:
 - `tests/live/test_lockstep_long.py` (`pytest -m lockstep`): 240 organic games in process and 200
   seeds across four deck/stake combinations on two `jackdaw serve` instances, every kind of move,
   no divergence; every `jackdaw validate` scenario over HTTP.
+
+Against the real game (Balatro 1.0.1o, Steamodded 1.0.0~BETA-1503a, BalatroBot 1.5.2, a fully
+unlocked profile, four instances in fast headless mode), October 2026:
+
+- `jackdaw lockstep --instances 4 --seeds 200 --rng-seed 2026 --decks RED,BLUE --stakes
+  WHITE,GOLD`: 200 games, 11,446 steps, 0 unclassified divergences. The first runs found G265
+  and G266 (two engine bugs, both fixed) and the timing allowances and Steamodded entries above.
+- `jackdaw validate`: 269 of 269 scenarios pass. Six are skipped: five skips for a tag that opens
+  a pack (BB-SKIP-PACK), and Luchador, which BalatroBot sells only in the shop.
+- G182 (the order `pairs(G.GAME.hands)` visits the hands): To Do List's hand is the game's on all
+  12 seeds tried.
