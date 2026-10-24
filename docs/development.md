@@ -40,7 +40,7 @@ has the branch flow, the checklist and how a release is cut.
     `VCINSTALLDIR` so the `cc` crate uses that environment as it is.
 
 Installing jackdaw from a git URL or an sdist compiles the extension, so it needs Rust as well.
-Prebuilt wheels do not.
+The prebuilt wheels on the GitHub releases do not.
 
 ## Everyday commands
 
