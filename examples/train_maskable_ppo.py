@@ -31,7 +31,7 @@ REWARD = "shaped:loss=0,score_progress=0.1,blind_beaten=0.5,boss_beaten=0.3"
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     p.add_argument("--timesteps", type=int, default=60_000_000, help="env steps to train for")
-    p.add_argument("--n-envs", type=int, default=32, help="parallel envs (DummyVecEnv)")
+    p.add_argument("--n-envs", type=int, default=32, help="parallel envs (BalatroVectorEnv)")
     p.add_argument("--n-steps", type=int, default=256, help="steps per env per rollout")
     p.add_argument("--batch-size", type=int, default=2048)
     p.add_argument("--n-epochs", type=int, default=4)
@@ -51,6 +51,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--max-steps", type=int, default=2_000, help="episode cap")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--threads", type=int, default=6, help="torch / BLAS threads (cap)")
+    p.add_argument("--env-threads", type=int, default=2, help="the vector env's threads")
     p.add_argument("--run-dir", default="runs/maskable_ppo")
     p.add_argument("--run-name", default=None, help="default: seed<seed>-<date>-<time>")
     p.add_argument("--checkpoint-freq", type=int, default=5_000_000, help="in env steps")
@@ -82,9 +83,15 @@ def main(argv: list[str] | None = None) -> None:
     run_name = args.run_name or time.strftime(f"seed{args.seed}-%Y%m%d-%H%M%S")
     run_dir = Path(args.run_dir) / run_name
     run_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / "config.json").write_text(json.dumps(vars(args), indent=2) + "\n")
+    from jackdaw.env import ACTION_VERSION
 
-    env = demo.make_training_env(args.n_envs, args.seed, args.reward, args.max_steps)
+    # The action space the policy learns: evaluate_agents.py refuses a model on another one.
+    config = {**vars(args), "action_version": ACTION_VERSION}
+    (run_dir / "config.json").write_text(json.dumps(config, indent=2) + "\n")
+
+    env = demo.make_training_env(
+        args.n_envs, args.seed, args.reward, args.max_steps, args.env_threads
+    )
     if args.resume:
         model = MaskablePPO.load(args.resume, env=env, device="cpu")
         model.tensorboard_log = str(run_dir / "tb")

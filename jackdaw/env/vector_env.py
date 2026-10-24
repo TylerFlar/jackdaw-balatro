@@ -8,9 +8,18 @@ action masks and per-env results into numpy arrays this object owns.
 Sub-env ``i`` behaves exactly as ``BalatroGymnasiumEnv(DirectAdapter,
 seed_prefix=f"{seed_prefix}_{i}", ...)``: the same runs, tables, rewards and
 episode stats.  ``reset(seed=s)`` starts sub-env ``i`` from seed ``s + i``
-(gymnasium's convention).  Episodes reset on the step after they end
-(``AutoresetMode.NEXT_STEP``): that step ignores the env's action and returns
-the new episode's first observation with reward 0.
+(gymnasium's convention); ``reset(options={"reset_mask": mask})`` resets only
+the sub-envs ``mask`` selects.
+
+Two autoreset modes, as in gymnasium:
+
+- ``AutoresetMode.NEXT_STEP`` (default): an episode resets on the step after it
+  ends.  That step ignores the env's action and returns the new episode's first
+  observation with reward 0.
+- ``AutoresetMode.SAME_STEP``: the step that ends an episode resets it and
+  returns the new episode's first observation and mask; the last observation is
+  in ``info["final_obs"]`` and the step's episode stats in ``info["final_info"]``.
+  This is what Stable-Baselines3's ``VecEnv`` expects.
 
 Rewards are the built-in ones, computed in Rust: :func:`~jackdaw.env.rewards.sparse_reward`
 (default), :func:`~jackdaw.env.rewards.blind_progress_reward` or a
@@ -38,7 +47,8 @@ from gymnasium.vector import AutoresetMode, VectorEnv
 from gymnasium.vector.utils import batch_space
 
 from jackdaw import _core
-from jackdaw.core import Game
+from jackdaw.core import Game, IllegalActionError
+from jackdaw.env.action_space import ACTION_VERSION, DEFAULT_MAX_FREE_MOVES
 from jackdaw.env.game_interface import GameState, game_state_from_parts
 from jackdaw.env.game_spec import FactoredAction
 from jackdaw.env.rewards import RewardFn, ShapedReward, sparse_reward
@@ -91,13 +101,26 @@ class BalatroVectorEnv(VectorEnv):
     copy:
         Return copies of the observation arrays (default), or views of the buffers the
         next step overwrites.
+    autoreset_mode:
+        ``AutoresetMode.NEXT_STEP`` (default) or ``AutoresetMode.SAME_STEP``.
+    max_free_moves:
+        As for the Gym env: after this many free moves in a row (swaps, sorts) a sub-env's
+        table holds none until another action.  ``None``: no cap.
+    on_refusal:
+        ``"truncate"`` (default): a table action the engine refuses ends that episode as
+        truncated, flagged in ``info["balatro/refused"]``.  ``"raise"``: the step raises
+        ``IllegalActionError`` after it (the refused episodes were cut).  A sub-env the
+        engine can't step yet is cut too, flagged in ``info["balatro/not_ported"]``.
 
-    A sub-env step the engine refuses (a table action that turns out illegal, or one it
-    can't take yet) ends that episode as truncated; ``info["balatro/refused"]`` and
-    ``info["balatro/not_ported"]`` flag them.
+    :attr:`action_version` is the action space's
+    :data:`~jackdaw.env.action_space.ACTION_VERSION`.
     """
 
-    metadata: dict[str, Any] = {"autoreset_mode": AutoresetMode.NEXT_STEP}
+    metadata: dict[str, Any] = {
+        "autoreset_mode": AutoresetMode.NEXT_STEP,
+        "action_version": ACTION_VERSION,
+    }
+    action_version: int = ACTION_VERSION
 
     def __init__(
         self,
@@ -111,9 +134,23 @@ class BalatroVectorEnv(VectorEnv):
         end_on_win: bool = True,
         num_threads: int = 0,
         copy: bool = True,
+        autoreset_mode: AutoresetMode = AutoresetMode.NEXT_STEP,
+        max_free_moves: int | None = DEFAULT_MAX_FREE_MOVES,
+        on_refusal: str = "truncate",
     ) -> None:
         if num_envs < 1:
             raise ValueError("num_envs must be at least 1")
+        autoreset_mode = AutoresetMode(autoreset_mode)
+        if autoreset_mode not in (AutoresetMode.NEXT_STEP, AutoresetMode.SAME_STEP):
+            raise ValueError(f"autoreset_mode {autoreset_mode} is not NEXT_STEP or SAME_STEP")
+        if on_refusal not in ("truncate", "raise"):
+            raise ValueError(f"on_refusal must be 'truncate' or 'raise', not {on_refusal!r}")
+        if max_free_moves is not None and max_free_moves < 0:
+            raise ValueError("max_free_moves must be None or at least 0")
+        self.autoreset_mode = autoreset_mode
+        self.metadata = {**type(self).metadata, "autoreset_mode": autoreset_mode}
+        self.max_free_moves = max_free_moves
+        self.on_refusal = on_refusal
         if reward_fn is not None and reward_shaping:
             raise ValueError("Pass either reward_fn or reward_shaping=True, not both")
         if reward_fn is None:
@@ -136,7 +173,9 @@ class BalatroVectorEnv(VectorEnv):
             (first.back_keys[0], first.stakes[0], "INIT", None, secrets.randbits(64))
             for _ in range(num_envs)
         ]
-        self._core = _core.VectorEnv(inits, max_steps, end_on_win, kind, weights, num_threads)
+        self._core = _core.VectorEnv(
+            inits, max_steps, end_on_win, kind, weights, num_threads, max_free_moves
+        )
         # Each step writes fresh observation and mask arrays (copy=True) or reuses these.
         self._obs = np.zeros((num_envs, OBS_LEN), dtype=np.float32)
         self._masks = np.zeros((num_envs, MAX_ACTIONS), dtype=np.bool_)
@@ -157,7 +196,9 @@ class BalatroVectorEnv(VectorEnv):
         options: dict[str, Any] | None = None,
     ) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
         """Start a new episode in every sub-env; ``seed`` an int (sub-env ``i`` gets
-        ``seed + i``), a list (one per sub-env) or None."""
+        ``seed + i``), a list (one per sub-env) or None.  With ``options={"reset_mask":
+        mask}`` only the sub-envs ``mask`` (``num_envs`` bools) selects start one; the others
+        keep their episodes and observations."""
         if seed is None:
             seeds: list[int | None] = [None] * self.num_envs
         elif isinstance(seed, int):
@@ -166,6 +207,19 @@ class BalatroVectorEnv(VectorEnv):
             seeds = list(seed)
             if len(seeds) != self.num_envs:
                 raise ValueError(f"expected {self.num_envs} seeds, got {len(seeds)}")
+        reset_mask = (options or {}).get("reset_mask")
+        if reset_mask is not None:
+            reset_mask = np.asarray(reset_mask, dtype=np.bool_).reshape(-1)
+            if reset_mask.shape != (self.num_envs,):
+                raise ValueError(f"reset_mask must hold {self.num_envs} bools")
+            if not self._reset_once:
+                raise RuntimeError("BalatroVectorEnv: a full reset() comes first")
+            chosen = np.flatnonzero(reset_mask).tolist()
+            obs, masks = self._outputs(keep=True)
+            resets = [(i, self._reset_tuple(i, seeds[i])) for i in chosen]
+            self._core.reset_some(resets, obs, masks.view(np.uint8))
+            self._pending = [i for i in self._pending if not reset_mask[i]]
+            return self._observations(obs), {"action_mask": masks}
         resets = [self._reset_tuple(i, s) for i, s in enumerate(seeds)]
         obs, masks = self._outputs()
         self._core.reset(resets, obs, masks.view(np.uint8))
@@ -176,9 +230,10 @@ class BalatroVectorEnv(VectorEnv):
     def step(
         self, actions: Any
     ) -> tuple[dict[str, np.ndarray], np.ndarray, np.ndarray, np.ndarray, dict[str, Any]]:
-        """Step every sub-env with its action (an index into its action table); a sub-env
-        whose episode ended on the last step starts a new one instead (its action is
-        ignored: pass anything)."""
+        """Step every sub-env with its action (an index into its action table).  With
+        ``NEXT_STEP``, a sub-env whose episode ended on the last step starts a new one
+        instead (its action is ignored: pass anything); with ``SAME_STEP``, a sub-env whose
+        episode ends now starts the next one before the step returns."""
         if not self._reset_once:
             raise RuntimeError("BalatroVectorEnv: call reset() before step()")
         actions = np.ascontiguousarray(actions, dtype=np.int64).reshape(self.num_envs)
@@ -190,20 +245,32 @@ class BalatroVectorEnv(VectorEnv):
         terminated = stats[:, _TERMINATED] != 0
         truncated = stats[:, _TRUNCATED] != 0
         ended = stats[:, _ENDED] != 0
-        self._pending = np.flatnonzero(ended).tolist()
         info: dict[str, Any] = {"action_mask": masks}
         if ended.any():
-            info["balatro/ante_reached"] = stats[:, _ANTE].astype(np.int64)
-            info["_balatro/ante_reached"] = ended
-            info["balatro/rounds_beaten"] = stats[:, _ROUNDS].astype(np.int64)
-            info["_balatro/rounds_beaten"] = ended
-            info["balatro/won"] = stats[:, _WON] != 0
-            info["_balatro/won"] = ended
-            for key, col in (("balatro/not_ported", _NOT_PORTED), ("balatro/refused", _REFUSED)):
-                flags = stats[:, col] != 0
-                if flags.any():
-                    info[key] = flags
-                    info["_" + key] = flags
+            episode = self._episode_info(stats, ended)
+            if self.autoreset_mode is AutoresetMode.SAME_STEP:
+                ended_envs = np.flatnonzero(ended).tolist()
+                final = batched_gym_obs(obs[ended_envs].copy())
+                final_obs = np.full(self.num_envs, None, dtype=object)
+                for row, i in enumerate(ended_envs):
+                    final_obs[i] = {key: value[row] for key, value in final.items()}
+                info["final_obs"] = final_obs
+                info["_final_obs"] = ended
+                info["final_info"] = episode
+                info["_final_info"] = ended
+                resets = [(i, self._reset_tuple(i, None)) for i in ended_envs]
+                self._core.reset_some(resets, obs, masks.view(np.uint8))
+                self._pending = []
+            else:
+                info.update(episode)
+                self._pending = np.flatnonzero(ended).tolist()
+        else:
+            self._pending = []
+        if self.on_refusal == "raise" and stats[:, _REFUSED].any():
+            refused = np.flatnonzero(stats[:, _REFUSED]).tolist()
+            raise IllegalActionError(
+                f"BalatroVectorEnv: the engine refused the action of sub-envs {refused}"
+            )
         return self._observations(obs), rewards, terminated, truncated, info
 
     def action_masks(self) -> np.ndarray:
@@ -242,13 +309,36 @@ class BalatroVectorEnv(VectorEnv):
         rng_seed = None if seed is None else sampler_seed(seed)
         return (back, stake, run_seed, None, rng_seed)
 
-    def _outputs(self) -> tuple[np.ndarray, np.ndarray]:
+    def _outputs(self, keep: bool = False) -> tuple[np.ndarray, np.ndarray]:
         """The arrays the next step writes: fresh ones (copy=True, so what was handed out stays
-        as it was), else the env's own."""
+        as it was), holding the last values with ``keep``, else the env's own."""
         if self.copy:
-            self._obs = np.empty((self.num_envs, OBS_LEN), dtype=np.float32)
-            self._masks = np.empty((self.num_envs, MAX_ACTIONS), dtype=np.bool_)
+            if keep:
+                self._obs = self._obs.copy()
+                self._masks = self._masks.copy()
+            else:
+                self._obs = np.empty((self.num_envs, OBS_LEN), dtype=np.float32)
+                self._masks = np.empty((self.num_envs, MAX_ACTIONS), dtype=np.bool_)
         return self._obs, self._masks
+
+    @staticmethod
+    def _episode_info(stats: np.ndarray, ended: np.ndarray) -> dict[str, Any]:
+        """The ended episodes' stats, in gymnasium's vector info form (a value array and a
+        ``_``-prefixed mask per key)."""
+        info: dict[str, Any] = {
+            "balatro/ante_reached": stats[:, _ANTE].astype(np.int64),
+            "_balatro/ante_reached": ended,
+            "balatro/rounds_beaten": stats[:, _ROUNDS].astype(np.int64),
+            "_balatro/rounds_beaten": ended,
+            "balatro/won": stats[:, _WON] != 0,
+            "_balatro/won": ended,
+        }
+        for key, col in (("balatro/not_ported", _NOT_PORTED), ("balatro/refused", _REFUSED)):
+            flags = stats[:, col] != 0
+            if flags.any():
+                info[key] = flags
+                info["_" + key] = flags
+        return info
 
     def _observations(self, obs: np.ndarray) -> dict[str, np.ndarray]:
         if self.copy:

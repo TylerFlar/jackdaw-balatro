@@ -1,12 +1,10 @@
 """Pieces shared by the MaskablePPO demo scripts: the environments, the training callbacks and
 the evaluation loop.
 
-Training runs ``BalatroGymnasiumEnv`` on the Rust engine in Stable-Baselines3's
-``DummyVecEnv``.  ``BalatroVectorEnv`` steps faster, but it resets an ended episode on the
-*following* step (gymnasium's ``AutoresetMode.NEXT_STEP``), while an SB3 ``VecEnv`` must return
-the next episode's first observation, and its action mask, from the very step that ended the
-last one.  The vector env can only reset a sub-env by stepping all the others, so wrapping it
-would put one transition per episode whose action is ignored into PPO's buffer (see README.md).
+Training runs ``BalatroVectorEnv`` with same-step autoreset (``AutoresetMode.SAME_STEP``) behind
+:class:`BalatroSB3VecEnv`, a Stable-Baselines3 ``VecEnv``: the step that ends an episode returns
+the next one's first observation and mask, and the last observation as SB3's
+``terminal_observation``.  Evaluation plays ``BalatroGymnasiumEnv``s, one per seed.
 """
 
 from __future__ import annotations
@@ -14,18 +12,17 @@ from __future__ import annotations
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from functools import partial
 from pathlib import Path
 from typing import Any
 
-import gymnasium
 import numpy as np
+from gymnasium.vector import AutoresetMode
 from stable_baselines3.common.callbacks import BaseCallback
-from stable_baselines3.common.vec_env import DummyVecEnv, VecEnv, VecMonitor
+from stable_baselines3.common.vec_env import VecEnv, VecMonitor
 
-from jackdaw.core import IllegalActionError
 from jackdaw.env import (
     BalatroGymnasiumEnv,
+    BalatroVectorEnv,
     DirectAdapter,
     GameAdapter,
     ShapedReward,
@@ -66,74 +63,123 @@ EVAL_SEED_BASE = 10_000_000
 # ---------------------------------------------------------------------------
 
 
-class EndOnRefusal(gymnasium.Wrapper):
-    """End the episode (truncated) when the engine refuses an action from the table.
-
-    ``BalatroVectorEnv`` does the same (``info["balatro/refused"]``); the single env raises
-    ``IllegalActionError`` instead, which would stop a long training run.  It never happened in
-    this demo's runs: a refusal would be an env bug, so the wrapper prints it.
-    """
-
-    def __init__(self, env: BalatroGymnasiumEnv) -> None:
-        super().__init__(env)
-        self._last_obs: dict[str, np.ndarray] | None = None
-        self.refusals = 0
-
-    def reset(self, **kwargs: Any) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
-        obs, info = self.env.reset(**kwargs)
-        self._last_obs = obs
-        return obs, info
-
-    def step(self, action: Any) -> tuple[dict[str, np.ndarray], float, bool, bool, dict[str, Any]]:
-        try:
-            obs, reward, terminated, truncated, info = self.env.step(action)
-        except IllegalActionError as exc:
-            self.refusals += 1
-            print(f"[EndOnRefusal] the engine refused table action {action}: {exc}", flush=True)
-            env: BalatroGymnasiumEnv = self.env.unwrapped  # type: ignore[assignment]
-            assert self._last_obs is not None
-            info = {"action_mask": np.zeros_like(env.action_masks()), "balatro/refused": True}
-            return self._last_obs, 0.0, False, True, info
-        self._last_obs = obs
-        return obs, reward, terminated, truncated, info
-
-    def action_masks(self) -> np.ndarray:
-        return self.env.unwrapped.action_masks()  # type: ignore[attr-defined]
-
-
 def make_env(
     rank: int = 0,
     seed: int = 0,
     reward: str = "shaped",
     max_steps: int = MAX_STEPS,
     adapter_factory: Callable[[], GameAdapter] = DirectAdapter,
-) -> EndOnRefusal:
+) -> BalatroGymnasiumEnv:
     """One Gym env, on the Rust engine in process by default (``DirectAdapter``).
 
     ``reset()`` without a seed starts the run ``f"TRAIN{seed}_{rank}_{n}"`` for the env's n-th
-    episode, so sub-envs never replay each other's runs.
+    episode, so sub-envs never replay each other's runs.  A table action the engine refuses (an
+    env bug) ends the episode, flagged in ``info["balatro/refused"]``.
     """
-    env = BalatroGymnasiumEnv(
+    return BalatroGymnasiumEnv(
         adapter_factory=adapter_factory,
         reward_fn=make_reward(reward),
         max_steps=max_steps,
         seed_prefix=f"TRAIN{seed}_{rank}",
     )
-    return EndOnRefusal(env)
+
+
+class BalatroSB3VecEnv(VecEnv):
+    """``BalatroVectorEnv`` (same-step autoreset) as a Stable-Baselines3 ``VecEnv``.
+
+    Sub-env ``i`` plays the runs ``BalatroGymnasiumEnv(seed_prefix=f"TRAIN{seed}_{i}")``
+    would: SB3's ``seed(s)`` makes its first run seed ``s + i``.  An ended episode's last
+    observation is ``infos[i]["terminal_observation"]`` (SB3 bootstraps truncated episodes
+    from it), next to the episode's stats; ``env_method("action_masks")`` gives each env's mask
+    for the observation the policy sees next, as ``MaskablePPO`` reads it.
+    """
+
+    def __init__(
+        self,
+        num_envs: int,
+        seed: int = 0,
+        reward: str = "shaped",
+        max_steps: int = MAX_STEPS,
+        num_threads: int = 1,
+    ) -> None:
+        self.venv = BalatroVectorEnv(
+            num_envs,
+            reward_fn=make_reward(reward),
+            max_steps=max_steps,
+            seed_prefix=f"TRAIN{seed}",
+            num_threads=num_threads,
+            autoreset_mode=AutoresetMode.SAME_STEP,
+        )
+        super().__init__(
+            num_envs, self.venv.single_observation_space, self.venv.single_action_space
+        )
+        self._actions: np.ndarray | None = None
+
+    def reset(self) -> dict[str, np.ndarray]:
+        seeds = None if self._seeds[0] is None else list(self._seeds)
+        obs, _ = self.venv.reset(seed=seeds)
+        self._reset_seeds()
+        return obs
+
+    def step_async(self, actions: np.ndarray) -> None:
+        self._actions = actions
+
+    def step_wait(self) -> tuple[dict[str, np.ndarray], np.ndarray, np.ndarray, list[dict]]:
+        obs, rewards, terminated, truncated, info = self.venv.step(self._actions)
+        dones = terminated | truncated
+        infos: list[dict[str, Any]] = [{} for _ in range(self.num_envs)]
+        if dones.any():
+            final = info["final_info"]
+            for i in np.flatnonzero(dones):
+                infos[i] = {
+                    "terminal_observation": info["final_obs"][i],
+                    "TimeLimit.truncated": bool(truncated[i] and not terminated[i]),
+                    "balatro/ante_reached": int(final["balatro/ante_reached"][i]),
+                    "balatro/rounds_beaten": int(final["balatro/rounds_beaten"][i]),
+                    "balatro/won": bool(final["balatro/won"][i]),
+                }
+                if "balatro/refused" in final and final["balatro/refused"][i]:
+                    infos[i]["balatro/refused"] = True
+        return obs, rewards.astype(np.float32), dones, infos
+
+    def action_masks(self) -> np.ndarray:
+        return self.venv.action_masks()
+
+    def env_method(
+        self, method_name: str, *args: Any, indices: Any = None, **kwargs: Any
+    ) -> list[Any]:
+        if method_name != "action_masks":
+            raise NotImplementedError(f"BalatroSB3VecEnv.env_method({method_name!r})")
+        masks = self.venv.action_masks()
+        return [masks[i] for i in self._get_indices(indices)]
+
+    def get_attr(self, attr_name: str, indices: Any = None) -> list[Any]:
+        if attr_name == "action_masks":
+            return [self.action_masks for _ in self._get_indices(indices)]
+        if attr_name == "render_mode":
+            return [None for _ in self._get_indices(indices)]
+        raise AttributeError(f"BalatroSB3VecEnv has no sub-env attribute {attr_name!r}")
+
+    def set_attr(self, attr_name: str, value: Any, indices: Any = None) -> None:
+        raise AttributeError(f"BalatroSB3VecEnv can't set {attr_name!r}")
+
+    def env_is_wrapped(self, wrapper_class: type, indices: Any = None) -> list[bool]:
+        return [False for _ in self._get_indices(indices)]
+
+    def close(self) -> None:
+        self.venv.close()
 
 
 def make_training_env(
-    n_envs: int, seed: int, reward: str = "shaped", max_steps: int = MAX_STEPS
+    n_envs: int,
+    seed: int,
+    reward: str = "shaped",
+    max_steps: int = MAX_STEPS,
+    num_threads: int = 1,
 ) -> VecEnv:
-    """``n_envs`` envs in a ``DummyVecEnv`` with episode statistics (``VecMonitor``).
-
-    ``MaskablePPO(seed=...)`` seeds it: sub-env ``i``'s first run is seed ``seed + i``.
-    ``DummyVecEnv`` resets an env within the step that ends its episode and keeps the final
-    observation in ``infos[i]["terminal_observation"]``; ``env_method("action_masks")`` then
-    reads each env's mask for the observation the policy sees next.
-    """
-    factories = [partial(make_env, i, seed, reward, max_steps) for i in range(n_envs)]
-    return VecMonitor(DummyVecEnv(factories))
+    """``n_envs`` envs stepped together in Rust, with episode statistics (``VecMonitor``).
+    ``MaskablePPO(seed=...)`` seeds it: sub-env ``i``'s first run is seed ``seed + i``."""
+    return VecMonitor(BalatroSB3VecEnv(n_envs, seed, reward, max_steps, num_threads))
 
 
 # ---------------------------------------------------------------------------
@@ -247,7 +293,7 @@ class StopFileCallback(BaseCallback):
 
 #: ``choose(envs, obs, masks) -> actions``: one action per env, given the batched
 #: observations (a dict of stacked arrays) and the ``(n, 500)`` action masks.
-Chooser = Callable[[list[EndOnRefusal], dict[str, np.ndarray], np.ndarray], Sequence[int]]
+Chooser = Callable[[list[BalatroGymnasiumEnv], dict[str, np.ndarray], np.ndarray], Sequence[int]]
 
 
 @dataclass(frozen=True)
@@ -339,7 +385,7 @@ def model_chooser(model: Any, deterministic: bool = True) -> Chooser:
     """The policy of a ``MaskablePPO`` model, masked: greedy with ``deterministic``."""
 
     def choose(
-        envs: list[EndOnRefusal], obs: dict[str, np.ndarray], masks: np.ndarray
+        envs: list[BalatroGymnasiumEnv], obs: dict[str, np.ndarray], masks: np.ndarray
     ) -> Sequence[int]:
         actions, _ = model.predict(obs, action_masks=masks, deterministic=deterministic)
         return [int(a) for a in np.asarray(actions).reshape(-1)]
@@ -352,7 +398,7 @@ def random_chooser(seed: int) -> Chooser:
     rng = np.random.default_rng(seed)
 
     def choose(
-        envs: list[EndOnRefusal], obs: dict[str, np.ndarray], masks: np.ndarray
+        envs: list[BalatroGymnasiumEnv], obs: dict[str, np.ndarray], masks: np.ndarray
     ) -> Sequence[int]:
         return [int(rng.choice(np.flatnonzero(m))) for m in masks]
 

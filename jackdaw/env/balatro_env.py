@@ -12,8 +12,14 @@ from collections.abc import Callable
 from typing import Any
 
 from jackdaw.bridge.live import VetoedActionError
-from jackdaw.core.game import NotPortedError
-from jackdaw.env.action_space import ActionMask, FactoredAction
+from jackdaw.core.game import IllegalActionError, NotPortedError
+from jackdaw.env.action_space import (
+    ACTION_VERSION,
+    DEFAULT_MAX_FREE_MOVES,
+    FREE_ACTION_TYPES,
+    ActionMask,
+    FactoredAction,
+)
 from jackdaw.env.balatro_spec import balatro_game_spec
 from jackdaw.env.game_interface import (
     DirectAdapter,
@@ -60,7 +66,8 @@ class BalatroEnvironment:
 
     A step the Rust engine can't take yet (``NotPortedError``) leaves the run
     unchanged and ends the episode as truncated, with the reason in
-    ``info["not_ported"]``.
+    ``info["not_ported"]``.  So does an action the engine refuses (``info["refused"]``),
+    unless ``on_refusal`` is ``"raise"``.
 
     With :class:`~jackdaw.bridge.live.LiveAdapter` (the live game through
     BalatroBot) ``info["game"]`` is the adapter's shadow run and masks follow
@@ -85,7 +92,19 @@ class BalatroEnvironment:
         End the episode (``terminated``) when the run is won, the way
         vanilla stops at its win screen.  False plays on into endless mode
         until the run is lost or truncated.
+    max_free_moves:
+        After this many free moves in a row (joker and hand swaps, hand sorts:
+        :data:`~jackdaw.env.action_space.FREE_ACTION_TYPES`) the mask allows none
+        until another action, so a policy can't stall on them.  ``None``: no cap.
+    on_refusal:
+        ``"truncate"`` (default) ends the episode on an action the engine refuses;
+        ``"raise"`` raises its ``IllegalActionError``.
+
+    :attr:`action_version` is the action space's
+    :data:`~jackdaw.env.action_space.ACTION_VERSION`: save it with a trained policy.
     """
+
+    action_version: int = ACTION_VERSION
 
     def __init__(
         self,
@@ -95,7 +114,15 @@ class BalatroEnvironment:
         max_steps: int = 10_000,
         seed_prefix: str = "TRAIN",
         end_on_win: bool = True,
+        max_free_moves: int | None = DEFAULT_MAX_FREE_MOVES,
+        on_refusal: str = "truncate",
     ) -> None:
+        if on_refusal not in ("truncate", "raise"):
+            raise ValueError(f"on_refusal must be 'truncate' or 'raise', not {on_refusal!r}")
+        if max_free_moves is not None and max_free_moves < 0:
+            raise ValueError("max_free_moves must be None or at least 0")
+        self.max_free_moves = max_free_moves
+        self.on_refusal = on_refusal
         self._adapter_factory = adapter_factory
         self._adapter = adapter_factory()
         self._back_keys = back_keys or ["b_red"]
@@ -107,6 +134,8 @@ class BalatroEnvironment:
 
         self._episode_count = 0
         self._step_count = 0
+        # Free moves since the last other action.
+        self._free_moves = 0
         # The Rust engine's summary of the last state (the next step's prev_state).
         self._state: GameState | None = None
 
@@ -127,6 +156,7 @@ class BalatroEnvironment:
         seed = str(kwargs.get("seed", f"{self._seed_prefix}_{self._episode_count}"))
         self._episode_count += 1
         self._step_count = 0
+        self._free_moves = 0
         self.episode_length = 0
         self.episode_won = False
         self.episode_ante = 1
@@ -144,7 +174,9 @@ class BalatroEnvironment:
                 f"{type(self._adapter).__name__} has no game: BalatroEnvironment plays a "
                 "jackdaw.core.Game (DirectAdapter, LiveAdapter)"
             )
-        obs, mask, state, splits = _rust_view(game._g.env_view(self._legality()))
+        obs, mask, state, splits = _rust_view(
+            game._g.env_view(self._legality(), self._free_moves_allowed())
+        )
         self._state = state
         info: dict[str, object] = {
             "game": game,
@@ -171,29 +203,43 @@ class BalatroEnvironment:
         prev_state = self._state
         not_ported: str | None = None
         vetoed: str | None = None
+        refused: str | None = None
+        # The mask after this move counts it among the free moves in a row (or ends the run of
+        # them); the count is kept once the step is through.
+        free_moves = self._free_moves + 1 if action.action_type in FREE_ACTION_TYPES else 0
+        free = self.max_free_moves is None or free_moves < self.max_free_moves
         try:
             if type(adapter) is DirectAdapter:
                 parts = game._g.env_step(
-                    action.action_type, action.entity_target, action.card_target, legality
+                    action.action_type, action.entity_target, action.card_target, legality, free
                 )
             else:
                 adapter.step(rust_factored_to_engine(action, game))
                 # Read the run again: an adapter may move its game to a new state object.
-                parts = game._g.env_view(legality)
+                parts = game._g.env_view(legality, free)
         except NotPortedError as exc:
             not_ported = str(exc)
-            parts = game._g.env_view(legality)
+            parts = game._g.env_view(legality, free)
         except VetoedActionError as exc:
             vetoed = str(exc)
-            parts = game._g.env_view(legality)
+            parts = game._g.env_view(legality, free)
+        except IllegalActionError as exc:
+            if self.on_refusal == "raise":
+                raise
+            refused = str(exc)
+            parts = game._g.env_view(legality, free)
         obs, mask, state, splits = _rust_view(parts)
+        self._free_moves = free_moves
         self._state = state
         self.episode_length += 1
         self._step_count += 1
 
         terminated = state.done or (self._end_on_win and state.won)
         truncated = (
-            self._step_count >= self._max_steps or not_ported is not None or vetoed is not None
+            self._step_count >= self._max_steps
+            or not_ported is not None
+            or vetoed is not None
+            or refused is not None
         )
         self.episode_ante = state.ante
         self.episode_won = state.won
@@ -210,7 +256,13 @@ class BalatroEnvironment:
             info["not_ported"] = not_ported
         if vetoed is not None:
             info["vetoed"] = vetoed
+        if refused is not None:
+            info["refused"] = refused
         return obs.to_game_observation(), terminated, truncated, _action_mask_to_game(mask), info
+
+    def _free_moves_allowed(self) -> bool:
+        """The mask may offer free moves: the cap on them in a row isn't reached."""
+        return self.max_free_moves is None or self._free_moves < self.max_free_moves
 
     def _legality(self) -> str:
         """The legality the adapter's moves follow: ``balatrobot`` for an adapter that

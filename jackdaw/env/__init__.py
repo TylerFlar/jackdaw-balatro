@@ -15,6 +15,9 @@ shadow run.  ``BalatroVectorEnv`` steps many environments in parallel in Rust.
 
 from jackdaw.bridge.live import LiveAdapter
 from jackdaw.env.action_space import (
+    ACTION_VERSION,
+    DEFAULT_MAX_FREE_MOVES,
+    FREE_ACTION_TYPES,
     NUM_ACTION_TYPES,
     ActionMask,
     ActionType,
@@ -66,6 +69,7 @@ from jackdaw.env.rewards import (
 from jackdaw.env.vector_env import BalatroVectorEnv
 
 __all__ = [
+    "ACTION_VERSION",
     "ActionMask",
     "ActionType",
     "Agent",
@@ -79,7 +83,9 @@ __all__ = [
     "D_JOKER",
     "D_PLAYING_CARD",
     "D_SHOP",
+    "DEFAULT_MAX_FREE_MOVES",
     "DirectAdapter",
+    "FREE_ACTION_TYPES",
     "FactoredAction",
     "GameActionMask",
     "GameAdapter",

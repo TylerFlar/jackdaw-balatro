@@ -103,6 +103,38 @@ impl VectorEnv {
         })
     }
 
+    /// Reset the envs `indices` (one spec each) and write their observations and action masks,
+    /// leaving the others alone: the vector env's same-step autoreset and partial resets.
+    pub fn reset_some(
+        &mut self,
+        indices: &[usize],
+        resets: &[ResetSpec],
+        obs: &mut [f32],
+        masks: &mut [u8],
+    ) -> Result<(), String> {
+        assert_eq!(indices.len(), resets.len());
+        let n = self.envs.len();
+        let mut chosen: Vec<Option<&ResetSpec>> = vec![None; n];
+        for (&i, r) in indices.iter().zip(resets) {
+            let slot = chosen.get_mut(i).ok_or_else(|| format!("no env {i}"))?;
+            *slot = Some(r);
+        }
+        let items = self
+            .envs
+            .iter_mut()
+            .zip(chosen)
+            .zip(obs.chunks_mut(GYM_OBS_LEN))
+            .zip(masks.chunks_mut(MAX_ACTIONS))
+            .filter(|(((_, r), _), _)| r.is_some());
+        for_each_home(&self.pool, items, |(((env, reset), o), m)| {
+            let reset = reset.expect("filtered");
+            env.reset(&reset.spec, reset.rng_seed)?;
+            env.write_obs(o);
+            env.write_action_mask(m);
+            Ok(())
+        })
+    }
+
     /// Step every env: one with a reset spec starts its next run (its output is all zeros),
     /// every other takes its action (an index into its table). An env the engine refuses ends
     /// its episode as truncated. Fails without stepping anything when an action is out of its
@@ -200,13 +232,10 @@ fn for_each_home<T: Send>(
 
 /// One env's step, refusals cut into a truncated episode end.
 fn step_one(env: &mut GymEnv, action: usize) -> EnvOut {
-    let (result, refused) = match env.step(action) {
-        Ok(r) => (r, false),
+    let (result, refused) = match env.step_or_cut(action) {
+        Ok((r, refusal)) => (r, refusal.is_some()),
         Err(StepError::BadIndex(_)) => unreachable!("actions are checked before stepping"),
-        Err(StepError::Convert(_) | StepError::Illegal(_)) => {
-            let fa = *env.table().get(action).expect("checked index");
-            (env.cut(fa), true)
-        }
+        Err(e) => unreachable!("step_or_cut fails only on a bad index: {e}"),
     };
     let ended = result.terminated() || result.truncated();
     EnvOut {

@@ -330,12 +330,22 @@ impl Game {
 
     /// What ``BalatroEnvironment`` reads from the run: ``(obs, rows, mask, state, shop_splits)``,
     /// the observation and mask as ``observation()`` and ``action_mask()`` give them, the
-    /// ``GameState`` summary, and the shop's card, voucher and booster counts.
-    #[pyo3(signature = (legality="vanilla"))]
-    fn env_view<'py>(&mut self, py: Python<'py>, legality: &str) -> PyResult<EnvView<'py>> {
+    /// ``GameState`` summary, and the shop's card, voucher and booster counts. With
+    /// ``free_moves`` false the mask allows no free move (swaps, sorts): the env's cap on them
+    /// in a row is reached.
+    #[pyo3(signature = (legality="vanilla", free_moves=true))]
+    fn env_view<'py>(
+        &mut self,
+        py: Python<'py>,
+        legality: &str,
+        free_moves: bool,
+    ) -> PyResult<EnvView<'py>> {
         let legality = env::legality(legality)?;
         let obs = observation_to_py(py, self.encoder.encode(&self.inner.gs))?;
         self.mask.compute(&self.inner, legality);
+        if !free_moves {
+            self.mask.forbid_free_moves();
+        }
         let mask = env::mask_to_py(py, &self.mask)?;
         let state = gym::state_to_py(&jackdaw_env::reward::StateSummary::of(&self.inner));
         let areas = &self.inner.gs.areas;
@@ -351,7 +361,9 @@ impl Game {
     /// ``env_view``. Raises ``ValueError`` for a factored action with no engine form,
     /// ``IllegalActionError`` or ``NotPortedError`` when the step is refused (the run is
     /// unchanged).
-    #[pyo3(signature = (action_type, entity_target=None, card_target=None, legality="vanilla"))]
+    #[pyo3(signature = (
+        action_type, entity_target=None, card_target=None, legality="vanilla", free_moves=true
+    ))]
     fn env_step<'py>(
         &mut self,
         py: Python<'py>,
@@ -359,13 +371,14 @@ impl Game {
         entity_target: Option<i64>,
         card_target: Option<Vec<i64>>,
         legality: &str,
+        free_moves: bool,
     ) -> PyResult<EnvView<'py>> {
         let fa = env::factored_from_py(action_type, entity_target, card_target)?;
         let action = jackdaw_env::action::to_engine(&fa, &self.inner).map_err(value_error)?;
         // No rollback copy: an illegal action changes nothing, and BalatroEnvironment ends the
         // episode on a NotPorted refusal.
         self.inner.step_in_place(&action).map_err(step_error)?;
-        self.env_view(py, legality)
+        self.env_view(py, legality, free_moves)
     }
 
     /// The ``GameState`` summary of the run (``jackdaw.env.game_interface.GameState``).
@@ -554,6 +567,17 @@ mod _core {
     #[allow(non_upper_case_globals)]
     #[pymodule_export]
     const MAX_ACTIONS: usize = jackdaw_env::gym::MAX_ACTIONS;
+
+    /// The action space's version (`jackdaw_env::ACTION_VERSION`): it changes when the masks
+    /// or the action tables do.
+    #[allow(non_upper_case_globals)]
+    #[pymodule_export]
+    const ACTION_VERSION: u32 = jackdaw_env::ACTION_VERSION;
+
+    /// The envs' default cap on free moves (swaps, sorts) in a row.
+    #[allow(non_upper_case_globals)]
+    #[pymodule_export]
+    const DEFAULT_MAX_FREE_MOVES: u32 = jackdaw_env::env::DEFAULT_MAX_FREE_MOVES;
 
     /// The Gym observation's rows per entity array (hand cards, jokers, consumables, shop
     /// items, pack cards).

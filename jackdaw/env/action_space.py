@@ -48,6 +48,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from jackdaw import _core
 from jackdaw.core.game import Legality
 from jackdaw.engine.actions import Action
 from jackdaw.env.game_spec import FactoredAction  # noqa: F401 — re-export
@@ -88,6 +89,29 @@ class ActionType(IntEnum):
     SortHandSuit = 20
     RerollBoss = 21
     BuyAndUse = 22
+
+
+#: The action types that only reorder cards (joker and hand swaps, the hand sorts): the run
+#: doesn't move on, so the envs cap how many come in a row (``max_free_moves``).
+FREE_ACTION_TYPES: frozenset[ActionType] = frozenset(
+    {
+        ActionType.SwapJokersLeft,
+        ActionType.SwapJokersRight,
+        ActionType.SwapHandLeft,
+        ActionType.SwapHandRight,
+        ActionType.SortHandRank,
+        ActionType.SortHandSuit,
+    }
+)
+
+#: The action space's version: what the action types mean, which ones a mask allows where, and
+#: how the Gym action table is built. A policy is tied to the masks it was trained with, so this
+#: goes up whenever they change. 2 (jackdaw 0.2): reordering follows the game's drag and drop,
+#: and the envs cap consecutive free moves.
+ACTION_VERSION: int = _core.ACTION_VERSION
+
+#: The envs' default cap on free moves in a row (enough to put five jokers in any order).
+DEFAULT_MAX_FREE_MOVES: int = _core.DEFAULT_MAX_FREE_MOVES
 
 
 # ---------------------------------------------------------------------------

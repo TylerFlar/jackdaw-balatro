@@ -33,12 +33,20 @@ pub const GYM_OBS_LEN: usize = D_GLOBAL
     + MAX_COUNTS[4] * ENTITY_WIDTHS[4]
     + 5;
 
-/// The env's settings (`BalatroEnvironment`'s `max_steps` and `end_on_win`, and the reward).
+/// How many free moves (swaps and sorts, [`ActionType::is_free`]) an env allows in a row by
+/// default: enough to put five jokers in any order.
+pub const DEFAULT_MAX_FREE_MOVES: u32 = 10;
+
+/// The env's settings (`BalatroEnvironment`'s `max_steps` and `end_on_win`, the reward, and the
+/// cap on free moves in a row).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EnvConfig {
     pub max_steps: u64,
     pub end_on_win: bool,
     pub reward: Reward,
+    /// After this many free moves in a row the mask allows none until another action; `None`
+    /// for no cap.
+    pub max_free_moves: Option<u32>,
 }
 
 impl Default for EnvConfig {
@@ -47,6 +55,7 @@ impl Default for EnvConfig {
             max_steps: 10_000,
             end_on_win: true,
             reward: Reward::Sparse,
+            max_free_moves: Some(DEFAULT_MAX_FREE_MOVES),
         }
     }
 }
@@ -112,6 +121,8 @@ pub struct GymEnv {
     pub max_ante: f64,
     /// Blinds beaten this episode (`balatro/rounds_beaten`).
     pub blinds_beaten: u64,
+    /// Free moves since the last other action.
+    free_moves: u32,
     state: StateSummary,
     ended: bool,
 }
@@ -134,6 +145,7 @@ impl GymEnv {
             episode_won: false,
             max_ante: 1.0,
             blinds_beaten: 0,
+            free_moves: 0,
             state,
             ended: false,
         };
@@ -174,15 +186,26 @@ impl GymEnv {
         self.episode_won = false;
         self.max_ante = 1.0;
         self.blinds_beaten = 0;
+        self.free_moves = 0;
         self.state = StateSummary::of(&self.game);
         self.ended = false;
         self.refresh();
         Ok(())
     }
 
+    /// The env's free moves in a row are at its cap: the mask allows no more.
+    pub fn free_moves_spent(&self) -> bool {
+        self.config
+            .max_free_moves
+            .is_some_and(|cap| self.free_moves >= cap)
+    }
+
     /// The mask and the action table of the current state.
     fn refresh(&mut self) {
         self.mask.compute(&self.game, Legality::Vanilla);
+        if self.free_moves_spent() {
+            self.mask.forbid_free_moves();
+        }
         self.table.enumerate(&self.mask, &self.game, &mut self.rng);
     }
 
@@ -200,15 +223,33 @@ impl GymEnv {
         Ok(self.finish(action, not_ported))
     }
 
-    /// End the episode here as truncated without a step (the run is unchanged): the vector env's
+    /// End the episode here as truncated without a step (the run is unchanged): the envs'
     /// answer to an action the engine refused.
     pub fn cut(&mut self, action: FactoredAction) -> StepResult {
         self.finish(action, Some(String::new()))
     }
 
+    /// [`GymEnv::step`], with a table action the engine refuses cut into a truncated episode end
+    /// ([`GymEnv::cut`]): the result, and the refusal. Only an index past the table fails.
+    pub fn step_or_cut(&mut self, index: usize) -> Result<(StepResult, Option<String>), StepError> {
+        match self.step(index) {
+            Ok(r) => Ok((r, None)),
+            Err(StepError::BadIndex(i)) => Err(StepError::BadIndex(i)),
+            Err(StepError::Convert(m) | StepError::Illegal(m)) => {
+                let action = *self.table.get(index).expect("checked index");
+                Ok((self.cut(action), Some(m)))
+            }
+        }
+    }
+
     fn finish(&mut self, action: FactoredAction, not_ported: Option<String>) -> StepResult {
         self.episode_length += 1;
         self.step_count += 1;
+        if action.action_type.is_free() {
+            self.free_moves += 1;
+        } else {
+            self.free_moves = 0;
+        }
         let prev = self.state;
         let curr = StateSummary::of(&self.game);
         let won = run_won(&self.game);
@@ -276,6 +317,7 @@ impl GymEnv {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::action::ActionType;
 
     fn spec(seed: &str) -> RunSpec {
         RunSpec {
@@ -308,5 +350,56 @@ mod tests {
         }
         assert!(env.ended());
         assert!(env.table().is_empty());
+    }
+
+    fn find(env: &GymEnv, t: ActionType) -> Option<usize> {
+        env.table()
+            .actions()
+            .iter()
+            .position(|a| a.action_type == t)
+    }
+
+    fn has_free(env: &GymEnv) -> bool {
+        env.table()
+            .actions()
+            .iter()
+            .any(|a| a.action_type.is_free())
+    }
+
+    #[test]
+    fn caps_free_moves_in_a_row() {
+        let config = EnvConfig {
+            max_free_moves: Some(2),
+            ..EnvConfig::default()
+        };
+        let mut env = GymEnv::new(&spec("CAPTEST"), config, 7).unwrap();
+        env.step(find(&env, ActionType::SelectBlind).unwrap())
+            .unwrap();
+        for _ in 0..2 {
+            assert!(has_free(&env));
+            env.step(find(&env, ActionType::SortHandSuit).unwrap())
+                .unwrap();
+        }
+        assert!(env.free_moves_spent());
+        assert!(!has_free(&env), "two free moves in a row: none more");
+        env.step(find(&env, ActionType::Discard).unwrap()).unwrap();
+        assert!(!env.free_moves_spent());
+        assert!(has_free(&env), "another action starts the count again");
+    }
+
+    #[test]
+    fn no_cap() {
+        let config = EnvConfig {
+            max_free_moves: None,
+            ..EnvConfig::default()
+        };
+        let mut env = GymEnv::new(&spec("CAPTEST"), config, 7).unwrap();
+        env.step(find(&env, ActionType::SelectBlind).unwrap())
+            .unwrap();
+        for _ in 0..50 {
+            env.step(find(&env, ActionType::SortHandRank).unwrap())
+                .unwrap();
+        }
+        assert!(has_free(&env));
     }
 }

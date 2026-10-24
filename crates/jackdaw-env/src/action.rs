@@ -93,6 +93,20 @@ impl ActionType {
         self as usize
     }
 
+    /// A move that only reorders cards (a joker or hand swap, a hand sort): the run doesn't move
+    /// on, so the envs cap how many come in a row.
+    pub fn is_free(self) -> bool {
+        matches!(
+            self,
+            ActionType::SwapJokersLeft
+                | ActionType::SwapJokersRight
+                | ActionType::SwapHandLeft
+                | ActionType::SwapHandRight
+                | ActionType::SortHandRank
+                | ActionType::SortHandSuit
+        )
+    }
+
     pub fn from_index(i: usize) -> Option<ActionType> {
         ActionType::ALL.get(i).copied()
     }

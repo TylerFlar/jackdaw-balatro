@@ -81,9 +81,8 @@ def smart_chooser() -> Any:
     def choose(envs: list[Any], obs: Any, masks: Any) -> list[int]:
         actions = []
         for env in envs:
-            gym_env = env.unwrapped
-            game = gym_env.game  # a copy of the run
-            table = list(gym_env._action_table)
+            game = env.game  # a copy of the run
+            table = list(env._action_table)
             action = with_forced_card(smart_agent(game, game.legal_actions()), game)
             wanted = engine_action_to_factored(action)
             if wanted.card_target == ():
@@ -106,9 +105,18 @@ def main(argv: list[str] | None = None) -> None:
     torch.set_num_threads(args.threads)
     torch.manual_seed(args.seed)
 
+    from jackdaw.env import ACTION_VERSION
+
     model_path = Path(args.model)
     config_path = model_path.parent / "config.json"
     config = json.loads(config_path.read_text()) if config_path.exists() else {}
+    # A policy only knows the masks it was trained with.
+    trained_on = config.get("action_version", 1)
+    if trained_on != ACTION_VERSION:
+        raise SystemExit(
+            f"{model_path} was trained on action space version {trained_on}; the envs are at "
+            f"version {ACTION_VERSION}. Retrain (or fine-tune) it on these envs."
+        )
     reward = args.reward or config.get("reward", "shaped")
     max_steps = args.max_steps or config.get("max_steps", demo.MAX_STEPS)
     model = MaskablePPO.load(model_path, device="cpu")
@@ -124,6 +132,7 @@ def main(argv: list[str] | None = None) -> None:
     summary: dict[str, Any] = {
         "model": model_path.as_posix(),
         "model_timesteps": int(model.num_timesteps),
+        "action_version": ACTION_VERSION,
         "reward": reward,
         "max_steps": max_steps,
         "seeds": f"{seeds[0]}..{seeds[-1]}",

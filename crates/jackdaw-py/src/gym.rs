@@ -72,11 +72,13 @@ fn config(
     end_on_win: bool,
     reward_kind: &str,
     weights: Option<[f64; 8]>,
+    max_free_moves: Option<u32>,
 ) -> PyResult<EnvConfig> {
     Ok(EnvConfig {
         max_steps,
         end_on_win,
         reward: reward(reward_kind, weights)?,
+        max_free_moves,
     })
 }
 
@@ -149,7 +151,8 @@ fn reset_spec(t: &ResetTuple) -> PyResult<ResetSpec> {
 }
 
 /// What a Gym step returns: `(obs, reward, terminated, truncated, n_actions, episode,
-/// not_ported)`, `episode` being `(ante_reached, rounds_beaten, won)` at an episode end.
+/// not_ported, refused)`, `episode` being `(ante_reached, rounds_beaten, won)` at an episode
+/// end and `refused` the engine's reason when it refused the action (the episode was cut).
 type StepParts<'py> = (
     Bound<'py, PyByteArray>,
     f64,
@@ -157,6 +160,7 @@ type StepParts<'py> = (
     bool,
     usize,
     Option<(Num, u64, bool)>,
+    Option<String>,
     Option<String>,
 );
 
@@ -171,9 +175,13 @@ pub struct GymEnv {
 impl GymEnv {
     /// An env at the start of a run. ``reward`` is ``"sparse"``, ``"blind_progress"``,
     /// ``"shaped"`` (with ``weights``: step_cost, shop_step_cost, blind_beaten, boss_beaten,
-    /// hands_left, score_progress, win, loss) or ``"none"``.
+    /// hands_left, score_progress, win, loss) or ``"none"``. After ``max_free_moves`` free moves
+    /// (swaps, sorts) in a row the table holds none until another action (``None``: no cap).
     #[new]
-    #[pyo3(signature = (back, stake, seed, challenge, rng_seed, max_steps, end_on_win, reward, weights=None))]
+    #[pyo3(signature = (
+        back, stake, seed, challenge, rng_seed, max_steps, end_on_win, reward, weights=None,
+        max_free_moves=None
+    ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         back: &str,
@@ -185,9 +193,10 @@ impl GymEnv {
         end_on_win: bool,
         reward: &str,
         weights: Option<[f64; 8]>,
+        max_free_moves: Option<u32>,
     ) -> PyResult<Self> {
         let spec = run_spec(back, stake, seed, challenge)?;
-        let cfg = config(max_steps, end_on_win, reward, weights)?;
+        let cfg = config(max_steps, end_on_win, reward, weights, max_free_moves)?;
         let inner = CoreGymEnv::new(&spec, cfg, rng_seed).map_err(value_error)?;
         Ok(GymEnv { inner, last: None })
     }
@@ -210,14 +219,27 @@ impl GymEnv {
         Ok((obs_bytes(py, &mut self.inner)?, self.inner.table().len()))
     }
 
-    /// Take action ``index`` of the table. Raises ``IndexError`` for an index past the table and
-    /// ``IllegalActionError`` when the engine refuses the action (the run is unchanged).
-    fn step<'py>(&mut self, py: Python<'py>, index: usize) -> PyResult<StepParts<'py>> {
-        let r = self.inner.step(index).map_err(|e| match e {
+    /// Take action ``index`` of the table. Raises ``IndexError`` for an index past the table.
+    /// When the engine refuses the action (the run is unchanged), ``cut_refused`` ends the
+    /// episode as truncated, with the reason as the step's ``refused``; otherwise it raises
+    /// ``IllegalActionError``.
+    #[pyo3(signature = (index, cut_refused=false))]
+    fn step<'py>(
+        &mut self,
+        py: Python<'py>,
+        index: usize,
+        cut_refused: bool,
+    ) -> PyResult<StepParts<'py>> {
+        let to_py = |e: StepError| match e {
             StepError::BadIndex(_) => PyIndexError::new_err(e.to_string()),
             StepError::Convert(m) => PyValueError::new_err(m),
             StepError::Illegal(m) => IllegalActionError::new_err(m),
-        })?;
+        };
+        let (r, refused) = if cut_refused {
+            self.inner.step_or_cut(index).map_err(to_py)?
+        } else {
+            (self.inner.step(index).map_err(to_py)?, None)
+        };
         let ended = r.terminated() || r.truncated();
         let episode = ended.then(|| {
             (
@@ -233,7 +255,8 @@ impl GymEnv {
             r.truncated(),
             self.inner.table().len(),
             episode,
-            r.not_ported.clone(),
+            r.not_ported.clone().filter(|_| refused.is_none()),
+            refused,
         );
         self.last = Some(r);
         Ok(out)
@@ -373,9 +396,12 @@ pub const STATS: usize = 9;
 #[pymethods]
 impl VectorEnv {
     /// One env per reset tuple ``(back, stake, seed, challenge, rng_seed)``, on ``threads``
-    /// worker threads (0: one per core).
+    /// worker threads (0: one per core); ``max_free_moves`` as for ``GymEnv``.
     #[new]
-    #[pyo3(signature = (resets, max_steps, end_on_win, reward, weights=None, threads=0))]
+    #[pyo3(signature = (
+        resets, max_steps, end_on_win, reward, weights=None, threads=0, max_free_moves=None
+    ))]
+    #[allow(clippy::too_many_arguments)]
     fn new(
         py: Python<'_>,
         resets: Vec<ResetTuple>,
@@ -384,12 +410,13 @@ impl VectorEnv {
         reward: &str,
         weights: Option<[f64; 8]>,
         threads: usize,
+        max_free_moves: Option<u32>,
     ) -> PyResult<Self> {
         let specs = resets
             .iter()
             .map(reset_spec)
             .collect::<PyResult<Vec<_>>>()?;
-        let cfg = config(max_steps, end_on_win, reward, weights)?;
+        let cfg = config(max_steps, end_on_win, reward, weights, max_free_moves)?;
         let inner = py
             .detach(|| CoreVectorEnv::new(&specs, cfg, threads))
             .map_err(value_error)?;
@@ -421,6 +448,33 @@ impl VectorEnv {
         let masks = writable(&mut masks, n * MAX_ACTIONS, "masks")?;
         let inner = &mut self.inner;
         py.detach(|| inner.reset(&specs, obs, masks))
+            .map_err(value_error)
+    }
+
+    /// Reset the envs listed in ``resets`` as ``(env, reset tuple)`` and write their
+    /// observations and action masks; the others' rows are left as they are.
+    fn reset_some(
+        &mut self,
+        py: Python<'_>,
+        resets: Vec<(usize, ResetTuple)>,
+        mut obs: PyBuffer<f32>,
+        mut masks: PyBuffer<u8>,
+    ) -> PyResult<()> {
+        let n = self.inner.len();
+        let mut indices = Vec::with_capacity(resets.len());
+        let mut specs = Vec::with_capacity(resets.len());
+        for (i, t) in &resets {
+            if *i >= n {
+                return Err(PyIndexError::new_err(format!("no env {i}")));
+            }
+            indices.push(*i);
+            specs.push(reset_spec(t)?);
+        }
+        disjoint(&[span(&obs), span(&masks)])?;
+        let obs = writable(&mut obs, n * GYM_OBS_LEN, "obs")?;
+        let masks = writable(&mut masks, n * MAX_ACTIONS, "masks")?;
+        let inner = &mut self.inner;
+        py.detach(|| inner.reset_some(&indices, &specs, obs, masks))
             .map_err(value_error)
     }
 

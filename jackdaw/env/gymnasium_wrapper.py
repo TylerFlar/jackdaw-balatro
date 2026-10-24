@@ -38,7 +38,7 @@ from gymnasium import spaces
 
 from jackdaw import _core
 from jackdaw.core import Game
-from jackdaw.env.action_space import ActionType
+from jackdaw.env.action_space import ACTION_VERSION, DEFAULT_MAX_FREE_MOVES, ActionType
 from jackdaw.env.balatro_env import BalatroEnvironment
 from jackdaw.env.balatro_spec import balatro_game_spec
 from jackdaw.env.game_interface import DirectAdapter, GameAdapter, game_state_from_parts
@@ -195,13 +195,24 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         Shorthand when ``reward_fn`` is not given: True selects
         :class:`~jackdaw.env.rewards.ShapedReward`, False (default)
         :func:`~jackdaw.env.rewards.sparse_reward`.
+    max_free_moves:
+        After this many free moves in a row (joker and hand swaps, hand sorts) the
+        table holds none until another action.  ``None``: no cap.
+    on_refusal:
+        ``"truncate"`` (default) ends the episode on a table action the engine
+        refuses, with the reason in ``info["balatro/refused"]``; ``"raise"`` raises
+        its ``IllegalActionError``.  (A refusal means the masks and the engine
+        disagree: an env bug.)
 
     With :class:`~jackdaw.env.game_interface.DirectAdapter` a step the engine can't
     take yet ends the episode as truncated, with the reason in
     ``info["balatro/not_ported"]``.  :attr:`game` is a copy of the current run.
+    :attr:`action_version` (also in :attr:`metadata`) is the action space's
+    :data:`~jackdaw.env.action_space.ACTION_VERSION`: save it with a trained policy.
     """
 
-    metadata: dict[str, Any] = {"render_modes": []}
+    metadata: dict[str, Any] = {"render_modes": [], "action_version": ACTION_VERSION}
+    action_version: int = ACTION_VERSION
 
     def __init__(
         self,
@@ -213,10 +224,18 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         reward_shaping: bool = False,
         reward_fn: RewardFn | None = None,
         end_on_win: bool = True,
+        max_free_moves: int | None = DEFAULT_MAX_FREE_MOVES,
+        on_refusal: str = "truncate",
     ) -> None:
         super().__init__()
         if reward_fn is not None and reward_shaping:
             raise ValueError("Pass either reward_fn or reward_shaping=True, not both")
+        if on_refusal not in ("truncate", "raise"):
+            raise ValueError(f"on_refusal must be 'truncate' or 'raise', not {on_refusal!r}")
+        if max_free_moves is not None and max_free_moves < 0:
+            raise ValueError("max_free_moves must be None or at least 0")
+        self.max_free_moves = max_free_moves
+        self.on_refusal = on_refusal
         if reward_fn is None:
             reward_fn = ShapedReward() if reward_shaping else sparse_reward
         self.reward_fn: RewardFn = reward_fn
@@ -237,7 +256,7 @@ class BalatroGymnasiumEnv(gymnasium.Env):
             back, stake, run_seed = self._starts.back_keys[0], self._starts.stakes[0], "INIT"
             self._core = _core.GymEnv(
                 back, stake, run_seed, None, secrets.randbits(64), max_steps, end_on_win,
-                kind, weights,
+                kind, weights, max_free_moves,
             )  # fmt: skip
         else:
             self._inner = BalatroEnvironment(
@@ -247,6 +266,8 @@ class BalatroGymnasiumEnv(gymnasium.Env):
                 max_steps=max_steps,
                 seed_prefix=seed_prefix,
                 end_on_win=end_on_win,
+                max_free_moves=max_free_moves,
+                on_refusal=on_refusal,
             )
 
         # Observation space
@@ -339,6 +360,8 @@ class BalatroGymnasiumEnv(gymnasium.Env):
             step_info["balatro/ante_reached"] = self._episode_max_ante
             step_info["balatro/rounds_beaten"] = self._episode_blinds_beaten
             step_info["balatro/won"] = self._inner.episode_won
+            if "refused" in info:
+                step_info["balatro/refused"] = info["refused"]
         return obs, reward, terminated, truncated, step_info
 
     def action_masks(self) -> np.ndarray:
@@ -373,7 +396,9 @@ class BalatroGymnasiumEnv(gymnasium.Env):
     def _rust_step(
         self, action: int
     ) -> tuple[dict[str, np.ndarray], float, bool, bool, dict[str, Any]]:
-        data, reward, terminated, truncated, _, episode, not_ported = self._core.step(int(action))
+        data, reward, terminated, truncated, _, episode, not_ported, refused = self._core.step(
+            int(action), self.on_refusal == "truncate"
+        )
         if self._python_reward:
             prev, curr, fa = self._core.last_transition()
             transition = Transition(
@@ -395,6 +420,8 @@ class BalatroGymnasiumEnv(gymnasium.Env):
             info["balatro/won"] = won
             if not_ported is not None:
                 info["balatro/not_ported"] = not_ported
+            if refused is not None:
+                info["balatro/refused"] = refused
         return gym_obs(data), reward, terminated, truncated, info
 
     # ------------------------------------------------------------------

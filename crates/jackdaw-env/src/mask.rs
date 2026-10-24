@@ -105,6 +105,17 @@ impl ActionMask {
         self.type_mask[t.index()]
     }
 
+    /// Mask out the free moves ([`ActionType::is_free`]), for an env at its cap of them.
+    pub fn forbid_free_moves(&mut self) {
+        for t in ActionType::ALL {
+            if t.is_free() {
+                self.type_mask[t.index()] = false;
+                self.has_entity[t.index()] = false;
+            }
+        }
+        self.order.retain(|t| !t.is_free());
+    }
+
     fn clear(&mut self, n_hand: usize) {
         self.type_mask = [false; NUM_ACTION_TYPES];
         self.card_mask.clear();
