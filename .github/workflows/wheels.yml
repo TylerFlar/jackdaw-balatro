@@ -104,7 +104,9 @@ jobs:
         with:
           target: x64
           args: --release --out dist
-          sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
+          # No sccache here: wrapping cl.exe, it breaks the C build of mimalloc (C1083 on
+          # '/WX-').
+          sccache: false
 
       - uses: actions/upload-artifact@v7
         with:
