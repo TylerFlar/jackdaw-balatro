@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
-    branches: [main]
+    branches: [main, dev]
 
 env:
   CARGO_TERM_COLOR: always
@@ -23,6 +23,8 @@ jobs:
       - run: uv sync --dev --no-install-project
       - run: uv run --no-sync ruff check .
       - run: uv run --no-sync ruff format --check .
+      # pyproject.toml, Cargo.toml and CHANGELOG.md name the same version (CONTRIBUTING.md).
+      - run: uv run --no-sync python scripts/check_version.py
 
   lint-rust:
     runs-on: ubuntu-latest

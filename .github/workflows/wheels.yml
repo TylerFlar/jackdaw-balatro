@@ -1,6 +1,8 @@
 name: Wheels
 
-# abi3 wheels (CPython 3.12+) for each platform, plus the sdist. Builds only: nothing is published.
+# abi3 wheels (CPython 3.12+) for each platform, plus the sdist. On a release tag (vX.Y.Z) the
+# tag must name the version, and the wheels go into a draft GitHub release to publish by hand
+# (CONTRIBUTING.md). Nothing goes to PyPI.
 on:
   push:
     tags: ["v*"]
@@ -13,7 +15,28 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: The manifests, the changelog and the tag agree
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [ "$REF_TYPE" = "tag" ]; then
+            python scripts/check_version.py --tag "$REF_NAME"
+          else
+            python scripts/check_version.py
+          fi
+
   linux:
+    needs: version
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -40,6 +63,7 @@ jobs:
 
   macos:
     # x86_64 is cross-compiled on the arm64 runner.
+    needs: version
     runs-on: macos-latest
     strategy:
       matrix:
@@ -65,6 +89,7 @@ jobs:
 
   windows:
     # Release wheels use the MSVC toolchain.
+    needs: version
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
@@ -87,6 +112,7 @@ jobs:
           path: dist
 
   sdist:
+    needs: version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -101,3 +127,32 @@ jobs:
         with:
           name: wheels-sdist
           path: dist
+
+  release:
+    # A draft: it shows on the releases page only once someone publishes it.
+    if: github.ref_type == 'tag'
+    needs: [linux, macos, windows, sdist]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: wheels-*
+          merge-multiple: true
+          path: dist
+
+      - name: Draft the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          python scripts/check_version.py --tag "$TAG" --notes > notes.md
+          gh release create "$TAG" dist/* --draft --verify-tag \
+            --title "jackdaw ${TAG#v}" --notes-file notes.md

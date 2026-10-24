@@ -117,7 +117,7 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "jackdaw-bot"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "jackdaw-core",
  "jackdaw-data",
@@ -126,7 +126,7 @@ dependencies = [
 
 [[package]]
 name = "jackdaw-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "jackdaw-data",
  "mimalloc",
@@ -136,11 +136,11 @@ dependencies = [
 
 [[package]]
 name = "jackdaw-data"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "jackdaw-env"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "jackdaw-core",
  "jackdaw-data",
@@ -149,7 +149,7 @@ dependencies = [
 
 [[package]]
 name = "jackdaw-py"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "jackdaw-bot",
  "jackdaw-core",
@@ -392,7 +392,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde_json",
 ]
