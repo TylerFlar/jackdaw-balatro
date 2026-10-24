@@ -192,6 +192,16 @@ impl DoubleEndedIterator for IdsIter {
 
 impl ExactSizeIterator for IdsIter {}
 
+/// The cards [`Areas::draw_cards`] moves.
+#[derive(Clone, Copy, Debug)]
+pub enum Draw<'a> {
+    /// These cards, in this order; a card no longer in the area (or listed twice) is skipped.
+    Cards(&'a [u32]),
+    /// The area's next cards, one after the other (`CardArea:draw_card_from`): the last card of
+    /// a deck or discard pile, else the first.
+    Next(usize),
+}
+
 /// One of the run's card areas.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum AreaId {
@@ -389,6 +399,82 @@ impl Areas {
         self.align(id);
     }
 
+    /// `draw_card`'s moves from `from` to `to`, made at once: every card lands as
+    /// [`Areas::emplace`] puts it (none stays flipped) and the result is that of moving them one
+    /// at a time, but each card moves once. One at a time, taking a card out shifts every card
+    /// behind it, and the deck takes each new card in front. Returns the sort ids moved, in the
+    /// order they moved.
+    pub fn draw_cards(&mut self, from: AreaId, to: AreaId, draw: Draw<'_>) -> Ids {
+        debug_assert_ne!(from, to);
+        let src = std::mem::take(self.get_mut(from));
+        let n = src.len();
+        // The positions in `from` of the cards that move, in the order they move.
+        let mut order = Ids::from_slice(&[]);
+        let mut taken_inline = [false; 256];
+        let mut taken_spill = Vec::new();
+        let taken: &mut [bool] = if n <= taken_inline.len() {
+            &mut taken_inline[..n]
+        } else {
+            taken_spill.resize(n, false);
+            &mut taken_spill
+        };
+        match draw {
+            Draw::Cards(ids) => {
+                for &id in ids {
+                    // `remove_card(card)` finds nothing for a card that already moved.
+                    if let Some(p) = src.iter().position(|c| c.sort_id == id)
+                        && !taken[p]
+                    {
+                        taken[p] = true;
+                        order.push(p as u32);
+                    }
+                }
+            }
+            Draw::Next(count) => {
+                let count = count.min(n);
+                for k in 0..count {
+                    // `remove_card()`: the last card of a deck or discard pile, else the first.
+                    let p = if matches!(from.kind(), AreaType::Deck | AreaType::Discard) {
+                        n - 1 - k
+                    } else {
+                        k
+                    };
+                    taken[p] = true;
+                    order.push(p as u32);
+                }
+            }
+        }
+        let land = |p: &u32| {
+            let mut c = src[*p as usize];
+            if to.face_down() {
+                c.facing = Facing::Back;
+            } else if c.facing == Facing::Back {
+                c.facing = Facing::Front;
+            }
+            c
+        };
+        let mut moved = Ids::from_slice(&[]);
+        for &p in &order {
+            moved.push(src[p as usize].sort_id);
+        }
+        let dst = self.get_mut(to);
+        if to.kind() == AreaType::Deck {
+            // Each card goes in front of the ones before it.
+            dst.splice(0..0, order.iter().rev().map(land));
+        } else {
+            dst.extend(order.iter().map(land));
+        }
+        let mut src = src;
+        let mut at = 0;
+        src.retain(|_| {
+            at += 1;
+            !taken[at - 1]
+        });
+        *self.get_mut(from) = src;
+        self.align(to);
+        moved
+    }
+
     /// `CardArea:remove_card(card)` (cardarea.lua:66-92): the given card, or the area's next
     /// card (the last one of a deck or discard pile, else the first).
     pub fn remove_card(&mut self, id: AreaId, sort_id: Option<u32>) -> Option<Card> {
@@ -452,5 +538,88 @@ impl Areas {
         shuffle(&mut order, seed);
         permute(cards, &order);
         self.align(id);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::card::CostContext;
+    use jackdaw_data::{card_by_key, centers};
+
+    fn card(sort_id: u32, facing: Facing) -> Card {
+        const FRONTS: [&str; 8] = ["S_A", "H_K", "D_2", "C_T", "S_5", "H_9", "D_J", "C_3"];
+        let front = card_by_key(FRONTS[sort_id as usize % FRONTS.len()]);
+        let mut c = Card::new(
+            sort_id,
+            centers::C_BASE,
+            front,
+            0.0,
+            &CostContext::default(),
+        );
+        c.facing = facing;
+        c
+    }
+
+    /// The moves one `draw_card` event at a time, as the event handler makes them.
+    fn one_at_a_time(areas: &mut Areas, from: AreaId, to: AreaId, draw: Draw<'_>) -> Vec<u32> {
+        let mut moved = Vec::new();
+        let mut step = |areas: &mut Areas, id: Option<u32>| {
+            if let Some(c) = areas.remove_card(from, id) {
+                moved.push(c.sort_id);
+                areas.emplace(to, c, false, false);
+            }
+        };
+        match draw {
+            Draw::Cards(ids) => ids.iter().for_each(|&id| step(areas, Some(id))),
+            Draw::Next(n) => (0..n).for_each(|_| step(areas, None)),
+        }
+        moved
+    }
+
+    #[test]
+    fn batched_draws_move_the_cards_as_single_draws_do() {
+        let mut state = 0x9E37_79B9_7F4A_7C15_u64;
+        let mut below = |n: u64| {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            (state >> 33) % n.max(1)
+        };
+        for _ in 0..2_000 {
+            let mut areas = Areas::default();
+            let mut next_id = 1;
+            for a in AreaId::PLAYING {
+                for _ in 0..below(14) {
+                    let facing = if below(2) == 0 {
+                        Facing::Front
+                    } else {
+                        Facing::Back
+                    };
+                    areas.get_mut(a).push(card(next_id, facing));
+                    next_id += 1;
+                }
+            }
+            let from = AreaId::PLAYING[below(4) as usize];
+            let to = loop {
+                let to = AreaId::PLAYING[below(4) as usize];
+                if to != from {
+                    break to;
+                }
+            };
+            // Cards of `from`, others, and repeats, in any order.
+            let ids: Vec<u32> = (0..below(9))
+                .map(|_| 1 + below(next_id as u64) as u32)
+                .collect();
+            let count = below(16) as usize;
+            for draw in [Draw::Cards(&ids), Draw::Next(count)] {
+                let mut single = areas.clone();
+                let expected = one_at_a_time(&mut single, from, to, draw);
+                let mut batched = areas.clone();
+                let moved = batched.draw_cards(from, to, draw);
+                assert_eq!(*moved, expected[..], "{from:?} -> {to:?} {draw:?}");
+                assert_eq!(batched, single, "{from:?} -> {to:?} {draw:?}");
+            }
+        }
     }
 }

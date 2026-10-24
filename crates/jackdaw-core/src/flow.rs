@@ -1,7 +1,7 @@
 //! The hand flow: selecting a blind, drawing, playing and discarding (state_events.lua,
 //! button_callbacks.lua) and the per-frame state handlers (`Game:update_*`, game.lua).
 
-use crate::area::AreaId;
+use crate::area::{AreaId, Draw};
 use crate::card::Card;
 use crate::event::Event;
 use crate::game::{Game, LuaState};
@@ -201,6 +201,10 @@ impl Game {
         card: Option<u32>,
         sort: bool,
     ) {
+        if self.batch_draws(from, to, card.is_some(), sort) {
+            self.draw_cards_batched(from, to, card, sort);
+            return;
+        }
         let moved = match card {
             Some(id) => self.gs.areas.remove_card(from, Some(id)),
             // CardArea:draw_card_from (cardarea.lua:592-611): every area accepts here except a
@@ -225,21 +229,109 @@ impl Game {
         }
         if sort {
             debug_assert_eq!(to, AreaId::Hand, "only hand draws sort");
-            // When the next event is another sorting draw into the hand, it runs right after
-            // this one (the queue runs in order) and sorts: no draw reads the hand's order
-            // (`stay_flipped` looks at the card alone), and every correct sort gives the same
-            // order, so a run of draws sorts once, after its last card.
-            let next_sorts = matches!(
+            self.sort_after_draw();
+        }
+    }
+
+    /// A sorting draw's `G.hand:sort()`. When the next event is another sorting draw into the
+    /// hand, it runs right after this one (the queue runs in order) and sorts: no draw reads the
+    /// hand's order (`stay_flipped` looks at the card alone), and every correct sort gives the
+    /// same order, so a run of draws sorts once, after its last card.
+    fn sort_after_draw(&mut self) {
+        let next_sorts = matches!(
+            self.rt.queue.front(),
+            Some(Event::DrawCard {
+                to: AreaId::Hand,
+                sort: true,
+                ..
+            })
+        );
+        if !next_sorts {
+            self.sort_hand();
+        }
+    }
+
+    /// The next queued event is the same `draw_card` between two playing areas, and the run of
+    /// them can be made in one go. The queue runs them back to back, and what the event loop
+    /// does between two of them changes nothing:
+    /// - the state handler is idle: the state is complete and isn't SELECTING_HAND, whose
+    ///   handler reacts to an emptied hand (the others act only on an incomplete state);
+    /// - the per-frame pass sees the same playing cards wherever they are (its tallies count
+    ///   them all, and the deck limit it keeps ends the same whether the deck grows or shrinks
+    ///   a card at a time or all at once).
+    ///
+    /// A draw into the hand (from the next card) still moves its cards one by one, each with
+    /// its `stay_flipped` roll in turn; the others move at once
+    /// ([`crate::area::Areas::draw_cards`]), as none of them rolls.
+    fn batch_draws(&self, from: AreaId, to: AreaId, explicit: bool, sort: bool) -> bool {
+        (to != AreaId::Hand || !explicit)
+            && AreaId::PLAYING.contains(&from)
+            && AreaId::PLAYING.contains(&to)
+            && self.rt.state_complete
+            && self.rt.state != LuaState::SelectingHand
+            && matches!(
                 self.rt.queue.front(),
-                Some(Event::DrawCard {
-                    to: AreaId::Hand,
-                    sort: true,
-                    ..
-                })
-            );
-            if !next_sorts {
-                self.sort_hand();
+                Some(Event::DrawCard { from: f, to: t, card, sort: s })
+                    if *f == from && *t == to && card.is_some() == explicit && *s == sort
+            )
+    }
+
+    /// This `draw_card` and the run of the same ones behind it in the queue, in one go.
+    fn draw_cards_batched(&mut self, from: AreaId, to: AreaId, first: Option<u32>, sort: bool) {
+        let mut ids = crate::area::Ids::from_slice(&[]);
+        let mut count = 1;
+        if let Some(id) = first {
+            ids.push(id);
+        }
+        while let Some(&Event::DrawCard {
+            from: f,
+            to: t,
+            card,
+            sort: s,
+        }) = self.rt.queue.front()
+            && f == from
+            && t == to
+            && card.is_some() == first.is_some()
+            && s == sort
+        {
+            self.rt.queue.pop_front();
+            count += 1;
+            if let Some(id) = card {
+                ids.push(id);
             }
+        }
+        if to == AreaId::Hand {
+            // `draw_card_from`: the hand always has room.
+            for _ in 0..count {
+                let Some(c) = self.gs.areas.remove_card(from, None) else {
+                    break;
+                };
+                let flipped = self.stay_flipped(to, &c);
+                self.gs.areas.emplace(to, c, false, flipped);
+            }
+            if sort {
+                self.sort_after_draw();
+            }
+            return;
+        }
+        debug_assert!(!sort, "only hand draws sort");
+        let draw = if first.is_some() {
+            Draw::Cards(&ids)
+        } else {
+            // `draw_card_from` takes a card while `to` has room; the deck always has.
+            let mut room = count;
+            if to != AreaId::Deck {
+                let limit = self.area_limit(to);
+                let len = self.gs.areas.get(to).len();
+                room = (0..count)
+                    .take_while(|k| ((len + k) as f64) < limit)
+                    .count();
+            }
+            Draw::Next(room)
+        };
+        let moved = self.gs.areas.draw_cards(from, to, draw);
+        if from == AreaId::Hand {
+            self.rt.highlighted.retain(|h| !moved.contains(h));
         }
     }
 
