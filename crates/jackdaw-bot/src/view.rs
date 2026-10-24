@@ -420,8 +420,9 @@ fn run_fields(gs: &GameState, deleted: bool, out: &mut Vec<(&'static str, Json)>
         Json::Obj(
             gs.sets
                 .used_vouchers
-                .iter()
-                .map(|k| ((*k).to_owned(), Json::str("")))
+                .sorted_keys()
+                .into_iter()
+                .map(|k| (k.to_owned(), Json::str("")))
                 .collect(),
         ),
     ));
@@ -456,11 +457,7 @@ fn run_fields(gs: &GameState, deleted: bool, out: &mut Vec<(&'static str, Json)>
             scaling,
             ante_scaling: gs.starting_params.ante_scaling,
             choices: rr.blind_choices,
-            states: [
-                rr.blind_states[0].as_str(),
-                rr.blind_states[1].as_str(),
-                rr.blind_states[2].as_str(),
-            ],
+            states: rr.blind_states,
             tags: rr.blind_tags,
         }),
     ));

@@ -19,7 +19,8 @@ use crate::card::{
 use crate::hand_eval::HandType;
 use crate::rng::Rng;
 use crate::state::{
-    Areas, BlindSlot, BlindState, ConsumeableUsage, CurrentRound, GameState, HandSort, HandState,
+    Areas, BlindSlot, BlindState, BossCounts, CenterBits, ConsumeableUsage, CurrentRound, GameState,
+    HandSort, HandState,
     HeldTag, LastScore, LuaValue, PackState, Phase, RoundBonus, RoundResets, Sets, SimState,
     StartingParams,
 };
@@ -891,11 +892,11 @@ pub fn export(gs: &GameState) -> Value {
         "hands": hands_json(gs),
         "tags": gs.tags.iter().map(|t| json!({"key": t.id.key()})).collect::<Vec<_>>(),
         "sets": {
-            "used_jokers": gs.sets.used_jokers.iter().filter(|k| pool_read(k)).collect::<Vec<_>>(),
-            "used_vouchers": gs.sets.used_vouchers.iter().collect::<Vec<_>>(),
+            "used_jokers": gs.sets.used_jokers.sorted_keys().into_iter().filter(|k| pool_read(k)).collect::<Vec<_>>(),
+            "used_vouchers": gs.sets.used_vouchers.sorted_keys(),
             "banned_keys": gs.sets.banned_keys.iter().collect::<Vec<_>>(),
             "pool_flags": Value::Object(gs.sets.pool_flags.iter().map(|(k, v)| (k.clone(), lua_value_json(v))).collect()),
-            "bosses_used": Value::Object(gs.sets.bosses_used.iter().map(|(k, v)| ((*k).to_owned(), num(*v))).collect()),
+            "bosses_used": Value::Object(gs.sets.bosses_used.iter().map(|(b, v)| (b.key().to_owned(), num(v))).collect()),
         },
         "consumeable_usage": {
             "by_key": Value::Object(gs.consumeable_usage.by_key.iter().map(|(k, v)| ((*k).to_owned(), num(*v))).collect()),
@@ -975,10 +976,18 @@ pub fn import(v: &Value) -> Result<GameState> {
 
     let mut rr = Obj::new(o.field("round_resets")?, "$.round_resets")?;
     let mut states = Obj::new(rr.field("blind_states")?, "$.round_resets.blind_states")?;
+    let state = |s: &str| {
+        RoundResets::STATES
+            .into_iter()
+            .find(|&n| n == s)
+            .ok_or_else(|| {
+                SnapshotError(format!("$.round_resets.blind_states: unknown state {s:?}"))
+            })
+    };
     let blind_states = [
-        states.str("Small")?.to_owned(),
-        states.str("Big")?.to_owned(),
-        states.str("Boss")?.to_owned(),
+        state(states.str("Small")?)?,
+        state(states.str("Big")?)?,
+        state(states.str("Boss")?)?,
     ];
     states.done()?;
     let mut choices = Obj::new(rr.field("blind_choices")?, "$.round_resets.blind_choices")?;
@@ -1140,10 +1149,10 @@ pub fn import(v: &Value) -> Result<GameState> {
         .collect::<Result<Vec<_>>>()?;
 
     let mut sets_o = Obj::new(o.field("sets")?, "$.sets")?;
-    let center_keys = |v: &[Value], path: &str| -> Result<BTreeSet<&'static str>> {
+    let center_keys = |v: &[Value], path: &str| -> Result<CenterBits> {
         str_list(v, path)?
             .into_iter()
-            .map(|k| Ok(center(k, path)?.key()))
+            .map(|k| center(k, path))
             .collect()
     };
     let sets = Sets {
@@ -1161,15 +1170,16 @@ pub fn import(v: &Value) -> Result<GameState> {
             other => return err(format!("$.sets.pool_flags: {other}")),
         },
         bosses_used: match sets_o.field("bosses_used")? {
-            Value::Object(m) => m
-                .iter()
-                .map(|(k, v)| {
-                    Ok((
-                        blind(k, "$.sets.bosses_used")?.key(),
+            Value::Object(m) => {
+                let mut counts = BossCounts::empty();
+                for (k, v) in m {
+                    counts.set(
+                        blind(k, "$.sets.bosses_used")?,
                         as_num(v, "$.sets.bosses_used")?,
-                    ))
-                })
-                .collect::<Result<_>>()?,
+                    );
+                }
+                counts
+            }
             other => return err(format!("$.sets.bosses_used: {other}")),
         },
     };

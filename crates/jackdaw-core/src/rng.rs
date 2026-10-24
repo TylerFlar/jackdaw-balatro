@@ -404,7 +404,8 @@ impl Rng {
         Self {
             seed: seed.to_owned(),
             hashed_seed: pseudohash(seed.as_bytes()),
-            streams: StreamMap::default(),
+            // A run starts a few dozen streams.
+            streams: StreamMap::with_capacity_and_hasher(32, Default::default()),
         }
     }
 

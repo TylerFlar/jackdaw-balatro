@@ -312,7 +312,7 @@ mod tests {
         assert!(legal.contains(&Action::SwapJokersLeft(1)));
         let before = g.gs.areas.ids(AreaId::Jokers);
         g.step(&Action::SwapJokersRight(0)).unwrap();
-        assert_eq!(g.gs.areas.ids(AreaId::Jokers), vec![before[1], before[0]]);
+        assert_eq!(*g.gs.areas.ids(AreaId::Jokers), [before[1], before[0]]);
         // The hand holds no cards here, so it has nothing to reorder.
         assert!(!legal.iter().any(|a| matches!(a, Action::SwapHandRight(_))));
         assert!(g.step(&Action::SwapHandRight(0)).is_err());

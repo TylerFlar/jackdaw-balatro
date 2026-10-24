@@ -103,12 +103,13 @@ impl Game {
                 if has_effect && let Some(n) = self.red_seal_repetitions(id) {
                     reps += n;
                 }
+                let card_effects: Vec<bool> = effects.iter().map(|e| !e.is_empty()).collect();
                 for k in self.gs.areas.ids(AreaId::Jokers) {
                     let mut ctx = Ctx::new(Kind::EndOfRound);
                     ctx.cardarea = Some(AreaId::Hand);
                     ctx.other_card = Some(id);
                     ctx.repetition = true;
-                    ctx.card_effects = effects.iter().map(|e| !e.is_empty()).collect();
+                    ctx.card_effects = &card_effects;
                     if let Some(ret) = self.eval_joker(k, &mut ctx) {
                         reps += ret.repetitions.unwrap_or(0.0) as usize;
                     }
@@ -222,17 +223,48 @@ impl Game {
         }
     }
 
-    /// The playing cards a per-round pick draws from: everything but Stone Cards, by sort id.
-    fn non_stone_cards(&self) -> Vec<u32> {
+    /// A per-round pick (`pseudorandom_element` with `pseudoseed(key .. ante)`) among the
+    /// playing cards that aren't Stone Cards, drawn only when there is one.
+    fn non_stone_pick(&mut self, key: &str) -> Option<crate::card::Base> {
         // Marble's pending stones are Stone Cards: the areas hold every other playing card.
-        let mut ids: Vec<u32> = AreaId::PLAYING
+        let mut inline = [0u32; 128];
+        let mut spill: Vec<u32> = Vec::new();
+        let mut n = 0;
+        for c in AreaId::PLAYING
             .into_iter()
             .flat_map(|a| self.gs.areas.get(a).iter())
-            .filter(|c| !c.is_stone())
-            .map(|c| c.sort_id)
-            .collect();
-        ids.sort_unstable();
-        ids
+        {
+            if c.is_stone() {
+                continue;
+            }
+            if n < inline.len() {
+                inline[n] = c.sort_id;
+            } else {
+                if spill.is_empty() {
+                    spill.extend_from_slice(&inline);
+                }
+                spill.push(c.sort_id);
+            }
+            n += 1;
+        }
+        if n == 0 {
+            return None;
+        }
+        let ids = if n <= inline.len() {
+            &mut inline[..n]
+        } else {
+            &mut spill[..]
+        };
+        // `pseudorandom_element` sorts cards by sort id: the pick is the r-th smallest.
+        let r = crate::rng::element_index(n, self.ante_seed(key));
+        let (_, &mut pick, _) = ids.select_nth_unstable(r);
+        Some(
+            self.gs
+                .areas
+                .card(pick)
+                .and_then(|c| c.base)
+                .expect("playing card"),
+        )
     }
 
     /// `pseudoseed(key .. ante)`.
@@ -244,18 +276,8 @@ impl Game {
     /// `reset_idol_card()` (common_events.lua:2271-2286).
     pub(crate) fn reset_idol_card(&mut self) {
         use crate::card::{Rank, Suit};
-        let cr = &mut self.gs.current_round;
-        cr.idol_card = (Suit::Spades, Rank::Ace);
-        let valid = self.non_stone_cards();
-        if !valid.is_empty() {
-            let seed = self.ante_seed("idol");
-            let pick = valid[crate::rng::element_index(valid.len(), seed)];
-            let base = self
-                .gs
-                .areas
-                .card(pick)
-                .and_then(|c| c.base)
-                .expect("playing card");
+        self.gs.current_round.idol_card = (Suit::Spades, Rank::Ace);
+        if let Some(base) = self.non_stone_pick("idol") {
             self.gs.current_round.idol_card = (base.suit, base.value);
         }
     }
@@ -263,16 +285,7 @@ impl Game {
     /// `reset_mail_rank()` (common_events.lua:2288-2301).
     pub(crate) fn reset_mail_rank(&mut self) {
         self.gs.current_round.mail_card = crate::card::Rank::Ace;
-        let valid = self.non_stone_cards();
-        if !valid.is_empty() {
-            let seed = self.ante_seed("mail");
-            let pick = valid[crate::rng::element_index(valid.len(), seed)];
-            let base = self
-                .gs
-                .areas
-                .card(pick)
-                .and_then(|c| c.base)
-                .expect("playing card");
+        if let Some(base) = self.non_stone_pick("mail") {
             self.gs.current_round.mail_card = base.value;
         }
     }
@@ -281,28 +294,22 @@ impl Game {
     pub(crate) fn reset_ancient_card(&mut self) {
         use crate::card::Suit;
         let current = self.gs.current_round.ancient_card;
-        let suits: Vec<Suit> = [Suit::Spades, Suit::Hearts, Suit::Clubs, Suit::Diamonds]
-            .into_iter()
-            .filter(|&s| Some(s) != current)
-            .collect();
+        let mut suits = [Suit::Spades; 4];
+        let mut n = 0;
+        for s in [Suit::Spades, Suit::Hearts, Suit::Clubs, Suit::Diamonds] {
+            if Some(s) != current {
+                suits[n] = s;
+                n += 1;
+            }
+        }
         let seed = self.ante_seed("anc");
-        self.gs.current_round.ancient_card =
-            Some(suits[crate::rng::element_index(suits.len(), seed)]);
+        self.gs.current_round.ancient_card = Some(suits[crate::rng::element_index(n, seed)]);
     }
 
     /// `reset_castle_card()` (common_events.lua:2312-2324).
     pub(crate) fn reset_castle_card(&mut self) {
         self.gs.current_round.castle_card = crate::card::Suit::Spades;
-        let valid = self.non_stone_cards();
-        if !valid.is_empty() {
-            let seed = self.ante_seed("cas");
-            let pick = valid[crate::rng::element_index(valid.len(), seed)];
-            let base = self
-                .gs
-                .areas
-                .card(pick)
-                .and_then(|c| c.base)
-                .expect("playing card");
+        if let Some(base) = self.non_stone_pick("cas") {
             self.gs.current_round.castle_card = base.suit;
         }
     }

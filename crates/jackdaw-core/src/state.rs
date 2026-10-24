@@ -151,7 +151,7 @@ pub struct RoundResets {
     pub ante: f64,
     pub blind_ante: f64,
     /// `blind_states[slot]` (`Select`, `Current`, `Upcoming`, `Skipped`, `Defeated`).
-    pub blind_states: [String; 3],
+    pub blind_states: [&'static str; 3],
     /// `blind_choices[slot]`; the boss is unset before the first ante is rolled.
     pub blind_choices: [Option<BlindId>; 3],
     /// `blind_tags` for Small and Big; `None` when not rolled yet (`blind_tags` absent).
@@ -160,12 +160,16 @@ pub struct RoundResets {
 }
 
 impl RoundResets {
-    pub fn blind_state(&self, slot: BlindSlot) -> &str {
-        &self.blind_states[slot.index()]
+    /// The values `blind_states` takes.
+    pub const STATES: [&'static str; 6] =
+        ["Select", "Current", "Upcoming", "Skipped", "Defeated", "Hide"];
+
+    pub fn blind_state(&self, slot: BlindSlot) -> &'static str {
+        self.blind_states[slot.index()]
     }
 
-    pub fn set_blind_state(&mut self, slot: BlindSlot, state: &str) {
-        self.blind_states[slot.index()] = state.to_owned();
+    pub fn set_blind_state(&mut self, slot: BlindSlot, state: &'static str) {
+        self.blind_states[slot.index()] = state;
     }
 
     pub fn blind_choice(&self, slot: BlindSlot) -> Option<BlindId> {
@@ -238,17 +242,115 @@ pub struct HandState {
     pub visible: bool,
 }
 
+const CENTER_WORDS: usize = jackdaw_data::CENTERS.len().div_ceil(64);
+
+/// A set of centers (`G.GAME.used_jokers`, `G.GAME.used_vouchers`), one bit per center.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub struct CenterBits([u64; CENTER_WORDS]);
+
+impl CenterBits {
+    pub fn contains(&self, c: CenterId) -> bool {
+        let i = usize::from(c.0);
+        self.0[i / 64] & (1 << (i % 64)) != 0
+    }
+
+    pub fn insert(&mut self, c: CenterId) {
+        let i = usize::from(c.0);
+        self.0[i / 64] |= 1 << (i % 64);
+    }
+
+    pub fn remove(&mut self, c: CenterId) {
+        let i = usize::from(c.0);
+        self.0[i / 64] &= !(1 << (i % 64));
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.iter().all(|&w| w == 0)
+    }
+
+    /// The members, in center order.
+    pub fn iter(&self) -> impl Iterator<Item = CenterId> + '_ {
+        (0..jackdaw_data::CENTERS.len())
+            .map(|i| CenterId(i as u16))
+            .filter(|&c| self.contains(c))
+    }
+
+    /// The members' keys in key order, as Lua's `pairs` order would never give but the snapshot
+    /// lists them.
+    pub fn sorted_keys(&self) -> Vec<&'static str> {
+        let mut keys: Vec<&'static str> = self.iter().map(CenterId::key).collect();
+        keys.sort_unstable();
+        keys
+    }
+}
+
+impl std::fmt::Debug for CenterBits {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_set().entries(self.sorted_keys()).finish()
+    }
+}
+
+impl FromIterator<CenterId> for CenterBits {
+    fn from_iter<I: IntoIterator<Item = CenterId>>(iter: I) -> CenterBits {
+        let mut bits = CenterBits::default();
+        for c in iter {
+            bits.insert(c);
+        }
+        bits
+    }
+}
+
+/// `G.GAME.bosses_used`: how often each boss appeared, by blind index (`None`: no entry).
+#[derive(Clone, Copy, PartialEq)]
+pub struct BossCounts([Option<f64>; jackdaw_data::BLINDS.len()]);
+
+impl BossCounts {
+    pub fn empty() -> BossCounts {
+        BossCounts([None; jackdaw_data::BLINDS.len()])
+    }
+
+    pub fn get(&self, b: BlindId) -> Option<f64> {
+        self.0[usize::from(b.0)]
+    }
+
+    pub fn set(&mut self, b: BlindId, n: f64) {
+        self.0[usize::from(b.0)] = Some(n);
+    }
+
+    /// The entries, in blind order.
+    pub fn iter(&self) -> impl Iterator<Item = (BlindId, f64)> + '_ {
+        self.0
+            .iter()
+            .enumerate()
+            .filter_map(|(i, n)| n.map(|n| (BlindId(i as u8), n)))
+    }
+}
+
+impl Default for BossCounts {
+    fn default() -> BossCounts {
+        BossCounts::empty()
+    }
+}
+
+impl std::fmt::Debug for BossCounts {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_map()
+            .entries(self.iter().map(|(b, n)| (b.key(), n)))
+            .finish()
+    }
+}
+
 /// `G.GAME.used_jokers` and friends.
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct Sets {
     /// Every center created this run (`used_jokers` covers all sets).
-    pub used_jokers: std::collections::BTreeSet<&'static str>,
-    pub used_vouchers: std::collections::BTreeSet<&'static str>,
+    pub used_jokers: CenterBits,
+    pub used_vouchers: CenterBits,
     /// Challenge bans: centers, tags or blinds.
     pub banned_keys: std::collections::BTreeSet<String>,
     pub pool_flags: BTreeMap<String, LuaValue>,
-    /// Boss key -> times it appeared.
-    pub bosses_used: BTreeMap<&'static str, f64>,
+    /// Times each boss appeared.
+    pub bosses_used: BossCounts,
 }
 
 /// `G.GAME.consumeable_usage` / `consumeable_usage_total`.

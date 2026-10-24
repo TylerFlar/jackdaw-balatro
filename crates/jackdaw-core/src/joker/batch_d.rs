@@ -499,14 +499,14 @@ fn caino(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
     match ctx.kind {
         // No caller in 1.0.1o: the increase waits for a nested event.
         Kind::CardsDestroyed if ctx.blueprint == 0 => {
-            let n = faces(g, &ctx.removed);
+            let n = faces(g, ctx.removed);
             if n > 0.0 {
                 g.queue(Event::Call(caino_event, id, n));
             }
             None
         }
         Kind::RemovePlayingCards if ctx.blueprint == 0 => {
-            let n = faces(g, &ctx.removed);
+            let n = faces(g, ctx.removed);
             if n > 0.0 {
                 let extra = g.extra(id);
                 let c = g.card_mut(id);

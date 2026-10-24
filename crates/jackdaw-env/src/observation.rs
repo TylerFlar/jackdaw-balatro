@@ -481,8 +481,8 @@ fn encode_global(gs: &GameState, ha: &HandAnalysis, v: &mut [f32]) {
     }
 
     // Vouchers owned [90:122].
-    for key in &gs.sets.used_vouchers {
-        if let Ok(i) = VOUCHER_KEYS.binary_search(key) {
+    for voucher in gs.sets.used_vouchers.iter() {
+        if let Ok(i) = VOUCHER_KEYS.binary_search(&voucher.key()) {
             set(G_VOUCHERS + i, 1.0);
         }
     }

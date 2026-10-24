@@ -150,7 +150,7 @@ impl Game {
 
     /// `eval_card(card, context)` for a joker or consumable in `G.jokers` context:
     /// `card:calculate_joker(context)`, or the edition with `context.edition`.
-    pub(crate) fn eval_joker(&mut self, id: u32, ctx: &mut Ctx) -> Option<Effect> {
+    pub(crate) fn eval_joker(&mut self, id: u32, ctx: &mut Ctx<'_>) -> Option<Effect> {
         self.calculate_joker(id, ctx)
     }
 
@@ -215,20 +215,19 @@ impl Game {
     }
 
     /// The scoring context for a card of the played hand.
-    fn scoring_ctx(&self, kind: Kind, s: &Scoring) -> Ctx {
+    fn scoring_ctx<'a>(&self, kind: Kind, s: &'a Scoring) -> Ctx<'a> {
         let mut ctx = Ctx::new(kind);
-        ctx.full_hand = s.full_hand.clone();
-        ctx.scoring_hand = s.scoring_hand.clone();
+        ctx.full_hand = &s.full_hand;
+        ctx.scoring_hand = &s.scoring_hand;
         ctx.scoring_name = Some(s.text);
-        ctx.poker_hands = Some(s.poker_hands);
+        ctx.poker_hands = Some(&s.poker_hands);
         ctx
     }
 
     /// `G.FUNCS.evaluate_play()` (state_events.lua:571-1086).
     pub(crate) fn evaluate_play(&mut self) {
-        let full_hand = self.gs.areas.ids(AreaId::Play);
-        let cards: Vec<Card> = self.gs.areas.play.clone();
-        let info = get_poker_hand_info(&self.eval_cards(&cards), self.eval_flags());
+        let full_hand = self.gs.areas.ids(AreaId::Play).to_vec();
+        let info = get_poker_hand_info(&self.eval_cards(&self.gs.areas.play), self.eval_flags());
         let Some(text) = info.hand else {
             return;
         };
@@ -247,9 +246,9 @@ impl Game {
             .map(|&i| full_hand[i as usize])
             .collect();
         if self.has_joker("Splash") {
-            scoring = full_hand.clone();
+            scoring.clone_from(&full_hand);
         } else {
-            for c in &cards {
+            for c in &self.gs.areas.play {
                 if c.is_stone() && !scoring.contains(&c.sort_id) {
                     scoring.push(c.sort_id);
                 }
@@ -257,11 +256,15 @@ impl Game {
         }
         scoring.sort_by_key(|id| full_hand.iter().position(|p| p == id));
         let s = Scoring {
-            full_hand: full_hand.clone(),
-            scoring_hand: scoring.clone(),
+            full_hand,
+            scoring_hand: scoring,
             text,
             poker_hands: info.poker_hands,
         };
+        let full_hand = &s.full_hand;
+        let scoring = &s.scoring_hand;
+        // One effect list, refilled for each card: the first entry is the card's own effect.
+        let mut effects: Vec<Effect> = Vec::with_capacity(1 + self.gs.areas.jokers.len());
 
         let mut mult;
         let mut hand_chips;
@@ -282,7 +285,7 @@ impl Game {
             mult = mod_mult(m);
             hand_chips = self.mod_chips(c);
 
-            for &id in &scoring {
+            for &id in scoring {
                 if self.gs.areas.card(id).is_some_and(|c| c.debuff) {
                     if let Some(b) = self.gs.blind.as_mut() {
                         b.triggered = true;
@@ -302,7 +305,8 @@ impl Game {
                     }
                 }
                 for _ in 0..reps {
-                    let mut effects = vec![self.eval_played_card(id)];
+                    effects.clear();
+                    effects.push(self.eval_played_card(id));
                     for k in self.gs.areas.ids(AreaId::Jokers) {
                         let mut ctx = self.scoring_ctx(Kind::Individual, &s);
                         ctx.cardarea = Some(AreaId::Play);
@@ -360,7 +364,8 @@ impl Game {
                 let mut reps = 1usize;
                 let mut j = 0;
                 while j < reps {
-                    let mut effects = vec![self.eval_held_card(id)];
+                    effects.clear();
+                    effects.push(self.eval_held_card(id));
                     for k in self.gs.areas.ids(AreaId::Jokers) {
                         let mut ctx = self.scoring_ctx(Kind::Individual, &s);
                         ctx.cardarea = Some(AreaId::Hand);
@@ -374,11 +379,13 @@ impl Game {
                         if has_effect && let Some(n) = self.red_seal_repetitions(id) {
                             reps += n;
                         }
+                        let card_effects: Vec<bool> =
+                            effects.iter().map(|e| !e.is_empty()).collect();
                         for k in self.gs.areas.ids(AreaId::Jokers) {
                             let mut ctx = self.scoring_ctx(Kind::Repetition, &s);
                             ctx.cardarea = Some(AreaId::Hand);
                             ctx.other_card = Some(id);
-                            ctx.card_effects = effects.iter().map(|e| !e.is_empty()).collect();
+                            ctx.card_effects = &card_effects;
                             if let Some(e) = self.eval_joker(k, &mut ctx) {
                                 reps += e.repetitions.unwrap_or(0.0) as usize;
                             }
@@ -450,12 +457,12 @@ impl Game {
             }
 
             let mut destroyed = Vec::new();
-            for &id in &scoring {
+            for &id in scoring {
                 let mut hit = false;
                 for j in self.gs.areas.ids(AreaId::Jokers) {
                     let mut ctx = Ctx::new(Kind::DestroyingCard);
                     ctx.destroying_card = Some(id);
-                    ctx.full_hand = full_hand.clone();
+                    ctx.full_hand = full_hand;
                     if self.calculate_joker(j, &mut ctx).is_some() {
                         hit = true;
                         break;
@@ -489,7 +496,7 @@ impl Game {
             for j in self.gs.areas.ids(AreaId::Jokers) {
                 let mut ctx = Ctx::new(Kind::RemovePlayingCards);
                 ctx.cardarea = Some(AreaId::Jokers);
-                ctx.removed = destroyed.clone();
+                ctx.removed = &destroyed;
                 self.eval_joker(j, &mut ctx);
             }
             for id in destroyed {
@@ -513,7 +520,7 @@ impl Game {
             self.eval_joker(j, &mut ctx);
         }
         if self.gs.modifier("debuff_played_cards").is_some() {
-            self.queue(Event::PermaDebuff(scoring));
+            self.queue(Event::PermaDebuff(scoring.clone()));
         }
         self.gs.sim.last_score = Some(LastScore {
             hand_type: text,

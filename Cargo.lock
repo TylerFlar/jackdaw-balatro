@@ -129,6 +129,7 @@ name = "jackdaw-core"
 version = "0.1.0"
 dependencies = [
  "jackdaw-data",
+ "mimalloc",
  "serde_json",
  "sha2",
 ]

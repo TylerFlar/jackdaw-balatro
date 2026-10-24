@@ -229,7 +229,7 @@ fn flower_pot(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
     let smeared = g.has_joker("Smeared Joker");
     let mut found = [false; 4];
     for wild_pass in [false, true] {
-        for &c in &ctx.scoring_hand {
+        for &c in ctx.scoring_hand {
             let card = g.card(c);
             if (card.name() == "Wild Card") != wild_pass {
                 continue;
@@ -257,7 +257,7 @@ fn seeing_double(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
     // Hearts, Diamonds, Spades, Clubs.
     let mut n = [0u32; 4];
     let order = [Suit::Hearts, Suit::Diamonds, Suit::Spades, Suit::Clubs];
-    for &c in &ctx.scoring_hand {
+    for &c in ctx.scoring_hand {
         let card = g.card(c);
         if card.name() != "Wild Card" {
             for (i, &s) in order.iter().enumerate() {
@@ -267,7 +267,7 @@ fn seeing_double(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
             }
         }
     }
-    for &c in &ctx.scoring_hand {
+    for &c in ctx.scoring_hand {
         let card = g.card(c);
         if card.name() == "Wild Card" {
             // Clubs, Diamonds, Spades, Hearts.
@@ -310,7 +310,7 @@ fn seance(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
     if ctx.kind != Kind::JokerMain || !g.consumable_room() {
         return None;
     }
-    let hand = HandType::from_name(&g.extra_str(id, "poker_hand")).expect("Seance's hand");
+    let hand = HandType::from_name(g.extra_str(id, "poker_hand")).expect("Seance's hand");
     if ctx.has_hand(hand) {
         g.create_consumable_later(PoolType::Spectral, "sea", None);
         return Some(noted(id));
@@ -529,7 +529,7 @@ fn midas_mask(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
         return None;
     }
     let mut faces = 0;
-    for &c in &ctx.scoring_hand {
+    for &c in ctx.scoring_hand {
         let pareidolia = g.has_joker("Pareidolia");
         if g.card(c).is_face(false, pareidolia) {
             faces += 1;
@@ -547,7 +547,7 @@ fn vampire(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
         return None;
     }
     let mut enhanced = 0.0;
-    for &c in &ctx.scoring_hand {
+    for &c in ctx.scoring_hand {
         let card = g.card(c);
         if card.center != centers::C_BASE && !card.debuff && !card.vampired {
             enhanced += 1.0;

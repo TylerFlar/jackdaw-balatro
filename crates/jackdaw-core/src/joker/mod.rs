@@ -22,7 +22,7 @@ mod batch_c;
 mod batch_d;
 mod batch_e;
 
-use jackdaw_data::{BlindId, CenterSet};
+use jackdaw_data::{BlindId, CenterId, CenterSet};
 
 use crate::area::AreaId;
 use crate::game::Game;
@@ -62,15 +62,16 @@ pub enum Kind {
     JokerMain,
 }
 
-/// A `calculate_joker` context table.
+/// A `calculate_joker` context table. The card lists borrow from the caller, so building one
+/// allocates nothing.
 #[derive(Clone, Debug)]
-pub struct Ctx {
+pub struct Ctx<'a> {
     pub kind: Kind,
     pub cardarea: Option<AreaId>,
-    pub full_hand: Vec<u32>,
-    pub scoring_hand: Vec<u32>,
+    pub full_hand: &'a [u32],
+    pub scoring_hand: &'a [u32],
     pub scoring_name: Option<HandType>,
-    pub poker_hands: Option<PokerHands>,
+    pub poker_hands: Option<&'a PokerHands>,
     pub other_card: Option<u32>,
     pub other_joker: Option<u32>,
     pub destroying_card: Option<u32>,
@@ -82,15 +83,15 @@ pub struct Ctx {
     /// `pre_discard` from The Hook.
     pub hook: bool,
     /// `remove_playing_cards`'s `removed` and `cards_destroyed`'s `glass_shattered`.
-    pub removed: Vec<u32>,
+    pub removed: &'a [u32],
     /// `card_effects`: whether each collected effect table is non-empty.
-    pub card_effects: Vec<bool>,
+    pub card_effects: &'a [bool],
     /// `setting_blind`'s `blind`.
     pub blind: Option<BlindId>,
     /// `card` (the card bought, sold or added, ...).
     pub card: Option<u32>,
     /// `playing_card_added`'s `cards`.
-    pub cards: Vec<u32>,
+    pub cards: &'a [u32],
     /// `using_consumeable`'s `consumeable`.
     pub consumeable: Option<u32>,
     /// Blueprint / Brainstorm depth (`context.blueprint`), 0 when not copying.
@@ -99,13 +100,13 @@ pub struct Ctx {
     pub blueprint_card: Option<u32>,
 }
 
-impl Ctx {
-    pub fn new(kind: Kind) -> Ctx {
+impl<'a> Ctx<'a> {
+    pub fn new(kind: Kind) -> Ctx<'a> {
         Ctx {
             kind,
             cardarea: None,
-            full_hand: Vec::new(),
-            scoring_hand: Vec::new(),
+            full_hand: &[],
+            scoring_hand: &[],
             scoring_name: None,
             poker_hands: None,
             other_card: None,
@@ -115,11 +116,11 @@ impl Ctx {
             repetition: false,
             game_over: false,
             hook: false,
-            removed: Vec::new(),
-            card_effects: Vec::new(),
+            removed: &[],
+            card_effects: &[],
             blind: None,
             card: None,
-            cards: Vec::new(),
+            cards: &[],
             consumeable: None,
             blueprint: 0,
             blueprint_card: None,
@@ -128,7 +129,7 @@ impl Ctx {
 
     /// `next(context.poker_hands[hand])`.
     pub fn has_hand(&self, hand: HandType) -> bool {
-        self.poker_hands.as_ref().is_some_and(|p| p.contains(hand))
+        self.poker_hands.is_some_and(|p| p.contains(hand))
     }
 
     /// `context.blueprint_card or self`.
@@ -138,7 +139,7 @@ impl Ctx {
 }
 
 /// One joker's branches of `calculate_joker`, for the card with this sort id.
-pub type CalcFn = fn(&mut Game, u32, &mut Ctx) -> Option<Effect>;
+pub type CalcFn = fn(&mut Game, u32, &mut Ctx<'_>) -> Option<Effect>;
 
 /// The ported joker with this center key.
 fn lookup(key: &str) -> Option<CalcFn> {
@@ -147,6 +148,34 @@ fn lookup(key: &str) -> Option<CalcFn> {
         .or_else(|| batch_c::lookup(key))
         .or_else(|| batch_d::lookup(key))
         .or_else(|| batch_e::lookup(key))
+}
+
+/// What `calculate_joker` does for a center, decided once per center.
+#[derive(Clone, Copy)]
+enum Dispatch {
+    Blueprint,
+    Brainstorm,
+    /// The shared rules only.
+    Passive,
+    Calc(CalcFn),
+    Unported,
+}
+
+/// [`Dispatch`] by center index.
+static DISPATCH: std::sync::LazyLock<Vec<Dispatch>> = std::sync::LazyLock::new(|| {
+    jackdaw_data::CENTERS
+        .iter()
+        .map(|c| match c.key {
+            "j_blueprint" => Dispatch::Blueprint,
+            "j_brainstorm" => Dispatch::Brainstorm,
+            key if PASSIVE.contains(&key) => Dispatch::Passive,
+            key => lookup(key).map_or(Dispatch::Unported, Dispatch::Calc),
+        })
+        .collect()
+});
+
+fn dispatch(center: CenterId) -> Dispatch {
+    DISPATCH[usize::from(center.0)]
 }
 
 /// Jokers with no branch of their own in `calculate_joker`: their effects are passive
@@ -196,7 +225,7 @@ pub const PASSIVE: &[&str] = &[
 
 /// Whether every effect of the joker with this center key is ported.
 pub fn is_ported(key: &str) -> bool {
-    matches!(key, "j_blueprint" | "j_brainstorm") || PASSIVE.contains(&key) || lookup(key).is_some()
+    jackdaw_data::center_by_key(key).is_some_and(|c| !matches!(dispatch(c), Dispatch::Unported))
 }
 
 /// The center keys of the ported jokers, in center order.
@@ -214,14 +243,14 @@ impl Game {
     pub fn playing_card_joker_effects(&mut self, cards: &[u32]) {
         for j in self.joker_ids() {
             let mut ctx = Ctx::new(Kind::PlayingCardAdded);
-            ctx.cards = cards.to_vec();
+            ctx.cards = cards;
             self.calculate_joker(j, &mut ctx);
         }
     }
 
     /// `card:calculate_joker(context)` for any card.
-    pub(crate) fn calculate_joker(&mut self, id: u32, ctx: &mut Ctx) -> Option<Effect> {
-        let card = self.gs.areas.card(id)?;
+    pub(crate) fn calculate_joker(&mut self, id: u32, ctx: &mut Ctx<'_>) -> Option<Effect> {
+        let card = self.gs.areas.joker_card(id)?;
         if card.debuff {
             return None;
         }
@@ -233,15 +262,15 @@ impl Game {
     }
 
     /// Observatory: a held Planet multiplies its own hand (card.lua:2293-2302).
-    fn observatory(&self, id: u32, ctx: &Ctx) -> Option<Effect> {
-        let card = self.gs.areas.card(id)?;
+    fn observatory(&self, id: u32, ctx: &Ctx<'_>) -> Option<Effect> {
+        let card = self.gs.areas.joker_card(id)?;
         let hand = card
             .center()
             .config("hand_type")
             .and_then(|v| v.as_str())
             .and_then(HandType::from_name);
         if ctx.kind == Kind::JokerMain
-            && self.gs.sets.used_vouchers.contains("v_observatory")
+            && self.gs.sets.used_vouchers.contains(jackdaw_data::centers::V_OBSERVATORY)
             && hand == ctx.scoring_name
         {
             let x = jackdaw_data::centers::V_OBSERVATORY
@@ -258,21 +287,22 @@ impl Game {
     }
 
     /// The joker part of `calculate_joker` (card.lua:2303-4060).
-    fn calculate_joker_card(&mut self, id: u32, ctx: &mut Ctx) -> Option<Effect> {
-        let card = self.gs.areas.card(id)?;
-        let name = card.name();
+    fn calculate_joker_card(&mut self, id: u32, ctx: &mut Ctx<'_>) -> Option<Effect> {
+        let card = self.gs.areas.joker_card(id)?;
         let key = card.center.key();
         let sliced = card.getting_sliced;
+        let what = dispatch(card.center);
         // Blueprint copies the joker to its right, Brainstorm the leftmost one.
-        let copied = match name {
-            "Blueprint" => {
-                let jokers = self.gs.areas.ids(AreaId::Jokers);
+        let copied = match what {
+            Dispatch::Blueprint => {
+                let jokers = &self.gs.areas.jokers;
                 jokers
                     .iter()
-                    .position(|&j| j == id)
-                    .and_then(|i| jokers.get(i + 1).copied())
+                    .position(|c| c.sort_id == id)
+                    .and_then(|i| jokers.get(i + 1))
+                    .map(|c| c.sort_id)
             }
-            "Brainstorm" => self.gs.areas.jokers.first().map(|c| c.sort_id),
+            Dispatch::Brainstorm => self.gs.areas.jokers.first().map(|c| c.sort_id),
             _ => None,
         };
         if let Some(other) = copied.filter(|&o| o != id) {
@@ -298,17 +328,20 @@ impl Game {
             }
             _ => {}
         }
-        if !is_ported(key) {
-            self.unported(&format!("joker {key}"));
-            return None;
+        match what {
+            Dispatch::Calc(f) => f(self, id, ctx),
+            Dispatch::Unported => {
+                self.unported(&format!("joker {key}"));
+                None
+            }
+            _ => None,
         }
-        lookup(key).and_then(|f| f(self, id, ctx))
     }
 
     /// The start of the main step (card.lua:3632-3671): Loyalty Card, then the rules every
     /// joker passes through by its ability values.
-    fn joker_main_shared(&mut self, id: u32, ctx: &Ctx) -> Option<Effect> {
-        let card = self.gs.areas.card(id)?;
+    fn joker_main_shared(&mut self, id: u32, ctx: &Ctx<'_>) -> Option<Effect> {
+        let card = self.gs.areas.joker_card(id)?;
         let name = card.name();
         if name == "Loyalty Card" {
             return self.loyalty_card(id, ctx);
@@ -349,7 +382,7 @@ impl Game {
 
     /// Loyalty Card (card.lua:3632-3652): every `every + 1` hands it gives `Xmult`. Without a
     /// Blueprint the shared rules still run after it when it returns nothing.
-    fn loyalty_card(&mut self, id: u32, ctx: &Ctx) -> Option<Effect> {
+    fn loyalty_card(&mut self, id: u32, ctx: &Ctx<'_>) -> Option<Effect> {
         let hands_played = self.gs.hands_played;
         let card = self.gs.areas.card_mut(id)?;
         let t = card.ability.extra.table()?;

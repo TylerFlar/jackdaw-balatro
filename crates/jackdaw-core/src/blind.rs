@@ -334,7 +334,7 @@ impl Game {
 
     /// The Hook's event (blind.lua:467-483): two random held cards are discarded.
     pub(crate) fn hook_discard(&mut self) {
-        let mut cards: Vec<u32> = self.gs.areas.ids(AreaId::Hand);
+        let mut cards: Vec<u32> = self.gs.areas.ids(AreaId::Hand).to_vec();
         let mut any = false;
         for i in 0..2 {
             if i < self.gs.areas.hand.len() {

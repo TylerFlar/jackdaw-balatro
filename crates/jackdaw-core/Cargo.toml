@@ -12,5 +12,9 @@ jackdaw-data.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 
+[dev-dependencies]
+# tests/perf.rs allocates with mimalloc, as the Python extension does.
+mimalloc = { version = "0.1.52", default-features = false }
+
 [lints]
 workspace = true

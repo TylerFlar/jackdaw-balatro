@@ -222,9 +222,13 @@ impl Game {
         // Every center with this name leaves used_jokers unless a joker or consumable of that
         // name is still held, debuffed or not.
         let name = card.name();
-        if self.find_joker(name, true).is_empty() {
-            for c in jackdaw_data::CENTERS.iter().filter(|c| c.name == name) {
-                self.gs.sets.used_jokers.remove(c.key);
+        let held = [AreaId::Jokers, AreaId::Consumables]
+            .into_iter()
+            .flat_map(|a| self.gs.areas.get(a).iter())
+            .any(|c| c.name() == name);
+        if !held {
+            for &c in jackdaw_data::same_name_centers(card.center) {
+                self.gs.sets.used_jokers.remove(c);
             }
         }
         // Lua also drops the card from G.playing_cards and renumbers every card's

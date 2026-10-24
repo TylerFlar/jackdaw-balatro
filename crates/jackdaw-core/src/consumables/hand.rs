@@ -128,7 +128,7 @@ impl Game {
         }
         for j in self.joker_ids() {
             let mut ctx = Ctx::new(Kind::RemovePlayingCards);
-            ctx.removed = destroyed.clone();
+            ctx.removed = &destroyed;
             self.calculate_joker(j, &mut ctx);
         }
     }

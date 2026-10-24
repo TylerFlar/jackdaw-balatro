@@ -312,6 +312,59 @@ mod sampler {
                     units += 1;
                 }
             }
+            "play5j" | "win" => {
+                let mut round = Game::new_run(&spec("PROFILE1")).unwrap();
+                if workload == "play5j" {
+                    for key in [
+                        "j_joker",
+                        "j_greedy_joker",
+                        "j_lusty_joker",
+                        "j_wrathful_joker",
+                        "j_gluttenous_joker",
+                    ] {
+                        let c = jackdaw_core::card::center_by_key(key).unwrap();
+                        round
+                            .debug_add(&jackdaw_core::debug::AddSpec::new(
+                                jackdaw_core::debug::AddKey::Joker(c),
+                            ))
+                            .unwrap();
+                    }
+                }
+                round.step(&Action::SelectBlind).unwrap();
+                round.gs.chips = if workload == "win" { 1e12 } else { -1e12 };
+                while !stop.load(Ordering::Relaxed) {
+                    let mut g = round.clone();
+                    g.step_in_place(&Action::PlayHand(vec![0, 1, 2, 3, 4]))
+                        .unwrap();
+                    black_box(g);
+                    units += 1;
+                }
+            }
+            "cashout" | "booster" | "reroll" => {
+                let mut eval = Game::new_run(&spec("PROFILE1")).unwrap();
+                eval.step(&Action::SelectBlind).unwrap();
+                eval.gs.chips = 1e12;
+                eval.step(&Action::PlayHand(vec![0])).unwrap();
+                let mut shop = eval.clone();
+                shop.step(&Action::CashOut).unwrap();
+                shop.gs.dollars = 1e12;
+                while !stop.load(Ordering::Relaxed) {
+                    match workload {
+                        "cashout" => {
+                            let mut g = eval.clone();
+                            g.step_in_place(&Action::CashOut).unwrap();
+                            black_box(g);
+                        }
+                        "booster" => {
+                            let mut g = shop.clone();
+                            g.step_in_place(&Action::OpenBooster(0)).unwrap();
+                            black_box(g);
+                        }
+                        _ => shop.step_in_place(&Action::Reroll).unwrap(),
+                    }
+                    units += 1;
+                }
+            }
             "shop" => {
                 let mut eval = Game::new_run(&spec("PROFILE1")).unwrap();
                 eval.step(&Action::SelectBlind).unwrap();

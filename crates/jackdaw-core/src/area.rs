@@ -13,6 +13,141 @@ use crate::card::{Card, Facing};
 use crate::rng::{Rng, shuffle};
 use crate::state::Areas;
 
+/// Reorder `items` so that position `k` holds the item that was at `order[k]` (a permutation
+/// of the positions), with at most one swap per position.
+fn permute<T>(items: &mut [T], order: &[usize]) {
+    for i in 0..items.len() {
+        // Where the item that belongs at `i` sits now: earlier swaps moved it along its cycle.
+        let mut j = order[i];
+        while j < i {
+            j = order[j];
+        }
+        items.swap(i, j);
+    }
+}
+
+/// The sort ids of an area's cards, kept on the stack for areas of up to [`Ids::INLINE`] cards
+/// (the loops over the jokers or the hand run for every scored card).
+#[derive(Clone)]
+pub struct Ids {
+    len: usize,
+    inline: [u32; Ids::INLINE],
+    spill: Vec<u32>,
+}
+
+impl Ids {
+    pub const INLINE: usize = 16;
+
+    pub fn of(cards: &[Card]) -> Ids {
+        let mut ids = Ids {
+            len: cards.len(),
+            inline: [0; Ids::INLINE],
+            spill: Vec::new(),
+        };
+        if cards.len() <= Ids::INLINE {
+            for (slot, c) in ids.inline.iter_mut().zip(cards) {
+                *slot = c.sort_id;
+            }
+        } else {
+            ids.spill = cards.iter().map(|c| c.sort_id).collect();
+        }
+        ids
+    }
+}
+
+impl std::ops::Deref for Ids {
+    type Target = [u32];
+
+    fn deref(&self) -> &[u32] {
+        if self.len <= Ids::INLINE {
+            &self.inline[..self.len]
+        } else {
+            &self.spill
+        }
+    }
+}
+
+impl std::ops::DerefMut for Ids {
+    fn deref_mut(&mut self) -> &mut [u32] {
+        if self.len <= Ids::INLINE {
+            &mut self.inline[..self.len]
+        } else {
+            &mut self.spill
+        }
+    }
+}
+
+impl std::fmt::Debug for Ids {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        (**self).fmt(f)
+    }
+}
+
+impl PartialEq for Ids {
+    fn eq(&self, other: &Ids) -> bool {
+        **self == **other
+    }
+}
+
+impl<'a> IntoIterator for &'a Ids {
+    type Item = &'a u32;
+    type IntoIter = std::slice::Iter<'a, u32>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl IntoIterator for Ids {
+    type Item = u32;
+    type IntoIter = IdsIter;
+
+    fn into_iter(self) -> IdsIter {
+        let end = self.len;
+        IdsIter {
+            ids: self,
+            at: 0,
+            end,
+        }
+    }
+}
+
+/// [`Ids`] by value.
+pub struct IdsIter {
+    ids: Ids,
+    at: usize,
+    end: usize,
+}
+
+impl Iterator for IdsIter {
+    type Item = u32;
+
+    fn next(&mut self) -> Option<u32> {
+        if self.at == self.end {
+            return None;
+        }
+        self.at += 1;
+        Some(self.ids[self.at - 1])
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let n = self.end - self.at;
+        (n, Some(n))
+    }
+}
+
+impl DoubleEndedIterator for IdsIter {
+    fn next_back(&mut self) -> Option<u32> {
+        if self.at == self.end {
+            return None;
+        }
+        self.end -= 1;
+        Some(self.ids[self.end])
+    }
+}
+
+impl ExactSizeIterator for IdsIter {}
+
 /// One of the run's card areas.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum AreaId {
@@ -156,9 +291,19 @@ impl Areas {
         Some(&mut self.get_mut(a)[i])
     }
 
+    /// [`Areas::card`], looking among the jokers and consumables first: `calculate_joker`'s
+    /// cards are there.
+    pub fn joker_card(&self, sort_id: u32) -> Option<&Card> {
+        self.jokers
+            .iter()
+            .chain(&self.consumables)
+            .find(|c| c.sort_id == sort_id)
+            .or_else(|| self.card(sort_id))
+    }
+
     /// The sort ids of an area's cards, in order.
-    pub fn ids(&self, id: AreaId) -> Vec<u32> {
-        self.get(id).iter().map(|c| c.sort_id).collect()
+    pub fn ids(&self, id: AreaId) -> Ids {
+        Ids::of(self.get(id))
     }
 
     /// `CardArea:emplace(card, location, stay_flipped)` (cardarea.lua:32-64), minus UI.
@@ -169,6 +314,10 @@ impl Areas {
             card.facing = Facing::Front;
         }
         let cards = self.get_mut(id);
+        // A copied game's areas have no spare room: grow by at least a hand's worth at once.
+        if cards.len() == cards.capacity() {
+            cards.reserve(cards.len().max(8));
+        }
         if front || id.kind() == AreaType::Deck {
             cards.insert(0, card);
         } else {
@@ -240,9 +389,15 @@ impl Areas {
     pub fn shuffle(&mut self, id: AreaId, rng: &mut Rng, key: &str) {
         let seed = rng.seed(key);
         let cards = self.get_mut(id);
-        // pseudoshuffle sorts by sort_id first when the entries carry one (misc_functions.lua).
-        cards.sort_by_key(|c| c.sort_id);
-        shuffle(cards, seed);
+        // pseudoshuffle sorts by sort_id first when the entries carry one (misc_functions.lua),
+        // then swaps. Both run on positions, and the result moves each card at most once.
+        let mut order: Vec<usize> = (0..cards.len()).collect();
+        if !cards.is_sorted_by_key(|c| c.sort_id) {
+            // Sort ids are unique, so any sort gives the stable sort's order.
+            order.sort_unstable_by_key(|&i| cards[i].sort_id);
+        }
+        shuffle(&mut order, seed);
+        permute(cards, &order);
         self.align(id);
     }
 }

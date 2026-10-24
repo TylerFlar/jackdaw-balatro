@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 use jackdaw_data::{BLINDS, CenterId, CenterSet, HANDS, P_CARDS, Value, centers};
 
 use crate::area::AreaId;
-use crate::card::{Card, EditionKind, Rank, Seal, Suit};
+use crate::card::{Card, CostContext, EditionKind, Rank, Seal, Suit};
 use crate::event::Event;
 use crate::game::{Game, LuaState, Runtime};
 use crate::hand_eval::HandType;
@@ -55,11 +55,12 @@ fn init_game_object(seed: &str) -> GameState {
             visible: h.visible,
         }
     });
-    let bosses_used = BLINDS
-        .iter()
-        .filter(|b| b.boss.is_some())
-        .map(|b| (b.key, 0.0))
-        .collect();
+    let mut bosses_used = crate::state::BossCounts::empty();
+    for (i, b) in BLINDS.iter().enumerate() {
+        if b.boss.is_some() {
+            bosses_used.set(jackdaw_data::BlindId(i as u8), 0.0);
+        }
+    }
     GameState {
         phase: Phase::BlindSelect,
         back: centers::B_RED,
@@ -122,11 +123,7 @@ fn init_game_object(seed: &str) -> GameState {
             temp_handsize: None,
             ante: 1.0,
             blind_ante: 1.0,
-            blind_states: [
-                "Select".to_owned(),
-                "Upcoming".to_owned(),
-                "Upcoming".to_owned(),
-            ],
+            blind_states: ["Select", "Upcoming", "Upcoming"],
             blind_choices: [
                 jackdaw_data::blind_by_key("bl_small"),
                 jackdaw_data::blind_by_key("bl_big"),
@@ -225,16 +222,32 @@ struct Proto {
 }
 
 impl Proto {
-    /// The sort key `s..r..e..d..g` (game.lua:2357-2359).
-    fn key(&self) -> String {
-        format!(
-            "{}{}{}{}{}",
+    /// The bytes of the sort key `s..r..e..d..g` (game.lua:2357-2359), which Lua compares as
+    /// strings.
+    fn key(&self) -> impl Iterator<Item = u8> + '_ {
+        [
             self.s,
             self.r,
             self.e.unwrap_or(""),
             self.d.unwrap_or(""),
-            self.g.unwrap_or("")
-        )
+            self.g.unwrap_or(""),
+        ]
+        .into_iter()
+        .flat_map(str::bytes)
+    }
+
+    /// The order of the sort keys (Lua string order). Suits and ranks are one letter each, so
+    /// they compare on their own before the rest.
+    fn cmp(a: &Proto, b: &Proto) -> std::cmp::Ordering {
+        let short = |p: &Proto| p.s.len() == 1 && p.r.len() == 1;
+        if short(a) && short(b) {
+            let head = (a.s.as_bytes()[0], a.r.as_bytes()[0]);
+            let first = head.cmp(&(b.s.as_bytes()[0], b.r.as_bytes()[0]));
+            if first.is_ne() {
+                return first;
+            }
+        }
+        a.key().cmp(b.key())
     }
 }
 
@@ -432,7 +445,7 @@ impl Game {
     /// A starting voucher: used at once, its effect through `Card.apply_to_run(nil, center)`.
     fn start_voucher(&mut self, key: &str) {
         let center = jackdaw_data::center_by_key(key).expect("a starting voucher");
-        self.gs.sets.used_vouchers.insert(center.key());
+        self.gs.sets.used_vouchers.insert(center);
         let extra = center.get().config_num("extra");
         self.apply_voucher(center.get().name, extra);
     }
@@ -466,7 +479,7 @@ impl Game {
         for v in list(field(ch, "vouchers")) {
             let key = string(field(v, "id")).expect("a challenge voucher's id");
             let center = jackdaw_data::center_by_key(key).expect("a challenge voucher");
-            self.gs.sets.used_vouchers.insert(center.key());
+            self.gs.sets.used_vouchers.insert(center);
             self.queue(Event::Call(
                 |g, c, _| {
                     let center = CenterId(c as u16);
@@ -610,25 +623,36 @@ impl Game {
                 }
             }
         }
-        protos.sort_by_cached_key(Proto::key);
-        let cards: Vec<Card> = protos.iter().map(|p| self.card_from_control(p)).collect();
-        self.gs.areas.emplace_all(AreaId::Deck, cards);
+        protos.sort_by(Proto::cmp);
+        // Nothing a deck card's creation does changes the costs the next one sees.
+        let cost = self.cost_context(AreaId::Deck);
+        let mut cards: Vec<Card> = protos
+            .iter()
+            .map(|p| self.card_from_control(p, &cost))
+            .collect();
+        // `emplace` puts each new card at the front, so the deck holds them in reverse. Nothing
+        // sees that order: `start_run` shuffles the deck next, and pseudoshuffle sorts by sort
+        // id first. The deck keeps them in creation order, which is sort id order.
+        for c in &mut cards {
+            c.facing = crate::card::Facing::Back;
+        }
+        debug_assert!(self.gs.areas.deck.is_empty(), "a new run's deck starts empty");
+        self.gs.areas.deck = cards;
         self.gs.starting_deck_size = self.playing_card_count() as f64;
     }
 
     /// `card_from_control(control)` (misc_functions.lua:1625-1633), before it joins the deck.
-    fn card_from_control(&mut self, p: &Proto) -> Card {
+    fn card_from_control(&mut self, p: &Proto, cost: &CostContext) -> Card {
         let front = jackdaw_data::card_by_parts(p.s, p.r).expect("a front");
         let center =
             p.e.map(|e| jackdaw_data::center_by_key(e).expect("an enhancement"))
                 .unwrap_or(centers::C_BASE);
-        let mut card = self.new_card(center, Some(front), AreaId::Deck);
-        let cost = self.cost_context(AreaId::Deck);
+        let mut card = self.new_card_with_cost(center, Some(front), cost);
         if let Some(d) = p.d {
-            card.set_edition(Some(EditionKind::from_name(d).expect("an edition")), &cost);
+            card.set_edition(Some(EditionKind::from_name(d).expect("an edition")), cost);
         }
         if let Some(gs) = p.g {
-            card.set_seal(Some(Seal::from_name(gs).expect("a seal")), &cost);
+            card.set_seal(Some(Seal::from_name(gs).expect("a seal")), cost);
         }
         card
     }

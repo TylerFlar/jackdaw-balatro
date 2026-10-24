@@ -115,8 +115,8 @@ impl Game {
     pub(crate) fn can_reroll_boss(&self) -> bool {
         let used = &self.gs.sets.used_vouchers;
         self.gs.dollars - self.gs.bankrupt_at - 10.0 >= 0.0
-            && (used.contains("v_retcon")
-                || (used.contains("v_directors_cut") && !self.gs.round_resets.boss_rerolled))
+            && (used.contains(jackdaw_data::centers::V_RETCON)
+                || (used.contains(jackdaw_data::centers::V_DIRECTORS_CUT) && !self.gs.round_resets.boss_rerolled))
     }
 
     /// The Orbital Tag hand rolled for `slot` this ante, if any.
@@ -144,8 +144,8 @@ impl Game {
         let ante = self.gs.round_resets.ante;
         let a = ante.max(1.0);
         let win = self.gs.win_ante;
-        let mut eligible: Vec<(&'static str, f64)> = Vec::new();
-        for b in jackdaw_data::BLINDS.iter() {
+        let mut eligible: Vec<(&'static str, BlindId, f64)> = Vec::with_capacity(32);
+        for (i, b) in jackdaw_data::BLINDS.iter().enumerate() {
             let Some(boss) = &b.boss else { continue };
             let ok = if boss.showdown {
                 crate::lua::modulo(ante, win) == 0.0 && ante >= 2.0
@@ -153,60 +153,61 @@ impl Game {
                 f64::from(boss.min) <= a && (crate::lua::modulo(a, win) != 0.0 || ante < 2.0)
             };
             if ok && !self.gs.sets.banned_keys.contains(b.key) {
+                let id = BlindId(i as u8);
                 let used = self
                     .gs
                     .sets
                     .bosses_used
-                    .get(b.key)
-                    .copied()
+                    .get(id)
                     .unwrap_or_else(|| panic!("bosses_used has no {}", b.key));
-                eligible.push((b.key, used));
+                eligible.push((b.key, id, used));
             }
         }
         let min_use = eligible
             .iter()
-            .map(|&(_, u)| u)
+            .map(|&(_, _, u)| u)
             .fold(100.0, |m: f64, u| if u <= m { u } else { m });
-        eligible.retain(|&(_, u)| u <= min_use);
+        eligible.retain(|&(_, _, u)| u <= min_use);
         // `pseudorandom_element` over a table keyed by boss key: sorted by key.
-        eligible.sort_unstable_by_key(|&(k, _)| k);
+        eligible.sort_unstable_by_key(|&(k, _, _)| k);
         let seed = self.gs.rng.seed("boss");
-        let key = eligible[crate::rng::element_index(eligible.len(), seed)].0;
-        *self.gs.sets.bosses_used.get_mut(key).expect("boss counted") += 1.0;
-        jackdaw_data::blind_by_key(key).expect("a boss blind")
+        let (_, id, used) = eligible[crate::rng::element_index(eligible.len(), seed)];
+        self.gs.sets.bosses_used.set(id, used + 1.0);
+        id
     }
 
     /// `get_next_tag_key(append)` (common_events.lua:1914-1925) over the Tag pool
     /// (`get_current_pool('Tag')`, common_events.lua:1982-1986). The sim's profile has
     /// discovered every center, so a tag's `requires` is always met.
     pub(crate) fn get_next_tag_key(&mut self, append: &str) -> TagId {
+        // As with the center pools (`Game::pick_from_current_pool`), the pool isn't built: a
+        // drawn slot is checked alone, and an empty pool falls back to the Handy Tag.
         let ante = self.gs.round_resets.ante;
-        let mut entries: Vec<Option<TagId>> = Vec::with_capacity(jackdaw_data::TAGS.len());
-        let mut size = 0;
-        for (i, t) in jackdaw_data::TAGS.iter().enumerate() {
-            let add = t.min_ante.is_none_or(|m| f64::from(m) <= ante);
-            if add && !self.gs.sets.banned_keys.contains(t.key) {
-                entries.push(Some(TagId(i as u8)));
-                size += 1;
-            } else {
-                entries.push(None);
-            }
-        }
-        if size == 0 {
-            entries = vec![Some(tags::TAG_HANDY)];
-        }
+        let in_pool = |g: &Game, i: usize| {
+            let t = &jackdaw_data::TAGS[i];
+            t.min_ante.is_none_or(|m| f64::from(m) <= ante)
+                && !g.gs.sets.banned_keys.contains(t.key)
+        };
         let key = crate::rng::Key::new("Tag").s(append).n(ante);
-        let n = entries.len();
-        let mut pick = entries[crate::rng::element_index(n, self.gs.rng.seed(&key))];
+        let n = jackdaw_data::TAGS.len();
+        let first = crate::rng::element_index(n, self.gs.rng.seed(&key));
+        if in_pool(self, first) {
+            return TagId(first as u8);
+        }
+        if !(0..n).any(|i| in_pool(self, i)) {
+            return tags::TAG_HANDY;
+        }
         let mut it = 1;
-        while pick.is_none() {
+        loop {
             it += 1;
             let seed = self
                 .gs
                 .rng
                 .seed(&crate::rng::Key::new(&key).s("_resample").i(it));
-            pick = entries[crate::rng::element_index(n, seed)];
+            let i = crate::rng::element_index(n, seed);
+            if in_pool(self, i) {
+                return TagId(i as u8);
+            }
         }
-        pick.expect("resampled")
     }
 }

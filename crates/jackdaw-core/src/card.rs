@@ -229,9 +229,7 @@ impl Base {
 /// The base is rebuilt from scratch (`times_played` restarts at 0); only the suit nominal of the
 /// first suit carries over.
 pub fn set_base(current: Option<&Base>, front: CardId, initial: bool) -> Base {
-    let proto = front.get();
-    let suit = Suit::from_name(proto.suit).expect("front suit");
-    let value = Rank::from_name(proto.value).expect("front value");
+    let (suit, value) = FRONTS[usize::from(front.0)];
     let suit_nominal_original = current
         .map(|b| b.suit_nominal_original)
         .unwrap_or_else(|| suit.nominal_original());
@@ -601,6 +599,62 @@ pub struct Card {
     pub getting_sliced: bool,
 }
 
+/// The table `Card:set_ability(center)` builds from the center alone (card.lua:223-310): the
+/// config values, a copy of `config.extra`, and the extra fields of Invisible Joker, Caino,
+/// Yorick and Loyalty Card. `forced_selection`, `perma_bonus` and `hands_played_at_create`
+/// come from the card and the game.
+fn ability_for(c: &jackdaw_data::Center) -> Ability {
+    let num = |k: &str| c.config_num(k);
+    let mut ability = Ability {
+        mult: num("mult").unwrap_or(0.0),
+        h_mult: num("h_mult").unwrap_or(0.0),
+        h_x_mult: num("h_x_mult").unwrap_or(0.0),
+        h_dollars: num("h_dollars").unwrap_or(0.0),
+        p_dollars: num("p_dollars").unwrap_or(0.0),
+        t_mult: num("t_mult").unwrap_or(0.0),
+        t_chips: num("t_chips").unwrap_or(0.0),
+        x_mult: num("Xmult").unwrap_or(1.0),
+        h_size: num("h_size").unwrap_or(0.0),
+        d_size: num("d_size").unwrap_or(0.0),
+        extra: Extra::from_config(c.config("extra")),
+        extra_value: 0.0,
+        // The old center's bonus is subtracted from the old table, which set_ability then
+        // discards, so the new bonus is just the new center's.
+        bonus: num("bonus").unwrap_or(0.0),
+        ..Ability::default()
+    };
+    match c.name {
+        "Invisible Joker" => ability.invis_rounds = Some(0.0),
+        "Caino" => ability.caino_xmult = Some(1.0),
+        "Yorick" => {
+            ability.yorick_discards = ability.extra.table().and_then(|t| t.num("discards"))
+        }
+        "Loyalty Card" => {
+            ability.burnt_hand = Some(0.0);
+            ability.loyalty_remaining = ability.extra.table().and_then(|t| t.num("every"));
+        }
+        _ => {}
+    }
+    ability
+}
+
+/// [`ability_for`] by center index.
+static ABILITIES: std::sync::LazyLock<Vec<Ability>> =
+    std::sync::LazyLock::new(|| jackdaw_data::CENTERS.iter().map(ability_for).collect());
+
+/// Each front's suit and rank, by `P_CARDS` index.
+static FRONTS: std::sync::LazyLock<Vec<(Suit, Rank)>> = std::sync::LazyLock::new(|| {
+    jackdaw_data::P_CARDS
+        .iter()
+        .map(|p| {
+            (
+                Suit::from_name(p.suit).expect("front suit"),
+                Rank::from_name(p.value).expect("front value"),
+            )
+        })
+        .collect()
+});
+
 /// The game values `Card:set_cost` reads.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct CostContext {
@@ -676,8 +730,9 @@ impl Card {
         self.center().effect
     }
 
+    /// `ability.effect == 'Stone Card'`: only the Stone Card's center has that effect.
     pub fn is_stone(&self) -> bool {
-        self.effect() == Some("Stone Card")
+        self.center == centers::M_STONE
     }
 
     pub fn is_joker(&self) -> bool {
@@ -696,45 +751,14 @@ impl Card {
     /// side effects: marking `G.GAME.used_jokers` for every center of this name, the To Do List
     /// hand roll ([`Card::roll_to_do_hand`]) and the boss re-debuff on a non-initial call.
     pub fn set_ability(&mut self, center: CenterId, hands_played: f64) {
-        let c = center.get();
-        let num = |k: &str| c.config_num(k);
-        let old = std::mem::take(&mut self.ability);
-        let mut ability = Ability {
-            mult: num("mult").unwrap_or(0.0),
-            h_mult: num("h_mult").unwrap_or(0.0),
-            h_x_mult: num("h_x_mult").unwrap_or(0.0),
-            h_dollars: num("h_dollars").unwrap_or(0.0),
-            p_dollars: num("p_dollars").unwrap_or(0.0),
-            t_mult: num("t_mult").unwrap_or(0.0),
-            t_chips: num("t_chips").unwrap_or(0.0),
-            x_mult: num("Xmult").unwrap_or(1.0),
-            h_size: num("h_size").unwrap_or(0.0),
-            d_size: num("d_size").unwrap_or(0.0),
-            extra: Extra::from_config(c.config("extra")),
-            extra_value: 0.0,
-            forced_selection: old.forced_selection,
-            perma_bonus: old.perma_bonus,
-            // The old center's bonus is subtracted from the old table, which set_ability then
-            // discards, so the new bonus is just the new center's.
-            bonus: num("bonus").unwrap_or(0.0),
-            hands_played_at_create: hands_played,
-            ..Ability::default()
-        };
-        match c.name {
-            "Invisible Joker" => ability.invis_rounds = Some(0.0),
-            "Caino" => ability.caino_xmult = Some(1.0),
-            "Yorick" => {
-                ability.yorick_discards = ability.extra.table().and_then(|t| t.num("discards"))
-            }
-            "Loyalty Card" => {
-                ability.burnt_hand = Some(0.0);
-                ability.loyalty_remaining = ability.extra.table().and_then(|t| t.num("every"));
-            }
-            _ => {}
-        }
+        let old = &self.ability;
+        let mut ability = ABILITIES[usize::from(center.0)].clone();
+        ability.forced_selection = old.forced_selection;
+        ability.perma_bonus = old.perma_bonus;
+        ability.hands_played_at_create = hands_played;
         self.center = center;
         self.ability = ability;
-        self.base_cost = c.cost.unwrap_or(1.0);
+        self.base_cost = center.get().cost.unwrap_or(1.0);
     }
 
     /// The To Do List hand roll inside `Card:set_ability` (card.lua:311-321): a random visible
@@ -1068,5 +1092,15 @@ mod tests {
         let g = Card::new(2, glass, card_by_key("S_2"), 0.0, &CostContext::default());
         assert_eq!(g.ability.x_mult, 2.0);
         assert_eq!(g.get_chip_x_mult(), 2.0);
+    }
+
+    #[test]
+    fn only_the_stone_card_has_the_stone_effect() {
+        let stone: Vec<&str> = jackdaw_data::CENTERS
+            .iter()
+            .filter(|c| c.effect == Some("Stone Card"))
+            .map(|c| c.key)
+            .collect();
+        assert_eq!(stone, ["m_stone"], "Card::is_stone compares the center");
     }
 }

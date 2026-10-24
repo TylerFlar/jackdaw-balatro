@@ -243,8 +243,24 @@ impl Game {
     /// `G.hand:sort()` with `G.hand.config.sort` (cardarea.lua:577-590).
     pub(crate) fn sort_hand(&mut self) {
         let suit = self.gs.hand_sort == HandSort::SuitDesc;
-        // get_nominal is unique per card (unique_val), so the order is total.
-        self.gs.areas.hand.sort_by(|a, b| {
+        let hand = &mut self.gs.areas.hand;
+        // get_nominal is unique per card (unique_val), so the order is total and every correct
+        // sort gives the same hand. After a draw only the new last card is out of place: move it
+        // into position.
+        let n = hand.len();
+        let mut keys = [0.0; 64];
+        if (2..=keys.len()).contains(&n) {
+            for (k, c) in keys.iter_mut().zip(hand.iter()) {
+                *k = c.get_nominal(suit);
+            }
+            let (rest, last) = (&keys[..n - 1], keys[n - 1]);
+            if rest.windows(2).all(|w| w[0] > w[1]) {
+                let at = rest.partition_point(|&k| k > last);
+                hand[at..].rotate_right(1);
+                return;
+            }
+        }
+        hand.sort_by(|a, b| {
             b.get_nominal(suit)
                 .partial_cmp(&a.get_nominal(suit))
                 .expect("nominals are finite")
@@ -325,7 +341,7 @@ impl Game {
         let highlighted = self.sorted_highlighted();
         for id in self.gs.areas.ids(AreaId::Jokers) {
             let mut ctx = crate::joker::Ctx::new(crate::joker::Kind::PreDiscard);
-            ctx.full_hand = highlighted.clone();
+            ctx.full_hand = &highlighted;
             ctx.hook = hook;
             self.calculate_joker(id, &mut ctx);
         }
@@ -336,7 +352,7 @@ impl Game {
             for j in self.gs.areas.ids(AreaId::Jokers) {
                 let mut ctx = crate::joker::Ctx::new(crate::joker::Kind::Discard);
                 ctx.other_card = Some(id);
-                ctx.full_hand = highlighted.clone();
+                ctx.full_hand = &highlighted;
                 if let Some(ret) = self.calculate_joker(j, &mut ctx)
                     && ret.remove
                 {
@@ -361,7 +377,7 @@ impl Game {
         if !destroyed.is_empty() {
             for j in self.gs.areas.ids(AreaId::Jokers) {
                 let mut ctx = crate::joker::Ctx::new(crate::joker::Kind::RemovePlayingCards);
-                ctx.removed = destroyed.clone();
+                ctx.removed = &destroyed;
                 self.eval_joker(j, &mut ctx);
             }
         }

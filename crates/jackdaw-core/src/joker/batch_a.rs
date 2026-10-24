@@ -32,7 +32,7 @@ fn suit_mult(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
     if ctx.kind != Kind::Individual || ctx.cardarea != Some(AreaId::Play) {
         return None;
     }
-    let suit = Suit::from_name(&g.extra_str(id, "suit")).expect("Suit Mult suit");
+    let suit = Suit::from_name(g.extra_str(id, "suit")).expect("Suit Mult suit");
     let other = ctx.other_card?;
     let smeared = g.has_joker("Smeared Joker");
     if g.card(other).is_suit(suit, false, false, smeared) == Some(true) {

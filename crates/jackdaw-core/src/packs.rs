@@ -90,7 +90,7 @@ impl Game {
         while i <= size {
             let card = match kind {
                 "Arcana" => {
-                    if self.gs.sets.used_vouchers.contains("v_omen_globe")
+                    if self.gs.sets.used_vouchers.contains(jackdaw_data::centers::V_OMEN_GLOBE)
                         && self.gs.rng.random("omen_globe") > 0.8
                     {
                         self.create_card(CardSpec::new(PoolType::Spectral, area, "ar2").soulable())
@@ -99,7 +99,7 @@ impl Game {
                     }
                 }
                 "Celestial" => {
-                    let forced = if self.gs.sets.used_vouchers.contains("v_telescope") && i == 1.0 {
+                    let forced = if self.gs.sets.used_vouchers.contains(jackdaw_data::centers::V_TELESCOPE) && i == 1.0 {
                         self.telescope_planet()
                     } else {
                         None
@@ -329,7 +329,7 @@ impl Game {
     pub(crate) fn pack_dealt(&mut self) {
         let ids = self.gs.areas.ids(AreaId::Hand);
         if let Some(pack) = self.gs.pack.as_mut() {
-            pack.dealt = ids;
+            pack.dealt = ids.to_vec();
         }
     }
 }

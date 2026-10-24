@@ -9,6 +9,7 @@ use jackdaw_data::{
 use crate::area::AreaId;
 use crate::card::{Card, CostContext, EditionKind};
 use crate::game::Game;
+use crate::rng::Key;
 
 /// `get_current_pool`'s `_type` for center pools.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -133,29 +134,26 @@ impl<'a> CardSpec<'a> {
     }
 }
 
-/// A culled pool: `None` marks an `'UNAVAILABLE'` slot.
-pub struct Pool {
-    pub entries: Vec<Option<CenterId>>,
-    pub key: String,
-}
-
 impl Game {
-    /// `get_current_pool(_type, _rarity, _legendary, _append)` (common_events.lua:1963-2053).
-    pub fn get_current_pool(
+    /// `get_current_pool(_type, _rarity, _legendary, _append)` (common_events.lua:1963-2053) and
+    /// the draw from it, `pseudorandom_element(_pool, pseudoseed(_pool_key))` with its
+    /// `'UNAVAILABLE'` resamples (2097-2104). Building the pool draws nothing, so it isn't built:
+    /// a drawn slot is checked on its own, and the other slots only after a miss, to tell an empty
+    /// pool (whose one-entry fallback Lua draws with that same first seed). `key` replaces the
+    /// pool key (`get_next_voucher_key`'s `'Voucher_fromtag'`).
+    pub fn pick_from_current_pool(
         &mut self,
         ty: PoolType,
         rarity: Option<f64>,
         legendary: bool,
         append: &str,
-    ) -> Pool {
+        key: Option<&str>,
+    ) -> CenterId {
         let ante = self.gs.round_resets.ante;
-        let (start, key): (&'static [CenterId], String) = if ty == PoolType::Joker {
+        let (start, pool_key) = if ty == PoolType::Joker {
             let roll = match rarity {
                 Some(r) => r,
-                None => self
-                    .gs
-                    .rng
-                    .random(&crate::rng::Key::new("rarity").n(ante).s(append)),
+                None => self.gs.rng.random(&Key::new("rarity").n(ante).s(append)),
             };
             let r = if legendary {
                 4
@@ -166,75 +164,84 @@ impl Game {
             } else {
                 1
             };
-            let key = format!("Joker{r}{}", if legendary { "" } else { append });
+            let key = if legendary {
+                Key::new("Joker4")
+            } else {
+                Key::new("Joker").i(r as u64).s(append).n(ante)
+            };
             (JOKER_RARITY_POOLS[r - 1], key)
         } else {
-            (ty.starting_pool(), format!("{}{append}", ty.name()))
+            (ty.starting_pool(), Key::new(ty.name()).s(append).n(ante))
         };
+        let pool_key = key.map_or(pool_key, Key::new);
         let showman = self.has_joker("Showman");
-        let mut entries = Vec::with_capacity(start.len());
-        let mut size = 0;
-        for &id in start {
-            let v = id.get();
-            let mut add = false;
-            // Lua also needs `v.unlocked ~= false or v.rarity == 4`, where `unlocked` comes from
-            // the profile (game.lua:741-751). The engines assume a fully unlocked profile, as the
-            // Python engine did, so every center passes; the prototypes' flags are a fresh
-            // profile's.
-            if ty == PoolType::Enhanced {
-                add = true;
-            } else if !(self.gs.sets.used_jokers.contains(v.key) && !showman) {
-                if v.set == CenterSet::Voucher {
-                    if !self.gs.sets.used_vouchers.contains(v.key) {
-                        let requires_met = v
-                            .requires
-                            .iter()
-                            .all(|r| self.gs.sets.used_vouchers.contains(r));
-                        let in_shop = self.gs.areas.shop_vouchers.iter().any(|c| c.center == id);
-                        add = requires_met && !in_shop;
-                    }
-                } else if v.set == CenterSet::Planet {
-                    let softlock = v.config("softlock").and_then(|x| x.as_bool()) == Some(true);
-                    let hand = v
-                        .config("hand_type")
-                        .and_then(|x| x.as_str())
-                        .and_then(crate::hand_eval::HandType::from_name);
-                    add = !softlock || hand.is_some_and(|h| self.gs.hand(h).played > 0.0);
-                } else if let Some(gate) = v.enhancement_gate {
-                    add = self.playing_cards().any(|c| c.center.key() == gate);
-                } else {
-                    add = true;
+        let n = start.len();
+        let first = start[crate::rng::element_index(n, self.gs.rng.seed(&pool_key))];
+        if self.in_pool(ty, first, showman) {
+            return first;
+        }
+        if !start.iter().any(|&c| self.in_pool(ty, c, showman)) {
+            return ty.fallback();
+        }
+        let mut it = 1;
+        loop {
+            it += 1;
+            let seed = self.gs.rng.seed(&Key::new(&pool_key).s("_resample").i(it));
+            let c = start[crate::rng::element_index(n, seed)];
+            if self.in_pool(ty, c, showman) {
+                return c;
+            }
+        }
+    }
+
+    /// Whether `id`, a center of the starting pool, has its key in a `ty` pool rather than
+    /// `'UNAVAILABLE'` (common_events.lua:1987-2036). Lua also needs `v.unlocked ~= false or
+    /// v.rarity == 4`, where `unlocked` comes from the profile (game.lua:741-751). The engine
+    /// assumes a fully unlocked profile, so every center passes; the prototypes' flags are a
+    /// fresh profile's.
+    fn in_pool(&self, ty: PoolType, id: CenterId, showman: bool) -> bool {
+        let v = id.get();
+        let sets = &self.gs.sets;
+        let mut add = false;
+        if ty == PoolType::Enhanced {
+            add = true;
+        } else if !(sets.used_jokers.contains(id) && !showman) {
+            if v.set == CenterSet::Voucher {
+                if !sets.used_vouchers.contains(id) {
+                    let requires_met = v.requires.iter().all(|r| {
+                        jackdaw_data::center_by_key(r).is_some_and(|c| sets.used_vouchers.contains(c))
+                    });
+                    let in_shop = self.gs.areas.shop_vouchers.iter().any(|c| c.center == id);
+                    add = requires_met && !in_shop;
                 }
-                if v.name == "Black Hole" || v.name == "The Soul" {
-                    add = false;
-                }
-            }
-            if let Some(f) = v.no_pool_flag
-                && self.pool_flag(f)
-            {
-                add = false;
-            }
-            if let Some(f) = v.yes_pool_flag
-                && !self.pool_flag(f)
-            {
-                add = false;
-            }
-            if add && !self.gs.sets.banned_keys.contains(v.key) {
-                entries.push(Some(id));
-                size += 1;
+            } else if v.set == CenterSet::Planet {
+                let softlock = v.config("softlock").and_then(|x| x.as_bool()) == Some(true);
+                let hand = v
+                    .config("hand_type")
+                    .and_then(|x| x.as_str())
+                    .and_then(crate::hand_eval::HandType::from_name);
+                add = !softlock || hand.is_some_and(|h| self.gs.hand(h).played > 0.0);
+            } else if let Some(gate) = v.enhancement_gate {
+                let gate = jackdaw_data::center_by_key(gate);
+                add = self.playing_cards().any(|c| Some(c.center) == gate);
             } else {
-                entries.push(None);
+                add = true;
+            }
+            if id == centers::C_BLACK_HOLE || id == centers::C_SOUL {
+                add = false;
             }
         }
-        if size == 0 {
-            entries = vec![Some(ty.fallback())];
+        if let Some(f) = v.no_pool_flag
+            && self.pool_flag(f)
+        {
+            add = false;
         }
-        let key = if legendary {
-            key
-        } else {
-            crate::rng::Key::new(&key).n(ante).to_string()
-        };
-        Pool { entries, key }
+        if let Some(f) = v.yes_pool_flag
+            && !self.pool_flag(f)
+        {
+            add = false;
+        }
+        add && !sets.banned_keys.contains(v.key)
     }
 
     /// `G.GAME.pool_flags[flag]` is truthy.
@@ -246,30 +253,10 @@ impl Game {
             .is_some_and(crate::state::LuaValue::truthy)
     }
 
-    /// `pseudorandom_element(_pool, pseudoseed(key))`, resampling `'UNAVAILABLE'` slots.
-    pub fn pick_from_pool(&mut self, pool: &Pool) -> CenterId {
-        let n = pool.entries.len();
-        let seed = self.gs.rng.seed(&pool.key);
-        let mut pick = pool.entries[crate::rng::element_index(n, seed)];
-        let mut it = 1;
-        while pick.is_none() {
-            it += 1;
-            let seed = self
-                .gs
-                .rng
-                .seed(&crate::rng::Key::new(&pool.key).s("_resample").i(it));
-            pick = pool.entries[crate::rng::element_index(n, seed)];
-        }
-        pick.expect("resampled")
-    }
-
     /// `get_next_voucher_key(_from_tag)` (common_events.lua:1901-1912).
     pub fn get_next_voucher_key(&mut self, from_tag: bool) -> Option<CenterId> {
-        let mut pool = self.get_current_pool(PoolType::Voucher, None, false, "");
-        if from_tag {
-            pool.key = "Voucher_fromtag".to_owned();
-        }
-        Some(self.pick_from_pool(&pool))
+        let key = from_tag.then_some("Voucher_fromtag");
+        Some(self.pick_from_current_pool(PoolType::Voucher, None, false, "", key))
     }
 
     /// The values `Card:set_cost` reads for a card in `area`.
@@ -287,9 +274,19 @@ impl Game {
     /// `Card(..., front, center)`: a new card with the next sort id; `set_ability` marks every
     /// center of its name in `G.GAME.used_jokers` (card.lua:349-354).
     pub fn new_card(&mut self, center: CenterId, front: Option<CardId>, area: AreaId) -> Card {
-        let sort_id = self.gs.next_sort_id();
         let cost = self.cost_context(area);
-        let mut card = Card::new(sort_id, center, front, self.gs.hands_played, &cost);
+        self.new_card_with_cost(center, front, &cost)
+    }
+
+    /// [`Game::new_card`] with the cost values already read.
+    pub fn new_card_with_cost(
+        &mut self,
+        center: CenterId,
+        front: Option<CardId>,
+        cost: &CostContext,
+    ) -> Card {
+        let sort_id = self.gs.next_sort_id();
+        let mut card = Card::new(sort_id, center, front, self.gs.hands_played, cost);
         self.set_ability_effects(&mut card);
         card
     }
@@ -299,7 +296,7 @@ impl Game {
     /// (card.lua:311-322). The boss re-debuff of a non-initial call is the caller's.
     fn set_ability_effects(&mut self, card: &mut Card) {
         for &c in jackdaw_data::same_name_centers(card.center) {
-            self.gs.sets.used_jokers.insert(c.key());
+            self.gs.sets.used_jokers.insert(c);
         }
         if card.name() == "To Do List" {
             // `pairs(G.GAME.hands)` order (card.lua:312-315).
@@ -394,7 +391,7 @@ impl Game {
             if matches!(
                 ty,
                 PoolType::Tarot | PoolType::Spectral | PoolType::TarotPlanet
-            ) && !(self.gs.sets.used_jokers.contains("c_soul") && !showman)
+            ) && !(self.gs.sets.used_jokers.contains(jackdaw_data::centers::C_SOUL) && !showman)
                 && self
                     .gs
                     .rng
@@ -404,7 +401,7 @@ impl Game {
                 forced = Some(centers::C_SOUL);
             }
             if matches!(ty, PoolType::Planet | PoolType::Spectral)
-                && !(self.gs.sets.used_jokers.contains("c_black_hole") && !showman)
+                && !(self.gs.sets.used_jokers.contains(jackdaw_data::centers::C_BLACK_HOLE) && !showman)
                 && self
                     .gs
                     .rng
@@ -425,10 +422,7 @@ impl Game {
                 }
                 c
             }
-            _ => {
-                let pool = self.get_current_pool(ty, rarity, legendary, append);
-                self.pick_from_pool(&pool)
-            }
+            _ => self.pick_from_current_pool(ty, rarity, legendary, append, None),
         };
         let front = if matches!(ty, PoolType::Base | PoolType::Enhanced) {
             Some(self.random_front(&crate::rng::Key::new("front").s(append).n(ante)))

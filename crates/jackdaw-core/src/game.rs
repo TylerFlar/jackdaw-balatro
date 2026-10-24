@@ -255,6 +255,10 @@ impl Game {
 
     /// Queue an event (`G.E_MANAGER:add_event`).
     pub fn queue(&mut self, event: Event) {
+        // A copied game starts with no room in its (empty) queue; a step queues a dozen events.
+        if self.rt.queue.capacity() == 0 {
+            self.rt.queue.reserve(16);
+        }
         self.rt.queue.push_back(event);
     }
 

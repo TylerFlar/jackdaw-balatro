@@ -20,7 +20,7 @@ impl Game {
         let cost = card.cost;
         let extra = card.ability.extra.num();
         self.gs.areas.emplace(AreaId::Play, card, false, false);
-        self.gs.sets.used_vouchers.insert(center.key());
+        self.gs.sets.used_vouchers.insert(center);
         self.ease_dollars(-cost);
         self.gs.current_round.voucher = None;
         self.apply_voucher(center.get().name, extra);

@@ -119,9 +119,9 @@ impl Game {
     }
 
     /// `self.ability.extra.<key>` as a string.
-    pub fn extra_str(&self, id: u32, key: &str) -> String {
+    pub fn extra_str(&self, id: u32, key: &str) -> &str {
         match self.card(id).ability.extra.table().and_then(|t| t.get(key)) {
-            Some(ExtraVal::Str(s)) => s.as_str().to_owned(),
+            Some(ExtraVal::Str(s)) => s.as_str(),
             other => panic!("card {id}: ability.extra.{key} is not a string ({other:?})"),
         }
     }
@@ -224,7 +224,7 @@ impl Game {
     }
 
     /// The jokers' sort ids, in order.
-    pub fn joker_ids(&self) -> Vec<u32> {
+    pub fn joker_ids(&self) -> crate::area::Ids {
         self.gs.areas.ids(AreaId::Jokers)
     }
 }

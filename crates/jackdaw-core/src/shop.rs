@@ -115,7 +115,7 @@ impl Game {
         let total =
             g.joker_rate + g.tarot_rate + g.planet_rate + g.playing_card_rate + g.spectral_rate;
         let polled = self.gs.rng.random(&crate::rng::Key::new("cdt").n(ante)) * total;
-        let illusion = self.gs.sets.used_vouchers.contains("v_illusion");
+        let illusion = self.gs.sets.used_vouchers.contains(jackdaw_data::centers::V_ILLUSION);
         // The table's entries are built before the loop, so Illusion's roll always happens.
         let playing = if illusion && self.gs.rng.random("illusion") > 0.6 {
             PoolType::Enhanced
