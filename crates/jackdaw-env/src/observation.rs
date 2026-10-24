@@ -1,14 +1,15 @@
-//! Observation encoder v1: a bit-for-bit port of `jackdaw/env/observation.py`
-//! (`encode_observation`).
+//! Observation encoder v1: a bit-for-bit port of the Python encoder `jackdaw/env/observation.py`
+//! had (its `encode_observation` now calls this one).
 //!
-//! The output equals the Python encoder's on the same state: the same arrays and shapes, the
-//! same `float32` values, quirks included. Every feature is computed in `f64` the way Python
-//! computes it (Python's `min`/`max` tie rules, float floor division, the platform libm's `log2`
-//! and `log1p`, which CPython calls too) and rounded to `f32` once, as a numpy assignment does.
+//! The output equals the Python encoder's on the same state (`tests/env/test_rust_observation.py`
+//! checks it against that encoder's frozen outputs): the same arrays and shapes, the same
+//! `float32` values, quirks included. Every feature is computed in `f64` the way Python computes
+//! it (Python's `min`/`max` tie rules, float floor division, the platform libm's `log2` and
+//! `log1p`, which CPython calls too) and rounded to `f32` once, as a numpy assignment does.
 //!
 //! Quirks kept on purpose (encoder v2 is where they get fixed):
 //! - The flag features are dead. `global[29]` packs `gs["four_fingers"]`, `["shortcut"]`,
-//!   `["smeared"]` and `["splash"]`, keys the Python engine never sets, so it is always 0; for the
+//!   `["smeared"]` and `["splash"]`, keys the Python engine never set, so it is always 0; for the
 //!   same reason a playing card's `is_scoring` (row 9) is just "not debuffed".
 //! - `global[26]` looks the blind key up among the center keys, where no blind is: always 0.
 //! - The best-hand analysis runs `get_best_hand` on the whole face-up hand, so flushes and
@@ -17,7 +18,7 @@
 //! - A joker's `ability_extra` (row 13) sums a table's numbers in key order, a boolean counting
 //!   as 0 or 1.
 //! - Joker Stencil and Throwback encode `x_mult` 1 and Swashbuckler its config `mult`: the Python
-//!   engine never runs `Card:update`, so its live jokers keep their `set_ability` values there
+//!   engine never ran `Card:update`, so its live jokers kept their `set_ability` values there
 //!   (the Rust engine and the snapshot hold Lua's per-frame values).
 
 mod analysis;
@@ -651,8 +652,8 @@ fn encode_playing_cards(cards: &[Card], scoring: &[bool], out: &mut [f32]) {
     }
 }
 
-/// `ability.mult` and `ability.x_mult` as the Python engine holds them: it never runs
-/// `Card:update`, so Joker Stencil's and Throwback's `x_mult` and Swashbuckler's `mult` keep their
+/// `ability.mult` and `ability.x_mult` as the Python engine held them: it never ran
+/// `Card:update`, so Joker Stencil's and Throwback's `x_mult` and Swashbuckler's `mult` kept their
 /// `set_ability` values, while the Rust engine holds Lua's per-frame values.
 fn python_mult_x_mult(c: &Card) -> (f64, f64) {
     let config = |key: &str, default: f64| c.center().config_num(key).unwrap_or(default);

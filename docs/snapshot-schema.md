@@ -3,11 +3,12 @@
 A snapshot is the complete, engine-agnostic state of a run. One format serves
 three purposes:
 
-- **Parity.** The Python oracle and the Rust engine both export snapshots, and
-  equal game states must give byte-identical canonical encodings (see
-  [Canonical encoding](#canonical-encoding)).
+- **Parity.** Equal game states give byte-identical canonical encodings (see
+  [Canonical encoding](#canonical-encoding)). The Rust engine was checked
+  against the Python reference engine snapshot by snapshot until the Python one
+  was retired; the parity fixtures keep the digests it produced.
 - **Golden v2.** `tests/fixtures/golden_v2.json` stores digests of snapshots
-  along the recorded tapes, so it doesn't depend on either engine's internals.
+  along the recorded tapes, so it doesn't depend on the engine's internals.
 - **`Game.to_dict()` / `Game.from_dict()`**, which are also what BalatroBot's
   `save`/`load` write and read in the sim.
 
@@ -20,10 +21,11 @@ happens next, and nothing else. It leaves out:
   center;
 - aliases (one object reachable from two places).
 
-`tests/parity/test_snapshot_roundtrip.py` proves completeness against the
-Python oracle. At every step of every tape, and along seeded fuzz runs, it
-rebuilds a state from the snapshot, applies the same action to both states, and
-requires identical snapshots afterwards.
+`tests/parity/test_rust_step.py` checks completeness: at every step of every
+tape it rebuilds the run from its snapshot before taking the tape's action, and
+the run must still reach every state golden v2 recorded.
+`tests/parity/test_rust_snapshot.py` re-exports every tape state and seeded fuzz
+state and requires the same snapshot.
 
 Field names follow Lua `G.GAME` where one exists. Values are JSON-like: `null`,
 booleans, numbers, strings, arrays and string-keyed objects.
@@ -220,5 +222,5 @@ In JSON text, a non-finite number is written as `{"$f": "inf"|"-inf"|"nan"}`.
 ## Versioning
 
 Adding, removing or renaming a field, or changing its meaning, bumps the schema
-version. The exporter, the Rust snapshot code and this document change in the
-same PR, and golden v2 is regenerated.
+version. The Rust snapshot code and this document change in the same PR, and
+the parity fixtures are refrozen (`scripts/refreeze.py`).

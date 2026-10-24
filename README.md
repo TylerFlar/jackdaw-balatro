@@ -84,8 +84,7 @@ crates/
 
 jackdaw/
   core/             The Python API: Game, read-only views, GameBuilder
-  engine/           The Python reference engine (the parity oracle the Rust engine is
-                    checked against) and the action types
+  engine/           The action types and the game's data tables (codegen input)
 
   env/              RL environment
     balatro_env.py    BalatroEnvironment — factored action interface
@@ -93,7 +92,7 @@ jackdaw/
     observation.py    Entity-based encoding (235-dim global + variable entities)
     vector_env.py     BalatroVectorEnv — many envs stepped in parallel in Rust
     action_space.py   23-type factored action space
-    game_interface.py GameAdapter protocol (DirectAdapter, OracleAdapter, BridgeAdapter)
+    game_interface.py GameAdapter protocol (DirectAdapter, BridgeAdapter)
     agents.py         Agent protocol + RandomAgent baseline
 
   bridge/           BalatroBot backends; LiveAdapter, the deviation catalog, lockstep

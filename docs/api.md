@@ -140,9 +140,9 @@ See [BalatroBot on the simulator](balatrobot).
 ## Observations
 
 `observation_buffer()` returns the RL observation (encoder v1) as raw float32 data, and
-`jackdaw.env.rust_observation.encode_game(game)` wraps it as an `Observation`. The environments
-in `jackdaw.env` (`BalatroEnvironment`, `BalatroGymnasiumEnv`, `BalatroVectorEnv`) build on
-this; see the [RL Project Guide](rl-guide).
+`jackdaw.env.encode_observation(game)` wraps it as an `Observation`; `jackdaw.env.get_action_mask(game)`
+gives the action mask. The environments in `jackdaw.env` (`BalatroEnvironment`,
+`BalatroGymnasiumEnv`, `BalatroVectorEnv`) build on these; see the [RL Project Guide](rl-guide).
 
 ## Speed
 

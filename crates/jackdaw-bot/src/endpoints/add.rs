@@ -3,10 +3,11 @@
 //! Ported from BalatroBot v1.5.2 (coder/balatrobot `9052d76f14723293f6c6b2cecaa791a5c4ae68f3`),
 //! `src/lua/endpoints/add.lua`, check for check. BalatroBot then calls Steamodded's
 //! `SMODS.add_card` (or `SMODS.add_booster_to_shop` for a pack); the sim runs
-//! [`jackdaw_core::game::Game::debug_add`], which follows the Python oracle where it has an
-//! `add` and Steamodded otherwise. The differences from the live game are listed in
-//! `docs/balatrobot.md` (and `docs/parity/gaps.md` B15, B18, B19). A key that names no card of
-//! its kind fails as `SMODS.add_card` does: `Failed to add card: <key>`.
+//! [`jackdaw_core::game::Game::debug_add`], which follows the retired Python engine where it had
+//! an `add` (the frozen parity setups depend on it) and Steamodded otherwise. The differences
+//! from the live game are listed in `docs/balatrobot.md` (and `docs/parity/gaps.md` B15, B18,
+//! B19). A key that names no card of its kind fails as `SMODS.add_card` does:
+//! `Failed to add card: <key>`.
 
 use jackdaw_core::card::{EditionKind, Seal};
 use jackdaw_core::debug::{AddKey, AddSpec};

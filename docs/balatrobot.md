@@ -61,15 +61,14 @@ dict), `bot_request(action)` (the request that performs an action, or `None`) an
 `legal_actions(Legality.BALATROBOT)`. `jackdaw._core.BotSession` is the raw session (JSON text
 in and out) behind all of these.
 
-**`BridgeAdapter(SimBackend())`** plays the environment over the protocol: actions go out as
-requests, the mask and legal actions follow BALATROBOT legality, and a shadow run in the Python
-engine supplies `raw_state` and is checked against every response (`DivergenceError`).
-
-**`LiveAdapter`** (`jackdaw.bridge`; also what `BridgeAdapter(LiveBackend(...))` gives) plays the
-live game the same way, with a shadow run in the Rust engine: each request is taken by the
-shadow through this layer first, then sent to the game, and the game's view is compared with the
-shadow's `bot_view()`. Known Steamodded and BalatroBot differences are handled by a deviation
-catalog; `jackdaw lockstep` runs it at scale. See [Lockstep against the live game](live).
+**`LiveAdapter`** (`jackdaw.bridge`; also what `BridgeAdapter(backend)` gives) plays the
+environment over the protocol, with a shadow run in the Rust engine: each request is taken by
+the shadow through this layer first, then sent to the backend, and the backend's view is
+compared with the shadow's `bot_view()` (`DivergenceError` on a difference). The mask and legal
+actions follow BALATROBOT legality. Over `LiveBackend` that is the live game; known Steamodded
+and BalatroBot differences are handled by a deviation catalog, and `jackdaw lockstep` runs it at
+scale. Over `SimBackend()` it is BalatroBot's API on the simulator. See
+[Lockstep against the live game](live).
 
 ## Command-space policy
 
@@ -231,13 +230,13 @@ Besides the policy above:
   (BB-CASHOUT-RACE). A player can't cash out before the button is up, and the simulator
   pays the round's own total.
 - **`screenshot`** always fails with `Failed to encode screenshot` (nothing is drawn).
-- **`add`** (debug) follows the Python oracle, so parity setups stay exact: a joker's
-  `'edi'..ante` poll runs even when an edition is given (live skips it, gaps.md B15); a playing
-  card draws no `'front'..ante` card (live draws one, B18); an enhanced playing card isn't checked
-  against the boss (live debuffs it at once, B19). Stickers are forced as `force_stickers` does:
-  eternal and perishable together, on any joker. A voucher `add` puts in the shop has no buy
-  button live, so buying it raises in `buy.lua`; the simulator reports the same Lua error
-  (`INTERNAL_ERROR`).
+- **`add`** (debug) follows the retired Python engine, whose parity setups are frozen, so they
+  stay exact: a joker's `'edi'..ante` poll runs even when an edition is given (live skips it,
+  gaps.md B15); a playing card draws no `'front'..ante` card (live draws one, B18); an enhanced
+  playing card isn't checked against the boss (live debuffs it at once, B19). Stickers are
+  forced as `force_stickers` does: eternal and perishable together, on any joker. A voucher
+  `add` puts in the shop has no buy button live, so buying it raises in `buy.lua`; the simulator
+  reports the same Lua error (`INTERNAL_ERROR`).
 - **`rearrange`** also writes the new positions into `ability.order` and the shared
   `config.center.order` live; no rule reads them during a run, and the simulator doesn't.
 - **Test endpoints** (`--debug`) are BalatroBot's `test_endpoint`, `test_state_endpoint`,
@@ -256,7 +255,7 @@ Besides the policy above:
 - `tests/bot/test_bot_native.py`: every engine tape is replayed through the requests; each step's
   snapshot equals the native step's (the sort mode aside, as above).
 - `tests/parity/test_rust_setup.py`: the parity setups (`add`, `set`, `force_boss`) give the
-  oracle's snapshot in Rust.
+  snapshots the Python engine gave, frozen in `tests/fixtures/setup_boards.json`.
 
 Steamodded behaviour (`SMODS.add_card`, `SMODS.add_booster_to_shop`, `SMODS_BOOSTER_OPENED`) was
 read from Steamodded 1.0.0~BETA-1503a as installed with BalatroBot and from the Lovely dump of the

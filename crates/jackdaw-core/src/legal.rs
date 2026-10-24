@@ -1,7 +1,6 @@
-//! The legal actions at a decision point, in the form the Python engine's
-//! `get_legal_actions` lists them (`jackdaw/engine/actions.py`): one marker `PlayHand` and
-//! `Discard` (empty selections) for the hand, and each usable consumable with the default
-//! hand selection it would be used on.
+//! The legal actions at a decision point, in the form the Python engine's `get_legal_actions`
+//! listed them: one marker `PlayHand` and `Discard` (empty selections) for the hand, and each
+//! usable consumable with the default hand selection it would be used on.
 //!
 //! A consumable's default selection is the first `min_highlighted` cards of the hand, or else
 //! the first such combination it can be used on; Aura needs one editionless card.

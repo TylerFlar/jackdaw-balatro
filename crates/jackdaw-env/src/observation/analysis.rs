@@ -1,6 +1,6 @@
-//! The hand analysis encoder v1 runs over an area's face-up cards, with the Python engine's
-//! semantics: `_compute_hand_analysis` (`get_hand_eval_flags` + `get_best_hand`,
-//! `jackdaw/engine/hand_eval.py`) and `_analyze_draws` (`jackdaw/env/observation.py`).
+//! The hand analysis encoder v1 runs over an area's face-up cards, with the Python encoder's
+//! semantics: `_compute_hand_analysis` (the Python engine's `get_hand_eval_flags` and
+//! `get_best_hand`) and `_analyze_draws`.
 //!
 //! This is not [`jackdaw_core::hand_eval`]: that one follows Lua for played hands of at most five
 //! cards, while the encoder evaluates a whole hand, where the two disagree. Python's Two Pair

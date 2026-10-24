@@ -4,15 +4,17 @@ Known behaviour gaps between jackdaw and Balatro 1.0.1o, confirmed during the pl
 against both the Lua source and the Python engine. Line refs are into `balatro_source/`; refs
 marked `ledger:` were added when the gap was linked to its ledger rows (the plan gave none).
 
-Every gap is fixed in the Python oracle first, with a regression test that cites the Lua lines,
-then in Rust (in the same PR if that subsystem is already ported). While a fix is pending, Rust
-stays oracle-compatible behind an `// AUDIT-Gxx` marker. The ledger rows that carry a gap id in
-their `gap` column (status `gap`) show where the logic lives; see [README.md](README.md).
+While the Python oracle existed, every gap was fixed there first, with a regression test that
+cites the Lua lines, then in Rust (in the same PR if that subsystem was already ported); while a
+fix was pending, Rust stayed oracle-compatible behind an `// AUDIT-Gxx` marker. The oracle is
+retired now: a gap is fixed in Rust, with a regression test that cites the Lua lines, and the
+`python fix` column and the `python-fixed` status are history. The ledger rows that carry a gap
+id in their `gap` column (status `gap`) show where the logic lives; see [README.md](README.md).
 
 Columns: `python fix` and `rust` take the PR or commit and code location of each fix, `test` the
 regression test id. Status is one of `open`, `in-progress`, `python-fixed` (fixed in the Python
-oracle with its regression test; the Rust port follows the fixed oracle), `fixed` (both engines,
-test landed) or `wontfix` (with the reason in the summary).
+oracle with its regression test; the Rust port follows the fixed oracle), `fixed` (fixed, test
+landed; in both engines while the oracle existed) or `wontfix` (with the reason in the summary).
 
 ## Gameplay gaps
 
@@ -138,17 +140,24 @@ test landed) or `wontfix` (with the reason in the summary).
 
 ### Related fixes without a gap id
 
-Found while fixing the register; each is covered by a regression test in `tests/engine/audit/`.
+Found while fixing the register; each was covered by a regression test in the oracle's
+`tests/engine/audit/`, retired with it. The Rust tests are named below.
 
 - The Wheel of Fortune, Ectoplasm and Hex draw from every editionless Joker, debuffed ones
   included (`eligible_strength_jokers` / `eligible_editionless_jokers`, card.lua:4209-4224); the
   oracle skipped debuffed jokers in both the use gate and the pick.
-  Test: `tests/engine/audit/test_consumables.py::TestDebuffedJokersAreEligible`.
+  Test: `tests/engine/audit/test_consumables.py::TestDebuffedJokersAreEligible`; on Rust,
+  `tests/parity/test_audit_debuffed_jokers.py::test_hex_targets_a_debuffed_joker`,
+  `tests/parity/test_consumables_rust.py::test_wheel_of_fortune_on_debuffed_jokers` and
+  `::test_ectoplasm_on_a_debuffed_joker_adds_no_slot`.
 - Joker Stencil counts every Stencil in G.jokers, debuffed ones included (card.lua:4203-4208;
   when it scores is G58); Swashbuckler sums the sell value of every other joker, debuffed ones
   included (card.lua:4240-4248); a round's Chaos the Clown free rerolls come from `find_joker`,
   which skips a debuffed Chaos (state_events.lua:311).
-  Test: `tests/engine/audit/test_jokers.py::TestPerFrameValues`.
+  Test: `tests/engine/audit/test_jokers.py::TestPerFrameValues`; on Rust,
+  `tests/parity/test_audit_debuffed_jokers.py::test_stencil_counts_a_debuffed_stencil`,
+  `::test_a_debuffed_chaos_gives_no_free_reroll` and
+  `tests/parity/test_jokers_batch_b.py::test_swashbuckler_sums_the_other_jokers`.
 
 ## Not gameplay, but fix them
 

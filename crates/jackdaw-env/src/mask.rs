@@ -6,7 +6,7 @@
 //! a consumable is usable when [`Game::consumable_use`] finds a selection, a pack card can be
 //! picked when the engine's legal actions would offer it. The one rule the mask states itself is
 //! the shop's buy space, which follows `check_for_buy_space` (a Negative card raises either
-//! limit by one) as the Python mask does.
+//! limit by one) as the Python mask did.
 
 use jackdaw_core::action::Action;
 use jackdaw_core::area::AreaId;
@@ -55,7 +55,7 @@ pub struct ActionMask {
     /// Per type, which entities it may target (present only for types that have legal targets).
     entity: [Vec<bool>; NUM_ACTION_TYPES],
     has_entity: [bool; NUM_ACTION_TYPES],
-    /// The types with an entity mask, in the order the Python mask adds them.
+    /// The types with an entity mask, in the order the Python mask added them.
     order: Vec<ActionType>,
     pub min_card_select: usize,
     pub max_card_select: usize,
@@ -121,7 +121,7 @@ impl ActionMask {
     }
 
     /// Fill `t`'s entity mask with `f(i)` for `n` entities; keep it (and allow `t`) when any
-    /// entity passes, as the Python helpers do with `if mask.any()`.
+    /// entity passes, as the Python helpers did with `if mask.any()`.
     fn entities(&mut self, t: ActionType, n: usize, mut f: impl FnMut(usize) -> bool) {
         if n == 0 {
             return;

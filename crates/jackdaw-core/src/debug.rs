@@ -2,13 +2,12 @@
 //! `set {shop: true}` (third_party/balatrobot/v1.5.2/src/lua/endpoints/add.lua, set.lua), plus
 //! the parity harness's setup operations (`tests/parity/harness.py`).
 //!
-//! These write state no player action can reach, so they follow what the Python oracle's
-//! versions do (`jackdaw/engine/debug.py`, formerly `SimBackend._handle_add` / `_handle_set` /
-//! `_restock_shop`): a parity spec's setup gives the same canonical snapshot in both engines
-//! (`tests/parity/test_rust_setup.py`). Where the oracle has no behaviour (vouchers, packs,
-//! consumable editions, sticker counts) they follow BalatroBot and Steamodded's
-//! `SMODS.add_card`. The known differences from the live game are rows in
-//! `docs/parity/gaps.md`:
+//! These write state no player action can reach, so they follow what the retired Python
+//! engine's versions did (its `debug.py`): a parity spec's setup gives the canonical snapshot
+//! that engine gave, which `tests/parity/test_rust_setup.py` checks against the frozen digests.
+//! Where the Python engine had no behaviour (vouchers, packs, consumable editions, sticker
+//! counts) they follow BalatroBot and Steamodded's `SMODS.add_card`. The known differences
+//! from the live game are rows in `docs/parity/gaps.md`:
 //!
 //! - a joker's `'edi'..ante` edition poll runs even when an edition is given (the live game
 //!   skips it, B15);
@@ -141,7 +140,8 @@ impl Game {
                 if spec.rental {
                     card.set_rental(true, &cost);
                 }
-                // create_card's poll, which the oracle runs even when an edition is given (B15).
+                // create_card's poll, which the Python engine ran even when an edition was given
+                // (B15).
                 let ante = crate::lua::tostring_number(self.gs.round_resets.ante);
                 let polled = self.poll_edition(&format!("edi{ante}"), 1.0, false, false);
                 if spec.edition.is_none() {
@@ -211,7 +211,7 @@ impl Game {
                 if in_round {
                     self.gs.areas.emplace(AreaId::Hand, card, false, false);
                 } else {
-                    // The oracle appends to its deck list: the top of the draw pile.
+                    // The Python engine appended to its deck list: the top of the draw pile.
                     let mut card = card;
                     card.facing = crate::card::Facing::Back;
                     self.gs.areas.deck.push(card);
@@ -223,8 +223,8 @@ impl Game {
         Ok(id)
     }
 
-    /// Draw up to the hand size (the oracle's `_draw_hand`): `min(#deck, size - #hand)` cards,
-    /// each sorted in.
+    /// Draw up to the hand size (the Python engine's `_draw_hand`): `min(#deck, size - #hand)`
+    /// cards, each sorted in.
     fn fill_hand(&mut self) {
         self.poll_hand_size();
         let room = self.gs.hand_size - self.gs.areas.hand.len() as f64;
@@ -320,8 +320,9 @@ impl Game {
     }
 
     /// Apply one setup operation of a parity spec (`tests/parity/harness.py`): `force_boss`,
-    /// `action`, `add` (oracle names: `{"key": "H_A", "seal": "Red", "enhancement": "m_steel",
-    /// "edition": "foil"}`) or `set` (`dollars`, `chips`, `hands_left`, `ante`).
+    /// `action`, `add` (the Python engine's names: `{"key": "H_A", "seal": "Red",
+    /// "enhancement": "m_steel", "edition": "foil"}`) or `set` (`dollars`, `chips`,
+    /// `hands_left`, `ante`).
     pub fn apply_setup_op(&mut self, op: &Value) -> Result<(), String> {
         let kind = op
             .get("op")

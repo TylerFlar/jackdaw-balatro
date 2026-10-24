@@ -28,7 +28,8 @@ What was reviewed (installed under `%APPDATA%/Balatro/Mods/`; only these three m
   `core/server.lua`, `endpoints/load.lua` and `utils/openrpc.json` differ, plus a debug shuffle
   hook in the installed `balatrobot.lua` (see B04). Reviewed: the entry file, `settings.lua`, every
   endpoint and the gamestate builder.
-- **The Python oracle** at `port/rust-core` `c494415`, cross-referenced for every entry.
+- **The Python oracle** at `port/rust-core` `c494415`, cross-referenced for every entry. It has
+  since been retired; its `jackdaw/engine/` paths below are at that commit.
 
 Patch numbers (`#n`) are the 1-based position of a `[[patches]]` block in its toml file. Appendix A
 classifies all 940 patches, and Appendix B lists the ones that did not apply.

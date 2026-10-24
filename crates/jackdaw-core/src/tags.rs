@@ -182,7 +182,7 @@ impl Game {
                 continue;
             }
             // Charm and Meteor pick their pack with the unseeded `math.random(1, 2)`; the sim
-            // takes the first, as the oracle does.
+            // takes the first, as the Python engine did.
             let pack = match self.gs.tags[i].id.get().name {
                 "Charm Tag" => centers::P_ARCANA_MEGA_1,
                 "Meteor Tag" => centers::P_CELESTIAL_MEGA_1,

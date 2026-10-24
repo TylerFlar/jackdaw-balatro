@@ -373,7 +373,7 @@ impl Game {
         gym::state_to_py(&jackdaw_env::reward::StateSummary::of(&self.inner))
     }
 
-    /// BalatroBot's ``add`` (``jackdaw/engine/debug.py`` names): ``key`` is ``j_*``, ``c_*``,
+    /// BalatroBot's ``add`` (the Python engine's names): ``key`` is ``j_*``, ``c_*``,
     /// ``v_*``, ``p_*`` or a playing card (``H_A``); ``seal`` ``"Red"``, ``edition``
     /// ``"foil"``, ``enhancement`` ``"m_steel"``, ``perishable`` a round count. Returns the new
     /// card's sort id. Debug only: no player action does this. On an error the game is
@@ -443,8 +443,8 @@ impl Game {
     }
 
     /// The legal actions here, as a JSON list of tape-form actions, in the Python engine's
-    /// order (`jackdaw.engine.actions.get_legal_actions`). ``legality`` is ``"vanilla"`` (the
-    /// default) or ``"balatrobot"``: only what the live BalatroBot also executes.
+    /// order. ``legality`` is ``"vanilla"`` (the default) or ``"balatrobot"``: only what the
+    /// live BalatroBot also executes.
     #[pyo3(signature = (legality=None))]
     fn legal_actions(&self, legality: Option<&str>) -> PyResult<String> {
         bot::legal_actions(&self.inner, legality)
@@ -462,7 +462,7 @@ impl Game {
     }
 
     /// Apply one parity setup operation (JSON text, `tests/parity/harness.py`): ``force_boss``,
-    /// ``action``, ``add`` (BalatroBot's ``add`` with the oracle's names) or ``set``.
+    /// ``action``, ``add`` (BalatroBot's ``add`` with the Python engine's names) or ``set``.
     fn apply_setup(&mut self, op: &str) -> PyResult<()> {
         let value: serde_json::Value = serde_json::from_str(op).map_err(value_error)?;
         self.inner.apply_setup_op(&value).map_err(value_error)
