@@ -88,7 +88,7 @@ pub(super) fn hermit(g: &mut Game, id: u32, _: f64) {
 /// Temperance: the jokers' sell value, capped, as `Card:update` keeps it in `ability.money`
 /// (card.lua:1394-1398, 4167-4174); `ease_dollars(..., true)`.
 pub(super) fn temperance(g: &mut Game, id: u32, _: f64) {
-    let money = g.card(id).ability.money.unwrap_or(0.0);
+    let money = g.card(id).ability.tally.unwrap_or(0.0);
     g.gs.dollars += money;
 }
 

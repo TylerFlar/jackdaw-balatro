@@ -2,8 +2,9 @@
 //! (`cargo test --release -p jackdaw-core --test perf -- --ignored --nocapture`). Not a
 //! benchmark suite. It allocates with mimalloc, as the Python extension does.
 //!
-//! A step's time is the time of a copy plus the step, minus the time of the copy, so the game
-//! it steps is in cache as it is in an environment.
+//! A step is timed as an environment runs it: on a game that has stepped before, copied back
+//! to the same position each time with `clone_from` (which keeps the game's allocations), minus
+//! the time of that copy.
 
 use std::hint::black_box;
 use std::time::Instant;
@@ -37,19 +38,20 @@ fn report(label: &str, us: f64, target_us: f64) {
     println!("{label:<34} {us:>8.3} us   target {target_us:>5.2} us   {verdict}");
 }
 
-/// The time of `action` on a copy of `game`, without the copy.
+/// The time of `action` from `game`'s position, without the copy back to it.
 fn step_us(game: &Game, action: &Action, n: u32) -> f64 {
+    let mut g = game.clone();
     let with_step = mean_us(n, || {
-        let mut g = game.clone();
+        g.clone_from(game);
         g.step_in_place(action).unwrap();
-        g
     });
-    with_step - mean_us(n, || game.clone())
+    with_step - mean_us(n, || g.clone_from(game))
 }
 
 fn joker(game: &mut Game, key: &str) {
     let center = jackdaw_core::card::center_by_key(key).unwrap();
-    game.debug_add(&AddSpec::new(AddKey::Joker(center))).unwrap();
+    game.debug_add(&AddSpec::new(AddKey::Joker(center)))
+        .unwrap();
 }
 
 #[test]
@@ -68,6 +70,12 @@ fn timings() {
     );
     let fresh = Game::new_run(&spec).unwrap();
     report("clone", mean_us(20_000, || fresh.clone()), 3.0);
+    let mut into = fresh.clone();
+    let us = mean_us(20_000, || into.clone_from(&fresh));
+    println!(
+        "{:<34} {us:>8.3} us   (no target)",
+        "clone_from into a used game"
+    );
 
     let mut round = fresh.clone();
     round.step(&Action::SelectBlind).unwrap();
@@ -75,7 +83,11 @@ fn timings() {
     // So far behind that no hand wins the blind.
     let mut behind = round.clone();
     behind.debug_set(SetField::Chips(-1e12));
-    report("play 5 cards, no jokers", step_us(&behind, &play, 20_000), 1.0);
+    report(
+        "play 5 cards, no jokers",
+        step_us(&behind, &play, 20_000),
+        1.0,
+    );
 
     let mut jokers = fresh.clone();
     for key in [
@@ -89,13 +101,20 @@ fn timings() {
     }
     jokers.step(&Action::SelectBlind).unwrap();
     jokers.debug_set(SetField::Chips(-1e12));
-    report("play 5 cards, 5 jokers", step_us(&jokers, &play, 20_000), 3.0);
+    report(
+        "play 5 cards, 5 jokers",
+        step_us(&jokers, &play, 20_000),
+        3.0,
+    );
 
     // Win the blind with the next hand, then cash out into the shop.
     let mut winning = round.clone();
     winning.debug_set(SetField::Chips(1e12));
     let us = step_us(&winning, &play, 20_000);
-    println!("{:<34} {us:>8.3} us   (the round's end, no target)", "play 5 cards, wins the blind");
+    println!(
+        "{:<34} {us:>8.3} us   (the round's end, no target)",
+        "play 5 cards, wins the blind"
+    );
     let mut won = winning.clone();
     won.step(&play).unwrap();
     report(

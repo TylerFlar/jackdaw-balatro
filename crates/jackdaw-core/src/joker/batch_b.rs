@@ -120,7 +120,7 @@ fn misprint(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
 /// Steel Joker: X(1 + `extra` per Steel Card in the deck), from the per-frame `steel_tally`
 /// (card.lua:3929-3935, 4185-4190).
 fn steel_joker(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
-    let tally = g.card(id).ability.steel_tally.unwrap_or(0.0);
+    let tally = g.card(id).ability.tally.unwrap_or(0.0);
     (ctx.kind == Kind::JokerMain && tally > 0.0).then(|| xmult_mod(1.0 + g.extra(id) * tally))
 }
 
@@ -158,7 +158,7 @@ fn erosion(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
 /// Stone Joker: +Chips per Stone Card in the deck, from the per-frame `stone_tally`
 /// (card.lua:3922-3928, 4197-4202).
 fn stone_joker(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
-    let tally = g.card(id).ability.stone_tally.unwrap_or(0.0);
+    let tally = g.card(id).ability.tally.unwrap_or(0.0);
     (ctx.kind == Kind::JokerMain && tally > 0.0).then(|| chip_mod(g.extra(id) * tally))
 }
 
@@ -190,7 +190,7 @@ fn stuntman(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
 /// Driver's License: XMult with at least 16 enhanced cards in the deck, from the per-frame
 /// `driver_tally` (card.lua:3943-3950, 4179-4184).
 fn drivers_license(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
-    let tally = g.card(id).ability.driver_tally.unwrap_or(0.0);
+    let tally = g.card(id).ability.tally.unwrap_or(0.0);
     (ctx.kind == Kind::JokerMain && tally >= 16.0).then(|| xmult_mod(g.extra(id)))
 }
 

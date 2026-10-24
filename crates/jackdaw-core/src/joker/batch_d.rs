@@ -510,7 +510,8 @@ fn caino(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
             if n > 0.0 {
                 let extra = g.extra(id);
                 let c = g.card_mut(id);
-                c.ability.caino_xmult = Some(c.ability.caino_xmult.unwrap_or(1.0) + n * extra);
+                c.ability.caino_xmult =
+                    crate::card::OptF64::some(c.ability.caino_xmult.unwrap_or(1.0) + n * extra);
             }
             None
         }
@@ -531,7 +532,8 @@ fn caino_event(g: &mut Game, id: u32, faces: f64) {
 fn caino_grow(g: &mut Game, id: u32, faces: f64) {
     if let Some(c) = g.gs.areas.card_mut(id) {
         let extra = c.ability.extra.num().unwrap_or(0.0);
-        c.ability.caino_xmult = Some(c.ability.caino_xmult.unwrap_or(1.0) + faces * extra);
+        c.ability.caino_xmult =
+            crate::card::OptF64::some(c.ability.caino_xmult.unwrap_or(1.0) + faces * extra);
     }
 }
 
@@ -700,11 +702,11 @@ fn yorick(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
         let discards = g.extra_num(id, "discards");
         let xmult = g.extra_num(id, "xmult");
         let c = g.card_mut(id);
-        c.ability.yorick_discards = Some(discards);
+        c.ability.yorick_discards = crate::card::OptF64::some(discards);
         c.ability.x_mult += xmult;
         return Some(message());
     }
-    g.card_mut(id).ability.yorick_discards = Some(left - 1.0);
+    g.card_mut(id).ability.yorick_discards = crate::card::OptF64::some(left - 1.0);
     None
 }
 

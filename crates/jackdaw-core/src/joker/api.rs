@@ -121,7 +121,7 @@ impl Game {
     /// `self.ability.extra.<key>` as a string.
     pub fn extra_str(&self, id: u32, key: &str) -> &str {
         match self.card(id).ability.extra.table().and_then(|t| t.get(key)) {
-            Some(ExtraVal::Str(s)) => s.as_str(),
+            Some(ExtraVal::Str(s)) => s,
             other => panic!("card {id}: ability.extra.{key} is not a string ({other:?})"),
         }
     }

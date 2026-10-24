@@ -157,6 +157,7 @@ pub struct Key {
 }
 
 impl Key {
+    #[inline]
     pub fn new(s: &str) -> Key {
         let mut key = Key {
             len: 0,
@@ -169,6 +170,7 @@ impl Key {
 
     /// `.. s`.
     #[must_use]
+    #[inline]
     pub fn s(mut self, s: &str) -> Key {
         self.push(s);
         self
@@ -176,6 +178,7 @@ impl Key {
 
     /// `.. tostring(x)`, as [`lua::tostring_number`] writes it.
     #[must_use]
+    #[inline]
     pub fn n(mut self, x: f64) -> Key {
         if x == 0.0 {
             self.push(if x.is_sign_negative() { "-0" } else { "0" });
@@ -192,11 +195,13 @@ impl Key {
 
     /// `.. tostring(i)` for an integer.
     #[must_use]
+    #[inline]
     pub fn i(mut self, i: u64) -> Key {
         self.digits(i);
         self
     }
 
+    #[inline]
     fn digits(&mut self, mut v: u64) {
         let mut out = [0u8; 20];
         let mut at = out.len();
@@ -208,24 +213,45 @@ impl Key {
                 break;
             }
         }
-        self.push(std::str::from_utf8(&out[at..]).expect("ascii digits"));
+        self.push_bytes(&out[at..]);
     }
 
+    #[inline]
     fn push(&mut self, s: &str) {
+        self.push_bytes(s.as_bytes());
+    }
+
+    /// Whole `&str`s and ASCII digits only, so the bytes stay UTF-8.
+    #[inline]
+    fn push_bytes(&mut self, b: &[u8]) {
         if let Some(long) = &mut self.long {
-            long.push_str(s);
+            long.push_str(std::str::from_utf8(b).expect("utf-8"));
             return;
         }
-        let end = self.len + s.len();
+        let end = self.len + b.len();
         if end <= self.buf.len() {
-            self.buf[self.len..end].copy_from_slice(s.as_bytes());
+            self.buf[self.len..end].copy_from_slice(b);
             self.len = end;
         } else {
             let mut long = String::with_capacity(end);
             long.push_str(self);
-            long.push_str(s);
+            long.push_str(std::str::from_utf8(b).expect("utf-8"));
             self.long = Some(long);
         }
+    }
+
+    /// The key's bytes.
+    pub fn bytes(&self) -> &[u8] {
+        match &self.long {
+            Some(long) => long.as_bytes(),
+            None => &self.buf[..self.len],
+        }
+    }
+}
+
+impl AsRef<[u8]> for Key {
+    fn as_ref(&self) -> &[u8] {
+        self.bytes()
     }
 }
 
@@ -233,11 +259,7 @@ impl std::ops::Deref for Key {
     type Target = str;
 
     fn deref(&self) -> &str {
-        match &self.long {
-            Some(long) => long,
-            // Only whole `&str`s are copied in: always UTF-8.
-            None => std::str::from_utf8(&self.buf[..self.len]).expect("utf-8"),
-        }
+        std::str::from_utf8(self.bytes()).expect("utf-8")
     }
 }
 
@@ -248,31 +270,91 @@ pub fn pseudohash(s: &[u8]) -> f64 {
 
 /// `pseudohash(a .. b)` without building the concatenation.
 pub fn pseudohash_parts(a: &[u8], b: &[u8]) -> f64 {
-    let byte_at = |i: usize| {
-        if i > a.len() {
-            b[i - a.len() - 1]
-        } else {
-            a[i - 1]
-        }
-    };
-    let mut num = 1.0;
-    for i in (1..=a.len() + b.len()).rev() {
+    pseudohash_head(a, pseudohash_tail(b, a.len()))
+}
+
+/// The first half of `pseudohash(a .. b)`, which runs from the last byte: the state after
+/// `b`'s bytes, for an `a` of `a_len` bytes. It depends on `a` only through its length.
+fn pseudohash_tail(b: &[u8], a_len: usize) -> f64 {
+    hash_steps(1.0, b, a_len)
+}
+
+/// The second half: `a`'s bytes, from the state `num` the bytes after them left.
+fn pseudohash_head(a: &[u8], num: f64) -> f64 {
+    hash_steps(num, a, 0)
+}
+
+/// `num = ((1.1239285023/num)*string.byte(str, i)*math.pi + math.pi*i)%1` for the bytes of
+/// `bytes`, last first, which sit at positions `offset + 1 ..= offset + bytes.len()` of the
+/// hashed string.
+fn hash_steps(mut num: f64, bytes: &[u8], offset: usize) -> f64 {
+    for k in (0..bytes.len()).rev() {
+        let i = offset + k + 1;
         // While every value is finite no operation can make a NaN, and plain arithmetic (in
         // Lua's order) gives the NaN-aware helpers' bits; `x % 1` is then `x - floor(x)`.
-        let s = 1.123_928_502_3 / num * f64::from(byte_at(i)) * lua::PI + lua::PI * i as f64;
+        let s = 1.123_928_502_3 / num * f64::from(bytes[k]) * lua::PI + lua::PI * i as f64;
         if !s.is_finite() {
-            return pseudohash_rest(&byte_at, i, num);
+            return hash_steps_lua(num, &bytes[..=k], offset);
         }
         num = s - lua::floor(s);
     }
     num
 }
 
-/// The rest of [`pseudohash_parts`] from byte `from` down, with Lua's NaN semantics.
-fn pseudohash_rest(byte_at: &dyn Fn(usize) -> u8, from: usize, mut num: f64) -> f64 {
-    for i in (1..=from).rev() {
+/// One chain of [`hash_steps_many`].
+#[derive(Clone, Copy)]
+struct Lane<'a> {
+    start: f64,
+    num: f64,
+    bytes: &'a [u8],
+    offset: usize,
+    /// The chain stopped being finite: it is redone alone, with Lua's NaN rules.
+    redo: bool,
+}
+
+impl<'a> Lane<'a> {
+    fn new(start: f64, bytes: &'a [u8], offset: usize) -> Lane<'a> {
+        Lane {
+            start,
+            num: start,
+            bytes,
+            offset,
+            redo: false,
+        }
+    }
+}
+
+/// [`hash_steps`] for several chains side by side. Each step of a chain waits on its division,
+/// and the chains don't depend on each other, so the processor overlaps their divisions.
+fn hash_steps_many(lanes: &mut [Lane<'_>]) {
+    let longest = lanes.iter().map(|l| l.bytes.len()).max().unwrap_or(0);
+    for t in 0..longest {
+        for lane in lanes.iter_mut() {
+            if t >= lane.bytes.len() || lane.redo {
+                continue;
+            }
+            let k = lane.bytes.len() - 1 - t;
+            let i = lane.offset + k + 1;
+            let s = 1.123_928_502_3 / lane.num * f64::from(lane.bytes[k]) * lua::PI
+                + lua::PI * i as f64;
+            if s.is_finite() {
+                lane.num = s - lua::floor(s);
+            } else {
+                lane.redo = true;
+            }
+        }
+    }
+    for lane in lanes.iter_mut().filter(|l| l.redo) {
+        lane.num = hash_steps(lane.start, lane.bytes, lane.offset);
+    }
+}
+
+/// [`hash_steps`] with Lua's NaN semantics, once a value is no longer finite.
+fn hash_steps_lua(mut num: f64, bytes: &[u8], offset: usize) -> f64 {
+    for k in (0..bytes.len()).rev() {
+        let i = offset + k + 1;
         let t = lua::mul(
-            lua::mul(lua::div(1.123_928_502_3, num), f64::from(byte_at(i))),
+            lua::mul(lua::div(1.123_928_502_3, num), f64::from(bytes[k])),
             lua::PI,
         );
         num = lua::modulo(lua::add(t, lua::mul(lua::PI, i as f64)), 1.0);
@@ -303,46 +385,48 @@ enum StreamKey {
 }
 
 impl StreamKey {
-    fn new(key: &str) -> Self {
+    fn new(key: &[u8]) -> Self {
         if key.len() > KEY_CAP {
-            return StreamKey::Heap(key.into());
+            return StreamKey::Heap(std::str::from_utf8(key).expect("a str's bytes").into());
         }
         let mut bytes = [0; KEY_CAP];
-        bytes[..key.len()].copy_from_slice(key.as_bytes());
+        bytes[..key.len()].copy_from_slice(key);
         StreamKey::Inline {
             len: key.len() as u8,
             bytes,
         }
     }
 
-    fn as_str(&self) -> &str {
+    fn bytes(&self) -> &[u8] {
         match self {
-            StreamKey::Inline { len, bytes } => {
-                std::str::from_utf8(&bytes[..usize::from(*len)]).expect("a str's bytes")
-            }
-            StreamKey::Heap(s) => s,
+            StreamKey::Inline { len, bytes } => &bytes[..usize::from(*len)],
+            StreamKey::Heap(s) => s.as_bytes(),
         }
+    }
+
+    fn as_str(&self) -> &str {
+        std::str::from_utf8(self.bytes()).expect("a str's bytes")
     }
 }
 
 impl PartialEq for StreamKey {
     fn eq(&self, other: &Self) -> bool {
-        self.as_str() == other.as_str()
+        self.bytes() == other.bytes()
     }
 }
 
 impl Eq for StreamKey {}
 
-/// Hashes as its `str`, so the table can be searched with a `&str`.
+/// Hashes as its bytes, so the table can be searched with a `&[u8]`.
 impl Hash for StreamKey {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.as_str().hash(state);
+        self.bytes().hash(state);
     }
 }
 
-impl Borrow<str> for StreamKey {
-    fn borrow(&self) -> &str {
-        self.as_str()
+impl Borrow<[u8]> for StreamKey {
+    fn borrow(&self) -> &[u8] {
+        self.bytes()
     }
 }
 
@@ -390,12 +474,54 @@ impl Hasher for FxHasher {
 
 type StreamMap = HashMap<StreamKey, f64, BuildHasherDefault<FxHasher>>;
 
+/// Key lengths the seed-half cache covers (the game's keys are shorter).
+const TAILS: usize = 32;
+
 /// `G.GAME.pseudorandom`: the run seed and one state per named stream.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug)]
 pub struct Rng {
     seed: String,
     hashed_seed: f64,
     streams: StreamMap,
+    /// `pseudohash_tail(seed, n)` for each key length `n` already met (bit `n` of
+    /// `tails_known`): a new stream hashes only its key. Derived from the seed, so not part of
+    /// the state.
+    tails: [f64; TAILS],
+    tails_known: u32,
+    /// Hashes of streams not started yet, worked out ahead ([`Rng::prime`]); empty between
+    /// steps.
+    primed: Vec<(StreamKey, f64)>,
+}
+
+impl Clone for Rng {
+    fn clone(&self) -> Rng {
+        Rng {
+            seed: self.seed.clone(),
+            hashed_seed: self.hashed_seed,
+            streams: self.streams.clone(),
+            tails: self.tails,
+            tails_known: self.tails_known,
+            primed: self.primed.clone(),
+        }
+    }
+
+    /// Keeps the seed's and the stream table's allocations.
+    fn clone_from(&mut self, source: &Rng) {
+        self.seed.clone_from(&source.seed);
+        self.hashed_seed = source.hashed_seed;
+        self.streams.clone_from(&source.streams);
+        self.tails = source.tails;
+        self.tails_known = source.tails_known;
+        self.primed.clone_from(&source.primed);
+    }
+}
+
+impl PartialEq for Rng {
+    fn eq(&self, other: &Rng) -> bool {
+        self.seed == other.seed
+            && self.hashed_seed.to_bits() == other.hashed_seed.to_bits()
+            && self.streams == other.streams
+    }
 }
 
 impl Rng {
@@ -406,6 +532,9 @@ impl Rng {
             hashed_seed: pseudohash(seed.as_bytes()),
             // A run starts a few dozen streams.
             streams: StreamMap::with_capacity_and_hasher(32, Default::default()),
+            tails: [0.0; TAILS],
+            tails_known: 0,
+            primed: Vec::new(),
         }
     }
 
@@ -416,8 +545,11 @@ impl Rng {
             hashed_seed,
             streams: streams
                 .iter()
-                .map(|(k, &v)| (StreamKey::new(k), v))
+                .map(|(k, &v)| (StreamKey::new(k.as_bytes()), v))
                 .collect(),
+            tails: [0.0; TAILS],
+            tails_known: 0,
+            primed: Vec::new(),
         }
     }
 
@@ -436,7 +568,7 @@ impl Rng {
 
     /// The current state of stream `key`, if it has been drawn from.
     pub fn stream(&self, key: &str) -> Option<f64> {
-        self.streams.get(key).copied()
+        self.streams.get(key.as_bytes()).copied()
     }
 
     /// How many streams have been drawn from.
@@ -445,25 +577,131 @@ impl Rng {
     }
 
     /// `pseudoseed(key)`: advance stream `key` and return the double that seeds TW223.
-    pub fn seed(&mut self, key: &str) -> f64 {
+    pub fn seed<K: AsRef<[u8]> + ?Sized>(&mut self, key: &K) -> f64 {
+        let key = key.as_ref();
         let hashed = self.hashed_seed;
         if let Some(state) = self.streams.get_mut(key) {
             *state = advance(*state);
             return lua::div(lua::add(*state, hashed), 2.0);
         }
         // First use: G.GAME.pseudorandom[key] = pseudohash(key .. seed), then advance.
-        let state = advance(pseudohash_parts(key.as_bytes(), self.seed.as_bytes()));
+        let hash = match self.primed.iter().position(|(k, _)| k.bytes() == key) {
+            Some(i) => self.primed.swap_remove(i).1,
+            None => {
+                let tail = self.tail(key.len());
+                pseudohash_head(key, tail)
+            }
+        };
+        let state = advance(hash);
         self.streams.insert(StreamKey::new(key), state);
         lua::div(lua::add(state, hashed), 2.0)
     }
 
+    /// A fresh RNG ([`Rng::new`]) with the streams `keys` start primed ([`Rng::prime`]); the
+    /// run seed's own hash is worked out in the same batch.
+    pub fn new_primed(seed: &str, keys: &[&str]) -> Self {
+        let mut rng = Self {
+            seed: seed.to_owned(),
+            hashed_seed: 0.0,
+            streams: StreamMap::with_capacity_and_hasher(32, Default::default()),
+            tails: [0.0; TAILS],
+            tails_known: 0,
+            primed: Vec::new(),
+        };
+        rng.prime_with(keys, true);
+        rng
+    }
+
+    /// Work out the hashes of the streams `keys` start, side by side ([`hash_steps_many`]),
+    /// for [`Rng::seed`] to take on each one's first draw. A cache only: what a key never drawn
+    /// from left here goes with [`Rng::unprime`]. Keys of [`TAILS`] bytes or more are left to
+    /// their first draw.
+    pub fn prime(&mut self, keys: &[&str]) {
+        self.prime_with(keys, false);
+    }
+
+    /// [`Rng::prime`], also hashing the run seed itself (`pseudohash(seed)`, the seed half of
+    /// an empty key) when `hash_seed`.
+    fn prime_with(&mut self, keys: &[&str], hash_seed: bool) {
+        const MAX: usize = 16;
+        assert!(keys.len() < MAX, "priming {} streams", keys.len());
+        let mut fresh: [&[u8]; MAX] = [&[]; MAX];
+        let mut n = 0;
+        for k in keys {
+            let k = k.as_bytes();
+            if k.len() < TAILS && !self.streams.contains_key(k) {
+                fresh[n] = k;
+                n += 1;
+            }
+        }
+        let fresh = &fresh[..n];
+        // The seed halves of the lengths not met yet (an empty key's is the seed's hash).
+        let seed = std::mem::take(&mut self.seed);
+        let mut lengths = [0usize; MAX];
+        let mut m = 0;
+        if hash_seed {
+            m = 1;
+        }
+        for k in fresh {
+            let n = k.len();
+            if self.tails_known & (1 << n) == 0 && !lengths[..m].contains(&n) {
+                lengths[m] = n;
+                m += 1;
+            }
+        }
+        let mut lanes = [Lane::new(1.0, &[], 0); MAX];
+        for (lane, &n) in lanes.iter_mut().zip(&lengths[..m]) {
+            *lane = Lane::new(1.0, seed.as_bytes(), n);
+        }
+        hash_steps_many(&mut lanes[..m]);
+        for (&n, lane) in lengths[..m].iter().zip(&lanes[..m]) {
+            self.tails[n] = lane.num;
+            self.tails_known |= 1 << n;
+        }
+        if hash_seed {
+            self.hashed_seed = self.tails[0];
+        }
+        self.seed = seed;
+        // The key halves.
+        let mut lanes = [Lane::new(1.0, &[], 0); MAX];
+        for (lane, k) in lanes.iter_mut().zip(fresh) {
+            *lane = Lane::new(self.tails[k.len()], k, 0);
+        }
+        hash_steps_many(&mut lanes[..n]);
+        self.primed.clear();
+        self.primed.extend(
+            fresh
+                .iter()
+                .zip(&lanes[..n])
+                .map(|(k, lane)| (StreamKey::new(k), lane.num)),
+        );
+    }
+
+    /// Drop the hashes [`Rng::prime`] left unused.
+    pub fn unprime(&mut self) {
+        self.primed = Vec::new();
+    }
+
+    /// `pseudohash_tail(seed, n)`, from the cache when a key of this length came before.
+    fn tail(&mut self, n: usize) -> f64 {
+        if n < TAILS && self.tails_known & (1 << n) != 0 {
+            return self.tails[n];
+        }
+        let tail = pseudohash_tail(self.seed.as_bytes(), n);
+        if n < TAILS {
+            self.tails[n] = tail;
+            self.tails_known |= 1 << n;
+        }
+        tail
+    }
+
     /// `pseudorandom(key)`: a double in `[0, 1)` drawn from stream `key`.
-    pub fn random(&mut self, key: &str) -> f64 {
+    pub fn random<K: AsRef<[u8]> + ?Sized>(&mut self, key: &K) -> f64 {
         Tw223::seeded(self.seed(key)).random()
     }
 
     /// `pseudorandom(key, min, max)`: an integer in `[min, max]` drawn from stream `key`.
-    pub fn random_range(&mut self, key: &str, min: i64, max: i64) -> i64 {
+    pub fn random_range<K: AsRef<[u8]> + ?Sized>(&mut self, key: &K, min: i64, max: i64) -> i64 {
         Tw223::seeded(self.seed(key)).random_range(min, max)
     }
 }

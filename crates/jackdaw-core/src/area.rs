@@ -14,15 +14,33 @@ use crate::rng::{Rng, shuffle};
 use crate::state::Areas;
 
 /// Reorder `items` so that position `k` holds the item that was at `order[k]` (a permutation
-/// of the positions), with at most one swap per position.
-fn permute<T>(items: &mut [T], order: &[usize]) {
-    for i in 0..items.len() {
-        // Where the item that belongs at `i` sits now: earlier swaps moved it along its cycle.
-        let mut j = order[i];
-        while j < i {
-            j = order[j];
+/// of the positions). Each cycle of the permutation moves its items once, plus one copy.
+pub(crate) fn permute<T: Copy>(items: &mut [T], order: &[usize]) {
+    let n = items.len();
+    let mut seen_inline = [false; 256];
+    let mut seen_spill = Vec::new();
+    let seen: &mut [bool] = if n <= seen_inline.len() {
+        &mut seen_inline[..n]
+    } else {
+        seen_spill.resize(n, false);
+        &mut seen_spill
+    };
+    for start in 0..n {
+        if seen[start] {
+            continue;
         }
-        items.swap(i, j);
+        let first = items[start];
+        let mut k = start;
+        loop {
+            seen[k] = true;
+            let from = order[k];
+            if from == start {
+                items[k] = first;
+                break;
+            }
+            items[k] = items[from];
+            k = from;
+        }
     }
 }
 
@@ -52,6 +70,32 @@ impl Ids {
             ids.spill = cards.iter().map(|c| c.sort_id).collect();
         }
         ids
+    }
+
+    pub fn push(&mut self, id: u32) {
+        if self.len < Ids::INLINE {
+            self.inline[self.len] = id;
+        } else {
+            if self.len == Ids::INLINE {
+                self.spill = self.inline.to_vec();
+            }
+            self.spill.push(id);
+        }
+        self.len += 1;
+    }
+
+    pub fn from_slice(ids: &[u32]) -> Ids {
+        let mut out = Ids {
+            len: ids.len(),
+            inline: [0; Ids::INLINE],
+            spill: Vec::new(),
+        };
+        if ids.len() <= Ids::INLINE {
+            out.inline[..ids.len()].copy_from_slice(ids);
+        } else {
+            out.spill = ids.to_vec();
+        }
+        out
     }
 }
 
@@ -393,8 +437,17 @@ impl Areas {
         // then swaps. Both run on positions, and the result moves each card at most once.
         let mut order: Vec<usize> = (0..cards.len()).collect();
         if !cards.is_sorted_by_key(|c| c.sort_id) {
-            // Sort ids are unique, so any sort gives the stable sort's order.
-            order.sort_unstable_by_key(|&i| cards[i].sort_id);
+            // Sort ids are unique, so any sort gives the stable sort's order. The sort runs on
+            // (sort id, position) words, away from the cards.
+            let mut keyed: Vec<u64> = cards
+                .iter()
+                .enumerate()
+                .map(|(i, c)| (u64::from(c.sort_id) << 32) | i as u64)
+                .collect();
+            keyed.sort_unstable();
+            for (slot, k) in order.iter_mut().zip(&keyed) {
+                *slot = (k & 0xFFFF_FFFF) as usize;
+            }
         }
         shuffle(&mut order, seed);
         permute(cards, &order);

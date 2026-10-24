@@ -170,11 +170,11 @@ impl Game {
         let tally = c.ability.perish_tally.unwrap_or(0.0);
         if c.ability.perishable && tally > 0.0 {
             if tally == 1.0 {
-                c.ability.perish_tally = Some(0.0);
+                c.ability.perish_tally = crate::card::OptF64::some(0.0);
                 // `self:set_debuff()` with no argument: the spent-perishable branch debuffs.
                 self.set_debuff(id, false);
             } else {
-                c.ability.perish_tally = Some(tally - 1.0);
+                c.ability.perish_tally = crate::card::OptF64::some(tally - 1.0);
             }
         }
     }
@@ -227,41 +227,45 @@ impl Game {
     /// playing cards that aren't Stone Cards, drawn only when there is one.
     fn non_stone_pick(&mut self, key: &str) -> Option<crate::card::Base> {
         // Marble's pending stones are Stone Cards: the areas hold every other playing card.
-        let mut inline = [0u32; 128];
-        let mut spill: Vec<u32> = Vec::new();
+        // The candidates' sort ids as a bitmap (sort ids stay below the next one to hand out).
+        let words = (self.gs.sim.next_sort_id as usize).div_ceil(64).max(1);
+        let mut inline = [0u64; 32];
+        let mut spill: Vec<u64> = Vec::new();
+        let bits: &mut [u64] = if words <= inline.len() {
+            &mut inline[..words]
+        } else {
+            spill.resize(words, 0);
+            &mut spill
+        };
         let mut n = 0;
-        for c in AreaId::PLAYING
-            .into_iter()
-            .flat_map(|a| self.gs.areas.get(a).iter())
-        {
-            if c.is_stone() {
-                continue;
+        for c in playing_cards(&self.gs.areas) {
+            if !c.is_stone() {
+                let id = c.sort_id as usize;
+                bits[id / 64] |= 1 << (id % 64);
+                n += 1;
             }
-            if n < inline.len() {
-                inline[n] = c.sort_id;
-            } else {
-                if spill.is_empty() {
-                    spill.extend_from_slice(&inline);
-                }
-                spill.push(c.sort_id);
-            }
-            n += 1;
         }
         if n == 0 {
             return None;
         }
-        let ids = if n <= inline.len() {
-            &mut inline[..n]
-        } else {
-            &mut spill[..]
-        };
         // `pseudorandom_element` sorts cards by sort id: the pick is the r-th smallest.
-        let r = crate::rng::element_index(n, self.ante_seed(key));
-        let (_, &mut pick, _) = ids.select_nth_unstable(r);
+        let mut r = crate::rng::element_index(n, self.ante_seed(key)) as u32;
+        let mut pick = 0;
+        for (w, &word) in bits.iter().enumerate() {
+            let ones = word.count_ones();
+            if r < ones {
+                let mut word = word;
+                for _ in 0..r {
+                    word &= word - 1;
+                }
+                pick = (w * 64) as u32 + word.trailing_zeros();
+                break;
+            }
+            r -= ones;
+        }
         Some(
-            self.gs
-                .areas
-                .card(pick)
+            playing_cards(&self.gs.areas)
+                .find(|c| c.sort_id == pick)
                 .and_then(|c| c.base)
                 .expect("playing card"),
         )
@@ -392,4 +396,11 @@ impl Game {
             .filter(|c| c.get_id() == Some(9))
             .count() as f64
     }
+}
+
+/// The cards of the playing areas, area by area.
+fn playing_cards(areas: &crate::state::Areas) -> impl Iterator<Item = &crate::card::Card> {
+    AreaId::PLAYING
+        .into_iter()
+        .flat_map(move |a| areas.get(a).iter())
 }

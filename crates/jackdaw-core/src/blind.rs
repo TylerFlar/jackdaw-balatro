@@ -166,6 +166,16 @@ impl Game {
     /// debuffed when they land.
     pub(crate) fn debuff_playing_cards(&mut self) {
         let rule = self.debuff_rule();
+        // Without a live blind every card gets `set_debuff(false)`, which changes only a card
+        // that is debuffed, debuffed for good, or a spent perishable.
+        if rule.disabled
+            && AreaId::PLAYING
+                .into_iter()
+                .flat_map(|a| self.gs.areas.get(a).iter())
+                .all(|c| !c.debuff && !c.ability.perma_debuff && !c.ability.perishable)
+        {
+            return;
+        }
         for a in AreaId::PLAYING {
             for i in 0..self.gs.areas.get(a).len() {
                 self.debuff_card_at(a, i, &rule);

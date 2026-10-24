@@ -11,6 +11,25 @@ use crate::card::{Card, Rank, Suit};
 use crate::hand_eval::HandType;
 use crate::rng::Rng;
 
+/// `Clone` for a struct, field by field, with a `clone_from` that clones each field into the
+/// old one: vectors and tables keep their allocations, so copying a run into a game that held
+/// one allocates little. A field missing from the list fails to build `clone`.
+macro_rules! clone_fields {
+    ($ty:ident { $($field:ident),* $(,)? }) => {
+        impl Clone for $ty {
+            fn clone(&self) -> Self {
+                $ty { $($field: self.$field.clone()),* }
+            }
+
+            fn clone_from(&mut self, source: &Self) {
+                $(self.$field.clone_from(&source.$field);)*
+            }
+        }
+    };
+}
+
+pub(crate) use clone_fields;
+
 /// The game phase (the engine's view of `G.STATE`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Phase {
@@ -161,8 +180,9 @@ pub struct RoundResets {
 
 impl RoundResets {
     /// The values `blind_states` takes.
-    pub const STATES: [&'static str; 6] =
-        ["Select", "Current", "Upcoming", "Skipped", "Defeated", "Hide"];
+    pub const STATES: [&'static str; 6] = [
+        "Select", "Current", "Upcoming", "Skipped", "Defeated", "Hide",
+    ];
 
     pub fn blind_state(&self, slot: BlindSlot) -> &'static str {
         self.blind_states[slot.index()]
@@ -341,7 +361,7 @@ impl std::fmt::Debug for BossCounts {
 }
 
 /// `G.GAME.used_jokers` and friends.
-#[derive(Clone, Debug, PartialEq, Default)]
+#[derive(Debug, PartialEq, Default)]
 pub struct Sets {
     /// Every center created this run (`used_jokers` covers all sets).
     pub used_jokers: CenterBits,
@@ -362,7 +382,7 @@ pub struct ConsumeableUsage {
 }
 
 /// The card areas, in area order.
-#[derive(Clone, Debug, PartialEq, Default)]
+#[derive(Debug, PartialEq, Default)]
 pub struct Areas {
     /// The draw pile; index 0 is the bottom, cards are drawn from the end.
     pub deck: Vec<Card>,
@@ -469,7 +489,7 @@ pub struct LastScore {
 }
 
 /// Simulator state with no single `G.GAME` field.
-#[derive(Clone, Debug, PartialEq, Default)]
+#[derive(Debug, PartialEq, Default)]
 pub struct SimState {
     /// The sort id the next card gets.
     pub next_sort_id: u32,
@@ -491,7 +511,7 @@ pub struct SimState {
 }
 
 /// The whole run.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct GameState {
     pub phase: Phase,
     // run
@@ -577,3 +597,94 @@ impl GameState {
         id
     }
 }
+
+clone_fields!(Sets {
+    used_jokers,
+    used_vouchers,
+    banned_keys,
+    pool_flags,
+    bosses_used,
+});
+
+clone_fields!(Areas {
+    deck,
+    hand,
+    discard,
+    play,
+    jokers,
+    consumables,
+    shop_jokers,
+    shop_vouchers,
+    shop_booster,
+    pack_cards,
+});
+
+clone_fields!(SimState {
+    next_sort_id,
+    pending_tag_packs,
+    pending_deck_bottom,
+    shop_d6ed,
+    shop_free,
+    hand_last_poll_size,
+    last_blind_was_boss,
+    pending_cashout,
+    last_score,
+    tag_history,
+});
+
+clone_fields!(GameState {
+    phase,
+    back,
+    stake,
+    challenge,
+    win_ante,
+    won,
+    dollars,
+    chips,
+    round,
+    skips,
+    hands_played,
+    unused_discards,
+    interest_cap,
+    interest_amount,
+    discount_percent,
+    inflation,
+    rental_rate,
+    bankrupt_at,
+    base_reroll_cost,
+    edition_rate,
+    joker_rate,
+    tarot_rate,
+    planet_rate,
+    spectral_rate,
+    playing_card_rate,
+    probabilities_normal,
+    hand_size,
+    hand_sort,
+    joker_slots,
+    consumable_slots,
+    starting_deck_size,
+    last_tarot_planet,
+    last_hand_played,
+    pack_size,
+    ecto_minus,
+    perishable_rounds,
+    blind_on_deck,
+    shop_joker_max,
+    first_shop_buffoon,
+    orbital_choices,
+    starting_params,
+    modifiers,
+    round_resets,
+    current_round,
+    round_bonus,
+    blind,
+    hands,
+    tags,
+    sets,
+    consumeable_usage,
+    areas,
+    pack,
+    rng,
+    sim,
+});

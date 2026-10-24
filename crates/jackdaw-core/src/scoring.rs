@@ -4,10 +4,11 @@
 use jackdaw_data::HANDS;
 
 use crate::area::AreaId;
+use crate::area::Ids;
 use crate::card::Card;
 use crate::event::Event;
 use crate::game::Game;
-use crate::hand_eval::{EvalCard, EvalFlags, HandType, PokerHands, get_poker_hand_info};
+use crate::hand_eval::{EvalCard, EvalCards, EvalFlags, HandType, PokerHands, get_poker_hand_info};
 use crate::joker::{Ctx, Kind};
 use crate::lua;
 use crate::state::LastScore;
@@ -127,7 +128,7 @@ impl Game {
     }
 
     /// The evaluation view of cards (`get_id`, flush suits with Smeared Joker, `get_nominal`).
-    pub fn eval_cards(&self, cards: &[Card]) -> Vec<EvalCard> {
+    pub fn eval_cards(&self, cards: &[Card]) -> EvalCards {
         let smeared = self.has_joker("Smeared Joker");
         cards
             .iter()
@@ -159,9 +160,9 @@ impl Game {
         let c = self.gs.areas.card(id)?;
         let e = c.get_edition()?;
         Some(EditionMods {
-            chip_mod: e.chips,
-            mult_mod: e.mult,
-            x_mult_mod: e.x_mult,
+            chip_mod: e.chips.get(),
+            mult_mod: e.mult.get(),
+            x_mult_mod: e.x_mult.get(),
         })
     }
 
@@ -226,7 +227,7 @@ impl Game {
 
     /// `G.FUNCS.evaluate_play()` (state_events.lua:571-1086).
     pub(crate) fn evaluate_play(&mut self) {
-        let full_hand = self.gs.areas.ids(AreaId::Play).to_vec();
+        let full_hand = self.gs.areas.ids(AreaId::Play);
         let info = get_poker_hand_info(&self.eval_cards(&self.gs.areas.play), self.eval_flags());
         let Some(text) = info.hand else {
             return;
@@ -239,14 +240,12 @@ impl Game {
 
         // The scoring hand: the best hand's cards, plus every played Stone Card (or every
         // played card with Splash), in play order.
-        let mut scoring: Vec<u32> = info
-            .scoring
-            .as_slice()
-            .iter()
-            .map(|&i| full_hand[i as usize])
-            .collect();
+        let mut scoring = Ids::from_slice(&[]);
+        for &i in info.scoring.as_slice() {
+            scoring.push(full_hand[i as usize]);
+        }
         if self.has_joker("Splash") {
-            scoring.clone_from(&full_hand);
+            scoring = full_hand.clone();
         } else {
             for c in &self.gs.areas.play {
                 if c.is_stone() && !scoring.contains(&c.sort_id) {
@@ -379,9 +378,13 @@ impl Game {
                         if has_effect && let Some(n) = self.red_seal_repetitions(id) {
                             reps += n;
                         }
-                        let card_effects: Vec<bool> =
-                            effects.iter().map(|e| !e.is_empty()).collect();
-                        for k in self.gs.areas.ids(AreaId::Jokers) {
+                        let jokers = self.gs.areas.ids(AreaId::Jokers);
+                        let card_effects: Vec<bool> = if jokers.is_empty() {
+                            Vec::new()
+                        } else {
+                            effects.iter().map(|e| !e.is_empty()).collect()
+                        };
+                        for k in jokers {
                             let mut ctx = self.scoring_ctx(Kind::Repetition, &s);
                             ctx.cardarea = Some(AreaId::Hand);
                             ctx.other_card = Some(id);
@@ -520,7 +523,7 @@ impl Game {
             self.eval_joker(j, &mut ctx);
         }
         if self.gs.modifier("debuff_played_cards").is_some() {
-            self.queue(Event::PermaDebuff(scoring.clone()));
+            self.queue(Event::PermaDebuff(scoring.to_vec()));
         }
         self.gs.sim.last_score = Some(LastScore {
             hand_type: text,
@@ -536,8 +539,8 @@ impl Game {
 
 /// The played hand as the scoring contexts see it.
 struct Scoring {
-    full_hand: Vec<u32>,
-    scoring_hand: Vec<u32>,
+    full_hand: Ids,
+    scoring_hand: Ids,
     text: HandType,
     poker_hands: PokerHands,
 }

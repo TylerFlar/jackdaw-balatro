@@ -90,7 +90,11 @@ impl Game {
         while i <= size {
             let card = match kind {
                 "Arcana" => {
-                    if self.gs.sets.used_vouchers.contains(jackdaw_data::centers::V_OMEN_GLOBE)
+                    if self
+                        .gs
+                        .sets
+                        .used_vouchers
+                        .contains(jackdaw_data::centers::V_OMEN_GLOBE)
                         && self.gs.rng.random("omen_globe") > 0.8
                     {
                         self.create_card(CardSpec::new(PoolType::Spectral, area, "ar2").soulable())
@@ -99,7 +103,13 @@ impl Game {
                     }
                 }
                 "Celestial" => {
-                    let forced = if self.gs.sets.used_vouchers.contains(jackdaw_data::centers::V_TELESCOPE) && i == 1.0 {
+                    let forced = if self
+                        .gs
+                        .sets
+                        .used_vouchers
+                        .contains(jackdaw_data::centers::V_TELESCOPE)
+                        && i == 1.0
+                    {
                         self.telescope_planet()
                     } else {
                         None

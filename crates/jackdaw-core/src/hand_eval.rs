@@ -95,17 +95,60 @@ pub struct EvalCard {
     pub nominal: f64,
 }
 
+/// The most cards a group holds: an x-of-a-kind holds x <= 5, flushes and straights only form
+/// in hands of five cards or fewer, and the hands built from two groups (Two Pair, Full House,
+/// Flush House, Straight Flush) take at most five positions.
+const GROUP_CAP: usize = 5;
+
+/// The evaluation views of a hand, on the stack.
+#[derive(Clone, Copy)]
+pub struct EvalCards {
+    len: usize,
+    cards: [EvalCard; MAX_CARDS],
+}
+
+impl FromIterator<EvalCard> for EvalCards {
+    fn from_iter<I: IntoIterator<Item = EvalCard>>(iter: I) -> EvalCards {
+        let blank = EvalCard {
+            id: None,
+            flush_suits: 0,
+            nominal: 0.0,
+        };
+        let mut out = EvalCards {
+            len: 0,
+            cards: [blank; MAX_CARDS],
+        };
+        for c in iter {
+            assert!(
+                out.len < MAX_CARDS,
+                "evaluating more than {MAX_CARDS} cards"
+            );
+            out.cards[out.len] = c;
+            out.len += 1;
+        }
+        out
+    }
+}
+
+impl std::ops::Deref for EvalCards {
+    type Target = [EvalCard];
+
+    fn deref(&self) -> &[EvalCard] {
+        &self.cards[..self.len]
+    }
+}
+
 /// Positions in the evaluated hand (0-based).
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Group {
-    idx: [u8; MAX_CARDS],
+    idx: [u8; GROUP_CAP],
     len: u8,
 }
 
 impl Default for Group {
     fn default() -> Self {
         Self {
-            idx: [0; MAX_CARDS],
+            idx: [0; GROUP_CAP],
             len: 0,
         }
     }
@@ -216,18 +259,28 @@ pub struct EvalFlags {
     pub shortcut: bool,
 }
 
-fn get_x_same(num: usize, hand: &[EvalCard]) -> Groups {
-    let mut by_id = [Group::default(); 15];
+/// `get_X_same(num, hand)` for num 2, 3, 4 and 5 (in that order), from one pass over the hand.
+fn get_x_same_all(hand: &[EvalCard]) -> [Groups; 4] {
+    let mut count = [0usize; 15];
+    let mut at = [[0u8; MAX_CARDS]; 15];
     for (i, c) in hand.iter().enumerate() {
         if let Some(id) = c.id {
-            by_id[id as usize].push(i);
+            let id = id as usize;
+            at[id][count[id]] = i as u8;
+            count[id] += 1;
         }
     }
     // Lua keeps, per id, the group built from the first card of that id: its positions in order.
-    let mut ret = Groups::default();
-    for id in (1..=14).rev() {
-        if by_id[id].len() == num {
-            ret.push(by_id[id]);
+    let mut ret = [Groups::default(); 4];
+    for (slot, num) in ret.iter_mut().zip(2..=5) {
+        for id in (1..=14).rev() {
+            if count[id] == num {
+                let mut g = Group::default();
+                for &i in &at[id][..num] {
+                    g.push(usize::from(i));
+                }
+                slot.push(g);
+            }
         }
     }
     ret
@@ -330,10 +383,7 @@ fn concat(a: &Group, b: &Group) -> Group {
 pub fn evaluate_poker_hand(hand: &[EvalCard], flags: EvalFlags) -> PokerHands {
     assert!(hand.len() <= MAX_CARDS, "evaluating {} cards", hand.len());
     use HandType::*;
-    let p5 = get_x_same(5, hand);
-    let p4 = get_x_same(4, hand);
-    let p3 = get_x_same(3, hand);
-    let p2 = get_x_same(2, hand);
+    let [p2, p3, p4, p5] = get_x_same_all(hand);
     let flush = get_flush(hand, flags);
     let straight = get_straight(hand, flags);
     let highest = get_highest(hand);

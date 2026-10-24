@@ -56,12 +56,12 @@ impl Game {
 
     /// The hand's cards in highlight order sorted by position (`table.sort(G.hand.highlighted,
     /// function(a,b) return a.T.x < b.T.x end)`).
-    fn sorted_highlighted(&mut self) -> Vec<u32> {
+    fn sorted_highlighted(&mut self) -> crate::area::Ids {
         let hand = self.gs.areas.ids(AreaId::Hand);
         self.rt
             .highlighted
             .sort_by_key(|id| hand.iter().position(|h| h == id).unwrap_or(usize::MAX));
-        self.rt.highlighted.clone()
+        crate::area::Ids::from_slice(&self.rt.highlighted)
     }
 
     // -----------------------------------------------------------------------
@@ -225,7 +225,21 @@ impl Game {
         }
         if sort {
             debug_assert_eq!(to, AreaId::Hand, "only hand draws sort");
-            self.sort_hand();
+            // When the next event is another sorting draw into the hand, it runs right after
+            // this one (the queue runs in order) and sorts: no draw reads the hand's order
+            // (`stay_flipped` looks at the card alone), and every correct sort gives the same
+            // order, so a run of draws sorts once, after its last card.
+            let next_sorts = matches!(
+                self.rt.queue.front(),
+                Some(Event::DrawCard {
+                    to: AreaId::Hand,
+                    sort: true,
+                    ..
+                })
+            );
+            if !next_sorts {
+                self.sort_hand();
+            }
         }
     }
 
@@ -259,6 +273,15 @@ impl Game {
                 hand[at..].rotate_right(1);
                 return;
             }
+            // Otherwise sort the positions by their keys, then move each card once.
+            let mut order = [0usize; 64];
+            for (i, slot) in order.iter_mut().enumerate().take(n) {
+                *slot = i;
+            }
+            order[..n]
+                .sort_by(|&a, &b| keys[b].partial_cmp(&keys[a]).expect("nominals are finite"));
+            crate::area::permute(hand, &order[..n]);
+            return;
         }
         hand.sort_by(|a, b| {
             b.get_nominal(suit)
@@ -322,7 +345,9 @@ impl Game {
     fn clear_forced_selection(&mut self) {
         for a in AreaId::PLAYING {
             for c in self.gs.areas.get_mut(a) {
-                c.ability.forced_selection = false;
+                if c.ability.forced_selection {
+                    c.ability.forced_selection = false;
+                }
             }
         }
     }

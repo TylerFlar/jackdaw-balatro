@@ -205,7 +205,7 @@ impl Game {
         if pos.is_empty() || pos.len() > MAX_CARDS || pos.iter().any(|&p| p >= hand.len()) {
             return None;
         }
-        let cards: Vec<jackdaw_core::card::Card> = pos.iter().map(|&p| hand[p].clone()).collect();
+        let cards: Vec<jackdaw_core::card::Card> = pos.iter().map(|&p| hand[p]).collect();
         let info = get_poker_hand_info(&self.inner.eval_cards(&cards), self.inner.eval_flags());
         let text = info.hand?;
         let mut scoring: Vec<usize> = info

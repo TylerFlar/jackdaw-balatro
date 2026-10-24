@@ -270,7 +270,11 @@ impl Game {
             .and_then(|v| v.as_str())
             .and_then(HandType::from_name);
         if ctx.kind == Kind::JokerMain
-            && self.gs.sets.used_vouchers.contains(jackdaw_data::centers::V_OBSERVATORY)
+            && self
+                .gs
+                .sets
+                .used_vouchers
+                .contains(jackdaw_data::centers::V_OBSERVATORY)
             && hand == ctx.scoring_name
         {
             let x = jackdaw_data::centers::V_OBSERVATORY
@@ -392,7 +396,7 @@ impl Game {
             every - 1.0 - (hands_played - card.ability.hands_played_at_create),
             every + 1.0,
         );
-        card.ability.loyalty_remaining = Some(remaining);
+        card.ability.loyalty_remaining = crate::card::OptF64::some(remaining);
         if remaining == every {
             return Some(Effect {
                 xmult_mod: Some(xmult),

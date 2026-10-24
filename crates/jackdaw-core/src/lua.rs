@@ -138,8 +138,9 @@ pub fn truncate13(x: f64) -> f64 {
         }
     };
     // q <= 10^13 < 2^53, so both operands are exact and the quotient is correctly rounded,
-    // which is exactly what reading the decimal string back yields.
-    let r = (q as f64) / 1e13;
+    // which is exactly what reading the decimal string back yields. (Through u64: converting
+    // a u128 is a library call.)
+    let r = (q as u64 as f64) / 1e13;
     if x < 0.0 { -r } else { r }
 }
 

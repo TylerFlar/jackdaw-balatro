@@ -42,13 +42,17 @@ impl Game {
         self.gs.round_resets.set_blind_state(on_deck, "Select");
         let ante = crate::rng::Key::new("").n(self.gs.round_resets.ante);
         if !self.gs.orbital_choices.contains_key(&*ante) {
-            let visible: Vec<_> = PAIRS_ORDER
-                .into_iter()
-                .filter(|&h| self.gs.hand(h).visible)
-                .collect();
+            let mut visible = [PAIRS_ORDER[0]; PAIRS_ORDER.len()];
+            let mut n = 0;
+            for h in PAIRS_ORDER {
+                if self.gs.hand(h).visible {
+                    visible[n] = h;
+                    n += 1;
+                }
+            }
             let mut roll = || {
                 let seed = self.gs.rng.seed("orbital");
-                visible[crate::rng::element_index(visible.len(), seed)]
+                visible[crate::rng::element_index(n, seed)]
             };
             let hands = [roll(), roll(), roll()];
             self.gs.orbital_choices.insert(ante.to_string(), hands);
@@ -116,7 +120,8 @@ impl Game {
         let used = &self.gs.sets.used_vouchers;
         self.gs.dollars - self.gs.bankrupt_at - 10.0 >= 0.0
             && (used.contains(jackdaw_data::centers::V_RETCON)
-                || (used.contains(jackdaw_data::centers::V_DIRECTORS_CUT) && !self.gs.round_resets.boss_rerolled))
+                || (used.contains(jackdaw_data::centers::V_DIRECTORS_CUT)
+                    && !self.gs.round_resets.boss_rerolled))
     }
 
     /// The Orbital Tag hand rolled for `slot` this ante, if any.
@@ -144,7 +149,8 @@ impl Game {
         let ante = self.gs.round_resets.ante;
         let a = ante.max(1.0);
         let win = self.gs.win_ante;
-        let mut eligible: Vec<(&'static str, BlindId, f64)> = Vec::with_capacity(32);
+        let mut eligible: Vec<(&'static str, BlindId, f64)> =
+            Vec::with_capacity(jackdaw_data::BLINDS.len());
         for (i, b) in jackdaw_data::BLINDS.iter().enumerate() {
             let Some(boss) = &b.boss else { continue };
             let ok = if boss.showdown {

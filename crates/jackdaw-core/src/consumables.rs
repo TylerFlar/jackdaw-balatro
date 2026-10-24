@@ -379,7 +379,7 @@ impl Game {
     /// other's; the only entry the other can lack while the target has it is
     /// `forced_selection` (Cerulean Bell), which `set_ability` carries over.
     fn copy_card_onto(&mut self, other: u32, target: u32) {
-        let src = self.card(other).clone();
+        let src = *self.card(other);
         self.set_card_ability(target, src.center);
         if let Some(b) = src.base {
             self.set_card_base(target, b.front);
@@ -388,7 +388,7 @@ impl Game {
         let cost = self.cost_context(area);
         let card = self.card_mut(target);
         let forced = card.ability.forced_selection;
-        card.ability = src.ability.clone();
+        card.ability = src.ability;
         card.ability.forced_selection |= forced;
         // `set_edition(other.edition or {}, nil, true)`: a playing card is never added to the
         // deck in the port, so a Negative edition takes no slot (none exists on playing cards).

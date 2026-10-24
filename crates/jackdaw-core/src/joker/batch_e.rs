@@ -145,7 +145,7 @@ fn invisible_joker(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
                 .is_some_and(|e| e.kind == EditionKind::Negative);
             let mut card = g.copy_card(chosen, negative, AreaId::Jokers);
             if card.ability.invis_rounds.is_some() {
-                card.ability.invis_rounds = Some(0.0);
+                card.ability.invis_rounds = crate::card::OptF64::some(0.0);
             }
             // Lua runs `add_to_deck` before the emplace; its effects don't depend on that.
             let copy = card.sort_id;
@@ -156,7 +156,7 @@ fn invisible_joker(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
         // The dispatch already refused Blueprint copies of this branch.
         Kind::EndOfRound if !ctx.individual && !ctx.repetition => {
             let rounds = g.card(id).ability.invis_rounds.unwrap_or(0.0) + 1.0;
-            g.card_mut(id).ability.invis_rounds = Some(rounds);
+            g.card_mut(id).ability.invis_rounds = crate::card::OptF64::some(rounds);
             Some(message())
         }
         _ => None,

@@ -14,15 +14,14 @@ use serde_json::{Map, Value, json};
 
 use crate::area::AreaId;
 use crate::card::{
-    Ability, Base, Card, Edition, EditionKind, Extra, ExtraVal, Facing, LuaStr, Rank, Seal, Suit,
+    Ability, Base, Card, Edition, EditionKind, Extra, ExtraVal, Facing, Rank, Seal, Suit,
 };
 use crate::hand_eval::HandType;
 use crate::rng::Rng;
 use crate::state::{
-    Areas, BlindSlot, BlindState, BossCounts, CenterBits, ConsumeableUsage, CurrentRound, GameState,
-    HandSort, HandState,
-    HeldTag, LastScore, LuaValue, PackState, Phase, RoundBonus, RoundResets, Sets, SimState,
-    StartingParams,
+    Areas, BlindSlot, BlindState, BossCounts, CenterBits, ConsumeableUsage, CurrentRound,
+    GameState, HandSort, HandState, HeldTag, LastScore, LuaValue, PackState, Phase, RoundBonus,
+    RoundResets, Sets, SimState, StartingParams,
 };
 
 pub const SCHEMA: &str = "jackdaw.snapshot/1";
@@ -240,17 +239,25 @@ fn extra_json(extra: &Extra) -> Value {
         Extra::Str(s) => json!(s),
         Extra::Table(t) => Value::Object(
             t.entries()
-                .iter()
                 .map(|(k, v)| {
                     let v = match v {
                         ExtraVal::Num(x) => num(*x),
-                        ExtraVal::Str(s) => json!(s.as_str()),
+                        ExtraVal::Str(s) => json!(s),
                         ExtraVal::Bool(b) => json!(b),
                     };
-                    ((*k).to_owned(), v)
+                    (k.to_owned(), v)
                 })
                 .collect(),
         ),
+    }
+}
+
+/// A snapshot's string in an `ability.extra` table as a `'static` one: the center's own value
+/// (the game never writes another), else a leaked copy.
+fn static_str(own: Option<&ExtraVal>, s: &str) -> &'static &'static str {
+    match own {
+        Some(ExtraVal::Str(st)) if ***st == *s => st,
+        _ => Box::leak(Box::new(&*Box::leak(s.to_owned().into_boxed_str()))),
     }
 }
 
@@ -272,7 +279,7 @@ fn extra_from(v: Option<&Value>, center: CenterId, path: &str) -> Result<Extra> 
             let Extra::Table(mut table) = base else {
                 return err(format!("{path}: table extra on a center without one"));
             };
-            let mut keys: Vec<&str> = table.entries().iter().map(|(k, _)| *k).collect();
+            let mut keys: Vec<&str> = table.entries().map(|(k, _)| k).collect();
             keys.sort_unstable();
             let mut got: Vec<&str> = map.keys().map(String::as_str).collect();
             got.sort_unstable();
@@ -284,7 +291,7 @@ fn extra_from(v: Option<&Value>, center: CenterId, path: &str) -> Result<Extra> 
             for (k, val) in map {
                 let p = format!("{path}.{k}");
                 let ev = match val {
-                    Value::String(s) => ExtraVal::Str(LuaStr::Owned(s.clone().into_boxed_str())),
+                    Value::String(s) => ExtraVal::Str(static_str(table.get(k), s)),
                     Value::Bool(b) => ExtraVal::Bool(*b),
                     other => ExtraVal::Num(as_num(other, &p)?),
                 };
@@ -333,7 +340,7 @@ fn ability_json(c: &Card) -> Value {
         ("burnt_hand", a.burnt_hand),
         ("loyalty_remaining", a.loyalty_remaining),
     ] {
-        if let Some(x) = v {
+        if let Some(x) = v.get() {
             m.insert(k.to_owned(), num(x));
         }
     }
@@ -381,11 +388,11 @@ fn ability_from(v: &Value, center: CenterId, path: &str) -> Result<Ability> {
         Some(Value::Bool(true)) => true,
         Some(other) => return err(format!("{path}.forced_selection: unexpected {other}")),
     };
-    a.invis_rounds = o.opt_num("invis_rounds")?;
-    a.caino_xmult = o.opt_num("caino_xmult")?;
-    a.yorick_discards = o.opt_num("yorick_discards")?;
-    a.burnt_hand = o.opt_num("burnt_hand")?;
-    a.loyalty_remaining = o.opt_num("loyalty_remaining")?;
+    a.invis_rounds = o.opt_num("invis_rounds")?.into();
+    a.caino_xmult = o.opt_num("caino_xmult")?.into();
+    a.yorick_discards = o.opt_num("yorick_discards")?.into();
+    a.burnt_hand = o.opt_num("burnt_hand")?.into();
+    a.loyalty_remaining = o.opt_num("loyalty_remaining")?.into();
     let p = o.sub("to_do_poker_hand");
     a.to_do_poker_hand = o
         .opt_str("to_do_poker_hand")?
@@ -415,13 +422,13 @@ fn edition_json(e: &Option<Edition>) -> Value {
     let mut m = Map::new();
     m.insert(e.kind.name().to_owned(), json!(true));
     m.insert("type".to_owned(), json!(e.kind.name()));
-    if let Some(x) = e.chips {
+    if let Some(x) = e.chips.get() {
         m.insert("chips".to_owned(), num(x));
     }
-    if let Some(x) = e.mult {
+    if let Some(x) = e.mult.get() {
         m.insert("mult".to_owned(), num(x));
     }
-    if let Some(x) = e.x_mult {
+    if let Some(x) = e.x_mult.get() {
         m.insert("x_mult".to_owned(), num(x));
     }
     Value::Object(m)
@@ -438,9 +445,9 @@ fn edition_from(v: Option<&Value>, path: &str) -> Result<Option<Edition>> {
     }
     let e = Edition {
         kind,
-        chips: o.opt_num("chips")?,
-        mult: o.opt_num("mult")?,
-        x_mult: o.opt_num("x_mult")?,
+        chips: o.opt_num("chips")?.into(),
+        mult: o.opt_num("mult")?.into(),
+        x_mult: o.opt_num("x_mult")?.into(),
     };
     o.done()?;
     Ok(Some(e))
@@ -481,7 +488,7 @@ pub fn card_json(c: &Card) -> Value {
         "stickers": {
             "eternal": c.ability.eternal,
             "perishable": c.ability.perishable,
-            "perish_tally": if c.ability.perishable { opt_num(c.ability.perish_tally) } else { Value::Null },
+            "perish_tally": if c.ability.perishable { opt_num(c.ability.perish_tally.get()) } else { Value::Null },
             "rental": c.ability.rental,
             "pinned": c.pinned,
         },
@@ -576,7 +583,7 @@ pub fn card_from(v: &Value, path: &str) -> Result<Card> {
     let mut st = Obj::new(o.field("stickers")?, &stp)?;
     ability.eternal = st.bool("eternal")?;
     ability.perishable = st.bool("perishable")?;
-    ability.perish_tally = st.opt_num("perish_tally")?;
+    ability.perish_tally = st.opt_num("perish_tally")?.into();
     ability.rental = st.bool("rental")?;
     let pinned = st.bool("pinned")?;
     st.done()?;

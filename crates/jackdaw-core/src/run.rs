@@ -159,7 +159,28 @@ fn init_game_object(seed: &str) -> GameState {
         consumeable_usage: ConsumeableUsage::default(),
         areas: Areas::default(),
         pack: None,
-        rng: Rng::new(seed),
+        // The streams `start_run` draws from before the first decision: the boss, the voucher,
+        // the blind tags, the deck's shuffle, the round's cards and the Orbital Tag hands, and
+        // the voucher's and the tags' first resamples (half the vouchers and a third of the tags
+        // are out of the first ante's pools).
+        rng: Rng::new_primed(
+            seed,
+            &[
+                "boss",
+                "Voucher1",
+                "Tag1",
+                "shuffle",
+                "idol1",
+                "mail1",
+                "anc1",
+                "cas1",
+                "orbital",
+                "Voucher1_resample2",
+                "Voucher1_resample3",
+                "Tag1_resample2",
+                "Tag1_resample3",
+            ],
+        ),
         sim: SimState {
             next_sort_id: 1,
             ..SimState::default()
@@ -214,6 +235,8 @@ fn lua_value(v: &Value) -> LuaValue {
 /// A playing card prototype of the starting deck (`card_protos` entries).
 #[derive(Clone, Debug)]
 struct Proto {
+    /// The `P_CARDS` front of `s` and `r`.
+    front: jackdaw_data::CardId,
     s: &'static str,
     r: &'static str,
     e: Option<&'static str>,
@@ -306,11 +329,11 @@ impl Game {
         g.gs.consumable_slots = sp.consumable_slots;
         g.gs.joker_slots = sp.joker_slots;
         g.gs.hand_size = sp.hand_size;
+        // The deck comes shuffled (`G.deck:shuffle()`, game.lua:2375).
         g.build_deck(challenge.map(|c| &c.data));
         let rr = &g.gs.round_resets;
         g.gs.current_round.discards_left = rr.discards;
         g.gs.current_round.hands_left = rr.hands;
-        g.gs.areas.shuffle(AreaId::Deck, &mut g.gs.rng, "shuffle");
         g.reset_idol_card();
         g.reset_mail_rank();
         g.gs.current_round.ancient_card = None;
@@ -320,6 +343,7 @@ impl Game {
         g.set_blind(None, false);
         g.reset_blinds();
         g.settle();
+        g.gs.rng.unprime();
         if let Some(what) = g.rt.unported.take() {
             return Err(format!("not ported yet: {what}"));
         }
@@ -567,13 +591,16 @@ impl Game {
     /// the deck's rules keep, sorted, made by `card_from_control`.
     fn build_deck(&mut self, ch: Option<&'static Value>) {
         let de = ch.and_then(|c| field(c, "deck"));
-        let mut protos: Vec<Proto> = Vec::new();
+        let mut protos: Vec<Proto> = Vec::with_capacity(P_CARDS.len());
         let custom = de.and_then(|d| field(d, "cards"));
         if let Some(Value::List(cards)) = custom {
             for c in cards.iter() {
+                let s = string(field(c, "s")).expect("a deck card's suit");
+                let r = string(field(c, "r")).expect("a deck card's rank");
                 protos.push(Proto {
-                    s: string(field(c, "s")).expect("a deck card's suit"),
-                    r: string(field(c, "r")).expect("a deck card's rank"),
+                    front: jackdaw_data::card_by_parts(s, r).expect("a front"),
+                    s,
+                    r,
                     e: string(field(c, "e")),
                     d: string(field(c, "d")),
                     g: string(field(c, "g")),
@@ -589,12 +616,14 @@ impl Game {
             };
             let erratic = self.gs.starting_params.erratic_suits_and_ranks;
             let no_faces = self.gs.starting_params.no_faces;
-            for p in P_CARDS.iter() {
-                let mut key = p.key;
+            for i in 0..P_CARDS.len() {
+                let mut front = i;
                 if erratic {
                     let seed = self.gs.rng.seed("erratic");
-                    key = P_CARDS[crate::rng::element_index(P_CARDS.len(), seed)].key;
+                    front = crate::rng::element_index(P_CARDS.len(), seed);
                 }
+                let key = P_CARDS[front].key;
+                let front = jackdaw_data::CardId(front as u8);
                 let (s, r) = (&key[0..1], &key[2..3]);
                 let mut keep = true;
                 let (mut e, mut d, mut g) = (None, None, None);
@@ -619,35 +648,77 @@ impl Game {
                     keep = false;
                 }
                 if keep {
-                    protos.push(Proto { s, r, e, d, g });
+                    protos.push(Proto {
+                        front,
+                        s,
+                        r,
+                        e,
+                        d,
+                        g,
+                    });
                 }
             }
         }
         protos.sort_by(Proto::cmp);
-        // Nothing a deck card's creation does changes the costs the next one sees.
+        // The cards are made in sort order (sort ids `first..`), each emplaced in front of the
+        // deck, and `start_run` then shuffles the deck (`G.deck:shuffle()`, game.lua:2375):
+        // pseudoshuffle sorts by sort id, then swaps. Making a deck card draws nothing and no
+        // card reads another, so the swaps come first and each card is made in its place.
+        let n = protos.len();
+        let mut order: Vec<usize> = (0..n).collect();
+        crate::rng::shuffle(&mut order, self.gs.rng.seed("shuffle"));
+        let first = self.gs.sim.next_sort_id;
+        self.gs.sim.next_sort_id += n as u32;
+        // Nothing a deck card's creation does changes the costs the next one sees. A new card's
+        // ability and costs come from its center, so cards of one center start as one template.
         let cost = self.cost_context(AreaId::Deck);
-        let mut cards: Vec<Card> = protos
+        let hands_played = self.gs.hands_played;
+        let mut templates: Vec<Card> = Vec::new();
+        let deck: Vec<Card> = order
             .iter()
-            .map(|p| self.card_from_control(p, &cost))
+            .map(|&k| {
+                let p = &protos[k];
+                let center =
+                    p.e.map(|e| jackdaw_data::center_by_key(e).expect("an enhancement"))
+                        .unwrap_or(centers::C_BASE);
+                let template = match templates.iter().find(|t| t.center == center) {
+                    Some(t) => *t,
+                    None => {
+                        let t = Card::new(0, center, None, hands_played, &cost);
+                        templates.push(t);
+                        t
+                    }
+                };
+                card_from_control(p, template, first + k as u32, &cost)
+            })
             .collect();
-        // `emplace` puts each new card at the front, so the deck holds them in reverse. Nothing
-        // sees that order: `start_run` shuffles the deck next, and pseudoshuffle sorts by sort
-        // id first. The deck keeps them in creation order, which is sort id order.
-        for c in &mut cards {
-            c.facing = crate::card::Facing::Back;
+        // set_ability's `used_jokers` marks, once per center (no deck card is a To Do List).
+        let mut marked = crate::state::CenterBits::default();
+        for c in &deck {
+            if !marked.contains(c.center) {
+                marked.insert(c.center);
+                self.mark_used(c.center);
+            }
         }
-        debug_assert!(self.gs.areas.deck.is_empty(), "a new run's deck starts empty");
-        self.gs.areas.deck = cards;
+        debug_assert!(
+            self.gs.areas.deck.is_empty(),
+            "a new run's deck starts empty"
+        );
+        self.gs.areas.deck = deck;
         self.gs.starting_deck_size = self.playing_card_count() as f64;
     }
+}
 
-    /// `card_from_control(control)` (misc_functions.lua:1625-1633), before it joins the deck.
-    fn card_from_control(&mut self, p: &Proto, cost: &CostContext) -> Card {
-        let front = jackdaw_data::card_by_parts(p.s, p.r).expect("a front");
-        let center =
-            p.e.map(|e| jackdaw_data::center_by_key(e).expect("an enhancement"))
-                .unwrap_or(centers::C_BASE);
-        let mut card = self.new_card_with_cost(center, Some(front), cost);
+/// `card_from_control(control)` (misc_functions.lua:1625-1633) for the card with sort id
+/// `sort_id`, face down in the deck, from `template`: `Card(...)` for its center with no front
+/// (`Card:init`'s `set_base` touches neither the ability nor the costs). The caller marks its
+/// center used.
+fn card_from_control(p: &Proto, template: Card, sort_id: u32, cost: &CostContext) -> Card {
+    {
+        let mut card = template;
+        card.sort_id = sort_id;
+        card.base = Some(crate::card::set_base(None, p.front, true));
+        card.facing = crate::card::Facing::Back;
         if let Some(d) = p.d {
             card.set_edition(Some(EditionKind::from_name(d).expect("an edition")), cost);
         }

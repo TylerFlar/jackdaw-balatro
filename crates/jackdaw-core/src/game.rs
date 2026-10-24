@@ -97,7 +97,7 @@ impl std::error::Error for StepError {}
 
 /// Engine state that exists only while a step runs, plus `G.STATE`. Between steps the queue is
 /// empty and the buffers are zero.
-#[derive(Clone, Debug, Default)]
+#[derive(Debug, Default)]
 pub struct Runtime {
     /// `G.STATE`.
     pub state: LuaState,
@@ -161,8 +161,9 @@ pub struct StaleShop {
     pub booster: (f64, f64),
 }
 
-/// A run: the persistent [`GameState`] and the engine's [`Runtime`].
-#[derive(Clone, Debug)]
+/// A run: the persistent [`GameState`] and the engine's [`Runtime`]. `clone_from` copies a run
+/// into a game that held one, reusing its allocations.
+#[derive(Debug)]
 pub struct Game {
     pub gs: GameState,
     pub rt: Runtime,
@@ -336,3 +337,22 @@ impl Game {
             .flat_map(|a| self.gs.areas.get(a).iter())
     }
 }
+
+crate::state::clone_fields!(Runtime {
+    state,
+    state_complete,
+    queue,
+    highlighted,
+    dollar_buffer,
+    joker_buffer,
+    consumeable_buffer,
+    facing_blind,
+    end_round_called,
+    shop_open,
+    round_blind,
+    unported,
+    areas,
+    event_base,
+});
+
+crate::state::clone_fields!(Game { gs, rt });

@@ -135,7 +135,7 @@ impl Game {
                 }
                 if let Some(rounds) = spec.perishable {
                     card.ability.perishable = true;
-                    card.ability.perish_tally = Some(rounds);
+                    card.ability.perish_tally = crate::card::OptF64::some(rounds);
                 }
                 if spec.rental {
                     card.set_rental(true, &cost);
@@ -298,7 +298,7 @@ impl Game {
                 cards.len()
             )));
         }
-        let new: Vec<_> = order.iter().map(|&i| cards[i].clone()).collect();
+        let new: Vec<_> = order.iter().map(|&i| cards[i]).collect();
         *self.gs.areas.get_mut(area) = new;
         self.gs.areas.align(area);
         Ok(())
@@ -457,7 +457,7 @@ mod tests {
         g.debug_add(&spec).unwrap();
         let j = g.gs.areas.jokers.last().unwrap();
         assert!(j.ability.eternal && j.ability.perishable);
-        assert_eq!(j.ability.perish_tally, Some(3.0));
+        assert_eq!(j.ability.perish_tally.get(), Some(3.0));
     }
 
     #[test]

@@ -310,22 +310,22 @@ impl EditionKind {
 pub struct Edition {
     pub kind: EditionKind,
     /// Foil: `edition.chips`.
-    pub chips: Option<f64>,
+    pub chips: OptF64,
     /// Holo: `edition.mult`.
-    pub mult: Option<f64>,
+    pub mult: OptF64,
     /// Polychrome: `edition.x_mult`.
-    pub x_mult: Option<f64>,
+    pub x_mult: OptF64,
 }
 
 impl Edition {
     /// The edition `set_edition` gives a card, with values from `G.P_CENTERS.e_*.config.extra`.
     pub fn new(kind: EditionKind) -> Edition {
-        let extra = kind.center().get().config_num("extra");
+        let extra = kind.center().get().config_num("extra").into();
         let mut e = Edition {
             kind,
-            chips: None,
-            mult: None,
-            x_mult: None,
+            chips: OptF64::NONE,
+            mult: OptF64::NONE,
+            x_mult: OptF64::NONE,
         };
         match kind {
             EditionKind::Holo => e.mult = extra,
@@ -367,42 +367,97 @@ impl Seal {
 // Ability
 // ---------------------------------------------------------------------------
 
-/// A string in `ability.extra`: static data, or text built at runtime. Compares by content, as
-/// Lua strings do.
-#[derive(Clone, Debug)]
-pub enum LuaStr {
-    Static(&'static str),
-    Owned(Box<str>),
-}
+/// A number or nil in eight bytes: an `Option<f64>` that keeps `None` as a signalling-NaN bit
+/// pattern. No arithmetic makes one (x64 quiets every NaN it produces), and a snapshot's
+/// non-finite numbers decode to the quiet NaN.
+#[derive(Clone, Copy)]
+pub struct OptF64(u64);
 
-impl LuaStr {
-    pub fn as_str(&self) -> &str {
-        match self {
-            LuaStr::Static(s) => s,
-            LuaStr::Owned(s) => s,
-        }
+impl OptF64 {
+    const NONE_BITS: u64 = 0x7FF4_0000_0000_0001;
+    pub const NONE: OptF64 = OptF64(OptF64::NONE_BITS);
+
+    pub fn some(x: f64) -> OptF64 {
+        debug_assert_ne!(
+            x.to_bits(),
+            OptF64::NONE_BITS,
+            "the nil pattern as a number"
+        );
+        OptF64(x.to_bits())
+    }
+
+    pub fn get(self) -> Option<f64> {
+        (self.0 != OptF64::NONE_BITS).then(|| f64::from_bits(self.0))
+    }
+
+    pub fn is_some(self) -> bool {
+        self.0 != OptF64::NONE_BITS
+    }
+
+    pub fn is_none(self) -> bool {
+        self.0 == OptF64::NONE_BITS
+    }
+
+    pub fn unwrap_or(self, default: f64) -> f64 {
+        self.get().unwrap_or(default)
     }
 }
 
-impl PartialEq for LuaStr {
-    fn eq(&self, other: &Self) -> bool {
-        self.as_str() == other.as_str()
+impl Default for OptF64 {
+    fn default() -> OptF64 {
+        OptF64::NONE
     }
 }
 
-/// A value in an `ability.extra` table.
-#[derive(Clone, Debug, PartialEq)]
+impl From<Option<f64>> for OptF64 {
+    fn from(v: Option<f64>) -> OptF64 {
+        v.map_or(OptF64::NONE, OptF64::some)
+    }
+}
+
+impl From<f64> for OptF64 {
+    fn from(x: f64) -> OptF64 {
+        OptF64::some(x)
+    }
+}
+
+/// Compares as the `Option<f64>`: a NaN differs from itself.
+impl PartialEq for OptF64 {
+    fn eq(&self, other: &OptF64) -> bool {
+        self.get() == other.get()
+    }
+}
+
+impl std::fmt::Debug for OptF64 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.get().fmt(f)
+    }
+}
+
+/// A value in an `ability.extra` table. Strings are the centers' own (a snapshot's are matched
+/// to them), held as thin pointers.
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ExtraVal {
     Num(f64),
-    Str(LuaStr),
+    Str(&'static &'static str),
     Bool(bool),
+}
+
+impl ExtraVal {
+    /// The string, if the value is one.
+    pub fn as_str(&self) -> Option<&'static str> {
+        match self {
+            ExtraVal::Str(s) => Some(s),
+            _ => None,
+        }
+    }
 }
 
 const EXTRA_SLOTS: usize = 3;
 
 /// `ability.extra`: nil, a number, a string, or a small table copied from the center config
-/// (`copy_table(center.config.extra)`). Table keys are static and kept in key order.
-#[derive(Clone, Debug, PartialEq, Default)]
+/// (`copy_table(center.config.extra)`).
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub enum Extra {
     #[default]
     Nil,
@@ -411,15 +466,35 @@ pub enum Extra {
     Table(ExtraTable),
 }
 
-/// The entries of an `ability.extra` table.
-#[derive(Clone, Debug, PartialEq, Default)]
+/// The entries of an `ability.extra` table: the keys of the center config's table, which the
+/// game never adds to, in key order, and a value for each.
+#[derive(Clone, Copy, Debug)]
 pub struct ExtraTable {
-    entries: Vec<(&'static str, ExtraVal)>,
+    keys: &'static [(&'static str, Value)],
+    vals: [ExtraVal; EXTRA_SLOTS],
+}
+
+impl Default for ExtraTable {
+    fn default() -> ExtraTable {
+        ExtraTable {
+            keys: &[],
+            vals: [ExtraVal::Num(0.0); EXTRA_SLOTS],
+        }
+    }
+}
+
+impl PartialEq for ExtraTable {
+    fn eq(&self, other: &ExtraTable) -> bool {
+        self.keys.len() == other.keys.len() && self.entries().eq(other.entries())
+    }
 }
 
 impl ExtraTable {
     pub fn get(&self, key: &str) -> Option<&ExtraVal> {
-        self.entries.iter().find(|(k, _)| *k == key).map(|(_, v)| v)
+        self.keys
+            .iter()
+            .position(|(k, _)| *k == key)
+            .map(|i| &self.vals[i])
     }
 
     pub fn num(&self, key: &str) -> Option<f64> {
@@ -431,16 +506,17 @@ impl ExtraTable {
 
     /// `extra[key] = value` for a key the table already has (the game never adds keys).
     pub fn set(&mut self, key: &str, value: ExtraVal) {
-        let slot = self
-            .entries
-            .iter_mut()
-            .find(|(k, _)| *k == key)
+        let i = self
+            .keys
+            .iter()
+            .position(|(k, _)| *k == key)
             .unwrap_or_else(|| panic!("ability.extra has no key {key:?}"));
-        slot.1 = value;
+        self.vals[i] = value;
     }
 
-    pub fn entries(&self) -> &[(&'static str, ExtraVal)] {
-        &self.entries
+    /// The keys and values, in key order.
+    pub fn entries(&self) -> impl Iterator<Item = (&'static str, &ExtraVal)> + '_ {
+        self.keys.iter().map(|(k, _)| *k).zip(&self.vals)
     }
 }
 
@@ -453,20 +529,19 @@ impl Extra {
             Some(Value::Str(s)) => Extra::Str(s),
             Some(Value::Table(entries)) => {
                 assert!(entries.len() <= EXTRA_SLOTS, "extra table too large");
-                Extra::Table(ExtraTable {
-                    entries: entries
-                        .iter()
-                        .map(|(k, v)| {
-                            let val = match v {
-                                Value::Num(x) => ExtraVal::Num(*x),
-                                Value::Str(s) => ExtraVal::Str(LuaStr::Static(s)),
-                                Value::Bool(b) => ExtraVal::Bool(*b),
-                                other => panic!("unexpected extra value {other:?}"),
-                            };
-                            (*k, val)
-                        })
-                        .collect(),
-                })
+                let mut table = ExtraTable {
+                    keys: entries,
+                    ..ExtraTable::default()
+                };
+                for (slot, (_, v)) in table.vals.iter_mut().zip(entries.iter()) {
+                    *slot = match v {
+                        Value::Num(x) => ExtraVal::Num(*x),
+                        Value::Str(s) => ExtraVal::Str(s),
+                        Value::Bool(b) => ExtraVal::Bool(*b),
+                        other => panic!("unexpected extra value {other:?}"),
+                    };
+                }
+                Extra::Table(table)
             }
             Some(Value::List([])) => Extra::Table(ExtraTable::default()),
             Some(other) => panic!("unexpected extra {other:?}"),
@@ -497,7 +572,7 @@ impl Extra {
 
 /// `card.ability` (card.lua:223-342 `Card:set_ability`). `name`, `effect`, `set`, `order`,
 /// `type` and `consumeable` come from the center and are read through [`Card::center`].
-#[derive(Clone, Debug, PartialEq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub struct Ability {
     pub mult: f64,
     pub h_mult: f64,
@@ -517,12 +592,12 @@ pub struct Ability {
     pub bonus: f64,
     pub hands_played_at_create: f64,
     // Set by set_ability for specific jokers.
-    pub invis_rounds: Option<f64>,
+    pub invis_rounds: OptF64,
     pub to_do_poker_hand: Option<HandType>,
-    pub caino_xmult: Option<f64>,
-    pub yorick_discards: Option<f64>,
-    pub burnt_hand: Option<f64>,
-    pub loyalty_remaining: Option<f64>,
+    pub caino_xmult: OptF64,
+    pub yorick_discards: OptF64,
+    pub burnt_hand: OptF64,
+    pub loyalty_remaining: OptF64,
     // Set during play.
     pub couponed: bool,
     pub played_this_ante: bool,
@@ -534,21 +609,15 @@ pub struct Ability {
     /// A Negative joker debuffed out of the deck keeps its slot until it's removed
     /// (card.lua:686-693, 4733-4739).
     pub queue_negative_removal: bool,
-    // Per-frame values `Card:update` keeps (card.lua:4167-4202); derived, so not in snapshots.
-    /// Temperance: the jokers' sell value, capped.
-    pub money: Option<f64>,
-    /// Driver's License: enhanced playing cards.
-    pub driver_tally: Option<f64>,
-    /// Steel Joker: Steel Cards.
-    pub steel_tally: Option<f64>,
-    /// Cloud 9: 9s.
-    pub nine_tally: Option<f64>,
-    /// Stone Joker: Stone Cards.
-    pub stone_tally: Option<f64>,
+    /// The per-frame value `Card:update` keeps for this card (card.lua:4167-4202), derived, so
+    /// not in snapshots: Temperance's `money` (the jokers' sell value, capped), Driver's
+    /// License's `driver_tally` (enhanced playing cards), Steel Joker's `steel_tally`, Cloud 9's
+    /// `nine_tally`, Stone Joker's `stone_tally`. A card is one of them, so they share a field.
+    pub tally: OptF64,
     // Stickers (`ability.eternal`, `.perishable`, `.perish_tally`, `.rental`).
     pub eternal: bool,
     pub perishable: bool,
-    pub perish_tally: Option<f64>,
+    pub perish_tally: OptF64,
     pub rental: bool,
 }
 
@@ -567,7 +636,7 @@ pub enum Facing {
 }
 
 /// A card (`Card`).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Card {
     /// `G.sort_id` at creation; the card's identity (per run).
     pub sort_id: u32,
@@ -624,14 +693,14 @@ fn ability_for(c: &jackdaw_data::Center) -> Ability {
         ..Ability::default()
     };
     match c.name {
-        "Invisible Joker" => ability.invis_rounds = Some(0.0),
-        "Caino" => ability.caino_xmult = Some(1.0),
+        "Invisible Joker" => ability.invis_rounds = OptF64::some(0.0),
+        "Caino" => ability.caino_xmult = OptF64::some(1.0),
         "Yorick" => {
-            ability.yorick_discards = ability.extra.table().and_then(|t| t.num("discards"))
+            ability.yorick_discards = ability.extra.table().and_then(|t| t.num("discards")).into()
         }
         "Loyalty Card" => {
-            ability.burnt_hand = Some(0.0);
-            ability.loyalty_remaining = ability.extra.table().and_then(|t| t.num("every"));
+            ability.burnt_hand = OptF64::some(0.0);
+            ability.loyalty_remaining = ability.extra.table().and_then(|t| t.num("every")).into();
         }
         _ => {}
     }
@@ -752,7 +821,7 @@ impl Card {
     /// hand roll ([`Card::roll_to_do_hand`]) and the boss re-debuff on a non-initial call.
     pub fn set_ability(&mut self, center: CenterId, hands_played: f64) {
         let old = &self.ability;
-        let mut ability = ABILITIES[usize::from(center.0)].clone();
+        let mut ability = ABILITIES[usize::from(center.0)];
         ability.forced_selection = old.forced_selection;
         ability.perma_bonus = old.perma_bonus;
         ability.hands_played_at_create = hands_played;
@@ -835,7 +904,7 @@ impl Card {
         self.ability.perishable = false;
         if self.center().perishable_compat && !self.ability.eternal {
             self.ability.perishable = true;
-            self.ability.perish_tally = Some(perishable_rounds);
+            self.ability.perish_tally = OptF64::some(perishable_rounds);
         }
     }
 
@@ -1036,7 +1105,6 @@ mod tests {
             Base::front_for(Suit::Spades, Rank::Seven),
             false,
         );
-        c.base = Some(new);
         assert_eq!(new.suit, Suit::Spades);
         assert_eq!(new.suit_nominal_original, Suit::Hearts.nominal_original());
         // Only the initial set_base records original_value; the rebuilt base starts fresh.
@@ -1057,7 +1125,7 @@ mod tests {
         c.set_edition(Some(EditionKind::Polychrome), &CostContext::default());
         // 2 + 5: floor(7.5) = 7, sell floor(3.5) = 3
         assert_eq!((c.cost, c.sell_cost), (7.0, 3.0));
-        assert_eq!(c.edition.unwrap().x_mult, Some(1.5));
+        assert_eq!(c.edition.unwrap().x_mult.get(), Some(1.5));
         c.ability.couponed = true;
         c.set_cost(&CostContext {
             in_shop: true,
@@ -1085,8 +1153,8 @@ mod tests {
     fn ability_specials() {
         let loyalty = center_by_key("j_loyalty_card").unwrap();
         let c = Card::new(1, loyalty, None, 3.0, &CostContext::default());
-        assert_eq!(c.ability.loyalty_remaining, Some(5.0));
-        assert_eq!(c.ability.burnt_hand, Some(0.0));
+        assert_eq!(c.ability.loyalty_remaining.get(), Some(5.0));
+        assert_eq!(c.ability.burnt_hand.get(), Some(0.0));
         assert_eq!(c.ability.hands_played_at_create, 3.0);
         let glass = center_by_key("m_glass").unwrap();
         let g = Card::new(2, glass, card_by_key("S_2"), 0.0, &CostContext::default());

@@ -81,7 +81,7 @@ impl Game {
             // queues the boss re-debuff (G205).
             return;
         }
-        let card = card.clone();
+        let card = *card;
         let a = &card.ability;
         if a.h_size != 0.0 {
             self.change_size(AreaId::Hand, a.h_size);
@@ -211,7 +211,7 @@ impl Game {
         };
         let card = self.gs.areas.get_mut(area).remove(i);
         self.rt.highlighted.retain(|&h| h != id);
-        self.remove_from_deck_card(id, card.clone(), false);
+        self.remove_from_deck_card(id, card, false);
         if card.ability.queue_negative_removal {
             if card.center().consumeable {
                 self.gs.consumable_slots -= 1.0;
@@ -311,15 +311,15 @@ impl Game {
                 match c.center {
                     C_TEMPERANCE => {
                         let cap = c.ability.extra.num().unwrap_or(0.0);
-                        c.ability.money = Some(joker_sell.min(cap));
+                        c.ability.tally = crate::card::OptF64::some(joker_sell.min(cap));
                     }
                     J_THROWBACK => {
                         c.ability.x_mult = 1.0 + skips * c.ability.extra.num().unwrap_or(0.0);
                     }
-                    J_DRIVERS_LICENSE => c.ability.driver_tally = driver,
-                    J_STEEL_JOKER => c.ability.steel_tally = steel,
-                    J_CLOUD_9 => c.ability.nine_tally = nine,
-                    J_STONE => c.ability.stone_tally = stone,
+                    J_DRIVERS_LICENSE => c.ability.tally = driver.into(),
+                    J_STEEL_JOKER => c.ability.tally = steel.into(),
+                    J_CLOUD_9 => c.ability.tally = nine.into(),
+                    J_STONE => c.ability.tally = stone.into(),
                     J_STENCIL => c.ability.x_mult = (joker_limit - n_jokers) + stencils,
                     J_SWASHBUCKLER => {
                         // Every other card in G.jokers, debuffed or not.

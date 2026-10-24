@@ -175,7 +175,7 @@ fn card(game: &Game, c: &Card, area: AreaId) -> Json {
     if c.ability.eternal {
         modifier.push(("eternal", Json::Bool(true)));
     }
-    if let Some(t) = c.ability.perish_tally
+    if let Some(t) = c.ability.perish_tally.get()
         && t > 0.0
     {
         modifier.push(("perishable", num(t)));

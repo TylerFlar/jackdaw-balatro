@@ -209,7 +209,8 @@ impl Game {
             if v.set == CenterSet::Voucher {
                 if !sets.used_vouchers.contains(id) {
                     let requires_met = v.requires.iter().all(|r| {
-                        jackdaw_data::center_by_key(r).is_some_and(|c| sets.used_vouchers.contains(c))
+                        jackdaw_data::center_by_key(r)
+                            .is_some_and(|c| sets.used_vouchers.contains(c))
                     });
                     let in_shop = self.gs.areas.shop_vouchers.iter().any(|c| c.center == id);
                     add = requires_met && !in_shop;
@@ -295,9 +296,7 @@ impl Game {
     /// name joins `G.GAME.used_jokers` (card.lua:349-354), and To Do List draws its hand
     /// (card.lua:311-322). The boss re-debuff of a non-initial call is the caller's.
     fn set_ability_effects(&mut self, card: &mut Card) {
-        for &c in jackdaw_data::same_name_centers(card.center) {
-            self.gs.sets.used_jokers.insert(c);
-        }
+        self.mark_used(card.center);
         if card.name() == "To Do List" {
             // `pairs(G.GAME.hands)` order (card.lua:312-315).
             let visible: Vec<_> = crate::hand_eval::PAIRS_ORDER
@@ -308,12 +307,19 @@ impl Game {
         }
     }
 
+    /// `set_ability`'s `G.GAME.used_jokers` marks: every center of this one's name.
+    pub(crate) fn mark_used(&mut self, center: CenterId) {
+        for &c in jackdaw_data::same_name_centers(center) {
+            self.gs.sets.used_jokers.insert(c);
+        }
+    }
+
     /// `card:set_ability(center)` on a card already in play (an enhancement change): the new
     /// ability, its game-level effects, then the boss re-debuff of a non-initial call
     /// (card.lua:223-366).
     pub fn set_card_ability(&mut self, id: u32, center: CenterId) {
         let hands_played = self.gs.hands_played;
-        let mut card = self.card(id).clone();
+        let mut card = *self.card(id);
         card.set_ability(center, hands_played);
         self.set_ability_effects(&mut card);
         *self.card_mut(id) = card;
@@ -355,7 +361,7 @@ impl Game {
     /// non-initial `set_base(other's front)`: the copy's `times_played` restarts at 0, its
     /// `original_value` stays unset, and its suit tiebreak is its current suit's.
     pub fn copy_card(&mut self, other: u32, strip_edition: bool, area: AreaId) -> Card {
-        let src = self.card(other).clone();
+        let src = *self.card(other);
         let cost = self.cost_context(area);
         let mut card = self.new_card(centers::C_BASE, None, area);
         card.set_ability(src.center, self.gs.hands_played);
@@ -363,7 +369,7 @@ impl Game {
         card.base = src
             .base
             .map(|b| crate::card::set_base(None, b.front, false));
-        card.ability = src.ability.clone();
+        card.ability = src.ability;
         if !strip_edition {
             card.set_edition(src.edition.map(|e| e.kind), &cost);
         }
@@ -391,7 +397,12 @@ impl Game {
             if matches!(
                 ty,
                 PoolType::Tarot | PoolType::Spectral | PoolType::TarotPlanet
-            ) && !(self.gs.sets.used_jokers.contains(jackdaw_data::centers::C_SOUL) && !showman)
+            ) && !(self
+                .gs
+                .sets
+                .used_jokers
+                .contains(jackdaw_data::centers::C_SOUL)
+                && !showman)
                 && self
                     .gs
                     .rng
@@ -401,7 +412,12 @@ impl Game {
                 forced = Some(centers::C_SOUL);
             }
             if matches!(ty, PoolType::Planet | PoolType::Spectral)
-                && !(self.gs.sets.used_jokers.contains(jackdaw_data::centers::C_BLACK_HOLE) && !showman)
+                && !(self
+                    .gs
+                    .sets
+                    .used_jokers
+                    .contains(jackdaw_data::centers::C_BLACK_HOLE)
+                    && !showman)
                 && self
                     .gs
                     .rng
