@@ -119,10 +119,10 @@ def test_a_challenge_needs_attach() -> None:
         LiveAdapter(SimBackend()).reset("b_red", 1, "X", challenge="c_omelette_1")
 
 
-def test_bridge_adapter_of_a_live_backend_is_a_live_adapter() -> None:
+def test_bridge_adapter_is_a_live_adapter() -> None:
     assert isinstance(BridgeAdapter(LiveBackend(url="http://127.0.0.1:1")), LiveAdapter)
     assert isinstance(BridgeAdapter(FakeLive()), LiveAdapter)
-    assert type(BridgeAdapter(SimBackend())) is BridgeAdapter
+    assert isinstance(BridgeAdapter(SimBackend()), LiveAdapter)
 
 
 # ---------------------------------------------------------------------------

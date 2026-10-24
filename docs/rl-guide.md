@@ -28,7 +28,7 @@ while not (terminated or truncated):
 
 That's the whole interface. The rest of this page explains what `obs`, `mask`, and `action` actually look like so you can wire them into your model.
 
-`DirectAdapter` runs the game on the Rust engine (`jackdaw.core.Game`), the one to train on. `OracleAdapter` runs the same game on the Python reference engine, roughly ten times slower; it is kept for checking the two engines against each other.
+`DirectAdapter` runs the game on the Rust engine (`jackdaw.core.Game`) in process, the adapter to train on. `LiveAdapter` plays the live game instead (see [Live Validation Adapter](#live-validation-adapter)).
 
 ## Observations
 
@@ -129,7 +129,7 @@ Types 21 and 22 were added after the first 21, so ids 0-20 keep their meaning; a
 
 The swaps follow the game's drag and drop: the jokers can be reordered whenever the game waits for a move, the hand whenever it holds cards (while choosing a hand, and in an Arcana or Spectral pack, where the order decides which card Death copies and the order the cards go back into the deck). The sort buttons exist only while choosing a hand. Consumables can be dragged in the game too, but their order changes nothing, so there is no action for it. Under BALATROBOT legality (the live bot) the jokers can't be reordered at blind select or on the cash-out screen: BalatroBot's `rearrange` refuses there.
 
-`UseConsumable` and `PickPackCard` take a `card_target` when the consumable works on hand cards (The Magician, Death, Aura...). Bound it with `get_consumable_target_info(card)`, which returns `(min_cards, max_cards, needs_targets)`; on the Rust engine, `jackdaw.env.rust_env.consumable_target_info(info["game"], "consumables", index)` (or `"pack_cards"`) returns the same. Leave `card_target` as `None` to get the engine's default selection: the lowest-index legal cards.
+`UseConsumable` and `PickPackCard` take a `card_target` when the consumable works on hand cards (The Magician, Death, Aura...). Bound it with `get_consumable_target_info(info["game"], "consumables", index)` (or `"pack_cards"`), which returns `(min_cards, max_cards, needs_targets)`. Leave `card_target` as `None` to get the engine's default selection: the lowest-index legal cards.
 
 ## Environment Config
 
@@ -153,10 +153,10 @@ With `end_on_win=True` (the default) a won run ends the episode, as vanilla stop
 ```python
 info["prev_state"]  # GameState snapshot taken before this step
 info["state"]       # GameState snapshot taken after this step
-info["game"]        # the run itself, a jackdaw.core.Game (DirectAdapter)
+info["game"]        # the run itself, a jackdaw.core.Game
 ```
 
-`GameState` is a small frozen snapshot: `phase`, `ante`, `round`, `dollars`, `hands_left`, `discards_left`, `hand_size`, `joker_slots`, `consumable_slots`, `blind_on_deck`, `blind_chips`, `chips`, `won`, `done`. Compare `prev_state` with `state` for before/after deltas. `info["game"]` is the live run, which the next step moves on, so read from it immediately or keep `info["game"].freeze()`. On the Python engine's adapters (`OracleAdapter`, `BridgeAdapter`) `info["raw_state"]`, the engine's state dict, takes its place.
+`GameState` is a small frozen snapshot: `phase`, `ante`, `round`, `dollars`, `hands_left`, `discards_left`, `hand_size`, `joker_slots`, `consumable_slots`, `blind_on_deck`, `blind_chips`, `chips`, `won`, `done`. Compare `prev_state` with `state` for before/after deltas. `info["game"]` is the live run, which the next step moves on, so read from it immediately or keep `info["game"].freeze()`.
 
 A step the Rust engine can't take yet leaves the run unchanged and ends the episode as truncated, with the reason in `info["not_ported"]`.
 
@@ -334,8 +334,7 @@ A reward function receives a `Transition`:
 t.prev, t.curr          # GameState snapshots before / after the action
 t.action                # the FactoredAction taken
 t.terminated, t.truncated, t.done
-t.game                  # the run after the step, a jackdaw.core.Game (DirectAdapter)
-t.raw_state             # the Python engine's dict instead (OracleAdapter, BridgeAdapter)
+t.game                  # the run after the step, a jackdaw.core.Game
 
 # Derived events
 t.blind_beaten          # this step's hand cleared a blind
@@ -432,6 +431,6 @@ env = BalatroEnvironment(
 # Same observations and actions; the mask is narrowed to what BalatroBot executes
 ```
 
-You must have Balatro running with BalatroBot configured to listen on the same host and port. `LiveAdapter` (also what `BridgeAdapter(LiveBackend(...))` gives) keeps a shadow run in the Rust engine: every action is taken by the shadow first, then by the game, and the game's answer is compared with the shadow. `info["game"]` is the shadow, and the observation and mask come from it, exactly as in training. An unexplained difference raises `DivergenceError` and writes a repro bundle; see [Lockstep against the live game](live).
+You must have Balatro running with BalatroBot configured to listen on the same host and port. `LiveAdapter` (also what `BridgeAdapter(backend)` gives) keeps a shadow run in the Rust engine: every action is taken by the shadow first, then by the game, and the game's answer is compared with the shadow. `info["game"]` is the shadow, and the observation and mask come from it, exactly as in training. An unexplained difference raises `DivergenceError` and writes a repro bundle; see [Lockstep against the live game](live). With `SimBackend()` in place of the `LiveBackend`, the same adapter plays BalatroBot's API on the simulator, in process.
 
-The simulator follows vanilla, which allows a few things BalatroBot's endpoints refuse: using a consumable at blind select, on the cash-out screen or while a pack is open, selling while a pack is open or at blind select, and using a card-targeting consumable in the shop. Over a `LiveAdapter` (and a `BridgeAdapter`) those actions are masked out (and `SimBackend`, which runs BalatroBot's endpoints on the simulator, refuses them the same way), so an agent is never offered a move the bot can't make. `Game.legal_actions(Legality.BALATROBOT)` gives the same list from the Rust engine. See [BalatroBot on the simulator](balatrobot) for the full policy and `jackdaw serve`.
+The simulator follows vanilla, which allows a few things BalatroBot's endpoints refuse: using a consumable at blind select, on the cash-out screen or while a pack is open, selling while a pack is open or at blind select, and using a card-targeting consumable in the shop. Over a `LiveAdapter` those actions are masked out (and `SimBackend`, which runs BalatroBot's endpoints on the simulator, refuses them the same way), so an agent is never offered a move the bot can't make. `Game.legal_actions(Legality.BALATROBOT)` gives the same list from the Rust engine. See [BalatroBot on the simulator](balatrobot) for the full policy and `jackdaw serve`.

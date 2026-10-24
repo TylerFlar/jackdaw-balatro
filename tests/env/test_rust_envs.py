@@ -1,17 +1,18 @@
-"""The environments on the Rust engine play exactly as on the Python engine.
+"""The environments on the Rust engine, against the oracle's frozen runs.
 
-``BalatroEnvironment`` and ``BalatroGymnasiumEnv`` with ``DirectAdapter``
-(the Rust engine, ``jackdaw._core``) are stepped side by side with the same
-environments on ``OracleAdapter`` (the Python engine), with the same seeds and
-actions: observations and masks must be bitwise equal, and states, flags,
-rewards, action tables and episode stats equal.  ``BalatroVectorEnv`` with one
-env must step exactly as the Rust Gym env (autoreset included), and give the
-same results whatever its thread count.
+``BalatroEnvironment`` and ``BalatroGymnasiumEnv`` were stepped side by side on the Rust
+engine (``DirectAdapter``) and on the Python engine (``OracleAdapter``), with the same seeds
+and actions, until the Python engine was retired. The runs are kept in
+``tests/fixtures/env_runs.json``: each episode's actions and a digest chain of what every reset
+and step returned (observations, masks, states, flags, rewards, action tables, episode stats;
+:mod:`tests.parity.frozen`). Both the all-Rust path and the generic path
+(:class:`tests.env.generic.GenericAdapter`, the path ``LiveAdapter`` takes) must reproduce
+them. ``BalatroVectorEnv`` with one env must step exactly as the Rust Gym env (autoreset
+included), and give the same results whatever its thread count.
 """
 
 from __future__ import annotations
 
-import random
 from collections.abc import Callable
 from typing import Any
 
@@ -20,7 +21,6 @@ import pytest
 
 from jackdaw.core import Game
 from jackdaw.core.game import NotPortedError
-from jackdaw.engine import card as card_module
 from jackdaw.engine.actions import GamePhase, PlayHand, SelectBlind
 from jackdaw.env import (
     BalatroEnvironment,
@@ -28,40 +28,27 @@ from jackdaw.env import (
     BalatroVectorEnv,
     DirectAdapter,
     GameAdapter,
-    OracleAdapter,
     ShapedReward,
     Transition,
     blind_progress_reward,
     sparse_reward,
 )
-from jackdaw.env.action_space import ActionType, engine_action_to_factored
-from jackdaw.env.game_spec import FactoredAction, GameActionMask, GameObservation
+from jackdaw.env.action_space import ActionType
+from jackdaw.env.game_spec import FactoredAction
 from jackdaw.env.rust_gym import MAX_ACTIONS, OBS_LEN
-from tests.env.test_rust_action_space import assert_mask_same
-from tests.golden.trajectories import _gym_smart_index, _mixed_policy
+from tests.env.generic import GenericAdapter
+from tests.parity import frozen
+
+_RUNS = frozen.load("env_runs.json")
+_ADAPTERS = pytest.mark.parametrize(
+    "adapter", [DirectAdapter, GenericAdapter], ids=["direct", "generic"]
+)
 
 
 def _same_array(a: np.ndarray, b: np.ndarray, where: str) -> None:
     assert a.dtype == b.dtype, f"{where}: dtype {a.dtype} vs {b.dtype}"
     assert a.shape == b.shape, f"{where}: shape {a.shape} vs {b.shape}"
     assert a.tobytes() == b.tobytes(), f"{where}: values differ"
-
-
-def _same_game_obs(a: GameObservation, b: GameObservation, where: str) -> None:
-    _same_array(a.global_context, b.global_context, f"{where} global")
-    assert list(a.entities) == list(b.entities), where
-    for k in a.entities:
-        _same_array(a.entities[k], b.entities[k], f"{where} {k}")
-
-
-def _same_game_mask(a: GameActionMask, b: GameActionMask, where: str) -> None:
-    _same_array(a.type_mask, b.type_mask, f"{where} type_mask")
-    _same_array(a.card_mask, b.card_mask, f"{where} card_mask")
-    assert list(a.entity_masks) == list(b.entity_masks), f"{where} entity types"
-    for k in a.entity_masks:
-        _same_array(a.entity_masks[k], b.entity_masks[k], f"{where} entity {int(k)}")
-    for f in ("min_card_select", "max_card_select", "forced_card"):
-        assert getattr(a, f) == getattr(b, f), f"{where} {f}"
 
 
 def _same_gym_obs(a: dict[str, np.ndarray], b: dict[str, np.ndarray], where: str) -> None:
@@ -75,53 +62,27 @@ def _same_gym_obs(a: dict[str, np.ndarray], b: dict[str, np.ndarray], where: str
 # ---------------------------------------------------------------------------
 
 
-def _check_env_reset(rust: BalatroEnvironment, oracle: BalatroEnvironment, where: str) -> Any:
-    card_module.reset_sort_id_counter()  # the oracle numbers cards from 0, as the Rust engine
-    o_obs, o_mask, o_info = oracle.reset()
-    r_obs, r_mask, r_info = rust.reset()
-    _same_game_obs(o_obs, r_obs, where)
-    _same_game_mask(o_mask, r_mask, where)
-    assert_mask_same(o_info["action_mask"], r_info["action_mask"], where)
-    assert o_info["state"] == r_info["state"], where
-    assert tuple(o_info["shop_splits"]) == tuple(r_info["shop_splits"]), where
-    assert isinstance(r_info["game"], Game) and "raw_state" not in r_info
-    return o_info
-
-
-@pytest.mark.parametrize(
-    ("back", "stake", "eps"),
-    [("b_red", 1, 0.1), ("b_plasma", 3, 0.3), ("b_ghost", 5, 0.2), ("b_magic", 8, 0.5)],
-)
-def test_balatro_environment_matches_the_oracle(back: str, stake: int, eps: float) -> None:
-    kwargs = {"back_keys": [back], "stakes": [stake], "seed_prefix": f"ENVPAR_{back}_{stake}"}
-    rust = BalatroEnvironment(adapter_factory=DirectAdapter, max_steps=300, **kwargs)
-    oracle = BalatroEnvironment(adapter_factory=OracleAdapter, max_steps=300, **kwargs)
-    policy = random.Random(f"{back}{stake}")
-    steps = 0
-    for episode in range(5):
-        o_info = _check_env_reset(rust, oracle, f"{back} ep{episode} reset")
-        for pos in range(300):
-            where = f"{back} ep{episode}@{pos}"
-            gs = o_info["raw_state"]
-            legal = oracle._adapter.get_legal_actions()
-            action = _mixed_policy(gs, legal, policy, eps)
-            fa = engine_action_to_factored(action, gs)
-            o_obs, o_term, o_trunc, o_mask, o_info = oracle.step(fa)
-            r_obs, r_term, r_trunc, r_mask, r_info = rust.step(fa)
-            assert "not_ported" not in r_info, f"{where}: {r_info['not_ported']}"
-            steps += 1
-            _same_game_obs(o_obs, r_obs, where)
-            _same_game_mask(o_mask, r_mask, where)
-            assert_mask_same(o_info["action_mask"], r_info["action_mask"], where)
-            assert (o_term, o_trunc) == (r_term, r_trunc), where
-            assert o_info["prev_state"] == r_info["prev_state"], where
-            assert o_info["state"] == r_info["state"], where
-            assert tuple(o_info["shop_splits"]) == tuple(r_info["shop_splits"]), where
-            for attr in ("episode_length", "episode_won", "episode_ante"):
-                assert getattr(oracle, attr) == getattr(rust, attr), f"{where} {attr}"
-            if o_term or o_trunc:
-                break
-    assert steps > 50
+@_ADAPTERS
+@pytest.mark.parametrize("case", sorted(_RUNS["environment"]))
+def test_balatro_environment_matches_the_oracle(case: str, adapter: type) -> None:
+    back, stake, _ = case.split("-")
+    kwargs = {"back_keys": [back], "stakes": [int(stake)], "seed_prefix": f"ENVPAR_{back}_{stake}"}
+    env = BalatroEnvironment(adapter_factory=adapter, max_steps=300, **kwargs)
+    for n, episode in enumerate(_RUNS["environment"][case]):
+        chain = frozen.Chain()
+        _, _, info = env.reset()
+        assert isinstance(info["game"], Game)
+        chain.push("reset", frozen.env_reset_record(info))
+        for pos, (t, entity, cards) in enumerate(episode["tape"]):
+            fa = FactoredAction(
+                action_type=t,
+                card_target=None if cards is None else tuple(cards),
+                entity_target=entity,
+            )
+            _, terminated, truncated, _, info = env.step(fa)
+            assert "not_ported" not in info, f"{case} ep{n}@{pos}: {info['not_ported']}"
+            chain.push("step", frozen.env_step_record(env, terminated, truncated, info))
+        frozen.check_chain(episode["chain"], chain, f"{case} episode {n}")
 
 
 def test_not_ported_ends_the_episode_truncated() -> None:
@@ -147,14 +108,13 @@ def test_direct_adapter_runs_the_rust_engine() -> None:
     state = adapter.reset("b_red", 1, "ADAPTER")
     assert state.phase == GamePhase.BLIND_SELECT and not adapter.done
     assert isinstance(adapter.game, Game)
-    assert not hasattr(adapter, "raw_state")
     legal = adapter.get_legal_actions()
     assert SelectBlind() in legal
     after = adapter.step(SelectBlind())
     assert after.phase == GamePhase.SELECTING_HAND and after.round == 1
-    frozen = adapter.game.freeze()
+    frozen_run = adapter.game.freeze()
     adapter.step(PlayHand(card_indices=(0,)))
-    assert frozen.state_hash() != adapter.game.state_hash()
+    assert frozen_run.state_hash() != adapter.game.state_hash()
 
 
 # ---------------------------------------------------------------------------
@@ -178,53 +138,23 @@ _GYM_CASES: dict[str, dict[str, Any]] = {
 }
 
 
-def _gym_pair(case: str, back: str, stake: int) -> tuple[BalatroGymnasiumEnv, BalatroGymnasiumEnv]:
-    kwargs = dict(_GYM_CASES[case])
-    kwargs.update(back_keys=[back], stakes=[stake], seed_prefix=f"GYMPAR_{case}")
-    return (
-        BalatroGymnasiumEnv(adapter_factory=DirectAdapter, **kwargs),
-        BalatroGymnasiumEnv(adapter_factory=OracleAdapter, **kwargs),
-    )
-
-
-def _check_tables(rust: BalatroGymnasiumEnv, oracle: BalatroGymnasiumEnv, where: str) -> None:
-    assert len(rust._action_table) == len(oracle._action_table), f"{where}: table size"
-    assert list(rust._action_table) == list(oracle._action_table), f"{where}: tables differ"
-
-
+@_ADAPTERS
 @pytest.mark.parametrize("case", sorted(_GYM_CASES))
-def test_gym_env_matches_the_oracle(case: str) -> None:
-    rust, oracle = _gym_pair(case, "b_red", 1 + len(case) % 4)
-    policy = np.random.default_rng(len(case))
-    steps = 0
-    for episode in range(6):
-        card_module.reset_sort_id_counter()
-        seed = 9000 + episode if episode < 5 else None  # the last reset is unseeded
-        o_obs, o_info = oracle.reset(seed=seed)
-        r_obs, r_info = rust.reset(seed=seed)
-        _same_gym_obs(o_obs, r_obs, f"{case} reset {episode}")
-        _same_array(o_info["action_mask"], r_info["action_mask"], f"{case} reset mask")
-        _check_tables(rust, oracle, f"{case} reset {episode}")
-        for pos in range(250):
-            where = f"{case} ep{episode}@{pos}"
-            if pos % 5:
-                action = _gym_smart_index(oracle, policy)
-            else:
-                action = int(policy.choice(np.flatnonzero(o_info["action_mask"])))
-            o_obs, o_r, o_term, o_trunc, o_info = oracle.step(action)
-            r_obs, r_r, r_term, r_trunc, r_info = rust.step(action)
-            assert "balatro/not_ported" not in r_info, where
-            steps += 1
-            _same_gym_obs(o_obs, r_obs, where)
-            assert (o_r, o_term, o_trunc) == (r_r, r_term, r_trunc), where
-            assert list(o_info) == list(r_info), where
-            _same_array(o_info["action_mask"], r_info["action_mask"], f"{where} mask")
-            for key in ("balatro/ante_reached", "balatro/rounds_beaten", "balatro/won"):
-                assert o_info.get(key) == r_info.get(key), f"{where} {key}"
-            _check_tables(rust, oracle, where)
-            if o_term or o_trunc:
-                break
-    assert steps > 40
+def test_gym_env_matches_the_oracle(case: str, adapter: type) -> None:
+    kwargs = dict(_GYM_CASES[case])
+    kwargs.update(back_keys=["b_red"], stakes=[1 + len(case) % 4], seed_prefix=f"GYMPAR_{case}")
+    env = BalatroGymnasiumEnv(adapter_factory=adapter, **kwargs)
+    episodes = _RUNS["gym"][case]
+    assert len(episodes) == 6
+    for n, episode in enumerate(episodes):
+        chain = frozen.Chain()
+        obs, info = env.reset(seed=episode["seed"])  # the last reset is unseeded
+        chain.push("reset", frozen.gym_record(env, obs, info))
+        for pos, action in enumerate(episode["tape"]):
+            obs, reward, terminated, truncated, info = env.step(action)
+            assert "balatro/not_ported" not in info, f"{case} ep{n}@{pos}"
+            chain.push("step", frozen.gym_record(env, obs, info, reward, terminated, truncated))
+        frozen.check_chain(episode["chain"], chain, f"{case} episode {n}")
 
 
 def test_gym_env_rejects_bad_actions() -> None:

@@ -23,8 +23,7 @@ import numpy as np
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.vec_env import DummyVecEnv, VecEnv, VecMonitor
 
-from jackdaw.core import IllegalActionError as RustIllegalActionError
-from jackdaw.engine.game import IllegalActionError as PyIllegalActionError
+from jackdaw.core import IllegalActionError
 from jackdaw.env import (
     BalatroGymnasiumEnv,
     DirectAdapter,
@@ -88,7 +87,7 @@ class EndOnRefusal(gymnasium.Wrapper):
     def step(self, action: Any) -> tuple[dict[str, np.ndarray], float, bool, bool, dict[str, Any]]:
         try:
             obs, reward, terminated, truncated, info = self.env.step(action)
-        except (RustIllegalActionError, PyIllegalActionError) as exc:
+        except IllegalActionError as exc:
             self.refusals += 1
             print(f"[EndOnRefusal] the engine refused table action {action}: {exc}", flush=True)
             env: BalatroGymnasiumEnv = self.env.unwrapped  # type: ignore[assignment]
@@ -109,7 +108,7 @@ def make_env(
     max_steps: int = MAX_STEPS,
     adapter_factory: Callable[[], GameAdapter] = DirectAdapter,
 ) -> EndOnRefusal:
-    """One Gym env on the Rust engine (``DirectAdapter``) or the Python one (``OracleAdapter``).
+    """One Gym env, on the Rust engine in process by default (``DirectAdapter``).
 
     ``reset()`` without a seed starts the run ``f"TRAIN{seed}_{rank}_{n}"`` for the env's n-th
     episode, so sub-envs never replay each other's runs.

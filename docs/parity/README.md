@@ -124,13 +124,14 @@ Details:
 
 ## Review protocol
 
-1. Read the Lua at `lua`, then the Rust (and, while it exists, the Python oracle).
+1. Read the Lua at `lua`, then the Rust.
 2. When the Rust exists, set `ported` and fill `rust`. When a test covers the unit, set `verified`
    and fill `test`; `cargo llvm-cov` over the tapes and fuzzing must show the unit executed.
 3. When behaviour differs, add a gap to [gaps.md](gaps.md) (or reuse one), put its id in `gap` and
-   set `gap`. The fix lands in the Python oracle first, with a regression test citing the Lua
-   lines, then in Rust; the row then moves to `ported`/`verified` and keeps the gap id in `gap` as
-   history. Update the gap's own status in gaps.md as well.
+   set `gap`. The fix lands in Rust with a regression test citing the Lua lines; the row then
+   moves to `ported`/`verified` and keeps the gap id in `gap` as history. Update the gap's own
+   status in gaps.md as well. (Until its retirement, a fix landed in the Python oracle first:
+   gaps.md's `python fix` column.)
 4. For `n/a-ui`, `n/a-meta` and `smods-diff`, say why in `notes`.
 
 `check` enforces: a valid status; at least one gap id on a `gap` row; every gap id defined in

@@ -129,11 +129,12 @@ class TestTransitionEvents:
     def test_from_step(self):
         prev, curr = _state(), _state(chips=10)
         action = FactoredAction(action_type=ActionType.PlayHand, card_target=(0,))
-        info = {"prev_state": prev, "state": curr, "raw_state": {"chips": 10}}
+        game = object()  # the run, passed through
+        info = {"prev_state": prev, "state": curr, "game": game}
         t = Transition.from_step(action, False, True, info)
         assert (t.prev, t.curr, t.action) == (prev, curr, action)
         assert t.truncated and t.done
-        assert t.raw_state == {"chips": 10}
+        assert t.game is game
 
 
 # ---------------------------------------------------------------------------

@@ -1,30 +1,11 @@
-"""Roundtrip validation — serializer ↔ deserializer ↔ backend end-to-end."""
+"""BalatroBot's API on the simulator, end to end: full runs, the gamestate view's
+schema at each phase, blind scores and money (``SimBackend``)."""
 
 from __future__ import annotations
 
 import pytest
 
 from jackdaw.bridge.backend import NOT_ALLOWED, RPCError, SimBackend
-from jackdaw.bridge.balatrobot_adapter import action_to_rpc
-from jackdaw.bridge.deserializer import rpc_to_action
-from jackdaw.engine.actions import (
-    BuyCard,
-    CashOut,
-    Discard,
-    NextRound,
-    OpenBooster,
-    PickPackCard,
-    PlayHand,
-    RedeemVoucher,
-    Reroll,
-    SelectBlind,
-    SellCard,
-    SkipBlind,
-    SkipPack,
-    SwapHandRight,
-    SwapJokersRight,
-    UseConsumable,
-)
 from tests.bot.schema import schemas, validate, validate_gamestate
 
 # ============================================================================
@@ -72,61 +53,7 @@ def _assert_valid_card(card: dict) -> None:
 
 
 # ============================================================================
-# 1. Serializer ↔ Deserializer roundtrip
-# ============================================================================
-
-
-class TestSerializerDeserializerRoundtrip:
-    @pytest.mark.parametrize(
-        "action",
-        [
-            PlayHand(card_indices=(0, 1, 2, 3, 4)),
-            PlayHand(card_indices=(0,)),
-            Discard(card_indices=(2, 3)),
-            SelectBlind(),
-            SkipBlind(),
-            BuyCard(shop_index=0),
-            BuyCard(shop_index=3),
-            RedeemVoucher(card_index=0),
-            OpenBooster(card_index=1),
-            SellCard(area="jokers", card_index=0),
-            SellCard(area="jokers", card_index=4),
-            SellCard(area="consumables", card_index=0),
-            SellCard(area="consumables", card_index=1),
-            UseConsumable(card_index=0, target_indices=None),
-            UseConsumable(card_index=0, target_indices=(1,)),
-            UseConsumable(card_index=1, target_indices=(0, 2, 4)),
-            Reroll(),
-            NextRound(),
-            CashOut(),
-            PickPackCard(card_index=0),
-            PickPackCard(card_index=2, target_indices=(0, 1)),
-            SkipPack(),
-        ],
-        ids=lambda a: f"{type(a).__name__}_{hash(a)}",
-    )
-    def test_roundtrip(self, action):
-        rpc = action_to_rpc(action)
-        recovered = rpc_to_action(rpc["method"], rpc["params"])
-        assert recovered == action
-
-    def test_roundtrip_swap_hand(self):
-        gs = {"hand": [None] * 5}
-        action = SwapHandRight(idx=2)
-        rpc = action_to_rpc(action, gs)
-        recovered = rpc_to_action(rpc["method"], rpc["params"])
-        assert recovered == action
-
-    def test_roundtrip_swap_jokers(self):
-        gs = {"jokers": [None] * 3}
-        action = SwapJokersRight(idx=1)
-        rpc = action_to_rpc(action, gs)
-        recovered = rpc_to_action(rpc["method"], rpc["params"])
-        assert recovered == action
-
-
-# ============================================================================
-# 2. Full run through backend
+# 1. Full run through backend
 # ============================================================================
 
 
@@ -220,7 +147,7 @@ class TestFullRunThroughBackend:
 
 
 # ============================================================================
-# 3. Gamestate schema completeness at each phase
+# 2. Gamestate schema completeness at each phase
 # ============================================================================
 
 
@@ -275,7 +202,7 @@ class TestGamestateSchemaCompleteness:
 
 
 # ============================================================================
-# 4. Card schema in context
+# 3. Card schema in context
 # ============================================================================
 
 
@@ -317,7 +244,7 @@ class TestCardSchemaInContext:
 
 
 # ============================================================================
-# 5. Blind scores increase with ante
+# 4. Blind scores increase with ante
 # ============================================================================
 
 
@@ -352,7 +279,7 @@ class TestBlindScoresIncreaseWithAnte:
 
 
 # ============================================================================
-# 6. Money changes on actions
+# 5. Money changes on actions
 # ============================================================================
 
 

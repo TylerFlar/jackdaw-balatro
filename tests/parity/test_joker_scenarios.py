@@ -1,9 +1,10 @@
-"""Per-joker parity: every joker the Rust engine has ported plays seeded scenarios.
+"""Per-joker scenarios: two short seeded runs for every joker, frozen from the lockstep.
 
-Each ported joker gets a few short seeded runs with only that joker on the
-board (:func:`tests.parity.joker_scenarios.scenario`); every step must match
-the oracle.  Steps Rust refuses as unported are skipped there, so this gate
-grows with the port: a joker joins it as soon as it is ported.
+Each run starts at the first blind, adds one joker through BalatroBot's ``add`` and plays a
+seeded policy: it selects every blind, plays and discards with the golden mixed policy, cashes
+out and leaves the shop and packs without buying. Every step was checked against the Python
+oracle; ``tests/fixtures/joker_scenarios.json`` keeps the tapes and the state after each step.
+The Rust engine must reach the same states, playing on and from each state's snapshot.
 """
 
 from __future__ import annotations
@@ -11,25 +12,19 @@ from __future__ import annotations
 import pytest
 
 from jackdaw import _core
-from tests.parity.joker_scenarios import scenario
-from tests.parity.rust_step import Report
+from tests.parity import frozen
 
-_PORTED = _core._ported_jokers()
-
-# Seeds and steps per joker: enough to reach a cash out and the next blind.
-_SEEDS = 2
-_STEPS = 40
+_SCENARIOS = frozen.load("joker_scenarios.json")
 
 
-@pytest.mark.parametrize("key", _PORTED)
+def test_every_joker_has_scenarios() -> None:
+    assert sorted(_SCENARIOS) == sorted(_core._ported_jokers())
+
+
+@pytest.mark.parametrize("key", sorted(_SCENARIOS))
 def test_ported_joker_matches_the_oracle(key: str) -> None:
-    report = Report()
-    for index in range(_SEEDS):
-        scenario((key,), index, steps=_STEPS, report=report)
-    found = [
-        f"{where}: {'; '.join(diff[:6])}"
-        for items in report.mismatches.values()
-        for where, diff in items
-    ]
-    assert not found, "\n".join(found[:5])
-    assert sum(report.matched.values()) > 0, "no step was checked"
+    steps = 0
+    for case in _SCENARIOS[key]:
+        for steps, _ in frozen.replay_tape(case):
+            pass
+    assert steps > 0, "no step was checked"

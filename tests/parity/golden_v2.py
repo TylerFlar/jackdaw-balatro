@@ -1,10 +1,9 @@
 """Golden v2: engine-agnostic behaviour digests for the recorded engine tapes.
 
-Golden v1 (``tests/golden``) hashes the Python object graph, so only the
-Python engine can reproduce it.  Golden v2 hashes canonical snapshots
-(``docs/snapshot-schema.md``) plus the legal action list at every step, so
-any engine that implements the snapshot schema reproduces the same digests,
-and the fixture outlives the Python oracle.
+Golden v2 hashes canonical snapshots (``docs/snapshot-schema.md``) plus the
+legal action list at every step, so any engine that implements the snapshot
+schema reproduces the same digests.  The Python oracle produced them; the
+fixture outlived it.
 
 Fixtures:
 
@@ -13,8 +12,9 @@ Fixtures:
 * ``tests/fixtures/golden_v2.json`` - per-trajectory digest chain,
   checkpoints every ``CHECKPOINT_EVERY`` records, and scenario checks.
 
-Regenerate both with ``uv run python scripts/generate_golden_v2.py`` only
-when a behaviour change is intended, and say so in the PR.
+Rewrite the digests from the Rust engine with
+``.venv/Scripts/python.exe scripts/refreeze.py golden_v2`` only when a
+behaviour change is intended, and say so in the PR.
 """
 
 from __future__ import annotations

@@ -1,7 +1,7 @@
 //! Player actions and the step entry point.
 //!
-//! The actions and their JSON form follow the Python engine (`jackdaw.engine.actions`) and the
-//! recorded tapes: `["PlayHand", [0, 2, 3]]`, `["SellCard", "jokers", 1]`, ...
+//! The actions and their JSON form follow the Python action types (`jackdaw.engine.actions`) and
+//! the recorded tapes: `["PlayHand", [0, 2, 3]]`, `["SellCard", "jokers", 1]`, ...
 
 use serde_json::Value;
 

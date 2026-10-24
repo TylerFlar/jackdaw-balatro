@@ -26,9 +26,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from jackdaw import _core
-from tests.parity import canon
+from tests.parity import canon, frozen
 from tests.parity.harness import FIXTURES, load_specs
-from tests.parity.rust_setup import rust_setup
 
 
 def _snap(text: str) -> dict[str, Any]:
@@ -53,7 +52,7 @@ def _reason(error: dict[str, Any]) -> str:
 
 
 def compare_tape(name: str, spec: dict[str, Any], report: Report) -> None:
-    native = rust_setup(spec["start"], spec["setup"])
+    native = frozen.new_game(spec["start"], spec["setup"])._g
     session = _core.BotSession.from_game(native)
     report.tapes += 1
     for pos, action in enumerate(spec["tape"]):

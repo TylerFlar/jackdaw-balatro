@@ -15,12 +15,14 @@ import random
 import numpy as np
 import pytest
 
+from jackdaw.core import Game
 from jackdaw.engine.actions import GamePhase
 from jackdaw.env.action_space import ActionMask, ActionType, FactoredAction
 from jackdaw.env.balatro_env import BalatroEnvironment
-from jackdaw.env.game_interface import GameState, OracleAdapter
+from jackdaw.env.game_interface import DirectAdapter, GameState
 from jackdaw.env.game_spec import GameActionMask, GameEnvironment, GameObservation
 from jackdaw.env.observation import Observation
+from tests.env.generic import GenericAdapter
 
 SEED = "TEST_BALATRO_ENV_42"
 
@@ -28,7 +30,7 @@ SEED = "TEST_BALATRO_ENV_42"
 @pytest.fixture()
 def env() -> BalatroEnvironment:
     return BalatroEnvironment(
-        adapter_factory=OracleAdapter,
+        adapter_factory=DirectAdapter,
         back_keys=["b_red"],
         stakes=[1],
         max_steps=500,
@@ -74,7 +76,7 @@ class TestReset:
 
     def test_info_contains_balatro_objects(self, env: BalatroEnvironment) -> None:
         _, _, info = env.reset()
-        assert "raw_state" in info
+        assert isinstance(info["game"], Game)
         assert "observation" in info
         assert "action_mask" in info
         assert "shop_splits" in info
@@ -89,6 +91,14 @@ class TestReset:
         env.reset()
         assert env.episode_length == 0
         assert env.episode_won is False
+
+    def test_an_adapter_without_a_game_is_refused(self) -> None:
+        class NoGame:
+            def reset(self, *args: object, **kwargs: object) -> None:
+                pass
+
+        with pytest.raises(TypeError, match="no game"):
+            BalatroEnvironment(adapter_factory=NoGame).reset()
 
 
 class TestStep:
@@ -113,8 +123,8 @@ class TestStep:
         assert env.episode_length == 1
 
     def test_info_snapshots_before_and_after(self, env: BalatroEnvironment) -> None:
-        """raw_state is the live engine dict, mutated in place by step(), so
-        the before-state has to be a snapshot taken ahead of the action."""
+        """``game`` is the live run, moved on by step(), so the before-state is a
+        snapshot taken ahead of the action."""
         _, _, info = env.reset()
         assert isinstance(info["state"], GameState)
         assert info["state"].phase == GamePhase.BLIND_SELECT
@@ -124,7 +134,12 @@ class TestStep:
         assert info["prev_state"].round == 0
         assert info["state"].phase == GamePhase.SELECTING_HAND
         assert info["state"].round == 1
-        assert info["raw_state"]["round"] == 1
+        assert info["game"].round == 1
+
+    def test_step_before_reset_raises(self) -> None:
+        env = BalatroEnvironment(adapter_factory=DirectAdapter)
+        with pytest.raises(RuntimeError, match="reset"):
+            env.step(FactoredAction(action_type=ActionType.SelectBlind))
 
 
 class TestEndOnWin:
@@ -134,26 +149,27 @@ class TestEndOnWin:
     @staticmethod
     def _win_run(env: BalatroEnvironment) -> tuple[bool, dict]:
         env.reset()
-        gs = env._adapter.raw_state
-        gs["round_resets"]["ante"] = 8
-        gs["round_resets"]["blind_choices"]["Boss"] = "bl_wall"  # no side effects
-        gs["blind_on_deck"] = "Boss"
+        game = env._adapter.game
+        game.debug_set(ante=8)
+        game.apply_setup({"op": "force_boss", "key": "bl_wall"})  # no side effects
         env.step(FactoredAction(action_type=ActionType.SelectBlind))
-        gs["blind"].chips = 1
+        game.debug_set(chips=game.blind.chips)
         _, terminated, _, _, info = env.step(
             FactoredAction(action_type=ActionType.PlayHand, card_target=(0, 1, 2, 3, 4))
         )
         return terminated, info
 
-    def test_won_run_ends_the_episode(self) -> None:
-        env = BalatroEnvironment(adapter_factory=OracleAdapter)
+    @pytest.mark.parametrize("adapter", [DirectAdapter, GenericAdapter])
+    def test_won_run_ends_the_episode(self, adapter: type) -> None:
+        env = BalatroEnvironment(adapter_factory=adapter)
         terminated, info = self._win_run(env)
         assert info["state"].won
         assert env.episode_won
         assert terminated
 
-    def test_end_on_win_false_continues_into_endless(self) -> None:
-        env = BalatroEnvironment(adapter_factory=OracleAdapter, end_on_win=False)
+    @pytest.mark.parametrize("adapter", [DirectAdapter, GenericAdapter])
+    def test_end_on_win_false_continues_into_endless(self, adapter: type) -> None:
+        env = BalatroEnvironment(adapter_factory=adapter, end_on_win=False)
         terminated, info = self._win_run(env)
         assert info["state"].won
         assert not terminated
@@ -219,14 +235,18 @@ def _pick_valid_action(
             entity_target = rng.choice(valid_entities)
 
     card_target = None
-    if at in (ActionType.PlayHand, ActionType.Discard, ActionType.UseConsumable):
+    if at in (ActionType.PlayHand, ActionType.Discard):
         valid_cards = [i for i in range(len(game_mask.card_mask)) if game_mask.card_mask[i]]
         if valid_cards:
             n = rng.randint(
                 max(1, action_mask.min_card_select),
                 min(len(valid_cards), action_mask.max_card_select),
             )
-            card_target = tuple(rng.sample(valid_cards, n))
+            selected = rng.sample(valid_cards, n)
+            forced = action_mask.forced_card  # Cerulean Bell
+            if forced is not None and forced not in selected:
+                selected[0] = forced
+            card_target = tuple(sorted(selected))
 
     return FactoredAction(
         action_type=at,

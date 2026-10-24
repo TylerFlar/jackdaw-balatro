@@ -162,7 +162,7 @@ impl Game {
         if !self.gs.first_shop_buffoon && !self.gs.sets.banned_keys.contains("p_buffoon_normal_1") {
             self.gs.first_shop_buffoon = true;
             // `math.random(1, 2)` is unseeded: the sim always takes the first variant, as the
-            // oracle does.
+            // Python engine did.
             return centers::P_BUFFOON_NORMAL_1;
         }
         let banned = |c: CenterId| self.gs.sets.banned_keys.contains(c.key());

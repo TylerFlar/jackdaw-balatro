@@ -95,6 +95,27 @@ builds the release wheels for Linux, macOS and Windows on `v*` tags.
 targets, `BALATRO_VERSION` in `crates/jackdaw-data` (`1.0.1o-FULL`). CI has no copy of the
 source, so these two commands run only locally.
 
+## Parity fixtures
+
+The Rust engine was checked step by step against a Python reference engine until that engine
+was retired. Its verdicts are frozen in `tests/fixtures`: golden v2's digest chains along the
+recorded tapes (`parity_specs.json`, `golden_v2.json`), each step's digest for the joker
+scenarios, fuzz cases and regressions, the new runs and setups, the env layer's observations,
+masks and conversions, the environments' runs, and the targeted parity tests' steps
+(`parity_cases.json`). `tests/parity/frozen.py` lists them.
+
+A deliberate behaviour change makes the engine disagree with them. Once the change is
+reviewed, rewrite the affected fixtures from the Rust engine, and say in the PR which ones
+changed and why:
+
+```bash
+uv run python scripts/refreeze.py                    # every fixture
+uv run python scripts/refreeze.py golden_v2 cases    # some of them
+```
+
+It replays every tape as recorded and recomputes its digests; a step the engine now refuses
+ends that tape there.
+
 ## Profiling
 
 `crates/jackdaw-env/examples/profile.rs` samples the engine's hot paths. It needs no profiler

@@ -5,10 +5,11 @@ Usage:
     uv run python scripts/find_seeds.py
     uv run python scripts/find_seeds.py --max-seeds 5000 --max-ante 8
 
-This script runs actual games through the engine (using greedy_play_agent)
-to see which tags and bosses appear at each ante. This is necessary because
-the RNG state depends on the full game flow — skipping/playing blinds, shop
-interactions, card draws, etc. all advance the RNG.
+This script runs actual games through the engine (the CLI's smart agent,
+jackdaw.cli.smart_agent) to see which tags and bosses appear at each ante.
+This is necessary because the RNG state depends on the full game flow —
+skipping/playing blinds, shop interactions, card draws, etc. all advance the
+RNG.
 
 Output: a minimal set of (seed, ante) pairs that see every tag and boss blind.
 """
@@ -19,13 +20,9 @@ import argparse
 import time
 from typing import Any
 
-from jackdaw.engine.actions import (
-    GamePhase,
-    get_legal_actions,
-)
-from jackdaw.engine.game import step
-from jackdaw.engine.run_init import initialize_run
-from jackdaw.engine.runner import greedy_play_agent
+from jackdaw.cli.smart_agent import smart_agent
+from jackdaw.core import Game
+from jackdaw.engine.actions import GamePhase
 
 # ---------------------------------------------------------------------------
 # All tags and boss blinds we need to cover
@@ -99,37 +96,31 @@ ALL_BOSSES = {
 }
 
 
-def _cheat_agent(gs: dict, legal: list) -> Any:
+def _cheat_agent(game: Game, legal: list) -> Any:
     """Agent that plays through all blinds using chip cheat.
 
     Selects every blind (never skips) and cheats chips after one hand
-    so greedy_play_agent can always beat the blind. Matches the validator's
+    so the smart agent can always beat the blind. Matches the validator's
     play-through strategy.
     """
-    phase = gs.get("phase")
-
     # After playing one hand, cheat chips to beat the blind
-    if phase == GamePhase.SELECTING_HAND:
-        blind = gs.get("blind")
-        chips = gs.get("chips", 0)
-        cr = gs.get("current_round", {})
-        if blind and chips > 0 and cr.get("hands_left", 0) <= 3:
-            gs["chips"] = getattr(blind, "chips", 600) - 1
+    if game.phase == GamePhase.SELECTING_HAND:
+        blind = game.blind
+        if blind is not None and game.chips > 0 and game.hands_left <= 3:
+            game.debug_set(chips=blind.chips - 1)
 
-    return greedy_play_agent(gs, legal)
+    return smart_agent(game, legal)
 
 
 def scan_seed(seed: str, max_ante: int) -> dict[str, Any]:
-    """Play a full game, skipping Small/Big blinds, recording tags and bosses.
+    """Play a full game, recording the tags and bosses each ante offers.
 
-    Cheats by giving extra hands on boss blinds so the greedy agent can
+    Cheats chips after the first hand of every blind so the agent can
     always survive to higher antes.
 
     Returns {"tags": set, "bosses": set, "tag_ante": dict, "boss_ante": dict}
     """
-    gs = initialize_run("b_red", 1, seed)
-    gs["phase"] = GamePhase.BLIND_SELECT
-    gs["blind_on_deck"] = "Small"
+    game = Game.new("b_red", 1, seed)
 
     tags_seen: set[str] = set()
     bosses_seen: set[str] = set()
@@ -141,22 +132,23 @@ def scan_seed(seed: str, max_ante: int) -> dict[str, Any]:
     actions_taken = 0
 
     while actions_taken < max_actions:
-        phase = gs.get("phase")
+        phase = game.phase
         if phase == GamePhase.GAME_OVER:
             break
 
-        ante = gs.get("round_resets", {}).get("ante", 1)
+        ante = game.ante
         if ante > max_ante:
             break
 
         # At BLIND_SELECT, record the tags and boss for this ante
         if phase == GamePhase.BLIND_SELECT:
-            blind_on_deck = gs.get("blind_on_deck", "")
+            snap = game.to_dict()
+            blind_on_deck = snap["game"]["blind_on_deck"]
+            round_resets = snap["round_resets"]
 
             # Record tags (available when Small/Big are on deck)
             if blind_on_deck in ("Small", "Big"):
-                blind_tags = gs.get("round_resets", {}).get("blind_tags", {})
-                for pos, tag_key in blind_tags.items():
+                for pos, tag_key in (round_resets.get("blind_tags") or {}).items():
                     if tag_key and tag_key not in tags_seen:
                         tags_seen.add(tag_key)
                         tag_ante[tag_key] = ante
@@ -164,23 +156,20 @@ def scan_seed(seed: str, max_ante: int) -> dict[str, Any]:
 
             # Record boss (available when Boss is on deck)
             if blind_on_deck == "Boss":
-                blind_choices = gs.get("round_resets", {}).get("blind_choices", {})
-                boss_key = blind_choices.get("Boss", "")
+                boss_key = round_resets["blind_choices"].get("Boss", "")
                 if boss_key and boss_key not in bosses_seen:
                     bosses_seen.add(boss_key)
                     boss_ante[boss_key] = ante
 
-        # Use skip agent (skips Small/Big, cheats hands, plays Boss greedily)
-        legal = get_legal_actions(gs)
+        legal = game.legal_actions()
         if not legal:
             break
 
-        action = _cheat_agent(gs, legal)
-        step(gs, action)
+        game.step(_cheat_agent(game, legal))
         actions_taken += 1
 
         # Early exit if won
-        if gs.get("won") and gs.get("phase") == GamePhase.SHOP:
+        if game.won and game.phase == GamePhase.SHOP:
             break
 
     return {

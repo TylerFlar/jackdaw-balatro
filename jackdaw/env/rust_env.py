@@ -1,11 +1,9 @@
 """The env layer's Rust paths: action masks and factored actions for a Rust run.
 
-``jackdaw._core`` ports :func:`jackdaw.env.action_space.get_action_mask`,
-:func:`~jackdaw.env.action_space.factored_to_engine_action` and
-:func:`~jackdaw.env.action_space.engine_action_to_factored` bit for bit.  These
-helpers wrap them as the same Python objects the dict-based functions return,
-for a :class:`jackdaw.core.Game`.  Masks arrive as one ``bytearray`` that the
-arrays view without copying.
+``jackdaw._core`` computes the action mask, the factored-action conversions and the
+consumables' targeting info (``crates/jackdaw-env``); these helpers wrap the results
+as :mod:`jackdaw.env.action_space`'s Python objects for a :class:`jackdaw.core.Game`.
+Masks arrive as one ``bytearray`` that the arrays view without copying.
 """
 
 from __future__ import annotations
@@ -47,7 +45,7 @@ def action_mask_from_parts(parts: MaskParts) -> ActionMask:
 
 
 def action_mask(game: Game, legality: Legality = Legality.VANILLA) -> ActionMask:
-    """:func:`~jackdaw.env.action_space.get_action_mask` for a Rust run."""
+    """The action mask of a Rust run (:func:`~jackdaw.env.action_space.get_action_mask`)."""
     return action_mask_from_parts(game._g.action_mask(Legality(legality).value))
 
 

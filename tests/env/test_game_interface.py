@@ -1,9 +1,9 @@
 """Tests for the unified game interface layer.
 
 Covers:
-- OracleAdapter reset/step/legal_actions cycle
-- OracleAdapter runs to completion with random_agent
-- BridgeAdapter(SimBackend) produces identical behavior to OracleAdapter
+- DirectAdapter reset/step/legal_actions cycle
+- DirectAdapter runs to completion with a random agent
+- BridgeAdapter(SimBackend) (BalatroBot's API on the simulator) plays as DirectAdapter
 - done/won flags set correctly on game over and win
 - GameAdapter protocol compliance
 """
@@ -12,28 +12,35 @@ from __future__ import annotations
 
 import random
 
-import numpy as np
 import pytest
 
+from jackdaw.bridge.backend import SimBackend
+from jackdaw.bridge.live import DivergenceError, LiveAdapter
+from jackdaw.core import Game, Legality
 from jackdaw.engine.actions import (
     CashOut,
     Discard,
     GamePhase,
     NextRound,
+    OpenBooster,
     PlayHand,
     SelectBlind,
+    SellCard,
     SkipPack,
     SortHand,
     SwapHandLeft,
     SwapHandRight,
     SwapJokersLeft,
     SwapJokersRight,
+    UseConsumable,
 )
+from jackdaw.env.action_space import ActionType, get_action_mask
 from jackdaw.env.game_interface import (
     BridgeAdapter,
+    DirectAdapter,
     GameAdapter,
     GameState,
-    OracleAdapter,
+    game_state,
 )
 
 # ---------------------------------------------------------------------------
@@ -50,7 +57,7 @@ def _random_agent_step(adapter: GameAdapter) -> None:
     legal = adapter.get_legal_actions()
     assert legal, "No legal actions available"
 
-    hand = adapter.raw_state.get("hand", [])
+    hand = adapter.game.hand  # type: ignore[attr-defined]
 
     # Separate progress-making from utility
     progress = [
@@ -86,8 +93,7 @@ def _run_to_completion(adapter: GameAdapter, max_actions: int = 5000) -> int:
     while actions < max_actions:
         if adapter.done:
             break
-        phase = adapter.raw_state.get("phase")
-        if adapter.won and phase == GamePhase.SHOP:
+        if adapter.won and adapter.game.phase == GamePhase.SHOP:  # type: ignore[attr-defined]
             break
         legal = adapter.get_legal_actions()
         if not legal:
@@ -95,6 +101,10 @@ def _run_to_completion(adapter: GameAdapter, max_actions: int = 5000) -> int:
         _random_agent_step(adapter)
         actions += 1
     return actions
+
+
+def _bridge() -> LiveAdapter:
+    return BridgeAdapter(SimBackend())
 
 
 # ---------------------------------------------------------------------------
@@ -154,77 +164,85 @@ class TestGameState:
 
 class TestProtocol:
     def test_direct_adapter_satisfies_protocol(self):
-        assert isinstance(OracleAdapter(), GameAdapter)
+        assert isinstance(DirectAdapter(), GameAdapter)
 
     def test_bridge_adapter_satisfies_protocol(self):
-        from jackdaw.bridge.backend import SimBackend
+        assert isinstance(_bridge(), GameAdapter)
 
-        assert isinstance(BridgeAdapter(SimBackend()), GameAdapter)
+    def test_bridge_adapter_is_a_live_adapter(self):
+        adapter = _bridge()
+        assert isinstance(adapter, LiveAdapter)
+        assert adapter.legality == Legality.BALATROBOT
 
 
 # ---------------------------------------------------------------------------
-# OracleAdapter tests
+# DirectAdapter tests
 # ---------------------------------------------------------------------------
 
 
 class TestDirectAdapter:
     def test_reset_returns_game_state(self):
-        adapter = OracleAdapter()
+        adapter = DirectAdapter()
         state = adapter.reset(BACK, STAKE, SEED)
         assert isinstance(state, GameState)
         assert state.phase == GamePhase.BLIND_SELECT
         assert state.blind_on_deck == "Small"
-        assert state.dollars > 0 or state.dollars == 0  # valid int
+        assert state.dollars >= 0
         assert not state.done
         assert not state.won
 
-    def test_reset_sets_raw_state(self):
-        adapter = OracleAdapter()
+    def test_reset_starts_the_run(self):
+        adapter = DirectAdapter()
         adapter.reset(BACK, STAKE, SEED)
-        gs = adapter.raw_state
-        assert gs["phase"] == GamePhase.BLIND_SELECT
-        assert gs["blind_on_deck"] == "Small"
-        assert "hand_levels" in gs
-        assert "rng" in gs
+        game = adapter.game
+        assert isinstance(game, Game)
+        assert game.seed == SEED
+        assert game.phase == GamePhase.BLIND_SELECT
+        assert game_state(game).blind_on_deck == "Small"
 
     def test_step_select_blind(self):
-        adapter = OracleAdapter()
+        adapter = DirectAdapter()
         adapter.reset(BACK, STAKE, SEED)
         state = adapter.step(SelectBlind())
         assert state.phase == GamePhase.SELECTING_HAND
         assert state.hands_left > 0
 
     def test_legal_actions_blind_select(self):
-        adapter = OracleAdapter()
+        adapter = DirectAdapter()
         adapter.reset(BACK, STAKE, SEED)
         legal = adapter.get_legal_actions()
         assert any(isinstance(a, SelectBlind) for a in legal)
 
     def test_legal_actions_selecting_hand(self):
-        adapter = OracleAdapter()
+        adapter = DirectAdapter()
         adapter.reset(BACK, STAKE, SEED)
         adapter.step(SelectBlind())
         legal = adapter.get_legal_actions()
         assert any(isinstance(a, PlayHand) for a in legal)
 
     def test_done_false_initially(self):
-        adapter = OracleAdapter()
+        adapter = DirectAdapter()
         adapter.reset(BACK, STAKE, SEED)
         assert not adapter.done
         assert not adapter.won
 
-    def test_raw_state_is_zero_copy(self):
-        """raw_state must return the same dict object (no copies)."""
-        adapter = OracleAdapter()
+    def test_game_is_the_live_run(self):
+        """``game`` is the run itself, not a copy: a step moves it on."""
+        adapter = DirectAdapter()
         adapter.reset(BACK, STAKE, SEED)
-        gs1 = adapter.raw_state
-        gs2 = adapter.raw_state
-        assert gs1 is gs2
+        game = adapter.game
+        assert adapter.game is game
+        adapter.step(SelectBlind())
+        assert game.phase == GamePhase.SELECTING_HAND
+
+    def test_game_before_reset_raises(self):
+        with pytest.raises(RuntimeError, match="reset"):
+            DirectAdapter().game  # noqa: B018
 
     def test_run_to_completion_random(self):
-        """OracleAdapter completes a full run with random agent."""
+        """DirectAdapter completes a full run with random agent."""
         random.seed(12345)
-        adapter = OracleAdapter()
+        adapter = DirectAdapter()
         adapter.reset(BACK, STAKE, SEED)
         actions = _run_to_completion(adapter, max_actions=5000)
         assert actions > 0
@@ -232,12 +250,17 @@ class TestDirectAdapter:
         assert adapter.done or adapter.won
 
     def test_reset_clears_previous_run(self):
-        adapter = OracleAdapter()
+        adapter = DirectAdapter()
         adapter.reset(BACK, STAKE, SEED)
         adapter.step(SelectBlind())
         # Reset should start fresh
         state = adapter.reset(BACK, STAKE, "DIFFERENT_SEED")
         assert state.phase == GamePhase.BLIND_SELECT
+
+    def test_reset_starts_a_challenge(self):
+        adapter = DirectAdapter()
+        adapter.reset("b_challenge", 1, SEED, challenge="c_omelette_1")
+        assert adapter.game.jokers  # Omelette starts with five Egg jokers
 
 
 # ---------------------------------------------------------------------------
@@ -246,69 +269,59 @@ class TestDirectAdapter:
 
 
 class TestBridgeAdapterSim:
-    def _make_adapter(self) -> BridgeAdapter:
-        from jackdaw.bridge.backend import SimBackend
-
-        return BridgeAdapter(SimBackend())
-
     def test_reset_returns_game_state(self):
-        adapter = self._make_adapter()
+        adapter = _bridge()
         state = adapter.reset(BACK, STAKE, SEED)
         assert isinstance(state, GameState)
         assert state.phase == GamePhase.BLIND_SELECT
         assert not state.done
 
     def test_step_select_blind(self):
-        adapter = self._make_adapter()
+        adapter = _bridge()
         adapter.reset(BACK, STAKE, SEED)
         state = adapter.step(SelectBlind())
         assert state.phase == GamePhase.SELECTING_HAND
 
     def test_legal_actions(self):
-        adapter = self._make_adapter()
+        adapter = _bridge()
         adapter.reset(BACK, STAKE, SEED)
         legal = adapter.get_legal_actions()
         assert any(isinstance(a, SelectBlind) for a in legal)
 
-    def test_raw_state_is_the_shadow_run(self):
-        """For SimBackend, raw_state is the shadow run's live engine dict, kept
-        in step with the simulator behind the bot protocol."""
-        from jackdaw.bridge.backend import SimBackend
-
+    def test_game_is_the_shadow_run(self):
+        """The adapter's ``game`` is its shadow run, kept in step with the simulator
+        behind the bot protocol."""
         backend = SimBackend()
         adapter = BridgeAdapter(backend)
         adapter.reset(BACK, STAKE, SEED)
-        gs = adapter.raw_state
         adapter.step(SelectBlind())
-        assert adapter.raw_state is gs
-        assert gs["phase"] == GamePhase.SELECTING_HAND
+        game = adapter.game
+        assert game.phase == GamePhase.SELECTING_HAND
         view = backend.view()
-        assert view["money"] == gs["dollars"]
-        assert [c["key"] for c in view["hand"]["cards"]] == [c.card_key for c in gs["hand"]]
+        assert view["money"] == game.dollars
+        assert len(view["hand"]["cards"]) == len(game.hand)
 
     def test_a_sort_is_a_permutation(self):
-        """SortHand goes out as a ``rearrange`` permutation: the hand is sorted,
-        but the sort mode (G.hand.config.sort) has no bot counterpart."""
-        adapter = self._make_adapter()
+        """SortHand goes out as a ``rearrange`` permutation: the hand is sorted
+        by suit on both sides."""
+        adapter = _bridge()
         adapter.reset(BACK, STAKE, SEED)
         adapter.step(SelectBlind())
-        mode = adapter.raw_state.get("hand_sort")
         adapter.step(SortHand(mode="suit"))
-        assert adapter.raw_state.get("hand_sort") == mode
-        suits = [c.base.suit for c in adapter.raw_state["hand"]]
+        suits = [c.suit for c in adapter.game.hand]
         assert suits == sorted(suits, key=suits.index)  # grouped by suit
+        live = [c["key"] for c in adapter.backend.view()["hand"]["cards"]]
+        assert live == [c.front for c in adapter.game.hand]
 
     def test_a_divergence_is_reported(self):
-        from jackdaw.env.game_interface import DivergenceError
-
-        adapter = self._make_adapter()
+        adapter = _bridge()
         adapter.reset(BACK, STAKE, SEED)
-        adapter.raw_state["dollars"] += 1
+        adapter.game.debug_set(money=adapter.game.dollars + 1)  # the shadow drifts
         with pytest.raises(DivergenceError, match="money"):
             adapter.step(SelectBlind())
 
     def test_done_won_flags(self):
-        adapter = self._make_adapter()
+        adapter = _bridge()
         adapter.reset(BACK, STAKE, SEED)
         assert not adapter.done
         assert not adapter.won
@@ -316,7 +329,7 @@ class TestBridgeAdapterSim:
     def test_run_to_completion(self):
         """BridgeAdapter(SimBackend) completes a run with random agent."""
         random.seed(12345)
-        adapter = self._make_adapter()
+        adapter = _bridge()
         adapter.reset(BACK, STAKE, SEED)
         actions = _run_to_completion(adapter, max_actions=5000)
         assert actions > 0
@@ -324,36 +337,32 @@ class TestBridgeAdapterSim:
 
 
 def _debug(adapter: GameAdapter, method: str, params: dict) -> None:
-    """BalatroBot's ``add`` / ``set`` on the adapter's run: the engine dict (the
-    oracle's debug ops) and, for the bridge, the simulator behind it."""
-    from jackdaw.engine.debug import add_card, set_values
-
-    if method == "add":
-        add_card(adapter.raw_state, **params)
+    """BalatroBot's ``add`` / ``set`` on the adapter's run (for the bridge, on both the
+    shadow and the simulator behind it)."""
+    if isinstance(adapter, LiveAdapter):
+        adapter.request(method, params)
+    elif method == "add":
+        adapter.game.debug_add(**params)  # type: ignore[attr-defined]
     else:
-        set_values(adapter.raw_state, **params)
-    if isinstance(adapter, BridgeAdapter):
-        adapter._backend.handle(method, params)
+        adapter.game.debug_set(**params)  # type: ignore[attr-defined]
 
 
 def _to_shop(adapter: GameAdapter) -> None:
     """Beat the Small Blind (``set`` its chips) and cash out."""
     adapter.step(SelectBlind())
-    _debug(adapter, "set", {"chips": adapter.raw_state["blind"].chips})
+    _debug(adapter, "set", {"chips": adapter.game.blind.chips})  # type: ignore[attr-defined]
     adapter.step(PlayHand(card_indices=(0,)))
     adapter.step(CashOut())
-    assert adapter.raw_state["phase"] == GamePhase.SHOP
+    assert adapter.game.phase == GamePhase.SHOP  # type: ignore[attr-defined]
 
 
 def _open_pack_with_tray_planet(adapter: GameAdapter) -> None:
     """In a pack (with picks left), holding a Pluto."""
-    from jackdaw.engine.actions import OpenBooster
-
     _to_shop(adapter)
     _debug(adapter, "add", {"key": "c_pluto"})
     _debug(adapter, "set", {"money": 50})
     adapter.step(OpenBooster(card_index=0))
-    assert adapter.raw_state["phase"] == GamePhase.PACK_OPENING
+    assert adapter.game.phase == GamePhase.PACK_OPENING  # type: ignore[attr-defined]
 
 
 class TestBridgeFollowsBalatrobot:
@@ -362,10 +371,7 @@ class TestBridgeFollowsBalatrobot:
     The bridge offers only what the bot will execute."""
 
     def test_legal_actions(self):
-        from jackdaw.bridge.backend import SimBackend
-        from jackdaw.engine.actions import SellCard, UseConsumable
-
-        for adapter, offered in ((OracleAdapter(), True), (BridgeAdapter(SimBackend()), False)):
+        for adapter, offered in ((DirectAdapter(), True), (_bridge(), False)):
             adapter.reset(BACK, STAKE, SEED)
             _open_pack_with_tray_planet(adapter)
             legal = adapter.get_legal_actions()
@@ -373,18 +379,18 @@ class TestBridgeFollowsBalatrobot:
             assert any(isinstance(a, SellCard) for a in legal) is offered
 
     def test_env_mask(self):
-        from jackdaw.bridge.backend import SimBackend
-        from jackdaw.env.action_space import ActionType
         from jackdaw.env.balatro_env import BalatroEnvironment
+        from jackdaw.env.game_spec import FactoredAction
 
-        for factory, offered in (
-            (OracleAdapter, True),
-            (lambda: BridgeAdapter(SimBackend()), False),
-        ):
+        for factory, offered in ((DirectAdapter, True), (_bridge, False)):
             env = BalatroEnvironment(adapter_factory=factory, back_keys=[BACK], stakes=[STAKE])
             env.reset(seed=SEED)
-            _open_pack_with_tray_planet(env._adapter)
-            mask = env._action_mask(env._adapter.raw_state)
+            adapter = env._adapter
+            _to_shop(adapter)
+            _debug(adapter, "add", {"key": "c_pluto"})
+            _debug(adapter, "set", {"money": 50})
+            *_, info = env.step(FactoredAction(ActionType.OpenBooster, entity_target=0))
+            mask = info["action_mask"]
             assert bool(mask.type_mask[ActionType.UseConsumable]) is offered
             assert bool(mask.type_mask[ActionType.SellConsumable]) is offered
             assert mask.type_mask[ActionType.PickPackCard]  # the bot can pick
@@ -392,77 +398,29 @@ class TestBridgeFollowsBalatrobot:
     def test_card_selecting_consumable_masked_in_the_shop(self):
         # use.lua refuses a consumable that needs card selection outside
         # SELECTING_HAND, even where the endpoint itself is allowed.
-        from jackdaw.bridge.backend import SimBackend
-        from jackdaw.env.action_space import ActionMask, ActionType
-
-        adapter = BridgeAdapter(SimBackend())
+        adapter = _bridge()
         adapter.reset(BACK, STAKE, SEED)
         _to_shop(adapter)
         _debug(adapter, "add", {"key": "c_pluto"})
         _debug(adapter, "add", {"key": "c_magician"})
-        type_mask = np.zeros(23, dtype=bool)
-        type_mask[ActionType.UseConsumable] = True
-        mask = ActionMask(
-            type_mask=type_mask,
-            card_mask=np.zeros(0, dtype=bool),
-            entity_masks={ActionType.UseConsumable: np.array([True, True])},
-            max_card_select=5,
-            min_card_select=1,
-        )
-        mask = adapter.restrict_mask(mask)
+        mask = get_action_mask(adapter.game, Legality.BALATROBOT)
         assert list(mask.entity_masks[ActionType.UseConsumable]) == [True, False]
 
 
 # ---------------------------------------------------------------------------
-# OracleAdapter vs BridgeAdapter(SimBackend) equivalence
+# DirectAdapter vs BridgeAdapter(SimBackend) equivalence
 # ---------------------------------------------------------------------------
 
 
 class TestEquivalence:
-    """OracleAdapter and BridgeAdapter(SimBackend) must produce identical
+    """DirectAdapter and BridgeAdapter(SimBackend) must produce identical
     behavior for the same seed when driven by the same deterministic agent.
     """
 
-    def _greedy_step(self, adapter: GameAdapter) -> str | None:
-        """Deterministic greedy agent step. Returns action type name or None."""
-        legal = adapter.get_legal_actions()
-        if not legal:
-            return None
-
-        hand = adapter.raw_state.get("hand", [])
-
-        for a in legal:
-            if isinstance(a, SelectBlind):
-                adapter.step(a)
-                return "SelectBlind"
-            if isinstance(a, CashOut):
-                adapter.step(a)
-                return "CashOut"
-            if isinstance(a, NextRound):
-                adapter.step(a)
-                return "NextRound"
-            if isinstance(a, SkipPack):
-                adapter.step(a)
-                return "SkipPack"
-
-        # Play hand if possible
-        for a in legal:
-            if isinstance(a, PlayHand) and hand:
-                n = min(5, len(hand))
-                action = PlayHand(card_indices=tuple(range(n)))
-                adapter.step(action)
-                return "PlayHand"
-
-        # Fallback
-        adapter.step(legal[0])
-        return type(legal[0]).__name__
-
     def test_identical_sequence(self):
         """Both adapters produce the same state sequence with greedy agent."""
-        from jackdaw.bridge.backend import SimBackend
-
-        direct = OracleAdapter()
-        bridge = BridgeAdapter(SimBackend())
+        direct = DirectAdapter()
+        bridge = _bridge()
 
         ds = direct.reset(BACK, STAKE, SEED)
         bs = bridge.reset(BACK, STAKE, SEED)
@@ -475,12 +433,7 @@ class TestEquivalence:
         for i in range(max_steps):
             if direct.done or bridge.done:
                 break
-
-            d_phase = direct.raw_state.get("phase")
-            b_phase = bridge.raw_state.get("phase")
-            if direct.won and d_phase == GamePhase.SHOP:
-                break
-            if bridge.won and b_phase == GamePhase.SHOP:
+            if direct.won and direct.game.phase == GamePhase.SHOP:
                 break
 
             # Take same greedy action on both
@@ -491,20 +444,11 @@ class TestEquivalence:
                 break
 
             # Use direct's legal actions to pick action, apply to both
-            hand = direct.raw_state.get("hand", [])
+            hand = direct.game.hand
 
             action = None
             for a in d_legal:
-                if isinstance(a, SelectBlind):
-                    action = a
-                    break
-                if isinstance(a, CashOut):
-                    action = a
-                    break
-                if isinstance(a, NextRound):
-                    action = a
-                    break
-                if isinstance(a, SkipPack):
+                if isinstance(a, (SelectBlind, CashOut, NextRound, SkipPack)):
                     action = a
                     break
 
@@ -522,15 +466,8 @@ class TestEquivalence:
             bs = bridge.step(action)
 
             # Core state fields must match
-            assert ds.phase == bs.phase, f"Step {i}: phase mismatch {ds.phase} != {bs.phase}"
-            assert ds.dollars == bs.dollars, (
-                f"Step {i}: dollars mismatch {ds.dollars} != {bs.dollars}"
-            )
-            assert ds.ante == bs.ante, f"Step {i}: ante mismatch"
-            assert ds.round == bs.round, f"Step {i}: round mismatch"
-            assert ds.chips == bs.chips, f"Step {i}: chips mismatch"
-            assert ds.hands_left == bs.hands_left, f"Step {i}: hands_left mismatch"
-            assert ds.discards_left == bs.discards_left, f"Step {i}: discards_left mismatch"
+            assert ds == bs, f"Step {i}: {ds} != {bs}"
+            assert direct.game.state_hash() == bridge.game.state_hash(), f"Step {i}"
 
         # Both must end in the same terminal state
         assert direct.done == bridge.done
@@ -546,41 +483,37 @@ class TestTerminalFlags:
     def test_game_over_sets_done(self):
         """When the game reaches GAME_OVER, done must be True."""
         random.seed(99999)
-        adapter = OracleAdapter()
+        adapter = DirectAdapter()
         adapter.reset(BACK, STAKE, SEED)
         _run_to_completion(adapter, max_actions=5000)
 
-        if adapter.raw_state.get("phase") == GamePhase.GAME_OVER:
+        if adapter.game.phase == GamePhase.GAME_OVER:
             assert adapter.done is True
 
     def test_won_flag_on_win(self):
         """If the run is won, adapter.won must be True."""
-        # Use a deterministic greedy agent that may or may not win —
-        # we just verify the flag is consistent with raw state.
+        # A random agent that may or may not win: the flag must agree with the run.
         random.seed(77777)
-        adapter = OracleAdapter()
+        adapter = DirectAdapter()
         adapter.reset(BACK, STAKE, SEED)
         _run_to_completion(adapter, max_actions=5000)
 
-        assert adapter.won == adapter.raw_state.get("won", False)
+        assert adapter.won == game_state(adapter.game).won
 
     def test_done_consistent_with_phase(self):
         """adapter.done must match phase == GAME_OVER."""
-        adapter = OracleAdapter()
+        adapter = DirectAdapter()
         adapter.reset(BACK, STAKE, SEED)
         # Not done at start
         assert not adapter.done
-        assert adapter.raw_state["phase"] != GamePhase.GAME_OVER
+        assert adapter.game.phase != GamePhase.GAME_OVER
 
     def test_bridge_done_flag(self):
-        """BridgeAdapter done/won flags match underlying engine."""
-        from jackdaw.bridge.backend import SimBackend
-
+        """BridgeAdapter done/won flags match its shadow run."""
         random.seed(88888)
-        adapter = BridgeAdapter(SimBackend())
+        adapter = _bridge()
         adapter.reset(BACK, STAKE, SEED)
         _run_to_completion(adapter, max_actions=5000)
 
-        # Flags must be consistent
-        raw_won = adapter.raw_state.get("won", False)
-        assert adapter.won == raw_won
+        assert adapter.won == game_state(adapter.game).won
+        assert adapter.done == (adapter.game.phase == GamePhase.GAME_OVER)

@@ -1,45 +1,24 @@
 """Targeted parity cases for joker batch E (the shop and consumable contexts).
 
-The seeded scenarios (:mod:`tests.parity.joker_scenarios`) never buy, sell, reroll, open or
-skip a pack, skip a blind or use a consumable, so most branches of these jokers are reached
-only here. Each case builds an oracle run (BalatroBot ``add`` for the jokers and cards),
-writes the few values play would take long to reach straight into the oracle's state, and
-checks every action against the Rust engine: the oracle's snapshot goes into Rust, both
-engines take the action, and the snapshots must match.
-
-Every step must be checked (none refused as unported), and after it both engines must list
-the same legal actions (these jokers change slot counts, sell values and pack and shop
-options); the assertions after a step confirm that the branch under test was taken.
+The seeded scenarios (``test_joker_scenarios.py``) never buy, sell, reroll, open or skip a pack,
+skip a blind or use a consumable, so most branches of these jokers are reached only here. Each
+case builds a run (BalatroBot ``add`` for the jokers and cards), writes the few values play
+would take long to reach straight into the state, and takes its steps; each step must match the
+oracle's, legal actions included (these jokers change slot counts, sell values and pack and shop
+options; :mod:`tests.parity.cases`). The assertions after a step confirm that the branch under
+test was taken.
 """
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
-from jackdaw import _core
-from jackdaw.engine.actions import GamePhase, get_legal_actions
-from jackdaw.engine.card_utils import astronomer_active
-from jackdaw.engine.game import blind_debuff_card
-from tests.golden.trajectories import encode_action
-from tests.parity import canon
-from tests.parity.pyengine import PyEngine
-from tests.parity.rust_step import Report, check_step, plain
-
-
-def legal_actions_differ(engine: PyEngine) -> bool:
-    """Rust's legal actions for the oracle's state differ from the oracle's own list."""
-    snap = plain(engine.snapshot())
-    if snap["phase"] == "game_over":
-        return False
-    with engine._ids():
-        py = [encode_action(a) for a in get_legal_actions(engine.gs)]
-    game = _core.Game.from_snapshot(json.dumps(canon.to_json_compatible(snap)))
-    return json.loads(game.legal_actions()) != py
+from jackdaw.core import Score
+from tests.parity.cases import CardRef, Run
 
 
 class Board:
-    """A targeted oracle run whose steps are checked against Rust one at a time."""
+    """A targeted run whose steps are checked against the oracle's one at a time."""
 
     def __init__(
         self,
@@ -58,139 +37,110 @@ class Board:
         back = "b_challenge" if challenge else "b_red"
         start = {"back": back, "stake": 1, "seed": seed, "challenge": challenge}
         self.seed = seed
-        self.engine = PyEngine(start, setup)
+        self.run = Run(start, setup)
         self.out_of_reach()
-        self.report = Report()
-        self.steps = 0
 
     @property
-    def gs(self) -> dict[str, Any]:
-        return self.engine.gs
+    def phase(self) -> str:
+        return self.run.game.phase
 
     def out_of_reach(self) -> None:
         """A hand ends the round only when a case wins it on purpose."""
-        self.gs["blind"].chips = 10**9
+        self.run.write("blind.chips", 10**9)
 
-    def add(self, key: str, **params: Any) -> Any:
+    def add(self, key: str, **params: Any) -> CardRef:
         """BalatroBot ``add``: a joker, a consumable, or a playing card (into the hand during a
         round, else the deck). A playing card in the hand meets the boss as a dealt one did."""
-        self.engine.apply({"op": "add", "key": key, **params})
-        area = {"j_": "jokers", "c_": "consumables"}.get(key[:2])
-        if area is None:
-            area = "hand" if self.gs["phase"] == GamePhase.SELECTING_HAND else "deck"
-        card = self.gs[area][-1]
-        if area == "hand":
-            blind_debuff_card(self.gs, card)
+        card = self.run.add(key, **params)
+        if card.area == "hand":
+            self.run.boss_check(card)
         return card
 
-    def cards(self, *keys: str, **params: Any) -> list[Any]:
+    def cards(self, *keys: str, **params: Any) -> list[CardRef]:
         return [self.add(k, **params) for k in keys]
 
-    def joker(self, key: str, n: int = 0) -> Any:
-        return [j for j in self.gs["jokers"] if j.center_key == key][n]
+    def joker(self, key: str, n: int = 0) -> CardRef:
+        return [j for j in self.run.cards("jokers") if j.key == key][n]
 
     def keys(self, area: str) -> list[str]:
-        return [c.center_key for c in self.gs[area]]
-
-    def indices(self, cards: tuple[Any, ...]) -> list[int]:
-        hand = self.gs["hand"]
-        return sorted(next(i for i, c in enumerate(hand) if c is card) for card in cards)
+        return self.run.keys(area)
 
     def step(self, action: list[Any]) -> None:
-        where = f"{self.seed}@{self.steps}"
-        self.steps += 1
-        kind = action[0]
-        checked = self.report.matched[kind]
-        ok = check_step(self.engine, action, where, self.report)
-        found = [
-            f"{w}: {'; '.join(d[:8])}"
-            for items in self.report.mismatches.values()
-            for w, d in items
-        ]
-        assert not found, "\n".join(found)
-        assert not self.report.unported, f"{where}: unported {dict(self.report.unported)}"
-        assert ok, f"{where}: the oracle refused {action}"
-        assert self.report.matched[kind] == checked + 1, f"{where}: step not checked"
-        assert not legal_actions_differ(self.engine), f"{where}: the legal actions differ"
+        assert self.run.step(action), f"{self.seed}: the oracle refused {action}"
 
     # -- actions ------------------------------------------------------------
 
-    def play(self, *cards: Any) -> None:
-        self.step(["PlayHand", self.indices(cards)])
+    def play(self, *cards: CardRef) -> None:
+        self.step(["PlayHand", self.run.indices(cards)])
 
     def play_pair(self) -> None:
         self.play(*self.cards("S_5", "H_5"))
 
-    def win_with(self, *cards: Any) -> None:
+    def win_with(self, *cards: CardRef) -> None:
         """Play the cards with the blind one chip from beaten."""
-        self.gs["chips"] = self.gs["blind"].chips - 1
+        self.run.write("game.chips", self.run.read("blind.chips") - 1)
         self.play(*cards)
-        assert self.gs["phase"] == GamePhase.ROUND_EVAL
+        assert self.phase == "round_eval"
 
     def to_shop(self, dollars: int = 100) -> None:
         """Win the round with a pair, cash out, and hold ``dollars`` in the shop."""
         self.win_with(*self.cards("S_5", "H_5"))
         self.step(["CashOut"])
-        assert self.gs["phase"] == GamePhase.SHOP
-        self.gs["dollars"] = dollars
+        assert self.phase == "shop"
+        self.run.write("game.dollars", dollars)
 
     def next_blind(self) -> None:
         """Leave the shop and select the blind on deck."""
         self.step(["NextRound"])
-        assert self.gs["phase"] == GamePhase.BLIND_SELECT
+        assert self.phase == "blind_select"
         self.step(["SelectBlind"])
         self.out_of_reach()
 
-    def sell(self, card: Any) -> None:
+    def sell(self, card: CardRef) -> None:
         for area in ("jokers", "consumables"):
-            for i, c in enumerate(self.gs[area]):
-                if c is card:
-                    self.step(["SellCard", area, i])
-                    return
+            cards = self.run.cards(area)
+            if card in cards:
+                self.step(["SellCard", area, cards.index(card)])
+                return
         raise AssertionError("the card is not held")
 
-    def use(self, card: Any) -> None:
-        index = next(i for i, c in enumerate(self.gs["consumables"]) if c is card)
-        self.step(["UseConsumable", index, None])
+    def use(self, card: CardRef) -> None:
+        self.step(["UseConsumable", self.run.cards("consumables").index(card), None])
 
-    def reprice(self, card: Any) -> None:
+    def reprice(self, card: CardRef) -> None:
         """``card:set_cost()`` with the run's prices."""
-        card.set_cost(
-            inflation=self.gs.get("inflation", 0),
-            discount_percent=self.gs.get("discount_percent", 0),
-            ante=self.gs["round_resets"]["ante"],
-            has_astronomer=astronomer_active(self.gs),
-        )
+        self.run.oracle(f"card {card.sort_id} repriced")
 
-    def set_booster(self, index: int, key: str) -> Any:
+    def set_booster(self, index: int, key: str) -> None:
         """Make the shop's booster at ``index`` a ``key`` pack, as populate_shop builds one."""
-        card = self.gs["shop_boosters"][index]
-        card.set_ability(key, hands_played=self.gs.get("hands_played", 0))
-        self.reprice(card)
-        return card
+        self.run.oracle(f"shop booster {index} made a {key}")
 
     def shop_rates(self, kind: str) -> None:
         """Before the shop is built: every shop card is of ``kind`` (a ``*_rate`` key)."""
-        for rate in ("joker_rate", "tarot_rate", "planet_rate", "spectral_rate"):
-            self.gs[rate] = 0
-        self.gs["playing_card_rate"] = 0
-        self.gs[kind] = 4
+        with self.run.edit() as snap:
+            game = snap["game"]
+            for rate in ("joker_rate", "tarot_rate", "planet_rate", "spectral_rate"):
+                game[rate] = 0
+            game["playing_card_rate"] = 0
+            game[kind] = 4
 
     def open_booster(self, key: str | None = None, index: int = 0) -> None:
         if key is not None:
             self.set_booster(index, key)
         self.step(["OpenBooster", index])
-        assert self.gs["phase"] == GamePhase.PACK_OPENING
+        assert self.phase == "pack_opening"
 
     @property
-    def last(self) -> Any:
-        return self.gs["last_score_result"]
+    def last(self) -> Score:
+        score = self.run.game.last_score
+        assert score is not None
+        return score
 
     def double_tags(self) -> int:
-        return sum(1 for e in self.gs.get("awarded_tags", []) if e["key"] == "tag_double")
+        return sum(1 for t in self.run.read("tags") if t["key"] == "tag_double")
 
 
-def negative(card: Any) -> bool:
+def negative(card: CardRef) -> bool:
     return bool(card.edition and card.edition.get("negative"))
 
 
@@ -216,7 +166,7 @@ def test_flash_card_counts_a_free_reroll() -> None:
     """Chaos the Clown's free reroll is still a reroll (button_callbacks.lua:2855-2909)."""
     b = Board("BE_FLASH_FREE", "j_chaos", "j_flash")
     b.to_shop(dollars=0)
-    assert b.gs["current_round"]["reroll_cost"] == 0
+    assert b.run.read("current_round.reroll_cost") == 0
     b.step(["Reroll"])
     assert b.joker("j_flash").ability["mult"] == 2
 
@@ -237,7 +187,7 @@ def test_red_card_grows_when_a_pack_is_skipped() -> None:
     assert b.joker("j_red_card").ability["mult"] == 3
     b.open_booster("p_celestial_normal_1")
     b.step(["PickPackCard", 0, None])
-    assert b.gs["phase"] == GamePhase.SHOP
+    assert b.phase == "shop"
     assert b.joker("j_red_card").ability["mult"] == 3
     b.next_blind()
     b.play_pair()
@@ -249,7 +199,7 @@ def test_red_card_skipping_an_arcana_pack() -> None:
     b = Board("BE_RED_ARCANA", "j_red_card", "j_brainstorm")
     b.to_shop()
     b.open_booster("p_arcana_normal_1")
-    assert b.gs["hand"]
+    assert b.run.cards("hand")
     b.step(["SkipPack"])
     assert b.joker("j_red_card").ability["mult"] == 3
 
@@ -264,9 +214,9 @@ def test_throwback_counts_the_skipped_blinds() -> None:
     b.to_shop()
     b.step(["NextRound"])
     b.step(["SkipBlind"])
-    if b.gs["phase"] == GamePhase.PACK_OPENING:
+    if b.phase == "pack_opening":
         b.step(["SkipPack"])
-    assert b.gs["skips"] == 1
+    assert b.run.read("game.skips") == 1
     b.step(["SelectBlind"])
     b.out_of_reach()
     b.play_pair()
@@ -302,14 +252,16 @@ def test_campfire_sees_sales_in_the_shop_and_blind_select() -> None:
 def test_campfire_resets_after_a_boss() -> None:
     """At the end of a boss round Campfire returns to X1 (card.lua:2889-2895)."""
     b = Board("BE_CAMPFIRE_BOSS", "j_campfire", "j_brainstorm", boss="bl_club")
-    b.joker("j_campfire").ability["x_mult"] = 2
+    with b.run.edit_card(b.joker("j_campfire")) as card:
+        card["ability"]["x_mult"] = 2
     b.win_with(*b.cards("S_5", "H_5"))
     assert b.joker("j_campfire").ability["x_mult"] == 1
 
 
 def test_campfire_keeps_its_xmult_after_a_small_blind() -> None:
     b = Board("BE_CAMPFIRE_SMALL", "j_campfire")
-    b.joker("j_campfire").ability["x_mult"] = 2
+    with b.run.edit_card(b.joker("j_campfire")) as card:
+        card["ability"]["x_mult"] = 2
     b.win_with(*b.cards("S_5", "H_5"))
     assert b.joker("j_campfire").ability["x_mult"] == 2
 
@@ -318,7 +270,7 @@ def test_campfire_resets_after_a_disabled_boss() -> None:
     """G.GAME.blind.boss stays set when the boss is disabled (blind.lua:356-415)."""
     b = Board("BE_CAMPFIRE_LUCHADOR", "j_campfire", "j_luchador", boss="bl_club")
     b.sell(b.joker("j_luchador"))
-    assert b.gs["blind"].disabled
+    assert b.run.read("blind.disabled")
     assert b.joker("j_campfire").ability["x_mult"] == 1.25
     b.win_with(*b.cards("S_5", "H_5"))
     assert b.joker("j_campfire").ability["x_mult"] == 1
@@ -328,21 +280,21 @@ def test_luchador_disables_the_wall() -> None:
     """Luchador: sold during an active boss, G.GAME.blind:disable() (card.lua:2355-2360); The
     Wall's target is halved (blind.lua:377-380)."""
     b = Board("BE_LUCHADOR_WALL", "j_luchador", boss="bl_wall")
-    target = b.gs["blind"].chips
+    target = b.run.read("blind.chips")
     b.sell(b.joker("j_luchador"))
-    assert b.gs["blind"].disabled
-    assert b.gs["blind"].chips == target / 2
+    assert b.run.read("blind.disabled")
+    assert b.run.read("blind.chips") == target / 2
 
 
 def test_luchador_ends_the_round_the_disabled_wall_lost() -> None:
     """Disabled, a boss whose new target the score already meets ends the round
     (blind.lua:397-406). The sale's money lands first: at $4 it is what earns interest."""
     b = Board("BE_LUCHADOR_WALL_WIN", "j_luchador", "j_golden", boss="bl_wall")
-    b.gs["blind"].chips = 2000
-    b.gs["chips"] = 1200
-    b.gs["dollars"] = 4
+    b.run.write("blind.chips", 2000)
+    b.run.write("game.chips", 1200)
+    b.run.write("game.dollars", 4)
     b.sell(b.joker("j_luchador"))
-    assert b.gs["phase"] == GamePhase.ROUND_EVAL
+    assert b.phase == "round_eval"
 
 
 def test_a_sale_that_ends_the_round_follows_the_event_order() -> None:
@@ -352,34 +304,35 @@ def test_a_sale_that_ends_the_round_follows_the_event_order() -> None:
     button_callbacks.lua:2318-2326)."""
     b = Board("BE_LUCHADOR_WALL_RENTAL", "j_campfire", "j_luchador", boss="bl_wall")
     luchador = b.joker("j_luchador")
-    luchador.set_rental(True)
+    with b.run.edit_card(luchador) as card:
+        card["stickers"]["rental"] = True
     b.reprice(luchador)
-    b.gs["blind"].chips = 2000
-    b.gs["chips"] = 1200
-    b.gs["dollars"] = 6
+    b.run.write("blind.chips", 2000)
+    b.run.write("game.chips", 1200)
+    b.run.write("game.dollars", 6)
     b.sell(luchador)
-    assert b.gs["phase"] == GamePhase.ROUND_EVAL
+    assert b.phase == "round_eval"
     assert b.keys("jokers") == ["j_campfire"]
     assert b.joker("j_campfire").ability["x_mult"] == 1
-    assert b.gs["dollars"] == 6 + 1 - 3
+    assert b.run.read("game.dollars") == 6 + 1 - 3
     b.step(["CashOut"])
 
 
 def test_luchador_gives_back_the_needles_hands() -> None:
     b = Board("BE_LUCHADOR_NEEDLE", "j_luchador", boss="bl_needle")
-    assert b.gs["current_round"]["hands_left"] == 1
+    assert b.run.read("current_round.hands_left") == 1
     b.sell(b.joker("j_luchador"))
-    assert b.gs["current_round"]["hands_left"] == 4
+    assert b.run.read("current_round.hands_left") == 4
 
 
 def test_luchador_frees_the_manacle() -> None:
     """The Manacle disabled: +1 hand size, whose change_size draws, then one more card drawn
     (blind.lua:386-390, cardarea.lua:100-105)."""
     b = Board("BE_LUCHADOR_MANACLE", "j_luchador", boss="bl_manacle")
-    held = len(b.gs["hand"])
+    held = len(b.run.cards("hand"))
     b.sell(b.joker("j_luchador"))
-    assert b.gs["blind"].disabled
-    assert len(b.gs["hand"]) > held
+    assert b.run.read("blind.disabled")
+    assert len(b.run.cards("hand")) > held
 
 
 def test_luchador_lifts_the_plants_debuffs() -> None:
@@ -393,26 +346,26 @@ def test_luchador_lifts_the_plants_debuffs() -> None:
 def test_a_sold_blueprint_copying_luchador_disables_the_boss() -> None:
     """selling_self has no Blueprint guard: the copy disables the boss (card.lua:2354-2360)."""
     b = Board("BE_LUCHADOR_COPY", "j_blueprint", "j_luchador", boss="bl_water")
-    assert b.gs["current_round"]["discards_left"] == 0
+    assert b.run.read("current_round.discards_left") == 0
     b.sell(b.joker("j_blueprint"))
-    assert b.gs["blind"].disabled
-    assert b.gs["current_round"]["discards_left"] == b.gs["round_resets"]["discards"]
+    assert b.run.read("blind.disabled")
+    assert b.run.read("current_round.discards_left") == b.run.read("round_resets.discards")
 
 
 def test_luchador_outside_a_boss_disables_nothing() -> None:
     """A Small blind is not a boss (Blind:get_type, blind.lua:346-354)."""
     b = Board("BE_LUCHADOR_SMALL", "j_luchador")
     b.sell(b.joker("j_luchador"))
-    assert not b.gs["blind"].disabled
+    assert not b.run.read("blind.disabled")
 
 
 def test_luchador_sold_in_the_shop_after_a_boss_disables_nothing() -> None:
     """The defeated boss was reset to the empty blind (G12), whose type is no boss."""
     b = Board("BE_LUCHADOR_SHOP", "j_luchador", "j_golden", boss="bl_manacle")
     b.to_shop()
-    size = b.gs["hand_size"]
+    size = b.run.read("game.hand_size")
     b.sell(b.joker("j_luchador"))
-    assert b.gs["hand_size"] == size
+    assert b.run.read("game.hand_size") == size
 
 
 def test_a_debuffed_luchador_disables_nothing() -> None:
@@ -423,7 +376,7 @@ def test_a_debuffed_luchador_disables_nothing() -> None:
     luchador = b.joker("j_luchador")
     assert luchador.debuff
     b.sell(luchador)
-    assert not b.gs["blind"].disabled
+    assert not b.run.read("blind.disabled")
 
 
 def test_luchador_under_verdant_leaf() -> None:
@@ -433,17 +386,17 @@ def test_luchador_under_verdant_leaf() -> None:
     card = b.add("S_5")
     assert card.debuff
     b.sell(b.joker("j_luchador"))
-    assert b.gs["blind"].disabled
+    assert b.run.read("blind.disabled")
     assert not card.debuff
 
 
 def test_luchador_after_the_boss_was_disabled() -> None:
     """A disabled boss is not disabled again."""
     b = Board("BE_LUCHADOR_TWICE", "j_luchador", "j_luchador", boss="bl_wall")
-    target = b.gs["blind"].chips
+    target = b.run.read("blind.chips")
     b.sell(b.joker("j_luchador"))
     b.sell(b.joker("j_luchador"))
-    assert b.gs["blind"].chips == target / 2
+    assert b.run.read("blind.chips") == target / 2
 
 
 def test_diet_cola_sold_gives_a_double_tag() -> None:
@@ -466,15 +419,15 @@ def test_diet_colas_double_tag_doubles_a_pack_tag() -> None:
     b.to_shop()
     b.sell(b.joker("j_diet_cola"))
     b.step(["NextRound"])
-    b.gs["round_resets"]["blind_tags"]["Big"] = "tag_buffoon"
+    b.run.write("round_resets.blind_tags.Big", "tag_buffoon")
     b.step(["SkipBlind"])
-    assert b.gs["phase"] == GamePhase.PACK_OPENING
+    assert b.phase == "pack_opening"
     b.step(["SkipPack"])
-    assert b.gs["phase"] == GamePhase.PACK_OPENING
+    assert b.phase == "pack_opening"
     b.step(["SkipPack"])
-    assert b.gs["phase"] == GamePhase.BLIND_SELECT
+    assert b.phase == "blind_select"
     assert b.joker("j_red_card").ability["mult"] == 6
-    assert [c.ability["set"] for c in b.gs["consumables"]] == ["Tarot", "Tarot"]
+    assert [c.set for c in b.run.cards("consumables")] == ["Tarot", "Tarot"]
 
 
 def test_diet_colas_double_tag_doubles_a_boss_tag() -> None:
@@ -484,9 +437,9 @@ def test_diet_colas_double_tag_doubles_a_boss_tag() -> None:
     b.to_shop()
     b.sell(b.joker("j_diet_cola"))
     b.step(["NextRound"])
-    b.gs["round_resets"]["blind_tags"]["Big"] = "tag_boss"
+    b.run.write("round_resets.blind_tags.Big", "tag_boss")
     b.step(["SkipBlind"])
-    assert b.gs["round_resets"]["boss_rerolled"]
+    assert b.run.read("round_resets.boss_rerolled")
     assert b.double_tags() == 0
 
 
@@ -507,9 +460,14 @@ def test_invisible_joker_counts_its_rounds() -> None:
     assert b.joker("j_invisible").ability["invis_rounds"] == 1
 
 
+def _invis_rounds(b: Board, rounds: int, n: int = 0) -> None:
+    with b.run.edit_card(b.joker("j_invisible", n)) as card:
+        card["ability"]["invis_rounds"] = rounds
+
+
 def test_invisible_joker_sold_too_early_copies_nothing() -> None:
     b = Board("BE_INVISIBLE_EARLY", "j_invisible", "j_golden")
-    b.joker("j_invisible").ability["invis_rounds"] = 1
+    _invis_rounds(b, 1)
     b.sell(b.joker("j_invisible"))
     assert b.keys("jokers") == ["j_golden"]
 
@@ -518,47 +476,47 @@ def test_invisible_joker_copies_another_joker() -> None:
     """Sold after two rounds, it copies a random other joker at once (card.lua:2371-2394); a
     Negative joker's copy loses the edition (G28)."""
     b = Board("BE_INVISIBLE_COPY", "j_invisible", "j_golden", "j_credit_card")
-    b.joker("j_invisible").ability["invis_rounds"] = 2
+    _invis_rounds(b, 2)
     b.sell(b.joker("j_invisible"))
-    assert len(b.gs["jokers"]) == 3
+    assert len(b.run.cards("jokers")) == 3
 
 
 def test_invisible_joker_copy_of_a_negative_joker_drops_the_edition() -> None:
     b = Board("BE_INVISIBLE_NEGATIVE", "j_invisible")
     b.add("j_golden", edition="negative")
-    b.joker("j_invisible").ability["invis_rounds"] = 2
+    _invis_rounds(b, 2)
     b.sell(b.joker("j_invisible"))
-    assert [negative(j) for j in b.gs["jokers"]] == [True, False]
+    assert [negative(j) for j in b.run.cards("jokers")] == [True, False]
 
 
 def test_invisible_joker_copy_sees_the_sale() -> None:
     """The copy joins G.jokers during selling_self, so a copied Campfire sees the sale in the
     selling_card loop that follows (button_callbacks.lua:2318-2326)."""
     b = Board("BE_INVISIBLE_CAMPFIRE", "j_invisible", "j_campfire")
-    b.joker("j_invisible").ability["invis_rounds"] = 2
+    _invis_rounds(b, 2)
     b.sell(b.joker("j_invisible"))
-    assert [j.ability["x_mult"] for j in b.gs["jokers"]] == [1.25, 1.25]
+    assert [j.ability["x_mult"] for j in b.run.cards("jokers")] == [1.25, 1.25]
 
 
 def test_invisible_joker_copy_of_an_invisible_joker_starts_over() -> None:
     b = Board("BE_INVISIBLE_TWO", "j_invisible", "j_invisible")
-    first, second = b.gs["jokers"]
-    first.ability["invis_rounds"] = 2
-    second.ability["invis_rounds"] = 3
+    first = b.joker("j_invisible")
+    _invis_rounds(b, 2)
+    _invis_rounds(b, 3, n=1)
     b.sell(first)
-    assert [j.ability["invis_rounds"] for j in b.gs["jokers"]] == [3, 0]
+    assert [j.ability["invis_rounds"] for j in b.run.cards("jokers")] == [3, 0]
 
 
 def test_invisible_joker_copy_joins_the_deck() -> None:
     """The copy runs add_to_deck: a copied Juggler's +1 hand size draws a card mid-round
     (card.lua:586-588, cardarea.lua:94-111)."""
     b = Board("BE_INVISIBLE_JUGGLER", "j_invisible", "j_juggler")
-    b.joker("j_invisible").ability["invis_rounds"] = 2
-    held, size = len(b.gs["hand"]), b.gs["hand_size"]
+    _invis_rounds(b, 2)
+    held, size = len(b.run.cards("hand")), b.run.read("game.hand_size")
     b.sell(b.joker("j_invisible"))
     assert b.keys("jokers") == ["j_juggler", "j_juggler"]
-    assert b.gs["hand_size"] == size + 1
-    assert len(b.gs["hand"]) == held + 1
+    assert b.run.read("game.hand_size") == size + 1
+    assert len(b.run.cards("hand")) == held + 1
 
 
 def test_invisible_joker_copies_a_debuffed_joker() -> None:
@@ -567,34 +525,34 @@ def test_invisible_joker_copies_a_debuffed_joker() -> None:
     (card.lua:564-643 checks no debuff)."""
     b = Board("BE_INVISIBLE_HEART_1", "j_invisible", "j_juggler", boss="bl_final_heart")
     b.play_pair()
-    assert [j.center_key for j in b.gs["jokers"] if j.debuff] == ["j_juggler"]
-    b.joker("j_invisible").ability["invis_rounds"] = 2
-    size = b.gs["hand_size"]
+    assert [j.key for j in b.run.cards("jokers") if j.debuff] == ["j_juggler"]
+    _invis_rounds(b, 2)
+    size = b.run.read("game.hand_size")
     b.sell(b.joker("j_invisible"))
     copy = b.joker("j_juggler", 1)
     assert copy.debuff
-    assert b.gs["hand_size"] == size + 1
+    assert b.run.read("game.hand_size") == size + 1
 
 
 def test_invisible_joker_alone_copies_nothing() -> None:
     b = Board("BE_INVISIBLE_ALONE", "j_invisible")
-    b.joker("j_invisible").ability["invis_rounds"] = 2
+    _invis_rounds(b, 2)
     b.sell(b.joker("j_invisible"))
-    assert not b.gs["jokers"]
+    assert not b.run.cards("jokers")
 
 
 def test_invisible_joker_needs_the_jokers_to_fit() -> None:
     """``#G.jokers.cards <= G.jokers.config.card_limit``, Invisible Joker included."""
     b = Board("BE_INVISIBLE_FULL", "j_invisible", "j_golden", "j_credit_card")
-    b.joker("j_invisible").ability["invis_rounds"] = 2
-    b.gs["joker_slots"] = 2
+    _invis_rounds(b, 2)
+    b.run.write("game.joker_slots", 2)
     b.sell(b.joker("j_invisible"))
     assert b.keys("jokers") == ["j_golden", "j_credit_card"]
 
 
 def test_a_sold_blueprint_copying_invisible_joker_copies_nothing() -> None:
     b = Board("BE_INVISIBLE_BLUEPRINT", "j_blueprint", "j_invisible", "j_golden")
-    b.joker("j_invisible").ability["invis_rounds"] = 2
+    _invis_rounds(b, 2)
     b.sell(b.joker("j_blueprint"))
     assert b.keys("jokers") == ["j_invisible", "j_golden"]
 
@@ -610,8 +568,9 @@ def test_hallucination_makes_a_tarot_when_a_pack_opens() -> None:
     b = Board("BE_HALLUCINATION", "j_oops", "j_hallucination")
     b.to_shop()
     b.open_booster("p_buffoon_normal_1")
-    assert [c.ability["set"] for c in b.gs["consumables"]] == ["Tarot"]
-    assert b.gs["consumables"][0].sort_id > max(c.sort_id for c in b.gs["pack_cards"])
+    assert [c.set for c in b.run.cards("consumables")] == ["Tarot"]
+    tarot = b.run.cards("consumables")[0]
+    assert tarot.sort_id > max(c.sort_id for c in b.run.cards("pack_cards"))
 
 
 def test_hallucination_rolls_for_each_copy() -> None:
@@ -619,7 +578,7 @@ def test_hallucination_rolls_for_each_copy() -> None:
     b = Board("BE_HALLUCINATION_COPIES", "j_oops", "j_blueprint", "j_hallucination")
     b.to_shop()
     b.open_booster("p_standard_normal_1")
-    assert [c.ability["set"] for c in b.gs["consumables"]] == ["Tarot", "Tarot"]
+    assert [c.set for c in b.run.cards("consumables")] == ["Tarot", "Tarot"]
 
 
 def test_hallucination_under_inflation() -> None:
@@ -628,10 +587,10 @@ def test_hallucination_under_inflation() -> None:
     raised value."""
     b = Board("BE_HALLUCINATION_INFLATION", "j_oops", "j_hallucination", challenge="c_inflation_1")
     b.to_shop()
-    inflation = b.gs["inflation"]
+    inflation = b.run.read("game.inflation")
     b.open_booster("p_buffoon_normal_1")
-    assert b.gs["inflation"] == inflation + 1
-    assert [c.ability["set"] for c in b.gs["consumables"]] == ["Tarot"]
+    assert b.run.read("game.inflation") == inflation + 1
+    assert [c.set for c in b.run.cards("consumables")] == ["Tarot"]
 
 
 def test_hallucination_copies_share_the_last_slot() -> None:
@@ -641,8 +600,8 @@ def test_hallucination_copies_share_the_last_slot() -> None:
     b.to_shop()
     b.add("c_pluto")
     b.open_booster("p_celestial_normal_1")
-    assert len(b.gs["consumables"]) == 2
-    assert "halu1" in b.gs["rng"].state
+    assert len(b.run.cards("consumables")) == 2
+    assert "halu1" in b.run.read("rng.streams")
 
 
 def test_hallucination_with_full_slots_rolls_nothing() -> None:
@@ -651,18 +610,19 @@ def test_hallucination_with_full_slots_rolls_nothing() -> None:
     b.add("c_pluto")
     b.add("c_mercury")
     b.open_booster("p_arcana_normal_1")
-    assert "halu1" not in b.gs["rng"].state
+    assert "halu1" not in b.run.read("rng.streams")
 
 
 def test_hallucination_rolls_with_the_odds() -> None:
     """Without Oops! All 6s the roll can miss: two packs, whatever they roll."""
     b = Board("BE_HALLUCINATION_ODDS", "j_hallucination", "j_blueprint")
-    b.gs["jokers"].reverse()  # Blueprint copies Hallucination
+    with b.run.edit() as snap:
+        snap["areas"]["jokers"].reverse()  # Blueprint copies Hallucination
     b.to_shop()
     for _ in range(2):
         b.open_booster("p_buffoon_normal_1")
         b.step(["SkipPack"])
-    assert b.gs["rng"].state["halu1"]
+    assert b.run.read("rng.streams")["halu1"]
 
 
 def test_perkeo_copies_a_consumable_when_the_shop_ends() -> None:
@@ -673,16 +633,16 @@ def test_perkeo_copies_a_consumable_when_the_shop_ends() -> None:
     b.add("c_pluto")
     b.add("c_mars")
     b.step(["NextRound"])
-    assert len(b.gs["consumables"]) == 3
-    assert negative(b.gs["consumables"][2])
-    assert b.gs["consumable_slots"] == 3
+    assert len(b.run.cards("consumables")) == 3
+    assert negative(b.run.cards("consumables")[2])
+    assert b.run.read("game.consumable_slots") == 3
 
 
 def test_perkeo_without_a_consumable_copies_nothing() -> None:
     b = Board("BE_PERKEO_EMPTY", "j_perkeo", "j_blueprint")
     b.to_shop()
     b.step(["NextRound"])
-    assert not b.gs["consumables"]
+    assert not b.run.cards("consumables")
 
 
 def test_perkeo_and_its_copies_each_copy() -> None:
@@ -692,8 +652,8 @@ def test_perkeo_and_its_copies_each_copy() -> None:
     b.to_shop()
     b.add("c_pluto")
     b.step(["NextRound"])
-    assert len(b.gs["consumables"]) == 4
-    assert b.gs["consumable_slots"] == 5
+    assert len(b.run.cards("consumables")) == 4
+    assert b.run.read("game.consumable_slots") == 5
 
 
 def test_perkeo_copies_a_negative_consumable() -> None:
@@ -707,8 +667,8 @@ def test_perkeo_copies_a_negative_consumable() -> None:
     b.out_of_reach()
     b.to_shop()
     b.step(["NextRound"])
-    assert len(b.gs["consumables"]) == 3
-    assert b.gs["consumable_slots"] == 4
+    assert len(b.run.cards("consumables")) == 3
+    assert b.run.read("game.consumable_slots") == 4
 
 
 # ---------------------------------------------------------------------------
@@ -751,10 +711,10 @@ def test_fortune_teller_counts_the_tarots_used() -> None:
     b.play_pair()
     assert b.last.mult == 2
     b.use(b.add("c_pluto"))
-    assert b.gs["consumable_usage_total"]["tarot"] == 0
+    assert b.run.read("consumeable_usage.totals.tarot") == 0
     b.play_pair()
     assert b.last.mult == 2
-    b.gs["consumable_usage_total"]["tarot"] = 3
+    b.run.write("consumeable_usage.totals.tarot", 3)
     b.play_pair()
     assert b.last.mult == 2 + 3 + 3
 
@@ -765,7 +725,7 @@ def test_hologram_grows_for_each_card_bought() -> None:
     b = Board("BE_HOLOGRAM", "j_blueprint", "j_hologram")
     b.shop_rates("playing_card_rate")
     b.to_shop()
-    assert all(c.ability["set"] in ("Default", "Enhanced") for c in b.gs["shop_cards"])
+    assert all(c.set in ("Default", "Enhanced") for c in b.run.cards("shop_jokers"))
     b.step(["BuyCard", 0])
     b.step(["BuyCard", 0])
     assert b.joker("j_hologram").ability["x_mult"] == 1.5

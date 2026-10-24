@@ -8,9 +8,9 @@ Canonical usage::
     env = BalatroEnvironment(adapter_factory=DirectAdapter)
     obs, mask, info = env.reset()
 
-``DirectAdapter`` runs the Rust engine (``jackdaw.core.Game``);
-``OracleAdapter`` runs the Python engine it is checked against.
-``BalatroVectorEnv`` steps many environments in parallel in Rust.
+``DirectAdapter`` runs the Rust engine (``jackdaw.core.Game``) in process;
+``LiveAdapter`` plays the live game through BalatroBot, in step with a Rust
+shadow run.  ``BalatroVectorEnv`` steps many environments in parallel in Rust.
 """
 
 from jackdaw.bridge.live import LiveAdapter
@@ -39,7 +39,6 @@ from jackdaw.env.game_interface import (
     DirectAdapter,
     GameAdapter,
     GameState,
-    OracleAdapter,
 )
 from jackdaw.env.game_spec import (
     GameActionMask,
@@ -92,7 +91,6 @@ __all__ = [
     "NUM_ACTION_TYPES",
     "NUM_CENTER_KEYS",
     "Observation",
-    "OracleAdapter",
     "RandomAgent",
     "RewardFn",
     "ShapedReward",

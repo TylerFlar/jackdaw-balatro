@@ -373,7 +373,7 @@ impl Game {
         gym::state_to_py(&jackdaw_env::reward::StateSummary::of(&self.inner))
     }
 
-    /// BalatroBot's ``add`` (``jackdaw/engine/debug.py`` names): ``key`` is ``j_*``, ``c_*``,
+    /// BalatroBot's ``add`` (the Python engine's names): ``key`` is ``j_*``, ``c_*``,
     /// ``v_*``, ``p_*`` or a playing card (``H_A``); ``seal`` ``"Red"``, ``edition``
     /// ``"foil"``, ``enhancement`` ``"m_steel"``, ``perishable`` a round count. Returns the new
     /// card's sort id. Debug only: no player action does this. On an error the game is
@@ -443,8 +443,8 @@ impl Game {
     }
 
     /// The legal actions here, as a JSON list of tape-form actions, in the Python engine's
-    /// order (`jackdaw.engine.actions.get_legal_actions`). ``legality`` is ``"vanilla"`` (the
-    /// default) or ``"balatrobot"``: only what the live BalatroBot also executes.
+    /// order. ``legality`` is ``"vanilla"`` (the default) or ``"balatrobot"``: only what the
+    /// live BalatroBot also executes.
     #[pyo3(signature = (legality=None))]
     fn legal_actions(&self, legality: Option<&str>) -> PyResult<String> {
         bot::legal_actions(&self.inner, legality)
@@ -462,7 +462,7 @@ impl Game {
     }
 
     /// Apply one parity setup operation (JSON text, `tests/parity/harness.py`): ``force_boss``,
-    /// ``action``, ``add`` (BalatroBot's ``add`` with the oracle's names) or ``set``.
+    /// ``action``, ``add`` (BalatroBot's ``add`` with the Python engine's names) or ``set``.
     fn apply_setup(&mut self, op: &str) -> PyResult<()> {
         let value: serde_json::Value = serde_json::from_str(op).map_err(value_error)?;
         self.inner.apply_setup_op(&value).map_err(value_error)
@@ -605,36 +605,6 @@ mod _core {
         Ok(jackdaw_core::snapshot::export(&gs).to_string())
     }
 
-    /// Start a new run in Rust and return its snapshot (JSON text) at the blind-select screen.
-    ///
-    /// ``back`` is a back key (``"b_red"``); a challenge (``"c_omelette_1"``) plays on the
-    /// Challenge Deck. Raises ``ValueError`` for an unknown back, stake or challenge, or a run
-    /// whose setup isn't ported yet.
-    #[pyfunction]
-    #[pyo3(signature = (back, stake, seed, challenge=None))]
-    fn _new_run(back: &str, stake: u8, seed: &str, challenge: Option<&str>) -> PyResult<String> {
-        use jackdaw_core::game::Game;
-        use jackdaw_core::run::RunSpec;
-        use pyo3::exceptions::PyValueError;
-        let back = jackdaw_core::card::center_by_key(back)
-            .ok_or_else(|| PyValueError::new_err(format!("unknown back {back:?}")))?;
-        let challenge = match challenge {
-            Some(id) => Some(
-                jackdaw_core::run::challenge_id(id)
-                    .ok_or_else(|| PyValueError::new_err(format!("unknown challenge {id:?}")))?,
-            ),
-            None => None,
-        };
-        let spec = RunSpec {
-            back,
-            stake,
-            seed: seed.to_owned(),
-            challenge,
-        };
-        let game = Game::new_run(&spec).map_err(PyValueError::new_err)?;
-        Ok(game.snapshot().to_string())
-    }
-
     /// Encode a canonical snapshot (JSON text) with observation encoder v1
     /// (``jackdaw.env.observation.encode_observation``).
     ///
@@ -744,30 +714,6 @@ mod _core {
     #[pyfunction]
     fn _ported_jokers() -> Vec<&'static str> {
         jackdaw_core::joker::ported()
-    }
-
-    /// Import a snapshot, take one action (its tape form, JSON text) and export the result.
-    ///
-    /// Returns ``(status, snapshot)``: ``"ok"`` with the new snapshot, or ``"illegal: ..."`` /
-    /// ``"unported: ..."`` with an empty string. The parity tests use it to step the Rust engine
-    /// from any Python oracle state.
-    #[pyfunction]
-    fn _step_snapshot(text: &str, action: &str) -> PyResult<(String, String)> {
-        use jackdaw_core::action::Action;
-        use jackdaw_core::game::{Game, StepError};
-        use pyo3::exceptions::PyValueError;
-        let value: serde_json::Value = serde_json::from_str(text)
-            .map_err(|e| PyValueError::new_err(format!("snapshot: bad JSON: {e}")))?;
-        let mut game =
-            Game::from_snapshot(&value).map_err(|e| PyValueError::new_err(e.to_string()))?;
-        let action: serde_json::Value = serde_json::from_str(action)
-            .map_err(|e| PyValueError::new_err(format!("action: bad JSON: {e}")))?;
-        let action = Action::from_json(&action).map_err(PyValueError::new_err)?;
-        Ok(match game.step(&action) {
-            Ok(()) => ("ok".to_owned(), game.snapshot().to_string()),
-            Err(StepError::Illegal(m)) => (format!("illegal: {m}"), String::new()),
-            Err(StepError::Unported(m)) => (format!("unported: {m}"), String::new()),
-        })
     }
 }
 

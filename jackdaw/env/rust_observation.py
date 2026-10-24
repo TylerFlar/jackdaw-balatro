@@ -1,12 +1,11 @@
 """Observation encoder v1 in Rust.
 
-``jackdaw._core`` ports :func:`jackdaw.env.observation.encode_observation`
-bit for bit: same arrays, shapes, dtypes and values.  It hands back the
-float32 values in one ``bytearray`` (global context, then the hand, joker,
-consumable, shop and pack rows) plus the row counts; these helpers view that
-buffer as numpy arrays (no copy) and return the same
-:class:`~jackdaw.env.observation.Observation` the Python encoder returns.
-The arrays are writable, C-contiguous views sharing one buffer per call.
+``jackdaw._core`` encodes a state (:mod:`jackdaw.env.observation` describes the
+features) and hands back the float32 values in one ``bytearray`` (global context,
+then the hand, joker, consumable, shop and pack rows) plus the row counts; these
+helpers view that buffer as numpy arrays (no copy) and return an
+:class:`~jackdaw.env.observation.Observation`.  The arrays are writable,
+C-contiguous views sharing one buffer per call.
 """
 
 from __future__ import annotations
@@ -42,14 +41,13 @@ _SHOP_BYTES = D_SHOP * 4
 
 _layout = _core._observation_layout()
 if _layout != (D_GLOBAL, list(_WIDTHS)) or _F32.itemsize != 4:
-    raise ImportError(f"jackdaw._core observation layout {_layout} differs from the Python encoder")
+    raise ImportError(f"jackdaw._core observation layout {_layout} differs from jackdaw.env")
 
 
 def observation_from_buffer(data: bytearray | bytes, rows: tuple[int, ...]) -> Observation:
     """Wrap the Rust encoder's ``(data, rows)`` as an :class:`Observation`.
 
-    A ``bytearray`` gives writable arrays (as the Python encoder's are), ``bytes``
-    read-only ones.
+    A ``bytearray`` gives writable arrays, ``bytes`` read-only ones.
     """
     n_hand, n_jokers, n_consumables, n_shop, n_pack = rows
     at_hand = _GLOBAL_BYTES

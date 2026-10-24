@@ -1,8 +1,7 @@
 """``jackdaw.core.Game``: the Rust engine behind a Python run object.
 
-The run's state must be the oracle's (snapshot and digest), survive its
-snapshot round trip, copy independently, and refuse illegal or unported steps
-without changing.
+The run's state must be the oracle's (its frozen digests), survive its snapshot round trip,
+copy independently, and refuse illegal steps without changing.
 """
 
 from __future__ import annotations
@@ -13,21 +12,17 @@ import pytest
 
 from jackdaw.core import Game, IllegalActionError, random_seed
 from jackdaw.engine.actions import Discard, GamePhase, PlayHand, SelectBlind, SortHand
-from tests.parity import canon
-from tests.parity.harness import load_specs
-from tests.parity.pyengine import PyEngine
-from tests.parity.rust_step import plain
-from tests.parity.test_rust_lockstep import lockstep
+from tests.parity import canon, frozen
+from tests.parity.golden_v2 import first_divergence, load_fixture
+from tests.parity.harness import RustEngine, load_specs, replay
 
 
 def test_a_new_run_is_the_oracles() -> None:
-    start = {"back": "b_blue", "stake": 3, "seed": "COREGAME", "challenge": None}
-    game = Game.new("b_blue", 3, "COREGAME")
-    oracle = plain(PyEngine(start).snapshot())
-    assert not canon.diff(oracle, game.to_dict())
-    assert game.state_hash() == canon.digest(oracle)
+    game = Game.new("b_blue", 3, "NEWRUN01")
+    assert game.state_hash() == frozen.load("new_runs.json")["b_blue/3/NEWRUN01"]
+    assert game.state_hash() == canon.digest(game.to_dict())
     assert game.phase is GamePhase.BLIND_SELECT
-    assert (game.ante, game.round, game.seed) == (1, 0, "COREGAME")
+    assert (game.ante, game.round, game.seed) == (1, 0, "NEWRUN01")
 
 
 def test_the_snapshot_round_trips() -> None:
@@ -66,24 +61,22 @@ def test_random_seeds_look_like_vanillas() -> None:
 
 
 @pytest.mark.parametrize("name", ["deck_b_red", "stake_1"])
-def test_game_plays_a_tape_with_the_oracle(name: str) -> None:
-    spec = next((s for s in load_specs() if s.name == name), None)
-    if spec is None:
-        pytest.skip(f"no spec {name}")
-    done, why, found = lockstep(spec)
-    assert not found, f"{name}: {why}: {found[:5]}"
+def test_game_plays_a_tape_as_the_oracle_did(name: str) -> None:
+    spec = next(s for s in load_specs() if s.name == name)
+    expected = load_fixture()["trajectories"][name]
+    got = replay(spec, RustEngine(spec.start, spec.setup))
+    assert got.digest == expected["digest"], f"{name}: {first_divergence(expected, got)}"
 
 
 @pytest.mark.parametrize("name", ["deck_b_erratic", "challenge_c_inflation_1", "jokers_3"])
 def test_state_hash_is_the_canonical_digest(name: str) -> None:
-    spec = next((s for s in load_specs() if s.name == name), None)
-    if spec is None:
-        pytest.skip(f"no spec {name}")
-    engine = PyEngine(spec.start, spec.setup)
+    spec = next(s for s in load_specs() if s.name == name)
+    game = frozen.new_game(spec.start, spec.setup)
     for action in spec.tape[:40]:
-        snap = plain(engine.snapshot())
+        snap = game.to_dict()
+        assert game.state_hash() == canon.digest(snap)
         assert Game.from_dict(snap).state_hash() == canon.digest(snap)
         try:
-            engine.step(action)
-        except Exception:
+            game.step(action)
+        except IllegalActionError:
             break

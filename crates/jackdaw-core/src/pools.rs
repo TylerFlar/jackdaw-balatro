@@ -179,7 +179,7 @@ impl Game {
             let mut add = false;
             // Lua also needs `v.unlocked ~= false or v.rarity == 4`, where `unlocked` comes from
             // the profile (game.lua:741-751). The engines assume a fully unlocked profile, as the
-            // oracle does (pools.py), so every center passes; the prototypes' flags are a fresh
+            // Python engine did, so every center passes; the prototypes' flags are a fresh
             // profile's.
             if ty == PoolType::Enhanced {
                 add = true;

@@ -1,9 +1,9 @@
 //! Canonical snapshots (`docs/snapshot-schema.md`): `GameState` to and from JSON.
 //!
-//! The snapshot is the format the Python oracle exports for parity checks, the save format,
-//! and `Game.to_dict()`. Import is strict: unknown keys, missing keys and malformed values are
-//! errors, so a field the Rust state doesn't hold can't be dropped silently. Non-finite numbers
-//! appear in JSON text as `{"$f": "inf" | "-inf" | "nan"}`.
+//! The snapshot is the save format, the state the parity checks hash, and `Game.to_dict()`.
+//! Import is strict: unknown keys, missing keys and malformed values are errors, so a field the
+//! Rust state doesn't hold can't be dropped silently. Non-finite numbers appear in JSON text as
+//! `{"$f": "inf" | "-inf" | "nan"}`.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 

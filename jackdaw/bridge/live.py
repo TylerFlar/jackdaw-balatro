@@ -237,12 +237,6 @@ class LiveAdapter:
         return self._shadow
 
     @property
-    def raw_state(self) -> dict[str, Any]:
-        raise AttributeError(
-            "LiveAdapter runs a Rust shadow: read adapter.game (jackdaw.core.Game)"
-        )
-
-    @property
     def view(self) -> dict[str, Any]:
         """The live game's last view."""
         return self._live_view
