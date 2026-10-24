@@ -2,23 +2,26 @@
 
 Each seed group starts the game once and advances through antes sequentially,
 testing each boss blind at its respective ante.  This avoids redundant game
-restarts when multiple bosses share the same seed.
+restarts when multiple bosses share the same seed.  Every request is compared
+with the shadow run as it is made (the lockstep), so a boss's effect is checked
+at the step it acts.
 
 Seeds found via: uv run python scripts/find_seeds.py --max-seeds 2000 --max-ante 8
 """
 
 from __future__ import annotations
 
-import time
 from collections import defaultdict
 
 from jackdaw.cli.scenarios import ScenarioResult, register
 from jackdaw.cli.scenarios.helpers import (
-    Handle,
+    Lockstep,
     cash_out,
     compare_state,
+    current_blind_score,
     get_state,
     next_round,
+    pause,
     play_hand,
     select_blind,
     set_both,
@@ -26,26 +29,8 @@ from jackdaw.cli.scenarios.helpers import (
 )
 
 
-def _wait_for_state(
-    handle: Handle,
-    expected: str,
-    *,
-    timeout: float = 10.0,
-    poll: float = 0.5,
-) -> bool:
-    """Poll until the backend reaches the expected state, or timeout."""
-    elapsed = 0.0
-    while elapsed < timeout:
-        if get_state(handle) == expected:
-            return True
-        time.sleep(poll)
-        elapsed += poll
-    return False
-
-
 def _force_beat_blind(
-    sim: Handle,
-    live: Handle,
+    ls: Lockstep,
     *,
     delay: float = 0.3,
 ) -> bool:
@@ -53,58 +38,49 @@ def _force_beat_blind(
 
     Returns True if the blind was beaten, False if game ended.
     """
-    _wait_for_state(live, "BLIND_SELECT")
-    select_blind(sim, live, delay=delay)
+    select_blind(ls, delay=delay)
 
-    state = get_state(sim)
+    state = get_state(ls)
     if state != "SELECTING_HAND":
         return state == "ROUND_EVAL"
 
     # Set chips just below the blind target so the first hand wins instantly.
-    sim_gs = sim("gamestate", None)
-    blind_target = 600
-    for b in sim_gs.get("blinds", {}).values():
-        if isinstance(b, dict) and b.get("status") == "CURRENT":
-            blind_target = b.get("score", 600)
-            break
-    set_both(sim, live, chips=blind_target - 1)
+    set_both(ls, chips=current_blind_score(ls) - 1)
 
-    play_hand(sim, live, [0, 1, 2, 3, 4], delay=delay)
+    play_hand(ls, [0, 1, 2, 3, 4], delay=delay)
 
-    state = get_state(sim)
+    state = get_state(ls)
     if state != "ROUND_EVAL":
         return False
 
-    time.sleep(2.0)  # scoring animation
-    cash_out(sim, live, delay=delay)
-    time.sleep(2.0)  # cash-out scoreboard
-    next_round(sim, live, delay=delay)
-    time.sleep(1.0)  # shop transition
+    pause(delay, 2.0)  # scoring animation
+    cash_out(ls, delay=delay)
+    pause(delay, 2.0)  # cash-out scoreboard
+    next_round(ls, delay=delay)
+    pause(delay, 1.0)  # shop transition
     return True
 
 
 def _advance_ante(
-    sim: Handle,
-    live: Handle,
+    ls: Lockstep,
     *,
     delay: float = 0.3,
 ) -> bool:
     """Play through Small, Big, and Boss blinds to advance one ante.
 
     Uses chip cheat on all three blinds. Does NOT skip — avoids tag rewards
-    and the balatrobot tag-pack crash.
+    (a pack tag's skip never answers live: BB-SKIP-PACK).
 
     Returns True if the ante was completed, False if game ended.
     """
     for _ in range(3):  # Small, Big, Boss
-        if not _force_beat_blind(sim, live, delay=delay):
+        if not _force_beat_blind(ls, delay=delay):
             return False
     return True
 
 
 def _finish_current_ante(
-    sim: Handle,
-    live: Handle,
+    ls: Lockstep,
     *,
     delay: float = 0.3,
 ) -> bool:
@@ -116,26 +92,20 @@ def _finish_current_ante(
     - GAME_OVER: return False
     - BLIND_SELECT: already advanced (shouldn't happen but handle gracefully)
     """
-    state = get_state(sim)
+    state = get_state(ls)
 
     if state == "SELECTING_HAND":
         # Still playing the boss — force-beat it
-        sim_gs = sim("gamestate", None)
-        blind_target = 600
-        for b in sim_gs.get("blinds", {}).values():
-            if isinstance(b, dict) and b.get("status") == "CURRENT":
-                blind_target = b.get("score", 600)
-                break
-        set_both(sim, live, chips=blind_target - 1)
-        play_hand(sim, live, [0, 1, 2, 3, 4], delay=delay)
-        state = get_state(sim)
+        set_both(ls, chips=current_blind_score(ls) - 1)
+        play_hand(ls, [0, 1, 2, 3, 4], delay=delay)
+        state = get_state(ls)
 
     if state == "ROUND_EVAL":
-        time.sleep(2.0)
-        cash_out(sim, live, delay=delay)
-        time.sleep(2.0)
-        next_round(sim, live, delay=delay)
-        time.sleep(1.0)
+        pause(delay, 2.0)
+        cash_out(ls, delay=delay)
+        pause(delay, 2.0)
+        next_round(ls, delay=delay)
+        pause(delay, 1.0)
         return True
 
     if state == "BLIND_SELECT":
@@ -145,8 +115,7 @@ def _finish_current_ante(
 
 
 def _test_boss(
-    sim: Handle,
-    live: Handle,
+    ls: Lockstep,
     boss_key: str,
     seed: str,
     ante: int,
@@ -157,23 +126,22 @@ def _test_boss(
 
     Uses chip cheat on the boss too so we survive to continue to the next ante.
     The boss's debuff/scoring effects still apply during the cheated hand,
-    so the sim-vs-live comparison is meaningful.
+    so the comparison with the shadow is meaningful.
     """
     # Beat Small blind
-    if not _force_beat_blind(sim, live, delay=delay):
+    if not _force_beat_blind(ls, delay=delay):
         return ScenarioResult(passed=True, details=f"{boss_key}: SKIP (lost at Small)")
 
     # Beat Big blind
-    if not _force_beat_blind(sim, live, delay=delay):
+    if not _force_beat_blind(ls, delay=delay):
         return ScenarioResult(passed=True, details=f"{boss_key}: SKIP (lost at Big)")
 
     # Select boss blind (boss effects apply on select)
-    _wait_for_state(live, "BLIND_SELECT")
-    select_blind(sim, live, delay=delay)
+    select_blind(ls, delay=delay)
 
-    state = get_state(sim)
+    state = get_state(ls)
     if state != "SELECTING_HAND":
-        diffs = compare_state(sim, live, label=f"boss {boss_key} after select")
+        diffs = compare_state(ls, label=f"boss {boss_key} after select")
         return ScenarioResult(
             passed=not diffs,
             diffs=diffs,
@@ -182,16 +150,10 @@ def _test_boss(
 
     # Cheat chips so first hand beats the boss, but scoring still exercises
     # the boss's effects (debuffs, restrictions, etc.)
-    sim_gs = sim("gamestate", None)
-    blind_target = 600
-    for b in sim_gs.get("blinds", {}).values():
-        if isinstance(b, dict) and b.get("status") == "CURRENT":
-            blind_target = b.get("score", 600)
-            break
-    set_both(sim, live, chips=blind_target - 1)
+    set_both(ls, chips=current_blind_score(ls) - 1)
 
-    play_hand(sim, live, [0, 1, 2, 3, 4], delay=delay)
-    diffs = compare_state(sim, live, label=f"boss {boss_key} ante {ante}")
+    play_hand(ls, [0, 1, 2, 3, 4], delay=delay)
+    diffs = compare_state(ls, label=f"boss {boss_key} ante {ante}")
     return ScenarioResult(
         passed=not diffs,
         diffs=diffs,
@@ -200,8 +162,7 @@ def _test_boss(
 
 
 def _boss_group_scenario(
-    sim: Handle,
-    live: Handle,
+    ls: Lockstep,
     *,
     seed: str,
     bosses: list[tuple[str, int]],
@@ -211,7 +172,7 @@ def _boss_group_scenario(
 
     bosses: list of (boss_key, ante) sorted by ante ascending.
     """
-    start_both(sim, live, seed=seed, delay=delay)
+    start_both(ls, seed=seed, delay=delay)
 
     sub_results: list[tuple[str, ScenarioResult]] = []
     current_ante = 1
@@ -229,7 +190,7 @@ def _boss_group_scenario(
 
         # Advance to target ante (playing through intermediate antes)
         while current_ante < target_ante:
-            if not _advance_ante(sim, live, delay=delay):
+            if not _advance_ante(ls, delay=delay):
                 # Game ended — skip this and remaining bosses
                 sub_results.append(
                     (
@@ -243,7 +204,7 @@ def _boss_group_scenario(
                 aborted = True
                 break
 
-            diffs = compare_state(sim, live, label=f"after ante {current_ante}", check_round=False)
+            diffs = compare_state(ls, label=f"after ante {current_ante}", check_round=False)
             if diffs:
                 sub_results.append(
                     (
@@ -264,12 +225,12 @@ def _boss_group_scenario(
             continue
 
         # Test the boss at this ante
-        boss_result = _test_boss(sim, live, boss_key, seed, target_ante, delay=delay)
+        boss_result = _test_boss(ls, boss_key, seed, target_ante, delay=delay)
         sub_results.append((f"boss_{boss_key[3:]}", boss_result))
 
         # Finish the ante so we can continue to the next boss
         if idx < len(bosses) - 1:
-            if not _finish_current_ante(sim, live, delay=delay):
+            if not _finish_current_ante(ls, delay=delay):
                 aborted = True
                 continue
             current_ante = target_ante + 1
@@ -372,8 +333,8 @@ for _seed, _bosses in _SEED_GROUPS.items():
     _boss_desc = ", ".join(f"{_BOSS_NAMES[k][0]}@{a}" for k, a in _bosses)
 
     def _make_fn(seed: str = _seed, bosses: list[tuple[str, int]] = _bosses):
-        def fn(sim: Handle, live: Handle, *, delay: float = 0.3) -> ScenarioResult:
-            return _boss_group_scenario(sim, live, seed=seed, bosses=bosses, delay=delay)
+        def fn(ls: Lockstep, *, delay: float = 0.3) -> ScenarioResult:
+            return _boss_group_scenario(ls, seed=seed, bosses=bosses, delay=delay)
 
         return fn
 

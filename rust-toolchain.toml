@@ -1,0 +1,5 @@
+[toolchain]
+# No target triple: Windows development uses the GNU host, CI and release wheels use MSVC/Linux.
+channel = "1.98.1"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

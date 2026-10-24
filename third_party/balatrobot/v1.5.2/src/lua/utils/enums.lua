@@ -1,0 +1,413 @@
+---@meta enums
+
+---@alias Deck
+---| "RED" # +1 discard every round
+---| "BLUE" # +1 hand every round
+---| "YELLOW" # Start with extra $10
+---| "GREEN" # At end of each Round, $2 per remaining Hand $1 per remaining Discard Earn no Interest
+---| "BLACK" # +1 Joker slot -1 hand every round
+---| "MAGIC" # Start run with the Cristal Ball voucher and 2 copies of The Fool
+---| "NEBULA" # Start run with the Telescope voucher and -1 consumable slot
+---| "GHOST" # Spectral cards  may appear in the shop. Start with a Hex card
+---| "ABANDONED" # Start run with no Face Cards in your deck
+---| "CHECKERED" # Start run with 26 Spaces and 26 Hearts in deck
+---| "ZODIAC" # Start run with Tarot Merchant, Planet Merchant, and Overstock
+---| "PAINTED" # +2 hand size, -1 Joker slot
+---| "ANAGLYPH" # After defeating each Boss Blind, gain a Double Tag
+---| "PLASMA" # Balanced Chips and Mult when calculating score for played hand X2 base Blind size
+---| "ERRATIC" # All Ranks and Suits in deck are randomized
+
+---@alias Stake
+---| "WHITE" # 1. Base Difficulty
+---| "RED" # 2. Small Blind gives no reward money. Applies all previous Stakes
+---| "GREEN" # 3. Required scores scales faster for each Ante. Applies all previous Stakes
+---| "BLACK" # 4. Shop can have Eternal Jokers. Applies all previous Stakes
+---| "BLUE" # 5. -1 Discard. Applies all previous Stakes
+---| "PURPLE" # 6. Required score scales faster for each Ante. Applies all previous Stakes
+---| "ORANGE" # 7. Shop can have Perishable Jokers. Applies all previous Stakes
+---| "GOLD" # 8. Shop can have Rental Jokers. Applies all previous Stakes
+
+---@alias State
+---| "SELECTING_HAND" # 1 When you can select cards to play or discard
+---| "HAND_PLAYED" # 2 Duing hand playing animation
+---| "DRAW_TO_HAND" # 3 During hand drawing animation
+---| "GAME_OVER" # 4 Game is over
+---| "SHOP" # 5 When inside the shop
+---| "PLAY_TAROT" # 6
+---| "BLIND_SELECT" # 7 When in the blind selection phase
+---| "ROUND_EVAL" # 8 When the round end and inside the "cash out" phase
+---| "TAROT_PACK" # 9
+---| "PLANET_PACK" # 10
+---| "MENU" # 11 When in the main menu of the game
+---| "TUTORIAL" # 12
+---| "SPLASH" # 13
+---| "SANDBOX" # 14
+---| "SPECTRAL_PACK" # 15
+---| "DEMO_CTA" # 16
+---| "STANDARD_PACK" # 17
+---| "BUFFOON_PACK" # 18
+---| "NEW_ROUND" # 19 When a round is won and the new round begins
+---| "SMODS_BOOSTER_OPENED" # 999 When a booster pack is opened with SMODS loaded
+---| "UNKNOWN" # Not a number, we never expect this game state
+
+---@alias Card.Set
+---| "BOOSTER" # Booster pack purchasale in the shop
+---| "DEFAULT" # Default playing card
+---| "EDITION" # Card with an edition
+---| "ENHANCED" # Playing card with an enhancement
+---| "JOKER" # Joker card
+---| "TAROT" # Tarot card (consumable)
+---| "PLANET" # Planet card (consumable)
+---| "SPECTRAL" # Spectral card (consumable)
+---| "VOUCHER" # Voucher card
+
+---@alias Card.Value.Suit
+---| "H" # Hearts (playing card)
+---| "D" # Diamonds (playing card)
+---| "C" # Clubs (playing card)
+---| "S" # Spades (playing card)
+
+---@alias Card.Value.Rank
+---| "2" # Two (playing card)
+---| "3" # Three (playing card)
+---| "4" # Four (playing card)
+---| "5" # Five (playing card)
+---| "6" # Six (playing card)
+---| "7" # Seven (playing card)
+---| "8" # Eight (playing card)
+---| "9" # Nine (playing card)
+---| "T" # Ten (playing card)
+---| "J" # Jack (playing card)
+---| "Q" # Queen (playing card)
+---| "K" # King (playing card)
+---| "A" # Ace (playing card)
+
+---@alias Card.Key.Consumable.Tarot
+---| "c_fool" # The Fool: Creates the last Tarot or Planet card used during this run (The Fool excluded)
+---| "c_magician" # The Magician: Enhances 2 selected cards to Lucky Cards
+---| "c_high_priestess" # The High Priestess: Creates up to 2 random Planet cards (Must have room)
+---| "c_empress" # The Empress: Enhances 2 selected cards to Mult Cards
+---| "c_emperor" # The Emperor: Creates up to 2 random Tarot cards (Must have room)
+---| "c_heirophant" # The Hierophant: Enhances 2 selected cards to Bonus Cards
+---| "c_lovers" # The Lovers: Enhances 1 selected card into a Wild Card
+---| "c_chariot" # The Chariot: Enhances 1 selected card into a Steel Card
+---| "c_justice" # Justice: Enhances 1 selected card into a Glass Card
+---| "c_hermit" # The Hermit: Doubles money (Max of $20)
+---| "c_wheel_of_fortune" # The Wheel of Fortune: 1 in 4 chance to add Foil, Holographic, or Polychrome edition to a random Joker
+---| "c_strength" # Strength: Increases rank of up to 2 selected cards by 1
+---| "c_hanged_man" # The Hanged Man: Destroys up to 2 selected cards
+---| "c_death" # Death: Select 2 cards, convert the left card into the right card (Drag to rearrange)
+---| "c_temperance" # Temperance: Gives the total sell value of all current Jokers (Max of $50)
+---| "c_devil" # The Devil: Enhances 1 selected card into a Gold Card
+---| "c_tower" # The Tower: Enhances 1 selected card into a Stone Card
+---| "c_star" # The Star: Converts up to 3 selected cards to Diamonds
+---| "c_moon" # The Moon: Converts up to 3 selected cards to Clubs
+---| "c_sun" # The Sun: Converts up to 3 selected cards to Hearts
+---| "c_judgement" # Judgement: Creates a random Joker card (Must have room)
+---| "c_world" # The World: Converts up to 3 selected cards to Spades
+
+---@alias Card.Key.Consumable.Planet
+---| "c_mercury" # Mercury: Increases Pair hand value by +1 Mult and +15 Chips
+---| "c_venus" # Venus: Increases Three of a Kind hand value by +2 Mult and +20 Chips
+---| "c_earth" # Earth: Increases Full House hand value by +2 Mult and +25 Chips
+---| "c_mars" # Mars: Increases Four of a Kind hand value by +3 Mult and +30 Chips
+---| "c_jupiter" # Jupiter: Increases Flush hand value by +2 Mult and +15 Chips
+---| "c_saturn" # Saturn: Increases Straight hand value by +3 Mult and +30 Chips
+---| "c_uranus" # Uranus: Increases Two Pair hand value by +1 Mult and +20 Chips
+---| "c_neptune" # Neptune: Increases Straight Flush hand value by +4 Mult and +40 Chips
+---| "c_pluto" # Pluto: Increases High Card hand value by +1 Mult and +10 Chips
+---| "c_planet_x" # Planet X: Increases Five of a Kind hand value by +3 Mult and +35 Chips
+---| "c_ceres" # Ceres: Increases Flush House hand value by +4 Mult and +40 Chips
+---| "c_eris" # Eris: Increases Flush Five hand value by +3 Mult and +50 Chips
+
+---@alias Card.Key.Consumable.Spectral
+---| "c_familiar" # Familiar: Destroy 1 random card in your hand, add 3 random Enhanced face cards to your hand
+---| "c_grim" # Grim: Destroy 1 random card in your hand, add 2 random Enhanced Aces to your hand
+---| "c_incantation" # Incantation: Destroy 1 random card in your hand, add 4 random Enhanced numbered cards to your hand
+---| "c_talisman" # Talisman: Add a Gold Seal to 1 selected card in your hand
+---| "c_aura" # Aura: Add Foil, Holographic, or Polychrome effect to 1 selected card in hand
+---| "c_wraith" # Wraith: Creates a random Rare Joker, sets money to $0
+---| "c_sigil" # Sigil: Converts all cards in hand to a single random suit
+---| "c_ouija" # Ouija: Converts all cards in hand to a single random rank (-1 hand size)
+---| "c_ectoplasm" # Ectoplasm: Add Negative to a random Joker, -1 hand size
+---| "c_immolate" # Immolate: Destroys 5 random cards in hand, gain $20
+---| "c_ankh" # Ankh: Create a copy of a random Joker, destroy all other Jokers (Removes Negative from copy)
+---| "c_deja_vu" # Deja Vu: Add a Red Seal to 1 selected card in your hand
+---| "c_hex" # Hex: Add Polychrome to a random Joker, destroy all other Jokers
+---| "c_trance" # Trance: Add a Blue Seal to 1 selected card in your hand
+---| "c_medium" # Medium: Add a Purple Seal to 1 selected card in your hand
+---| "c_cryptid" # Cryptid: Create 2 copies of 1 selected card in your hand
+---| "c_soul" # The Soul: Creates a Legendary Joker (Must have room)
+---| "c_black_hole" # Black Hole: Upgrade every poker hand by 1 level
+
+---@alias Card.Key.Joker
+---| "j_joker" # +4 Mult
+---| "j_greedy_joker" # Played cards with Diamond suit give +3 Mult when scored
+---| "j_lusty_joker" # Played cards with Heart suit give +3 Mult when scored
+---| "j_wrathful_joker" # Played cards with Spade suit give +3 Mult when scored
+---| "j_gluttenous_joker" # Played cards with Club suit give +3 Mult when scored
+---| "j_jolly" # +8 Mult if played hand contains a Pair
+---| "j_zany" # +12 Mult if played hand contains a Three of a Kind
+---| "j_mad" # +10 Mult if played hand contains a Two Pair
+---| "j_crazy" # +12 Mult if played hand contains a Straight
+---| "j_droll" # +10 Mult if played hand contains a Flush
+---| "j_sly" # +50 Chips if played hand contains a Pair
+---| "j_wily" # +100 Chips if played hand contains a Three of a Kind
+---| "j_clever" # +80 Chips if played hand contains a Two Pair
+---| "j_devious" # +100 Chips if played hand contains a Straight
+---| "j_crafty" # +80 Chips if played hand contains a Flush
+---| "j_half" # +20 Mult if played hand contains 3 or fewer cards
+---| "j_stencil" # X1 Mult for each empty Joker slot. Joker Stencil included (Currently X1 )
+---| "j_four_fingers" # All Flushes and Straights can be made with 4 cards
+---| "j_mime" # Retrigger all card held in hand abilities
+---| "j_credit_card" # Go up to -$20 in debt
+---| "j_ceremonial" # When Blind is selected, destroy Joker to the right and permanently add double its sell value to this Mult (Currently +0 Mult )
+---| "j_banner" # +30 Chips for each remaining discard
+---| "j_mystic_summit" # +15 Mult when 0 discards remaining
+---| "j_marble" # Adds one Stone card to the deck when Blind is selected
+---| "j_loyalty_card" # X4 Mult every 6 hands played 5 remaining
+---| "j_8_ball" # 1 in 4 chance for each played 8 to create a Tarot card when scored (Must have room)
+---| "j_misprint" # +0-23 Mult
+---| "j_dusk" # Retrigger all played cards in final hand of the round
+---| "j_raised_fist" # Adds double the rank of lowest ranked card held in hand to Mult
+---| "j_chaos" # 1 free Reroll per shop
+---| "j_fibonacci" # Each played Ace , 2 , 3 , 5 , or 8 gives +8 Mult when scored
+---| "j_steel_joker" # Gives X0.2 Mult for each Steel Card in your full deck (Currently X1 Mult )
+---| "j_scary_face" # Played face cards give +30 Chips when scored
+---| "j_abstract" # +3 Mult for each Joker card (Currently +0 Mult )
+---| "j_delayed_grat" # Earn $2 per discard if no discards are used by end of the round
+---| "j_hack" # Retrigger each played 2 , 3 , 4 , or 5
+---| "j_pareidolia" # All cards are considered face cards
+---| "j_gros_michel" # +15 Mult 1 in 6 chance this is destroyed at the end of round.
+---| "j_even_steven" # Played cards with even rank give +4 Mult when scored (10, 8, 6, 4, 2)
+---| "j_odd_todd" # Played cards with odd rank give +31 Chips when scored (A, 9, 7, 5, 3)
+---| "j_scholar" # Played Aces give +20 Chips and +4 Mult when scored
+---| "j_business" # Played face cards have a 1 in 2 chance to give $2 when scored
+---| "j_supernova" # Adds the number of times poker hand has been played this run to Mult
+---| "j_ride_the_bus" # This Joker gains +1 Mult per consecutive hand played without a scoring face card (Currently +0 Mult )
+---| "j_space" # 1 in 4 chance to upgrade level of played poker hand
+---| "j_egg" # Gains $3 of sell value at end of round
+---| "j_burglar" # When Blind is selected, gain +3 Hands and lose all discards
+---| "j_blackboard" # X3 Mult if all cards held in hand are Spades or Clubs
+---| "j_runner" # Gains +15 Chips if played hand contains a Straight (Currently +0 Chips )
+---| "j_ice_cream" # +100 Chips -5 Chips for every hand played
+---| "j_dna" # If first hand of round has only 1 card, add a permanent copy to deck and draw it to hand
+---| "j_splash" # Every played card counts in scoring
+---| "j_blue_joker" # +2 Chips for each remaining card in deck (Currently +104 Chips )
+---| "j_sixth_sense" # If first hand of round is a single 6 , destroy it and create a Spectral card (Must have room)
+---| "j_constellation" # This Joker gains X0.1 Mult every time a Planet card is used (Currently X1 Mult )
+---| "j_hiker" # Every played card permanently gains +5 Chips when scored
+---| "j_faceless" # Earn $5 if 3 or more face cards are discarded at the same time
+---| "j_green_joker" # +1 Mult per hand played -1 Mult per discard (Currently +0 Mult )
+---| "j_superposition" # Create a Tarot card if poker hand contains an Ace and a Straight (Must have room)
+---| "j_todo_list" # Earn $4 if poker hand is a [Poker Hand] , poker hand changes at end of round
+---| "j_cavendish" # X3 Mult 1 in 1000 chance this card is destroyed at the end of round
+---| "j_card_sharp" # X3 Mult if played poker hand has already been played this round
+---| "j_red_card" # This Joker gains +3 Mult when any Booster Pack is skipped (Currently +0 Mult )
+---| "j_madness" # When Small Blind or Big Blind is selected, gain X0.5 Mult and destroy a random Joker (Currently X1 Mult )
+---| "j_square" # This Joker gains +4 Chips if played hand has exactly 4 cards (Currently 0 Chips )
+---| "j_seance" # If poker hand is a Straight Flush , create a random Spectral card (Must have room)
+---| "j_riff_raff" # When Blind is selected, create 2 Common Jokers (Must have room)
+---| "j_vampire" # This Joker gains X0.1 Mult per scoring Enhanced card played, removes card Enhancement (Currently X1 Mult )
+---| "j_shortcut" # Allows Straights to be made with gaps of 1 rank (ex: 10 8 6 5 3 )
+---| "j_hologram" # This Joker gains X0.25 Mult every time a playing card is added to your deck (Currently X1 Mult )
+---| "j_vagabond" # Create a Tarot card if hand is played with $4 or less
+---| "j_baron" # Each King held in hand gives X1.5 Mult
+---| "j_cloud_9" # Earn $1 for each 9 in your full deck at end of round (Currently $4 )
+---| "j_rocket" # Earn $1 at end of round. Payout increases by $2 when Boss Blind is defeated
+---| "j_obelisk" # This Joker gains X0.2 Mult per consecutive hand played without playing your most played poker hand (Currently X1 Mult )
+---| "j_midas_mask" # All played face cards become Gold cards when scored
+---| "j_luchador" # Sell this card to disable the current Boss Blind
+---| "j_photograph" # First played face card gives X2 Mult when scored
+---| "j_gift" # Add $1 of sell value to every Joker and Consumable card at end of round
+---| "j_turtle_bean" # +5 hand size, reduces by 1 each round
+---| "j_erosion" # +4 Mult for each card below [the deck's starting size] in your full deck (Currently +0 Mult )
+---| "j_reserved_parking" # Each face card held in hand has a 1 in 2 chance to give $1
+---| "j_mail" # Earn $5 for each discarded [rank] , rank changes every round
+---| "j_to_the_moon" # Earn an extra $1 of interest for every $5 you have at end of round
+---| "j_hallucination" # 1 in 2 chance to create a Tarot card when any Booster Pack is opened (Must have room)
+---| "j_fortune_teller" # +1 Mult per Tarot card used this run (Currently +0 )
+---| "j_juggler" # +1 hand size
+---| "j_drunkard" # +1 discard each round
+---| "j_stone" # Gives +25 Chips for each Stone Card in your full deck (Currently +0 Chips )
+---| "j_golden" # Earn $4 at end of round
+---| "j_lucky_cat" # This Joker gains X0.25 Mult every time a Lucky card successfully triggers (Currently X1 Mult )
+---| "j_baseball" # Uncommon Jokers each give X1.5 Mult
+---| "j_bull" # +2 Chips for each $1 you have (Currently +0 Chips )
+---| "j_diet_cola" # Sell this card to create a free Double Tag
+---| "j_trading" # If first discard of round has only 1 card, destroy it and earn $3
+---| "j_flash" # This Joker gains +2 Mult per reroll in the shop (Currently +0 Mult )
+---| "j_popcorn" # +20 Mult -4 Mult per round played
+---| "j_trousers" # This Joker gains +2 Mult if played hand contains a Two Pair (Currently +0 Mult )
+---| "j_ancient" # Each played card with [suit] gives X1.5 Mult when scored, suit changes at end of round
+---| "j_ramen" # X2 Mult , loses X0.01 Mult per card discarded
+---| "j_walkie_talkie" # Each played 10 or 4 gives +10 Chips and +4 Mult when scored
+---| "j_selzer" # Retrigger all cards played for the next 10 hands
+---| "j_castle" # This Joker gains +3 Chips per discarded [suit] card, suit changes every round (Currently +0 Chips )
+---| "j_smiley" # Played face cards give +5 Mult when scored
+---| "j_campfire" # This Joker gains X0.25 Mult for each card sold , resets when Boss Blind is defeated (Currently X1 Mult )
+---| "j_ticket" # Played Gold cards earn $4 when scored
+---| "j_mr_bones" # Prevents Death if chips scored are at least 25% of required chips self destructs
+---| "j_acrobat" # X3 Mult on final hand of round
+---| "j_sock_and_buskin" # Retrigger all played face cards
+---| "j_swashbuckler" # Adds the sell value of all other owned Jokers to Mult (Currently +1 Mult )
+---| "j_troubadour" # +2 hand size, -1 hand each round
+---| "j_certificate" # When round begins, add a random playing card with a random seal to your hand
+---| "j_smeared" # Hearts and Diamonds count as the same suit, Spades and Clubs count as the same suit
+---| "j_throwback" # X0.25 Mult for each Blind skipped this run (Currently X1 Mult )
+---| "j_hanging_chad" # Retrigger first played card used in scoring 2 additional times
+---| "j_rough_gem" # Played cards with Diamond suit earn $1 when scored
+---| "j_bloodstone" # 1 in 2 chance for played cards with Heart suit to give X1.5 Mult when scored
+---| "j_arrowhead" # Played cards with Spade suit give +50 Chips when scored
+---| "j_onyx_agate" # Played cards with Club suit give +7 Mult when scored
+---| "j_glass" # This Joker gains X0.75 Mult for every Glass Card that is destroyed (Currently X1 Mult )
+---| "j_ring_master" # Joker , Tarot , Planet , and Spectral cards may appear multiple times
+---| "j_flower_pot" # X3 Mult if poker hand contains a Diamond card, Club card, Heart card, and Spade card
+---| "j_blueprint" # Copies ability of Joker to the right
+---| "j_wee" # This Joker gains +8 Chips when each played 2 is scored (Currently +0 Chips )
+---| "j_merry_andy" # +3 discards each round, -1 hand size
+---| "j_oops" # Doubles all listed probabilities (ex: 1 in 3 -> 2 in 3 )
+---| "j_idol" # Each played [rank] of [suit] gives X2 Mult when scored Card changes every round
+---| "j_seeing_double" # X2 Mult if played hand has a scoring Club card and a scoring card of any other suit
+---| "j_matador" # Earn $8 if played hand triggers the Boss Blind ability
+---| "j_hit_the_road" # This Joker gains X0.5 Mult for every Jack discarded this round (Currently X1 Mult )
+---| "j_duo" # X2 Mult if played hand contains a Pair
+---| "j_trio" # X3 Mult if played hand contains a Three of a Kind
+---| "j_family" # X4 Mult if played hand contains a Four of a Kind
+---| "j_order" # X3 Mult if played hand contains a Straight
+---| "j_tribe" # X2 Mult if played hand contains a Flush
+---| "j_stuntman" # +250 Chips , -2 hand size
+---| "j_invisible" # After 2 rounds, sell this card to Duplicate a random Joker (Currently 0 /2) (Removes Negative from copy)
+---| "j_brainstorm" # Copies the ability of leftmost Joker
+---| "j_satellite" # Earn $1 at end of round per unique Planet card used this run
+---| "j_shoot_the_moon" # Each Queen held in hand gives +13 Mult
+---| "j_drivers_license" # X3 Mult if you have at least 16 Enhanced cards in your full deck (Currently 0 )
+---| "j_cartomancer" # Create a Tarot card when Blind is selected (Must have room)
+---| "j_astronomer" # All Planet cards and Celestial Packs in the shop are free
+---| "j_burnt" # Upgrade the level of the first discarded poker hand each round
+---| "j_bootstraps" # +2 Mult for every $5 you have (Currently +0 Mult )
+---| "j_caino" # This Joker gains X1 Mult when a face card is destroyed (Currently X1 Mult )
+---| "j_triboulet" # Played Kings and Queens each give X2 Mult when scored
+---| "j_yorick" # This Joker gains X1 Mult every 23 [23] cards discarded (Currently X1 Mult )
+---| "j_chicot" # Disables effect of every Boss Blind
+---| "j_perkeo" # Creates a Negative copy of 1 random consumable card in your possession at the end of the shop
+
+---@alias Card.Key.Voucher
+---| "v_overstock_norm" # Overstock: +1 card slot available in shop (to 3 slots)
+---| "v_clearance_sale" # Clearance Sale: All cards and packs in shop are 25% off
+---| "v_hone" # Hone: Foil, Holographic, and Polychrome cards appear 2X more often
+---| "v_reroll_surplus" # Reroll Surplus: Rerolls cost $2 less
+---| "v_crystal_ball" # Crystal Ball: +1 consumable slot
+---| "v_telescope" # Telescope: Celestial Packs always contain the Planet card for your most played poker hand
+---| "v_grabber" # Grabber: Permanently gain +1 hand per round
+---| "v_wasteful" # Wasteful: Permanently gain +1 discard each round
+---| "v_tarot_merchant" # Tarot Merchant: Tarot cards appear 2X more frequently in the shop
+---| "v_planet_merchant" # Planet Merchant: Planet cards appear 2X more frequently in the shop
+---| "v_seed_money" # Seed Money: Raise the cap on interest earned in each round to $10
+---| "v_blank" # Blank: Does nothing?
+---| "v_magic_trick" # Magic Trick: Playing cards can be purchased from the shop
+---| "v_hieroglyph" # Hieroglyph: -1 Ante, -1 hand each round
+---| "v_directors_cut" # Director's Cut: Reroll Boss Blind 1 time per Ante, $10 per roll
+---| "v_paint_brush" # Paint Brush: +1 hand size
+---| "v_overstock_plus" # Overstock Plus: +1 card slot available in shop (to 4 slots)
+---| "v_liquidation" # Liquidation: All cards and packs in shop are 50% off
+---| "v_glow_up" # Glow Up: Foil, Holographic, and Polychrome cards appear 4X more often
+---| "v_reroll_glut" # Reroll Glut: Rerolls cost an additional $2 less
+---| "v_omen_globe" # Omen Globe: Spectral cards may appear in any of the Arcana Packs
+---| "v_observatory" # Observatory: Planet cards in your consumable area give X1.5 Mult for their specified poker hand
+---| "v_nacho_tong" # Nacho Tong: Permanently gain an additional +1 hand per round
+---| "v_recyclomancy" # Recyclomancy: Permanently gain an additional +1 discard each round
+---| "v_tarot_tycoon" # Tarot Tycoon: Tarot cards appear 4X more frequently in the shop
+---| "v_planet_tycoon" # Planet Tycoon: Planet cards appear 4X more frequently in the shop
+---| "v_money_tree" # Money Tree: Raise the cap on interest earned in each round to $20
+---| "v_antimatter" # Antimatter: +1 Joker slot
+---| "v_illusion" # Illusion: Playing cards in shop may have an Enhancement, Edition, and/or a Seal
+---| "v_petroglyph" # Petroglyph: -1 Ante again, -1 discard each round
+---| "v_retcon" # Retcon: Reroll Boss Blind unlimited times, $10 per roll
+---| "v_palette" # Palette: +1 hand size again
+
+---@alias Card.Key.Pack
+---| "p_arcana_normal_1" # Arcana Pack: Choose 1 of 3 Tarot Cards to be used immediately.
+---| "p_arcana_normal_2" # Arcana Pack: Choose 1 of 3 Tarot Cards to be used immediately.
+---| "p_arcana_normal_3" # Arcana Pack: Choose 1 of 3 Tarot Cards to be used immediately.
+---| "p_arcana_normal_4" # Arcana Pack: Choose 1 of 3 Tarot Cards to be used immediately.
+---| "p_arcana_jumbo_1" # Jumbo Arcana Pack: Choose 1 of 5 Tarot Cards to be used immediately.
+---| "p_arcana_jumbo_2" # Jumbo Arcana Pack: Choose 1 of 5 Tarot Cards to be used immediately.
+---| "p_arcana_mega_1" # Mega Arcana Pack: Choose up to 2 of 5 Tarot Cards to be used immediately.
+---| "p_arcana_mega_2" # Mega Arcana Pack: Choose up to 2 of 5 Tarot Cards to be used immediately.
+---| "p_celestial_normal_1" # Celestial Pack: Choose 1 of 3 Planet Cards to be used immediately.
+---| "p_celestial_normal_2" # Celestial Pack: Choose 1 of 3 Planet Cards to be used immediately.
+---| "p_celestial_normal_3" # Celestial Pack: Choose 1 of 3 Planet Cards to be used immediately.
+---| "p_celestial_normal_4" # Celestial Pack: Choose 1 of 3 Planet Cards to be used immediately.
+---| "p_celestial_jumbo_1" # Jumbo Celestial Pack: Choose 1 of 5 Planet Cards to be used immediately.
+---| "p_celestial_jumbo_2" # Jumbo Celestial Pack: Choose 1 of 5 Planet Cards to be used immediately.
+---| "p_celestial_mega_1" # Mega Celestial Pack: Choose up to 2 of 5 Planet Cards to be used immediately.
+---| "p_celestial_mega_2" # Mega Celestial Pack: Choose up to 2 of 5 Planet Cards to be used immediately.
+---| "p_spectral_normal_1" # Spectral Pack: Choose 1 of 2 Spectral Cards to be used immediately.
+---| "p_spectral_normal_2" # Spectral Pack: Choose 1 of 2 Spectral Cards to be used immediately.
+---| "p_spectral_jumbo_1" # Jumbo Spectral Pack: Choose 1 of 4 Spectral Cards to be used immediately.
+---| "p_spectral_mega_1" # Mega Spectral Pack: Choose up to 2 of 4 Spectral Cards to be used immediately.
+---| "p_standard_normal_1" # Standard Pack: Choose 1 of 3 Playing Cards to add to your Deck.
+---| "p_standard_normal_2" # Standard Pack: Choose 1 of 3 Playing Cards to add to your Deck.
+---| "p_standard_normal_3" # Standard Pack: Choose 1 of 3 Playing Cards to add to your Deck.
+---| "p_standard_normal_4" # Standard Pack: Choose 1 of 3 Playing Cards to add to your Deck.
+---| "p_standard_jumbo_1" # Jumbo Standard Pack: Choose 1 of 5 Playing Cards to add to your Deck.
+---| "p_standard_jumbo_2" # Jumbo Standard Pack: Choose 1 of 5 Playing Cards to add to your Deck.
+---| "p_standard_mega_1" # Mega Standard Pack: Choose up to 2 of 5 Playing Cards to add to your Deck.
+---| "p_standard_mega_2" # Mega Standard Pack: Choose up to 2 of 5 Playing Cards to add to your Deck.
+---| "p_buffoon_normal_1" # Buffoon Pack: Choose 1 of 2 Joker Cards.
+---| "p_buffoon_normal_2" # Buffoon Pack: Choose 1 of 2 Joker Cards.
+---| "p_buffoon_jumbo_1" # Jumbo Buffoon Pack: Choose 1 of 4 Joker Cards.
+---| "p_buffoon_mega_1" # Mega Buffoon Pack: Choose up to 2 of 4 Joker Cards.
+
+---@alias Card.Key.PlayingCard
+---| "H_2" | "H_3" | "H_4" | "H_5" | "H_6" | "H_7" | "H_8" | "H_9" | "H_T" | "H_J" | "H_Q" | "H_K" | "H_A"
+---| "D_2" | "D_3" | "D_4" | "D_5" | "D_6" | "D_7" | "D_8" | "D_9" | "D_T" | "D_J" | "D_Q" | "D_K" | "D_A"
+---| "C_2" | "C_3" | "C_4" | "C_5" | "C_6" | "C_7" | "C_8" | "C_9" | "C_T" | "C_J" | "C_Q" | "C_K" | "C_A"
+---| "S_2" | "S_3" | "S_4" | "S_5" | "S_6" | "S_7" | "S_8" | "S_9" | "S_T" | "S_J" | "S_Q" | "S_K" | "S_A"
+
+---@alias Card.Key.Consumable
+---| Card.Key.Consumable.Tarot
+---| Card.Key.Consumable.Planet
+---| Card.Key.Consumable.Spectral
+
+---@alias Card.Key
+---| Card.Key.Consumable
+---| Card.Key.Joker
+---| Card.Key.Voucher
+---| Card.Key.PlayingCard
+---| Card.Key.Pack
+
+---@alias Card.Modifier.Seal
+---| "RED" # Retrigger this card 1 time
+---| "BLUE" # Creates the Planet card for final played poker hand of round if held in hand (Must have room)
+---| "GOLD" # Earn $3 when this card is played and scores
+---| "PURPLE" # Creates a Tarot card when discarded (Must have room)
+
+---@alias Card.Modifier.Edition
+---| "HOLO" # +10 Mult when scored (Playing cards). +10 Mult directly before the Joker is reached during scoring (Jokers)
+---| "FOIL" # +50 Chips when scored (Playing cards). +50 Chips directly before the Joker is reached during scoring (Jokers)
+---| "POLYCHROME" # X1.5 Mult when scored (Playing cards). X1.5 Mult directly after the Joker is reached during scoring (Jokers)
+---| "NEGATIVE" # N/A (Playing cards). +1 Joker slot (Jokers). +1 Consumable slot (Consumables)
+
+---@alias Card.Modifier.Enhancement
+---| "BONUS" # Enhanced card gives an additional +30 Chips when scored
+---| "MULT" # Enhanced card gives +4 Mult when scored
+---| "WILD" # Enhanced card is considered to be every suit simultaneously
+---| "GLASS" # Enhanced card gives X2 Mult when scored
+---| "STEEL" # Enhanced card gives X1.5 Mult while held in hand
+---| "STONE" # Enhanced card's value is set to +50 Chips
+---| "GOLD" # Enhanced card gives $3 if held in hand at end of round
+---| "LUCKY" # Enhanced card has a 1 in 5 chance to give +20 Mult. Enhanced card has a 1 in 15 chance to give $20
+
+---@alias Blind.Type
+---| "SMALL" # No special effects - can be skipped to receive a Tag
+---| "BIG" # No special effects - can be skipped to receive a Tag
+---| "BOSS" # Various effect depending on the boss type
+
+---@alias Blind.Status
+---| "SELECT" # Selectable blind
+---| "CURRENT" # Current blind selected
+---| "UPCOMING" # Future blind
+---| "DEFEATED" # Previously defeated blind
+---| "SKIPPED" # Previously skipped blind

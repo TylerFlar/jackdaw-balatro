@@ -1,0 +1,16 @@
+[package]
+name = "jackdaw-env"
+description = "Observation encoding, action masks and vector environment for jackdaw"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+jackdaw-core.workspace = true
+jackdaw-data.workspace = true
+rayon.workspace = true
+
+[lints]
+workspace = true

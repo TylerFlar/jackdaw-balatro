@@ -9,11 +9,15 @@ End-to-end tests that exercise the full stack:
 
 from __future__ import annotations
 
+import random
+
 import numpy as np
 import pytest
 
+from jackdaw.bridge.backend import SimBackend
 from jackdaw.engine.actions import GamePhase
 from jackdaw.env.action_space import (
+    ActionType,
     engine_action_to_factored,
     factored_to_engine_action,
     get_action_mask,
@@ -45,6 +49,18 @@ MAX_STEPS = 5000
 # ---------------------------------------------------------------------------
 
 
+def _finished(adapter) -> bool:
+    return adapter.done or (adapter.won and adapter.game.phase == GamePhase.SHOP)
+
+
+def _agent_step(adapter, agent) -> None:
+    """One RandomAgent step on the adapter's run."""
+    game = adapter.game
+    info = {"game": game}
+    fa = agent.act({}, get_action_mask(game), info)
+    adapter.step(factored_to_engine_action(fa, game))
+
+
 def _run_episode_collecting(
     adapter,
     agent,
@@ -61,47 +77,35 @@ def _run_episode_collecting(
     observations: list[Observation] = []
     mask_checks: list[bool] = []
 
-    gs = adapter.raw_state
     steps = 0
 
     for _ in range(max_steps):
-        if adapter.done:
-            break
-        phase = gs.get("phase")
-        if adapter.won and phase == GamePhase.SHOP:
+        if _finished(adapter):
             break
 
         legal = adapter.get_legal_actions()
         if not legal:
             break
 
-        mask = get_action_mask(gs)
-        info = {"raw_state": gs, "legal_actions": legal}
+        game = adapter.game
+        mask = get_action_mask(game)
 
         # Collect observation
         if collect_obs:
-            obs = encode_observation(gs)
-            observations.append(obs)
+            observations.append(encode_observation(game))
 
-            # Check mask consistency: every legal action type has mask True
-            mask_ok = True
-            if mask.type_mask.sum() == 0 and legal:
-                mask_ok = False
-            mask_checks.append(mask_ok)
+            # Check mask consistency: some action type is legal while legal actions exist
+            mask_checks.append(bool(mask.type_mask.any()))
 
-        fa = agent.act({}, mask, info)
-
-        engine_action = factored_to_engine_action(fa, gs)
-        adapter.step(engine_action)
-        gs = adapter.raw_state
+        fa = agent.act({}, mask, {"game": game, "legal_actions": legal})
+        adapter.step(factored_to_engine_action(fa, game))
         steps += 1
 
-    rr = gs.get("round_resets", {})
     return {
         "steps": steps,
         "won": adapter.won,
         "done": adapter.done,
-        "ante": rr.get("ante", 1),
+        "ante": adapter.game.ante,
         "observations": observations,
         "mask_checks": mask_checks,
     }
@@ -177,9 +181,7 @@ class TestBridgeAdapterIdenticalTrajectory:
     """BridgeAdapter(SimBackend) must produce identical game trajectory."""
 
     def test_identical_trajectory(self):
-        from jackdaw.bridge.backend import SimBackend
-
-        # Run DirectAdapter episode
+        random.seed(2024)
         direct = DirectAdapter()
         direct.reset(BACK, STAKE, SEED)
 
@@ -191,10 +193,7 @@ class TestBridgeAdapterIdenticalTrajectory:
 
         steps = 0
         for _ in range(MAX_STEPS):
-            if direct.done or bridge.done:
-                break
-            d_phase = direct.raw_state.get("phase")
-            if direct.won and d_phase == GamePhase.SHOP:
+            if direct.done or bridge.done or _finished(direct):
                 break
 
             d_legal = direct.get_legal_actions()
@@ -202,25 +201,22 @@ class TestBridgeAdapterIdenticalTrajectory:
             if not d_legal or not b_legal:
                 break
 
-            gs = direct.raw_state
-            mask = get_action_mask(gs)
-            info = {"raw_state": gs, "legal_actions": d_legal}
-            fa = agent_d.act({}, mask, info)
+            # The bridge offers only what BalatroBot executes: draw from its mask. A sort
+            # goes out as a rearrange, which orders the hand but sets no sort mode, so the
+            # cards drawn after it would land elsewhere: no sorts.
+            game = bridge.game
+            mask = get_action_mask(game, bridge.legality)
+            mask.type_mask[[ActionType.SortHandRank, ActionType.SortHandSuit]] = False
+            fa = agent_d.act({}, mask, {"game": game, "legal_actions": b_legal})
 
-            engine_action = factored_to_engine_action(fa, gs)
+            engine_action = factored_to_engine_action(fa, game)
 
             ds = direct.step(engine_action)
             bs = bridge.step(engine_action)
             steps += 1
 
             # Core state must match
-            assert ds.phase == bs.phase, f"Step {steps}: phase {ds.phase} != {bs.phase}"
-            assert ds.dollars == bs.dollars, f"Step {steps}: dollars {ds.dollars} != {bs.dollars}"
-            assert ds.ante == bs.ante, f"Step {steps}: ante mismatch"
-            assert ds.round == bs.round, f"Step {steps}: round mismatch"
-            assert ds.chips == bs.chips, f"Step {steps}: chips mismatch"
-            assert ds.hands_left == bs.hands_left, f"Step {steps}: hands_left mismatch"
-            assert ds.discards_left == bs.discards_left, f"Step {steps}: discards_left mismatch"
+            assert ds == bs, f"Step {steps}: {ds} != {bs}"
 
         assert steps > 0, "No steps taken"
         assert direct.done == bridge.done, "done flag mismatch"
@@ -248,37 +244,26 @@ class TestMultiSeedStress:
             agent = RandomAgent()
             agent.reset()
 
-            gs = adapter.raw_state
             steps = 0
 
             for _ in range(MAX_STEPS):
-                if adapter.done:
-                    break
-                phase = gs.get("phase")
-                if adapter.won and phase == GamePhase.SHOP:
+                if _finished(adapter):
                     break
 
                 legal = adapter.get_legal_actions()
                 if not legal:
                     break
 
-                mask = get_action_mask(gs)
-                info = {"raw_state": gs, "legal_actions": legal}
-                fa = agent.act({}, mask, info)
-
                 # Verify observation has no NaN
-                obs = encode_observation(gs)
+                obs = encode_observation(adapter.game)
                 assert np.isfinite(obs.global_context).all(), f"NaN in global_context seed={seed}"
                 if obs.hand_cards.shape[0] > 0:
                     assert np.isfinite(obs.hand_cards).all(), f"NaN in hand_cards seed={seed}"
 
-                engine_action = factored_to_engine_action(fa, gs)
-                adapter.step(engine_action)
-                gs = adapter.raw_state
+                _agent_step(adapter, agent)
                 steps += 1
 
-            rr = gs.get("round_resets", {})
-            antes.append(rr.get("ante", 1))
+            antes.append(adapter.game.ante)
             step_counts.append(steps)
             if adapter.won:
                 wins += 1
@@ -303,6 +288,15 @@ class TestMultiSeedStress:
 # (d) Observation consistency test
 # ---------------------------------------------------------------------------
 
+_PHASE_IDX = {
+    GamePhase.BLIND_SELECT: 0,
+    GamePhase.SELECTING_HAND: 1,
+    GamePhase.ROUND_EVAL: 2,
+    GamePhase.SHOP: 3,
+    GamePhase.PACK_OPENING: 4,
+    GamePhase.GAME_OVER: 5,
+}
+
 
 class TestObservationConsistency:
     """At each step, observation entity counts must match game state."""
@@ -313,70 +307,40 @@ class TestObservationConsistency:
         agent = RandomAgent()
         agent.reset()
 
-        gs = adapter.raw_state
         checked = 0
 
         for _ in range(MAX_STEPS):
-            if adapter.done:
-                break
-            phase = gs.get("phase")
-            if adapter.won and phase == GamePhase.SHOP:
+            if _finished(adapter):
                 break
 
             legal = adapter.get_legal_actions()
             if not legal:
                 break
 
-            obs = encode_observation(gs)
+            game = adapter.game
+            obs = encode_observation(game)
 
             # Hand cards count
-            hand = gs.get("hand", [])
-            assert obs.hand_cards.shape[0] == len(hand), (
-                f"hand_cards.shape[0]={obs.hand_cards.shape[0]} != len(hand)={len(hand)}"
-            )
-
+            assert obs.hand_cards.shape[0] == len(game.hand)
             # Jokers count
-            jokers = gs.get("jokers", [])
-            assert obs.jokers.shape[0] == len(jokers), (
-                f"jokers.shape[0]={obs.jokers.shape[0]} != len(jokers)={len(jokers)}"
-            )
-
+            assert obs.jokers.shape[0] == len(game.jokers)
             # Consumables count
-            consumables = gs.get("consumables", [])
-            assert obs.consumables.shape[0] == len(consumables), (
-                f"consumables.shape[0]={obs.consumables.shape[0]} "
-                f"!= len(consumables)={len(consumables)}"
-            )
+            assert obs.consumables.shape[0] == len(game.consumables)
+            # Shop rows: cards, vouchers, then boosters
+            shop = len(game.shop_jokers) + len(game.shop_vouchers) + len(game.shop_boosters)
+            assert obs.shop_cards.shape[0] == shop
+            # Pack cards count
+            assert obs.pack_cards.shape[0] == len(game.pack_cards)
 
-            # Global context phase encoding matches game state phase
-            phase_val = gs.get("phase", GamePhase.GAME_OVER)
-            if isinstance(phase_val, str):
-                phase_val = GamePhase(phase_val)
-            _PHASE_IDX = {
-                GamePhase.BLIND_SELECT: 0,
-                GamePhase.SELECTING_HAND: 1,
-                GamePhase.ROUND_EVAL: 2,
-                GamePhase.SHOP: 3,
-                GamePhase.PACK_OPENING: 4,
-                GamePhase.GAME_OVER: 5,
-            }
-            expected_idx = _PHASE_IDX.get(phase_val, 5)
-            # Phase is one-hot in obs.global_context[0:6]
-            phase_vec = obs.global_context[:6]
-            actual_idx = int(np.argmax(phase_vec))
-            assert actual_idx == expected_idx, (
+            # Global context phase encoding matches game state phase (one-hot [0:6])
+            actual_idx = int(np.argmax(obs.global_context[:6]))
+            assert actual_idx == _PHASE_IDX[game.phase], (
                 f"Phase encoding mismatch: global_context phase={actual_idx} "
-                f"but game_state phase={phase_val} (expected idx={expected_idx})"
+                f"but game phase={game.phase}"
             )
 
             checked += 1
-
-            mask = get_action_mask(gs)
-            info = {"raw_state": gs, "legal_actions": legal}
-            fa = agent.act({}, mask, info)
-            engine_action = factored_to_engine_action(fa, gs)
-            adapter.step(engine_action)
-            gs = adapter.raw_state
+            _agent_step(adapter, agent)
 
         assert checked > 0, "No steps checked"
 
@@ -387,7 +351,7 @@ class TestObservationConsistency:
 
 
 class TestActionRoundtrip:
-    """engine_action -> factored -> engine_action must be lossless for representable actions."""
+    """engine_action -> factored -> engine_action must be lossless."""
 
     def test_roundtrip_across_episode(self):
         adapter = DirectAdapter()
@@ -395,15 +359,10 @@ class TestActionRoundtrip:
         agent = RandomAgent()
         agent.reset()
 
-        gs = adapter.raw_state
         roundtrip_count = 0
-        skip_count = 0
 
         for _ in range(MAX_STEPS):
-            if adapter.done:
-                break
-            phase = gs.get("phase")
-            if adapter.won and phase == GamePhase.SHOP:
+            if _finished(adapter):
                 break
 
             legal = adapter.get_legal_actions()
@@ -411,28 +370,23 @@ class TestActionRoundtrip:
                 break
 
             # Test roundtrip for each legal action
+            game = adapter.game
             for engine_action in legal:
+                fa = engine_action_to_factored(engine_action)
                 try:
-                    fa = engine_action_to_factored(engine_action, gs)
-                    recovered = factored_to_engine_action(fa, gs)
-
-                    # Compare the recovered action to the original
-                    assert type(engine_action) is type(recovered), (
-                        f"Type mismatch: {type(engine_action).__name__} "
-                        f"!= {type(recovered).__name__}"
-                    )
-                    roundtrip_count += 1
-
+                    recovered = factored_to_engine_action(fa, game)
                 except ValueError:
-                    # Complex permutations can't be represented as single swaps
-                    skip_count += 1
+                    # The PlayHand / Discard markers carry no selection
+                    assert not getattr(engine_action, "card_indices", True)
+                    continue
 
-            mask = get_action_mask(gs)
-            info = {"raw_state": gs, "legal_actions": legal}
-            fa = agent.act({}, mask, info)
-            engine_action = factored_to_engine_action(fa, gs)
-            adapter.step(engine_action)
-            gs = adapter.raw_state
+                # Compare the recovered action to the original
+                assert type(engine_action) is type(recovered), (
+                    f"Type mismatch: {type(engine_action).__name__} != {type(recovered).__name__}"
+                )
+                roundtrip_count += 1
+
+            _agent_step(adapter, agent)
 
         assert roundtrip_count > 0, "No actions were roundtrip-tested"
 
@@ -448,47 +402,46 @@ class TestActionRoundtrip:
 
         adapter = DirectAdapter()
         adapter.reset(BACK, STAKE, SEED)
-        gs = adapter.raw_state
+        game = adapter.game
 
         # SelectBlind roundtrip
-        fa = engine_action_to_factored(SelectBlind(), gs)
-        recovered = factored_to_engine_action(fa, gs)
+        fa = engine_action_to_factored(SelectBlind())
+        recovered = factored_to_engine_action(fa, game)
         assert isinstance(recovered, SelectBlind)
 
         # SkipBlind roundtrip
-        fa = engine_action_to_factored(SkipBlind(), gs)
-        recovered = factored_to_engine_action(fa, gs)
+        fa = engine_action_to_factored(SkipBlind())
+        recovered = factored_to_engine_action(fa, game)
         assert isinstance(recovered, SkipBlind)
 
         # Advance to selecting hand
         adapter.step(SelectBlind())
-        gs = adapter.raw_state
-        hand = gs.get("hand", [])
+        hand = game.hand
+        assert hand
 
-        if hand:
-            # PlayHand roundtrip
-            indices = tuple(range(min(3, len(hand))))
-            orig = PlayHand(card_indices=indices)
-            fa = engine_action_to_factored(orig, gs)
-            recovered = factored_to_engine_action(fa, gs)
-            assert isinstance(recovered, PlayHand)
-            assert recovered.card_indices == orig.card_indices
+        # PlayHand roundtrip
+        indices = tuple(range(min(3, len(hand))))
+        orig = PlayHand(card_indices=indices)
+        fa = engine_action_to_factored(orig)
+        recovered = factored_to_engine_action(fa, game)
+        assert isinstance(recovered, PlayHand)
+        assert recovered.card_indices == orig.card_indices
 
-            # Discard roundtrip
-            orig = Discard(card_indices=indices)
-            fa = engine_action_to_factored(orig, gs)
-            recovered = factored_to_engine_action(fa, gs)
-            assert isinstance(recovered, Discard)
-            assert recovered.card_indices == orig.card_indices
+        # Discard roundtrip
+        orig = Discard(card_indices=indices)
+        fa = engine_action_to_factored(orig)
+        recovered = factored_to_engine_action(fa, game)
+        assert isinstance(recovered, Discard)
+        assert recovered.card_indices == orig.card_indices
 
         # SortHand roundtrip
-        fa = engine_action_to_factored(SortHand(mode="rank"), gs)
-        recovered = factored_to_engine_action(fa, gs)
+        fa = engine_action_to_factored(SortHand(mode="rank"))
+        recovered = factored_to_engine_action(fa, game)
         assert isinstance(recovered, SortHand)
         assert recovered.mode == "rank"
 
-        fa = engine_action_to_factored(SortHand(mode="suit"), gs)
-        recovered = factored_to_engine_action(fa, gs)
+        fa = engine_action_to_factored(SortHand(mode="suit"))
+        recovered = factored_to_engine_action(fa, game)
         assert isinstance(recovered, SortHand)
         assert recovered.mode == "suit"
 
@@ -506,53 +459,45 @@ def _run_full_episode(adapter, agent, *, max_steps=MAX_STEPS):
     """
     agent.reset()
 
-    gs = adapter.raw_state
     steps = 0
     obs_list: list[Observation] = []
     masks_valid: list[bool] = []
     action_ok: list[bool] = []
 
     for _ in range(max_steps):
-        if adapter.done:
-            break
-        phase = gs.get("phase")
-        if adapter.won and phase == GamePhase.SHOP:
+        if _finished(adapter):
             break
 
         legal = adapter.get_legal_actions()
         if not legal:
             break
 
+        game = adapter.game
         # Observation
-        obs = encode_observation(gs)
-        obs_list.append(obs)
+        obs_list.append(encode_observation(game))
 
         # Action mask
-        mask = get_action_mask(gs)
-        has_legal_type = mask.type_mask.sum() > 0
-        masks_valid.append(has_legal_type)
+        mask = get_action_mask(game)
+        masks_valid.append(bool(mask.type_mask.sum() > 0))
 
-        info = {"raw_state": gs, "legal_actions": legal}
-        fa = agent.act({}, mask, info)
+        fa = agent.act({}, mask, {"game": game, "legal_actions": legal})
 
         # Action conversion
         try:
-            engine_action = factored_to_engine_action(fa, gs)
+            engine_action = factored_to_engine_action(fa, game)
             action_ok.append(True)
         except ValueError:
             action_ok.append(False)
             break
 
         adapter.step(engine_action)
-        gs = adapter.raw_state
         steps += 1
 
-    rr = gs.get("round_resets", {})
     return {
         "steps": steps,
         "won": adapter.won,
         "done": adapter.done,
-        "ante": rr.get("ante", 1),
+        "ante": adapter.game.ante,
         "observations": obs_list,
         "masks_valid": masks_valid,
         "action_ok": action_ok,
@@ -649,55 +594,48 @@ class TestActionRoundtripFidelity:
         agent = RandomAgent()
         agent.reset()
 
-        gs = adapter.raw_state
         total_tested = 0
         total_skipped = 0
         failures: list[str] = []
 
         for step_idx in range(MAX_STEPS):
-            if adapter.done:
-                break
-            phase = gs.get("phase")
-            if adapter.won and phase == GamePhase.SHOP:
+            if _finished(adapter):
                 break
 
             legal = adapter.get_legal_actions()
             if not legal:
                 break
 
+            game = adapter.game
             for engine_action in legal:
+                fa = engine_action_to_factored(engine_action)
                 try:
-                    fa = engine_action_to_factored(engine_action, gs)
-                    recovered = factored_to_engine_action(fa, gs)
+                    recovered = factored_to_engine_action(fa, game)
+                except ValueError:
+                    # The PlayHand / Discard markers carry no selection
+                    total_skipped += 1
+                    continue
 
-                    # Type must match
-                    if not isinstance(recovered, type(engine_action)):
+                # Type must match
+                if not isinstance(recovered, type(engine_action)):
+                    failures.append(
+                        f"step={step_idx} type mismatch: "
+                        f"{type(engine_action).__name__} != "
+                        f"{type(recovered).__name__}"
+                    )
+
+                # For actions with card_indices, verify exact match
+                orig_ci = getattr(engine_action, "card_indices", None)
+                recov_ci = getattr(recovered, "card_indices", None)
+                if orig_ci is not None and recov_ci is not None:
+                    if tuple(orig_ci) != tuple(recov_ci):
                         failures.append(
-                            f"step={step_idx} type mismatch: "
-                            f"{type(engine_action).__name__} != "
-                            f"{type(recovered).__name__}"
+                            f"step={step_idx} card_indices mismatch: {orig_ci} != {recov_ci}"
                         )
 
-                    # For actions with card_indices, verify exact match
-                    orig_ci = getattr(engine_action, "card_indices", None)
-                    recov_ci = getattr(recovered, "card_indices", None)
-                    if orig_ci is not None and recov_ci is not None:
-                        if tuple(orig_ci) != tuple(recov_ci):
-                            failures.append(
-                                f"step={step_idx} card_indices mismatch: {orig_ci} != {recov_ci}"
-                            )
+                total_tested += 1
 
-                    total_tested += 1
-                except ValueError:
-                    # Complex permutations are expected to fail
-                    total_skipped += 1
-
-            mask = get_action_mask(gs)
-            info = {"raw_state": gs, "legal_actions": legal}
-            fa = agent.act({}, mask, info)
-            engine_action = factored_to_engine_action(fa, gs)
-            adapter.step(engine_action)
-            gs = adapter.raw_state
+            _agent_step(adapter, agent)
 
         assert total_tested > 0, "No actions roundtrip-tested"
         assert not failures, (
@@ -727,75 +665,47 @@ class TestObservationEncodingStress:
             adapter.reset(BACK, STAKE, seed)
             agent = RandomAgent()
             agent.reset()
-            gs = adapter.raw_state
 
             for _ in range(MAX_STEPS):
-                if adapter.done:
-                    break
-                phase = gs.get("phase")
-                if adapter.won and phase == GamePhase.SHOP:
+                if _finished(adapter):
                     break
 
                 legal = adapter.get_legal_actions()
                 if not legal:
                     break
 
-                obs = encode_observation(gs)
+                game = adapter.game
+                obs = encode_observation(game)
 
                 # Shape checks
                 assert obs.global_context.shape == (D_GLOBAL,), (
                     f"seed={seed}: global_context shape {obs.global_context.shape}"
                 )
 
-                hand = gs.get("hand", [])
-                assert obs.hand_cards.shape[0] == len(hand), (
-                    f"seed={seed}: hand_cards rows {obs.hand_cards.shape[0]} "
-                    f"!= hand size {len(hand)}"
-                )
-                if len(hand) > 0:
+                assert obs.hand_cards.shape[0] == len(game.hand), f"seed={seed}: hand rows"
+                if obs.hand_cards.shape[0] > 0:
                     assert obs.hand_cards.shape[1] == D_PLAYING_CARD
 
-                jokers = gs.get("jokers", [])
-                assert obs.jokers.shape[0] == len(jokers), (
-                    f"seed={seed}: jokers rows {obs.jokers.shape[0]} != joker count {len(jokers)}"
-                )
-                if len(jokers) > 0:
+                assert obs.jokers.shape[0] == len(game.jokers), f"seed={seed}: joker rows"
+                if obs.jokers.shape[0] > 0:
                     assert obs.jokers.shape[1] == D_JOKER
 
-                # No NaN/Inf
-                assert np.isfinite(obs.global_context).all(), (
-                    f"seed={seed}: NaN/Inf in global_context"
-                )
-                if obs.hand_cards.shape[0] > 0:
-                    assert np.isfinite(obs.hand_cards).all(), f"seed={seed}: NaN/Inf in hand_cards"
-                if obs.jokers.shape[0] > 0:
-                    assert np.isfinite(obs.jokers).all(), f"seed={seed}: NaN/Inf in jokers"
-                if obs.consumables.shape[0] > 0:
-                    assert np.isfinite(obs.consumables).all(), (
-                        f"seed={seed}: NaN/Inf in consumables"
-                    )
-                if obs.shop_cards.shape[0] > 0:
-                    assert np.isfinite(obs.shop_cards).all(), f"seed={seed}: NaN/Inf in shop_cards"
-                if obs.pack_cards.shape[0] > 0:
-                    assert np.isfinite(obs.pack_cards).all(), f"seed={seed}: NaN/Inf in pack_cards"
-
-                # No astronomically large values (catches log-scale overflow)
-                assert np.abs(obs.global_context).max() < self.VALUE_LIMIT, (
-                    f"seed={seed}: global_context has value > {self.VALUE_LIMIT}"
-                )
-                if obs.hand_cards.shape[0] > 0:
-                    assert np.abs(obs.hand_cards).max() < self.VALUE_LIMIT
-                if obs.jokers.shape[0] > 0:
-                    assert np.abs(obs.jokers).max() < self.VALUE_LIMIT
+                # No NaN/Inf, no astronomically large values (catches log-scale overflow)
+                for name in (
+                    "global_context",
+                    "hand_cards",
+                    "jokers",
+                    "consumables",
+                    "shop_cards",
+                    "pack_cards",
+                ):
+                    arr = getattr(obs, name)
+                    assert np.isfinite(arr).all(), f"seed={seed}: NaN/Inf in {name}"
+                    if arr.size:
+                        assert np.abs(arr).max() < self.VALUE_LIMIT, f"seed={seed}: {name}"
 
                 total_obs_checked += 1
-
-                mask = get_action_mask(gs)
-                info = {"raw_state": gs, "legal_actions": legal}
-                fa = agent.act({}, mask, info)
-                engine_action = factored_to_engine_action(fa, gs)
-                adapter.step(engine_action)
-                gs = adapter.raw_state
+                _agent_step(adapter, agent)
 
         assert total_obs_checked > 1000, (
             f"Only checked {total_obs_checked} observations "

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from jackdaw.cli.scenarios import ScenarioResult, register
 from jackdaw.cli.scenarios.helpers import (
-    Handle,
+    Lockstep,
     add_both,
     compare_state,
     discard,
@@ -191,8 +191,8 @@ _JOKER_CONFIGS: list[tuple[str, str, str | None]] = [
 for _key, _desc, _preset in _JOKER_CONFIGS:
 
     def _make_fn(key: str = _key, preset: str | None = _preset):  # noqa: B023
-        def fn(sim: Handle, live: Handle, *, delay: float = 0.3) -> ScenarioResult:
-            return run_joker_with_setup(sim, live, joker_key=key, hand_preset=preset, delay=delay)
+        def fn(ls: Lockstep, *, delay: float = 0.3) -> ScenarioResult:
+            return run_joker_with_setup(ls, joker_key=key, hand_preset=preset, delay=delay)
 
         return fn
 
@@ -213,9 +213,9 @@ for _key, _desc, _preset in _JOKER_CONFIGS:
     category="jokers",
     description="+20 Mult if hand has 3 or fewer cards",
 )
-def _joker_half(sim: Handle, live: Handle, *, delay: float = 0.3) -> ScenarioResult:
+def _joker_half(ls: Lockstep, *, delay: float = 0.3) -> ScenarioResult:
     return run_joker_with_setup(
-        sim, live, joker_key="j_half", hand_preset="THREE_CARDS", play_count=3, delay=delay
+        ls, joker_key="j_half", hand_preset="THREE_CARDS", play_count=3, delay=delay
     )
 
 
@@ -224,9 +224,9 @@ def _joker_half(sim: Handle, live: Handle, *, delay: float = 0.3) -> ScenarioRes
     category="jokers",
     description="+4 Chips if hand has exactly 4 cards (permanent)",
 )
-def _joker_square(sim: Handle, live: Handle, *, delay: float = 0.3) -> ScenarioResult:
+def _joker_square(ls: Lockstep, *, delay: float = 0.3) -> ScenarioResult:
     return run_joker_with_setup(
-        sim, live, joker_key="j_square", hand_preset="FOUR_CARDS", play_count=4, delay=delay
+        ls, joker_key="j_square", hand_preset="FOUR_CARDS", play_count=4, delay=delay
     )
 
 
@@ -235,13 +235,13 @@ def _joker_square(sim: Handle, live: Handle, *, delay: float = 0.3) -> ScenarioR
     category="jokers",
     description="x3 Mult on final hand of round",
 )
-def _joker_acrobat(sim: Handle, live: Handle, *, delay: float = 0.3) -> ScenarioResult:
-    start_both(sim, live, seed="J_ACROBAT", delay=delay)
-    select_blind(sim, live, delay=delay)
-    add_both(sim, live, key="j_acrobat")
-    set_both(sim, live, hands=1)
-    play_hand(sim, live, [0, 1, 2, 3, 4], delay=delay)
-    diffs = compare_state(sim, live, label="acrobat final hand")
+def _joker_acrobat(ls: Lockstep, *, delay: float = 0.3) -> ScenarioResult:
+    start_both(ls, seed="J_ACROBAT", delay=delay)
+    select_blind(ls, delay=delay)
+    add_both(ls, key="j_acrobat")
+    set_both(ls, hands=1)
+    play_hand(ls, [0, 1, 2, 3, 4], delay=delay)
+    diffs = compare_state(ls, label="acrobat final hand")
     return ScenarioResult(
         passed=not diffs,
         diffs=diffs,
@@ -254,13 +254,13 @@ def _joker_acrobat(sim: Handle, live: Handle, *, delay: float = 0.3) -> Scenario
     category="jokers",
     description="Retrigger all played cards on final hand",
 )
-def _joker_dusk(sim: Handle, live: Handle, *, delay: float = 0.3) -> ScenarioResult:
-    start_both(sim, live, seed="J_DUSK", delay=delay)
-    select_blind(sim, live, delay=delay)
-    add_both(sim, live, key="j_dusk")
-    set_both(sim, live, hands=1)
-    play_hand(sim, live, [0, 1, 2, 3, 4], delay=delay)
-    diffs = compare_state(sim, live, label="dusk final hand")
+def _joker_dusk(ls: Lockstep, *, delay: float = 0.3) -> ScenarioResult:
+    start_both(ls, seed="J_DUSK", delay=delay)
+    select_blind(ls, delay=delay)
+    add_both(ls, key="j_dusk")
+    set_both(ls, hands=1)
+    play_hand(ls, [0, 1, 2, 3, 4], delay=delay)
+    diffs = compare_state(ls, label="dusk final hand")
     return ScenarioResult(
         passed=not diffs,
         diffs=diffs,
@@ -273,13 +273,13 @@ def _joker_dusk(sim: Handle, live: Handle, *, delay: float = 0.3) -> ScenarioRes
     category="jokers",
     description="+15 Mult when 0 discards left",
 )
-def _joker_mystic_summit(sim: Handle, live: Handle, *, delay: float = 0.3) -> ScenarioResult:
-    start_both(sim, live, seed="J_MYSTIC_SUMMIT", delay=delay)
-    select_blind(sim, live, delay=delay)
-    add_both(sim, live, key="j_mystic_summit")
-    set_both(sim, live, discards=0)
-    play_hand(sim, live, [0, 1, 2, 3, 4], delay=delay)
-    diffs = compare_state(sim, live, label="mystic_summit 0 discards")
+def _joker_mystic_summit(ls: Lockstep, *, delay: float = 0.3) -> ScenarioResult:
+    start_both(ls, seed="J_MYSTIC_SUMMIT", delay=delay)
+    select_blind(ls, delay=delay)
+    add_both(ls, key="j_mystic_summit")
+    set_both(ls, discards=0)
+    play_hand(ls, [0, 1, 2, 3, 4], delay=delay)
+    diffs = compare_state(ls, label="mystic_summit 0 discards")
     return ScenarioResult(
         passed=not diffs,
         diffs=diffs,
@@ -292,19 +292,19 @@ def _joker_mystic_summit(sim: Handle, live: Handle, *, delay: float = 0.3) -> Sc
     category="jokers",
     description="+13 Mult per Queen held in hand",
 )
-def _joker_shoot_the_moon(sim: Handle, live: Handle, *, delay: float = 0.3) -> ScenarioResult:
+def _joker_shoot_the_moon(ls: Lockstep, *, delay: float = 0.3) -> ScenarioResult:
     """Inject Queens but play non-Queens so Queens remain held."""
-    start_both(sim, live, seed="J_SHOOT_THE_MOON", delay=delay)
-    select_blind(sim, live, delay=delay)
-    add_both(sim, live, key="j_shoot_the_moon")
+    start_both(ls, seed="J_SHOOT_THE_MOON", delay=delay)
+    select_blind(ls, delay=delay)
+    add_both(ls, key="j_shoot_the_moon")
     # Add 2 Queens (held) + 5 non-Queens (played)
     for key in ["H_Q", "D_Q", "S_2", "C_3", "H_4", "D_5", "S_6"]:
-        add_both(sim, live, key=key)
+        add_both(ls, key=key)
     # Play the last 5 (non-Queens), keep Queens held
-    count = get_hand_count(sim)
+    count = get_hand_count(ls)
     play_indices = list(range(count - 5, count))
-    play_hand(sim, live, play_indices, delay=delay)
-    diffs = compare_state(sim, live, label="shoot_the_moon queens held")
+    play_hand(ls, play_indices, delay=delay)
+    diffs = compare_state(ls, label="shoot_the_moon queens held")
     return ScenarioResult(
         passed=not diffs,
         diffs=diffs,
@@ -317,9 +317,9 @@ def _joker_shoot_the_moon(sim: Handle, live: Handle, *, delay: float = 0.3) -> S
     category="jokers",
     description="Destroys first played 6 for Spectral (first hand only)",
 )
-def _joker_sixth_sense(sim: Handle, live: Handle, *, delay: float = 0.3) -> ScenarioResult:
+def _joker_sixth_sense(ls: Lockstep, *, delay: float = 0.3) -> ScenarioResult:
     return run_joker_with_setup(
-        sim, live, joker_key="j_sixth_sense", hand_preset="WITH_SIXES", delay=delay
+        ls, joker_key="j_sixth_sense", hand_preset="WITH_SIXES", delay=delay
     )
 
 
@@ -328,13 +328,13 @@ def _joker_sixth_sense(sim: Handle, live: Handle, *, delay: float = 0.3) -> Scen
     category="jokers",
     description="Creates Tarot if $4 or less after play",
 )
-def _joker_vagabond(sim: Handle, live: Handle, *, delay: float = 0.3) -> ScenarioResult:
-    start_both(sim, live, seed="J_VAGABOND", delay=delay)
-    select_blind(sim, live, delay=delay)
-    add_both(sim, live, key="j_vagabond")
-    set_both(sim, live, money=4)
-    play_hand(sim, live, [0, 1, 2, 3, 4], delay=delay)
-    diffs = compare_state(sim, live, label="vagabond low money")
+def _joker_vagabond(ls: Lockstep, *, delay: float = 0.3) -> ScenarioResult:
+    start_both(ls, seed="J_VAGABOND", delay=delay)
+    select_blind(ls, delay=delay)
+    add_both(ls, key="j_vagabond")
+    set_both(ls, money=4)
+    play_hand(ls, [0, 1, 2, 3, 4], delay=delay)
+    diffs = compare_state(ls, label="vagabond low money")
     return ScenarioResult(
         passed=not diffs,
         diffs=diffs,
@@ -350,10 +350,9 @@ def _joker_vagabond(sim: Handle, live: Handle, *, delay: float = 0.3) -> Scenari
     category="jokers",
     description="$5 if 3+ face cards discarded",
 )
-def _joker_faceless(sim: Handle, live: Handle, *, delay: float = 0.3) -> ScenarioResult:
+def _joker_faceless(ls: Lockstep, *, delay: float = 0.3) -> ScenarioResult:
     return run_joker_with_setup(
-        sim,
-        live,
+        ls,
         joker_key="j_faceless",
         hand_preset="HIGH_CARD",
         pre_discard=["H_J", "D_Q", "S_K"],
@@ -366,13 +365,13 @@ def _joker_faceless(sim: Handle, live: Handle, *, delay: float = 0.3) -> Scenari
     category="jokers",
     description="$5 per discarded card of target rank",
 )
-def _joker_mail(sim: Handle, live: Handle, *, delay: float = 0.3) -> ScenarioResult:
-    start_both(sim, live, seed="J_MAIL", delay=delay)
-    select_blind(sim, live, delay=delay)
-    add_both(sim, live, key="j_mail")
-    discard(sim, live, [0, 1, 2], delay=delay)
-    play_hand(sim, live, [0, 1, 2, 3, 4], delay=delay)
-    diffs = compare_state(sim, live, label="mail after discard+play")
+def _joker_mail(ls: Lockstep, *, delay: float = 0.3) -> ScenarioResult:
+    start_both(ls, seed="J_MAIL", delay=delay)
+    select_blind(ls, delay=delay)
+    add_both(ls, key="j_mail")
+    discard(ls, [0, 1, 2], delay=delay)
+    play_hand(ls, [0, 1, 2, 3, 4], delay=delay)
+    diffs = compare_state(ls, label="mail after discard+play")
     return ScenarioResult(
         passed=not diffs,
         diffs=diffs,
@@ -385,13 +384,13 @@ def _joker_mail(sim: Handle, live: Handle, *, delay: float = 0.3) -> ScenarioRes
     category="jokers",
     description="$3 if first discard has only 1 card",
 )
-def _joker_trading(sim: Handle, live: Handle, *, delay: float = 0.3) -> ScenarioResult:
-    start_both(sim, live, seed="J_TRADING", delay=delay)
-    select_blind(sim, live, delay=delay)
-    add_both(sim, live, key="j_trading")
-    discard(sim, live, [0], delay=delay)
-    play_hand(sim, live, [0, 1, 2, 3, 4], delay=delay)
-    diffs = compare_state(sim, live, label="trading after discard+play")
+def _joker_trading(ls: Lockstep, *, delay: float = 0.3) -> ScenarioResult:
+    start_both(ls, seed="J_TRADING", delay=delay)
+    select_blind(ls, delay=delay)
+    add_both(ls, key="j_trading")
+    discard(ls, [0], delay=delay)
+    play_hand(ls, [0, 1, 2, 3, 4], delay=delay)
+    diffs = compare_state(ls, label="trading after discard+play")
     return ScenarioResult(
         passed=not diffs,
         diffs=diffs,
@@ -404,10 +403,9 @@ def _joker_trading(sim: Handle, live: Handle, *, delay: float = 0.3) -> Scenario
     category="jokers",
     description="x0.5 Mult per Jack discarded this round",
 )
-def _joker_hit_the_road(sim: Handle, live: Handle, *, delay: float = 0.3) -> ScenarioResult:
+def _joker_hit_the_road(ls: Lockstep, *, delay: float = 0.3) -> ScenarioResult:
     return run_joker_with_setup(
-        sim,
-        live,
+        ls,
         joker_key="j_hit_the_road",
         hand_preset="HIGH_CARD",
         pre_discard=["H_J", "D_J", "S_J", "C_J"],
@@ -420,10 +418,9 @@ def _joker_hit_the_road(sim: Handle, live: Handle, *, delay: float = 0.3) -> Sce
     category="jokers",
     description="+3 Chips per card discarded of matching suit (permanent)",
 )
-def _joker_castle(sim: Handle, live: Handle, *, delay: float = 0.3) -> ScenarioResult:
+def _joker_castle(ls: Lockstep, *, delay: float = 0.3) -> ScenarioResult:
     return run_joker_with_setup(
-        sim,
-        live,
+        ls,
         joker_key="j_castle",
         hand_preset="HIGH_CARD",
         pre_discard=["H_2", "H_3", "H_4"],
@@ -436,10 +433,9 @@ def _joker_castle(sim: Handle, live: Handle, *, delay: float = 0.3) -> ScenarioR
     category="jokers",
     description="Upgrade discarded hand type level",
 )
-def _joker_burnt(sim: Handle, live: Handle, *, delay: float = 0.3) -> ScenarioResult:
+def _joker_burnt(ls: Lockstep, *, delay: float = 0.3) -> ScenarioResult:
     return run_joker_with_setup(
-        sim,
-        live,
+        ls,
         joker_key="j_burnt",
         hand_preset="PAIR",
         pre_discard=["H_A", "D_A"],  # discard a pair to level up Pair
@@ -452,14 +448,14 @@ def _joker_burnt(sim: Handle, live: Handle, *, delay: float = 0.3) -> ScenarioRe
     category="jokers",
     description="x1 Mult, needs 23 discards then x5",
 )
-def _joker_yorick(sim: Handle, live: Handle, *, delay: float = 0.3) -> ScenarioResult:
+def _joker_yorick(ls: Lockstep, *, delay: float = 0.3) -> ScenarioResult:
     # Yorick needs many discards; just test basic discard tracking
-    start_both(sim, live, seed="J_YORICK", delay=delay)
-    select_blind(sim, live, delay=delay)
-    add_both(sim, live, key="j_yorick")
-    discard(sim, live, [0, 1, 2], delay=delay)
-    play_hand(sim, live, [0, 1, 2, 3, 4], delay=delay)
-    diffs = compare_state(sim, live, label="yorick after discard+play")
+    start_both(ls, seed="J_YORICK", delay=delay)
+    select_blind(ls, delay=delay)
+    add_both(ls, key="j_yorick")
+    discard(ls, [0, 1, 2], delay=delay)
+    play_hand(ls, [0, 1, 2, 3, 4], delay=delay)
+    diffs = compare_state(ls, label="yorick after discard+play")
     return ScenarioResult(
         passed=not diffs,
         diffs=diffs,
@@ -472,12 +468,12 @@ def _joker_yorick(sim: Handle, live: Handle, *, delay: float = 0.3) -> ScenarioR
     category="jokers",
     description="$4 if poker hand matches target",
 )
-def _joker_todo_list(sim: Handle, live: Handle, *, delay: float = 0.3) -> ScenarioResult:
-    start_both(sim, live, seed="J_TODO", delay=delay)
-    select_blind(sim, live, delay=delay)
-    add_both(sim, live, key="j_todo_list")
-    play_hand(sim, live, [0, 1, 2, 3, 4], delay=delay)
-    diffs = compare_state(sim, live, label="todo_list after play")
+def _joker_todo_list(ls: Lockstep, *, delay: float = 0.3) -> ScenarioResult:
+    start_both(ls, seed="J_TODO", delay=delay)
+    select_blind(ls, delay=delay)
+    add_both(ls, key="j_todo_list")
+    play_hand(ls, [0, 1, 2, 3, 4], delay=delay)
+    diffs = compare_state(ls, label="todo_list after play")
     return ScenarioResult(
         passed=not diffs,
         diffs=diffs,
@@ -486,7 +482,7 @@ def _joker_todo_list(sim: Handle, live: Handle, *, delay: float = 0.3) -> Scenar
 
 
 @register(name="joker_luchador", category="jokers", description="Sell to disable boss blind")
-def _joker_luchador(sim: Handle, live: Handle, *, delay: float = 0.3) -> ScenarioResult:
+def _joker_luchador(ls: Lockstep, *, delay: float = 0.3) -> ScenarioResult:
     # Luchador requires selling during a round (SELECTING_HAND), but the
     # balatrobot API only supports sell in SHOP state.  Skip this scenario.
     return ScenarioResult(

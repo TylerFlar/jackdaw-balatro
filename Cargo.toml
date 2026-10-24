@@ -1,0 +1,62 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/jackdaw-data",
+    "crates/jackdaw-core",
+    "crates/jackdaw-bot",
+    "crates/jackdaw-env",
+    "crates/jackdaw-py",
+    "xtask",
+]
+# Plain `cargo build` / `cargo test` leave out the PyO3 extension so they never link libpython.
+# maturin builds it (`uv sync`, `uv build`); `cargo build -p jackdaw-py` also works.
+default-members = [
+    "crates/jackdaw-data",
+    "crates/jackdaw-core",
+    "crates/jackdaw-bot",
+    "crates/jackdaw-env",
+    "xtask",
+]
+
+[workspace.package]
+version = "0.2.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/TylerFlar/jackdaw-balatro"
+# The crates ship inside the `jackdaw` Python wheel, not on crates.io.
+publish = false
+
+[workspace.dependencies]
+jackdaw-bot = { path = "crates/jackdaw-bot" }
+jackdaw-core = { path = "crates/jackdaw-core" }
+jackdaw-data = { path = "crates/jackdaw-data" }
+jackdaw-env = { path = "crates/jackdaw-env" }
+# `float_roundtrip` parses floats exactly; the default parser can be 1 ulp off.
+serde_json = { version = "1.0.154", features = ["float_roundtrip"] }
+# The canonical snapshot digest (`jackdaw_core::canon`).
+sha2 = "0.10"
+# The vector env's worker threads (`jackdaw_env::vector`).
+rayon = "1.12"
+
+# `unsafe_code` is forbidden per crate (`#![forbid(unsafe_code)]`) rather than here, because the
+# PyO3 macros in jackdaw-py expand to unsafe code.
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+# PyO3 turns a panic into a Python exception instead of aborting the interpreter.
+panic = "unwind"
+debug = "line-tables-only"
+
+# `cargo build --profile profiling`: release code with full debug info for profilers.
+[profile.profiling]
+inherits = "release"
+debug = true
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3

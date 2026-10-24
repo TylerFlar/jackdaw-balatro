@@ -1,0 +1,1956 @@
+[
+  {
+    "consumeables": [],
+    "deck": {
+      "type": "Challenge Deck"
+    },
+    "id": "c_omelette_1",
+    "jokers": [
+      {
+        "id": "j_egg"
+      },
+      {
+        "id": "j_egg"
+      },
+      {
+        "id": "j_egg"
+      },
+      {
+        "id": "j_egg"
+      },
+      {
+        "id": "j_egg"
+      }
+    ],
+    "name": "The Omelette",
+    "restrictions": {
+      "banned_cards": [
+        {
+          "id": "v_seed_money"
+        },
+        {
+          "id": "v_money_tree"
+        },
+        {
+          "id": "j_to_the_moon"
+        },
+        {
+          "id": "j_rocket"
+        },
+        {
+          "id": "j_golden"
+        },
+        {
+          "id": "j_satellite"
+        }
+      ],
+      "banned_other": [],
+      "banned_tags": []
+    },
+    "rules": {
+      "custom": [
+        {
+          "id": "no_reward"
+        },
+        {
+          "id": "no_extra_hand_money"
+        },
+        {
+          "id": "no_interest"
+        }
+      ],
+      "modifiers": []
+    },
+    "vouchers": []
+  },
+  {
+    "consumeables": [],
+    "deck": {
+      "cards": [
+        {
+          "r": "4",
+          "s": "D"
+        },
+        {
+          "r": "5",
+          "s": "D"
+        },
+        {
+          "r": "6",
+          "s": "D"
+        },
+        {
+          "r": "7",
+          "s": "D"
+        },
+        {
+          "r": "8",
+          "s": "D"
+        },
+        {
+          "r": "9",
+          "s": "D"
+        },
+        {
+          "r": "T",
+          "s": "D"
+        },
+        {
+          "r": "J",
+          "s": "D"
+        },
+        {
+          "r": "Q",
+          "s": "D"
+        },
+        {
+          "r": "K",
+          "s": "D"
+        },
+        {
+          "r": "J",
+          "s": "D"
+        },
+        {
+          "r": "Q",
+          "s": "D"
+        },
+        {
+          "r": "K",
+          "s": "D"
+        },
+        {
+          "r": "4",
+          "s": "C"
+        },
+        {
+          "r": "5",
+          "s": "C"
+        },
+        {
+          "r": "6",
+          "s": "C"
+        },
+        {
+          "r": "7",
+          "s": "C"
+        },
+        {
+          "r": "8",
+          "s": "C"
+        },
+        {
+          "r": "9",
+          "s": "C"
+        },
+        {
+          "r": "T",
+          "s": "C"
+        },
+        {
+          "r": "J",
+          "s": "C"
+        },
+        {
+          "r": "Q",
+          "s": "C"
+        },
+        {
+          "r": "K",
+          "s": "C"
+        },
+        {
+          "r": "J",
+          "s": "C"
+        },
+        {
+          "r": "Q",
+          "s": "C"
+        },
+        {
+          "r": "K",
+          "s": "C"
+        },
+        {
+          "r": "4",
+          "s": "H"
+        },
+        {
+          "r": "5",
+          "s": "H"
+        },
+        {
+          "r": "6",
+          "s": "H"
+        },
+        {
+          "r": "7",
+          "s": "H"
+        },
+        {
+          "r": "8",
+          "s": "H"
+        },
+        {
+          "r": "9",
+          "s": "H"
+        },
+        {
+          "r": "T",
+          "s": "H"
+        },
+        {
+          "r": "J",
+          "s": "H"
+        },
+        {
+          "r": "Q",
+          "s": "H"
+        },
+        {
+          "r": "K",
+          "s": "H"
+        },
+        {
+          "r": "J",
+          "s": "H"
+        },
+        {
+          "r": "Q",
+          "s": "H"
+        },
+        {
+          "r": "K",
+          "s": "H"
+        },
+        {
+          "r": "4",
+          "s": "S"
+        },
+        {
+          "r": "5",
+          "s": "S"
+        },
+        {
+          "r": "6",
+          "s": "S"
+        },
+        {
+          "r": "7",
+          "s": "S"
+        },
+        {
+          "r": "8",
+          "s": "S"
+        },
+        {
+          "r": "9",
+          "s": "S"
+        },
+        {
+          "r": "T",
+          "s": "S"
+        },
+        {
+          "r": "J",
+          "s": "S"
+        },
+        {
+          "r": "Q",
+          "s": "S"
+        },
+        {
+          "r": "K",
+          "s": "S"
+        },
+        {
+          "r": "J",
+          "s": "S"
+        },
+        {
+          "r": "Q",
+          "s": "S"
+        },
+        {
+          "r": "K",
+          "s": "S"
+        }
+      ],
+      "type": "Challenge Deck"
+    },
+    "id": "c_city_1",
+    "jokers": [
+      {
+        "eternal": true,
+        "id": "j_ride_the_bus"
+      },
+      {
+        "eternal": true,
+        "id": "j_shortcut"
+      }
+    ],
+    "name": "15 Minute City",
+    "restrictions": {
+      "banned_cards": [],
+      "banned_other": [],
+      "banned_tags": []
+    },
+    "rules": {
+      "custom": [],
+      "modifiers": []
+    },
+    "vouchers": []
+  },
+  {
+    "consumeables": [],
+    "deck": {
+      "type": "Challenge Deck"
+    },
+    "id": "c_rich_1",
+    "jokers": [],
+    "name": "Rich get Richer",
+    "restrictions": {
+      "banned_cards": [],
+      "banned_other": [],
+      "banned_tags": []
+    },
+    "rules": {
+      "custom": [
+        {
+          "id": "chips_dollar_cap"
+        }
+      ],
+      "modifiers": [
+        {
+          "id": "dollars",
+          "value": 100
+        }
+      ]
+    },
+    "vouchers": [
+      {
+        "id": "v_seed_money"
+      },
+      {
+        "id": "v_money_tree"
+      }
+    ]
+  },
+  {
+    "consumeables": [],
+    "deck": {
+      "type": "Challenge Deck"
+    },
+    "id": "c_knife_1",
+    "jokers": [
+      {
+        "eternal": true,
+        "id": "j_ceremonial",
+        "pinned": true
+      }
+    ],
+    "name": "On a Knife's Edge",
+    "restrictions": {
+      "banned_cards": [],
+      "banned_other": [],
+      "banned_tags": []
+    },
+    "rules": {
+      "custom": [],
+      "modifiers": []
+    },
+    "vouchers": []
+  },
+  {
+    "consumeables": [],
+    "deck": {
+      "type": "Challenge Deck"
+    },
+    "id": "c_xray_1",
+    "jokers": [],
+    "name": "X-ray Vision",
+    "restrictions": {
+      "banned_cards": [],
+      "banned_other": [],
+      "banned_tags": []
+    },
+    "rules": {
+      "custom": [
+        {
+          "id": "flipped_cards",
+          "value": 4
+        }
+      ],
+      "modifiers": []
+    },
+    "vouchers": []
+  },
+  {
+    "consumeables": [],
+    "deck": {
+      "cards": [
+        {
+          "r": "2",
+          "s": "D"
+        },
+        {
+          "r": "3",
+          "s": "D"
+        },
+        {
+          "r": "4",
+          "s": "D"
+        },
+        {
+          "r": "5",
+          "s": "D"
+        },
+        {
+          "r": "6",
+          "s": "D"
+        },
+        {
+          "r": "7",
+          "s": "D"
+        },
+        {
+          "r": "8",
+          "s": "D"
+        },
+        {
+          "r": "9",
+          "s": "D"
+        },
+        {
+          "r": "2",
+          "s": "C"
+        },
+        {
+          "r": "3",
+          "s": "C"
+        },
+        {
+          "r": "4",
+          "s": "C"
+        },
+        {
+          "r": "5",
+          "s": "C"
+        },
+        {
+          "r": "6",
+          "s": "C"
+        },
+        {
+          "r": "7",
+          "s": "C"
+        },
+        {
+          "r": "8",
+          "s": "C"
+        },
+        {
+          "r": "9",
+          "s": "C"
+        },
+        {
+          "r": "2",
+          "s": "H"
+        },
+        {
+          "r": "3",
+          "s": "H"
+        },
+        {
+          "r": "4",
+          "s": "H"
+        },
+        {
+          "r": "5",
+          "s": "H"
+        },
+        {
+          "r": "6",
+          "s": "H"
+        },
+        {
+          "r": "7",
+          "s": "H"
+        },
+        {
+          "r": "8",
+          "s": "H"
+        },
+        {
+          "r": "9",
+          "s": "H"
+        },
+        {
+          "r": "2",
+          "s": "S"
+        },
+        {
+          "r": "3",
+          "s": "S"
+        },
+        {
+          "r": "4",
+          "s": "S"
+        },
+        {
+          "r": "5",
+          "s": "S"
+        },
+        {
+          "r": "6",
+          "s": "S"
+        },
+        {
+          "r": "7",
+          "s": "S"
+        },
+        {
+          "r": "8",
+          "s": "S"
+        },
+        {
+          "r": "9",
+          "s": "S"
+        }
+      ],
+      "type": "Challenge Deck"
+    },
+    "id": "c_mad_world_1",
+    "jokers": [
+      {
+        "edition": "negative",
+        "eternal": true,
+        "id": "j_pareidolia"
+      },
+      {
+        "eternal": true,
+        "id": "j_business"
+      }
+    ],
+    "name": "Mad World",
+    "restrictions": {
+      "banned_cards": [],
+      "banned_other": [
+        {
+          "id": "bl_plant",
+          "type": "blind"
+        }
+      ],
+      "banned_tags": []
+    },
+    "rules": {
+      "custom": [
+        {
+          "id": "no_extra_hand_money"
+        },
+        {
+          "id": "no_interest"
+        }
+      ],
+      "modifiers": []
+    },
+    "vouchers": []
+  },
+  {
+    "consumeables": [],
+    "deck": {
+      "type": "Challenge Deck"
+    },
+    "id": "c_luxury_1",
+    "jokers": [],
+    "name": "Luxury Tax",
+    "restrictions": {
+      "banned_cards": [],
+      "banned_other": [],
+      "banned_tags": []
+    },
+    "rules": {
+      "custom": [
+        {
+          "id": "minus_hand_size_per_X_dollar",
+          "value": 5
+        }
+      ],
+      "modifiers": [
+        {
+          "id": "hand_size",
+          "value": 10
+        }
+      ]
+    },
+    "vouchers": []
+  },
+  {
+    "consumeables": [],
+    "deck": {
+      "type": "Challenge Deck"
+    },
+    "id": "c_non_perishable_1",
+    "jokers": [],
+    "name": "Non-Perishable",
+    "restrictions": {
+      "banned_cards": [
+        {
+          "id": "j_gros_michel"
+        },
+        {
+          "id": "j_ice_cream"
+        },
+        {
+          "id": "j_cavendish"
+        },
+        {
+          "id": "j_turtle_bean"
+        },
+        {
+          "id": "j_ramen"
+        },
+        {
+          "id": "j_diet_cola"
+        },
+        {
+          "id": "j_selzer"
+        },
+        {
+          "id": "j_popcorn"
+        },
+        {
+          "id": "j_mr_bones"
+        },
+        {
+          "id": "j_invisible"
+        },
+        {
+          "id": "j_luchador"
+        }
+      ],
+      "banned_other": [
+        {
+          "id": "bl_final_leaf",
+          "type": "blind"
+        }
+      ],
+      "banned_tags": []
+    },
+    "rules": {
+      "custom": [
+        {
+          "id": "all_eternal"
+        }
+      ],
+      "modifiers": []
+    },
+    "vouchers": []
+  },
+  {
+    "consumeables": [],
+    "deck": {
+      "cards": [
+        {
+          "r": "2",
+          "s": "D"
+        },
+        {
+          "r": "3",
+          "s": "D"
+        },
+        {
+          "r": "4",
+          "s": "D"
+        },
+        {
+          "r": "5",
+          "s": "D"
+        },
+        {
+          "r": "6",
+          "s": "D"
+        },
+        {
+          "r": "7",
+          "s": "D"
+        },
+        {
+          "r": "8",
+          "s": "D"
+        },
+        {
+          "r": "9",
+          "s": "D"
+        },
+        {
+          "r": "T",
+          "s": "D"
+        },
+        {
+          "e": "m_stone",
+          "r": "J",
+          "s": "D"
+        },
+        {
+          "e": "m_stone",
+          "r": "Q",
+          "s": "D"
+        },
+        {
+          "e": "m_stone",
+          "r": "K",
+          "s": "D"
+        },
+        {
+          "r": "A",
+          "s": "D"
+        },
+        {
+          "r": "2",
+          "s": "C"
+        },
+        {
+          "r": "3",
+          "s": "C"
+        },
+        {
+          "r": "4",
+          "s": "C"
+        },
+        {
+          "r": "5",
+          "s": "C"
+        },
+        {
+          "r": "6",
+          "s": "C"
+        },
+        {
+          "r": "7",
+          "s": "C"
+        },
+        {
+          "r": "8",
+          "s": "C"
+        },
+        {
+          "r": "9",
+          "s": "C"
+        },
+        {
+          "r": "T",
+          "s": "C"
+        },
+        {
+          "e": "m_stone",
+          "r": "J",
+          "s": "C"
+        },
+        {
+          "e": "m_stone",
+          "r": "Q",
+          "s": "C"
+        },
+        {
+          "e": "m_stone",
+          "r": "K",
+          "s": "C"
+        },
+        {
+          "r": "A",
+          "s": "C"
+        },
+        {
+          "r": "2",
+          "s": "H"
+        },
+        {
+          "r": "3",
+          "s": "H"
+        },
+        {
+          "r": "4",
+          "s": "H"
+        },
+        {
+          "r": "5",
+          "s": "H"
+        },
+        {
+          "r": "6",
+          "s": "H"
+        },
+        {
+          "r": "7",
+          "s": "H"
+        },
+        {
+          "r": "8",
+          "s": "H"
+        },
+        {
+          "r": "9",
+          "s": "H"
+        },
+        {
+          "r": "T",
+          "s": "H"
+        },
+        {
+          "e": "m_stone",
+          "r": "J",
+          "s": "H"
+        },
+        {
+          "e": "m_stone",
+          "r": "Q",
+          "s": "H"
+        },
+        {
+          "e": "m_stone",
+          "r": "K",
+          "s": "H"
+        },
+        {
+          "r": "A",
+          "s": "H"
+        },
+        {
+          "r": "2",
+          "s": "S"
+        },
+        {
+          "r": "3",
+          "s": "S"
+        },
+        {
+          "r": "4",
+          "s": "S"
+        },
+        {
+          "r": "5",
+          "s": "S"
+        },
+        {
+          "r": "6",
+          "s": "S"
+        },
+        {
+          "r": "7",
+          "s": "S"
+        },
+        {
+          "r": "8",
+          "s": "S"
+        },
+        {
+          "r": "9",
+          "s": "S"
+        },
+        {
+          "r": "T",
+          "s": "S"
+        },
+        {
+          "e": "m_stone",
+          "r": "J",
+          "s": "S"
+        },
+        {
+          "e": "m_stone",
+          "r": "Q",
+          "s": "S"
+        },
+        {
+          "e": "m_stone",
+          "r": "K",
+          "s": "S"
+        },
+        {
+          "r": "A",
+          "s": "S"
+        }
+      ],
+      "type": "Challenge Deck"
+    },
+    "id": "c_medusa_1",
+    "jokers": [
+      {
+        "eternal": true,
+        "id": "j_marble"
+      }
+    ],
+    "name": "Medusa",
+    "restrictions": {
+      "banned_cards": [],
+      "banned_other": [],
+      "banned_tags": []
+    },
+    "rules": {
+      "custom": [],
+      "modifiers": []
+    },
+    "vouchers": []
+  },
+  {
+    "consumeables": [],
+    "deck": {
+      "cards": [
+        {
+          "g": "Red",
+          "r": "2",
+          "s": "D"
+        },
+        {
+          "g": "Red",
+          "r": "3",
+          "s": "D"
+        },
+        {
+          "g": "Red",
+          "r": "4",
+          "s": "D"
+        },
+        {
+          "g": "Red",
+          "r": "5",
+          "s": "D"
+        },
+        {
+          "g": "Red",
+          "r": "6",
+          "s": "D"
+        },
+        {
+          "g": "Red",
+          "r": "7",
+          "s": "D"
+        },
+        {
+          "g": "Red",
+          "r": "8",
+          "s": "D"
+        },
+        {
+          "g": "Red",
+          "r": "9",
+          "s": "D"
+        },
+        {
+          "g": "Red",
+          "r": "T",
+          "s": "D"
+        },
+        {
+          "g": "Red",
+          "r": "J",
+          "s": "D"
+        },
+        {
+          "g": "Red",
+          "r": "Q",
+          "s": "D"
+        },
+        {
+          "g": "Red",
+          "r": "K",
+          "s": "D"
+        },
+        {
+          "g": "Red",
+          "r": "A",
+          "s": "D"
+        },
+        {
+          "g": "Red",
+          "r": "2",
+          "s": "C"
+        },
+        {
+          "g": "Red",
+          "r": "3",
+          "s": "C"
+        },
+        {
+          "g": "Red",
+          "r": "4",
+          "s": "C"
+        },
+        {
+          "g": "Red",
+          "r": "5",
+          "s": "C"
+        },
+        {
+          "g": "Red",
+          "r": "6",
+          "s": "C"
+        },
+        {
+          "g": "Red",
+          "r": "7",
+          "s": "C"
+        },
+        {
+          "g": "Red",
+          "r": "8",
+          "s": "C"
+        },
+        {
+          "g": "Red",
+          "r": "9",
+          "s": "C"
+        },
+        {
+          "g": "Red",
+          "r": "T",
+          "s": "C"
+        },
+        {
+          "g": "Red",
+          "r": "J",
+          "s": "C"
+        },
+        {
+          "g": "Red",
+          "r": "Q",
+          "s": "C"
+        },
+        {
+          "g": "Red",
+          "r": "K",
+          "s": "C"
+        },
+        {
+          "g": "Red",
+          "r": "A",
+          "s": "C"
+        },
+        {
+          "g": "Red",
+          "r": "2",
+          "s": "H"
+        },
+        {
+          "g": "Red",
+          "r": "3",
+          "s": "H"
+        },
+        {
+          "g": "Red",
+          "r": "4",
+          "s": "H"
+        },
+        {
+          "g": "Red",
+          "r": "5",
+          "s": "H"
+        },
+        {
+          "g": "Red",
+          "r": "6",
+          "s": "H"
+        },
+        {
+          "g": "Red",
+          "r": "7",
+          "s": "H"
+        },
+        {
+          "g": "Red",
+          "r": "8",
+          "s": "H"
+        },
+        {
+          "g": "Red",
+          "r": "9",
+          "s": "H"
+        },
+        {
+          "g": "Red",
+          "r": "T",
+          "s": "H"
+        },
+        {
+          "g": "Red",
+          "r": "J",
+          "s": "H"
+        },
+        {
+          "g": "Red",
+          "r": "Q",
+          "s": "H"
+        },
+        {
+          "g": "Red",
+          "r": "K",
+          "s": "H"
+        },
+        {
+          "g": "Red",
+          "r": "A",
+          "s": "H"
+        },
+        {
+          "g": "Red",
+          "r": "2",
+          "s": "S"
+        },
+        {
+          "g": "Red",
+          "r": "3",
+          "s": "S"
+        },
+        {
+          "g": "Red",
+          "r": "4",
+          "s": "S"
+        },
+        {
+          "g": "Red",
+          "r": "5",
+          "s": "S"
+        },
+        {
+          "g": "Red",
+          "r": "6",
+          "s": "S"
+        },
+        {
+          "g": "Red",
+          "r": "7",
+          "s": "S"
+        },
+        {
+          "g": "Red",
+          "r": "8",
+          "s": "S"
+        },
+        {
+          "g": "Red",
+          "r": "9",
+          "s": "S"
+        },
+        {
+          "g": "Red",
+          "r": "T",
+          "s": "S"
+        },
+        {
+          "g": "Red",
+          "r": "J",
+          "s": "S"
+        },
+        {
+          "g": "Red",
+          "r": "Q",
+          "s": "S"
+        },
+        {
+          "g": "Red",
+          "r": "K",
+          "s": "S"
+        },
+        {
+          "g": "Red",
+          "r": "A",
+          "s": "S"
+        }
+      ],
+      "type": "Challenge Deck"
+    },
+    "id": "c_double_nothing_1",
+    "jokers": [],
+    "name": "Double or Nothing",
+    "restrictions": {
+      "banned_cards": [],
+      "banned_other": [],
+      "banned_tags": []
+    },
+    "rules": {
+      "custom": [
+        {
+          "id": "debuff_played_cards"
+        }
+      ],
+      "modifiers": []
+    },
+    "vouchers": []
+  },
+  {
+    "consumeables": [],
+    "deck": {
+      "type": "Challenge Deck"
+    },
+    "id": "c_typecast_1",
+    "jokers": [],
+    "name": "Typecast",
+    "restrictions": {
+      "banned_cards": [],
+      "banned_other": [
+        {
+          "id": "bl_final_leaf",
+          "type": "blind"
+        }
+      ],
+      "banned_tags": []
+    },
+    "rules": {
+      "custom": [
+        {
+          "id": "set_eternal_ante",
+          "value": 4
+        },
+        {
+          "id": "set_joker_slots_ante",
+          "value": 4
+        }
+      ],
+      "modifiers": []
+    },
+    "vouchers": []
+  },
+  {
+    "consumeables": [],
+    "deck": {
+      "type": "Challenge Deck"
+    },
+    "id": "c_inflation_1",
+    "jokers": [
+      {
+        "id": "j_credit_card"
+      }
+    ],
+    "name": "Inflation",
+    "restrictions": {
+      "banned_cards": [
+        {
+          "id": "v_clearance_sale"
+        },
+        {
+          "id": "v_liquidation"
+        }
+      ],
+      "banned_other": [],
+      "banned_tags": []
+    },
+    "rules": {
+      "custom": [
+        {
+          "id": "inflation"
+        }
+      ],
+      "modifiers": []
+    },
+    "vouchers": []
+  },
+  {
+    "consumeables": [
+      {
+        "id": "c_empress"
+      },
+      {
+        "id": "c_emperor"
+      }
+    ],
+    "deck": {
+      "type": "Challenge Deck"
+    },
+    "id": "c_bram_poker_1",
+    "jokers": [
+      {
+        "eternal": true,
+        "id": "j_vampire"
+      }
+    ],
+    "name": "Bram Poker",
+    "restrictions": {
+      "banned_cards": [],
+      "banned_other": [],
+      "banned_tags": []
+    },
+    "rules": {
+      "custom": [
+        {
+          "id": "no_shop_jokers"
+        }
+      ],
+      "modifiers": []
+    },
+    "vouchers": [
+      {
+        "id": "v_magic_trick"
+      },
+      {
+        "id": "v_illusion"
+      }
+    ]
+  },
+  {
+    "consumeables": [],
+    "deck": {
+      "cards": [
+        {
+          "e": "m_glass",
+          "r": "2",
+          "s": "D"
+        },
+        {
+          "e": "m_glass",
+          "r": "3",
+          "s": "D"
+        },
+        {
+          "e": "m_glass",
+          "r": "4",
+          "s": "D"
+        },
+        {
+          "e": "m_glass",
+          "r": "5",
+          "s": "D"
+        },
+        {
+          "e": "m_glass",
+          "r": "6",
+          "s": "D"
+        },
+        {
+          "e": "m_glass",
+          "r": "7",
+          "s": "D"
+        },
+        {
+          "e": "m_glass",
+          "r": "8",
+          "s": "D"
+        },
+        {
+          "e": "m_glass",
+          "r": "9",
+          "s": "D"
+        },
+        {
+          "e": "m_glass",
+          "r": "T",
+          "s": "D"
+        },
+        {
+          "e": "m_glass",
+          "r": "J",
+          "s": "D"
+        },
+        {
+          "e": "m_glass",
+          "r": "Q",
+          "s": "D"
+        },
+        {
+          "e": "m_glass",
+          "r": "K",
+          "s": "D"
+        },
+        {
+          "e": "m_glass",
+          "r": "A",
+          "s": "D"
+        },
+        {
+          "e": "m_glass",
+          "r": "2",
+          "s": "C"
+        },
+        {
+          "e": "m_glass",
+          "r": "3",
+          "s": "C"
+        },
+        {
+          "e": "m_glass",
+          "r": "4",
+          "s": "C"
+        },
+        {
+          "e": "m_glass",
+          "r": "5",
+          "s": "C"
+        },
+        {
+          "e": "m_glass",
+          "r": "6",
+          "s": "C"
+        },
+        {
+          "e": "m_glass",
+          "r": "7",
+          "s": "C"
+        },
+        {
+          "e": "m_glass",
+          "r": "8",
+          "s": "C"
+        },
+        {
+          "e": "m_glass",
+          "r": "9",
+          "s": "C"
+        },
+        {
+          "e": "m_glass",
+          "r": "T",
+          "s": "C"
+        },
+        {
+          "e": "m_glass",
+          "r": "J",
+          "s": "C"
+        },
+        {
+          "e": "m_glass",
+          "r": "Q",
+          "s": "C"
+        },
+        {
+          "e": "m_glass",
+          "r": "K",
+          "s": "C"
+        },
+        {
+          "e": "m_glass",
+          "r": "A",
+          "s": "C"
+        },
+        {
+          "e": "m_glass",
+          "r": "2",
+          "s": "H"
+        },
+        {
+          "e": "m_glass",
+          "r": "3",
+          "s": "H"
+        },
+        {
+          "e": "m_glass",
+          "r": "4",
+          "s": "H"
+        },
+        {
+          "e": "m_glass",
+          "r": "5",
+          "s": "H"
+        },
+        {
+          "e": "m_glass",
+          "r": "6",
+          "s": "H"
+        },
+        {
+          "e": "m_glass",
+          "r": "7",
+          "s": "H"
+        },
+        {
+          "e": "m_glass",
+          "r": "8",
+          "s": "H"
+        },
+        {
+          "e": "m_glass",
+          "r": "9",
+          "s": "H"
+        },
+        {
+          "e": "m_glass",
+          "r": "T",
+          "s": "H"
+        },
+        {
+          "e": "m_glass",
+          "r": "J",
+          "s": "H"
+        },
+        {
+          "e": "m_glass",
+          "r": "Q",
+          "s": "H"
+        },
+        {
+          "e": "m_glass",
+          "r": "K",
+          "s": "H"
+        },
+        {
+          "e": "m_glass",
+          "r": "A",
+          "s": "H"
+        },
+        {
+          "e": "m_glass",
+          "r": "2",
+          "s": "S"
+        },
+        {
+          "e": "m_glass",
+          "r": "3",
+          "s": "S"
+        },
+        {
+          "e": "m_glass",
+          "r": "4",
+          "s": "S"
+        },
+        {
+          "e": "m_glass",
+          "r": "5",
+          "s": "S"
+        },
+        {
+          "e": "m_glass",
+          "r": "6",
+          "s": "S"
+        },
+        {
+          "e": "m_glass",
+          "r": "7",
+          "s": "S"
+        },
+        {
+          "e": "m_glass",
+          "r": "8",
+          "s": "S"
+        },
+        {
+          "e": "m_glass",
+          "r": "9",
+          "s": "S"
+        },
+        {
+          "e": "m_glass",
+          "r": "T",
+          "s": "S"
+        },
+        {
+          "e": "m_glass",
+          "r": "J",
+          "s": "S"
+        },
+        {
+          "e": "m_glass",
+          "r": "Q",
+          "s": "S"
+        },
+        {
+          "e": "m_glass",
+          "r": "K",
+          "s": "S"
+        },
+        {
+          "e": "m_glass",
+          "r": "A",
+          "s": "S"
+        }
+      ],
+      "type": "Challenge Deck"
+    },
+    "id": "c_fragile_1",
+    "jokers": [
+      {
+        "edition": "negative",
+        "eternal": true,
+        "id": "j_oops"
+      },
+      {
+        "edition": "negative",
+        "eternal": true,
+        "id": "j_oops"
+      }
+    ],
+    "name": "Fragile",
+    "restrictions": {
+      "banned_cards": [
+        {
+          "id": "c_magician"
+        },
+        {
+          "id": "c_empress"
+        },
+        {
+          "id": "c_heirophant"
+        },
+        {
+          "id": "c_chariot"
+        },
+        {
+          "id": "c_devil"
+        },
+        {
+          "id": "c_tower"
+        },
+        {
+          "id": "c_lovers"
+        },
+        {
+          "id": "c_incantation"
+        },
+        {
+          "id": "c_grim"
+        },
+        {
+          "id": "c_familiar"
+        },
+        {
+          "id": "p_standard_normal_1",
+          "ids": [
+            "p_standard_normal_1",
+            "p_standard_normal_2",
+            "p_standard_normal_3",
+            "p_standard_normal_4",
+            "p_standard_jumbo_1",
+            "p_standard_jumbo_2",
+            "p_standard_mega_1",
+            "p_standard_mega_2"
+          ]
+        },
+        {
+          "id": "j_marble"
+        },
+        {
+          "id": "j_vampire"
+        },
+        {
+          "id": "j_midas_mask"
+        },
+        {
+          "id": "j_certificate"
+        },
+        {
+          "id": "v_magic_trick"
+        },
+        {
+          "id": "v_illusion"
+        }
+      ],
+      "banned_other": [],
+      "banned_tags": [
+        {
+          "id": "tag_standard"
+        }
+      ]
+    },
+    "rules": {
+      "custom": [],
+      "modifiers": []
+    },
+    "vouchers": []
+  },
+  {
+    "consumeables": [],
+    "deck": {
+      "type": "Challenge Deck"
+    },
+    "id": "c_monolith_1",
+    "jokers": [
+      {
+        "eternal": true,
+        "id": "j_obelisk"
+      },
+      {
+        "edition": "negative",
+        "eternal": true,
+        "id": "j_marble"
+      }
+    ],
+    "name": "Monolith",
+    "restrictions": {
+      "banned_cards": [],
+      "banned_other": [],
+      "banned_tags": []
+    },
+    "rules": {
+      "custom": [],
+      "modifiers": []
+    },
+    "vouchers": []
+  },
+  {
+    "consumeables": [],
+    "deck": {
+      "type": "Challenge Deck"
+    },
+    "id": "c_blast_off_1",
+    "jokers": [
+      {
+        "eternal": true,
+        "id": "j_constellation"
+      },
+      {
+        "eternal": true,
+        "id": "j_rocket"
+      }
+    ],
+    "name": "Blast Off",
+    "restrictions": {
+      "banned_cards": [
+        {
+          "id": "v_grabber"
+        },
+        {
+          "id": "v_nacho_tong"
+        },
+        {
+          "id": "j_burglar"
+        }
+      ],
+      "banned_other": [],
+      "banned_tags": []
+    },
+    "rules": {
+      "custom": [],
+      "modifiers": [
+        {
+          "id": "hands",
+          "value": 2
+        },
+        {
+          "id": "discards",
+          "value": 2
+        },
+        {
+          "id": "joker_slots",
+          "value": 4
+        }
+      ]
+    },
+    "vouchers": [
+      {
+        "id": "v_planet_merchant"
+      },
+      {
+        "id": "v_planet_tycoon"
+      }
+    ]
+  },
+  {
+    "consumeables": [],
+    "deck": {
+      "type": "Challenge Deck"
+    },
+    "id": "c_five_card_1",
+    "jokers": [
+      {
+        "id": "j_card_sharp"
+      },
+      {
+        "id": "j_joker"
+      }
+    ],
+    "name": "Five-Card Draw",
+    "restrictions": {
+      "banned_cards": [
+        {
+          "id": "j_juggler"
+        },
+        {
+          "id": "j_troubadour"
+        },
+        {
+          "id": "j_turtle_bean"
+        }
+      ],
+      "banned_other": [],
+      "banned_tags": []
+    },
+    "rules": {
+      "custom": [],
+      "modifiers": [
+        {
+          "id": "hand_size",
+          "value": 5
+        },
+        {
+          "id": "joker_slots",
+          "value": 7
+        },
+        {
+          "id": "discards",
+          "value": 6
+        }
+      ]
+    },
+    "vouchers": []
+  },
+  {
+    "consumeables": [],
+    "deck": {
+      "type": "Challenge Deck"
+    },
+    "id": "c_golden_needle_1",
+    "jokers": [
+      {
+        "id": "j_credit_card"
+      }
+    ],
+    "name": "Golden Needle",
+    "restrictions": {
+      "banned_cards": [
+        {
+          "id": "v_grabber"
+        },
+        {
+          "id": "v_nacho_tong"
+        },
+        {
+          "id": "j_burglar"
+        }
+      ],
+      "banned_other": [],
+      "banned_tags": []
+    },
+    "rules": {
+      "custom": [
+        {
+          "id": "discard_cost",
+          "value": 1
+        }
+      ],
+      "modifiers": [
+        {
+          "id": "hands",
+          "value": 1
+        },
+        {
+          "id": "discards",
+          "value": 6
+        },
+        {
+          "id": "dollars",
+          "value": 10
+        }
+      ]
+    },
+    "vouchers": []
+  },
+  {
+    "consumeables": [],
+    "deck": {
+      "type": "Challenge Deck"
+    },
+    "id": "c_cruelty_1",
+    "jokers": [],
+    "name": "Cruelty",
+    "restrictions": {
+      "banned_cards": [],
+      "banned_other": [],
+      "banned_tags": []
+    },
+    "rules": {
+      "custom": [
+        {
+          "id": "no_reward_specific",
+          "value": "Small"
+        },
+        {
+          "id": "no_reward_specific",
+          "value": "Big"
+        }
+      ],
+      "modifiers": [
+        {
+          "id": "joker_slots",
+          "value": 3
+        }
+      ]
+    },
+    "vouchers": []
+  },
+  {
+    "consumeables": [],
+    "deck": {
+      "type": "Challenge Deck"
+    },
+    "id": "c_jokerless_1",
+    "jokers": [],
+    "name": "Jokerless",
+    "restrictions": {
+      "banned_cards": [
+        {
+          "id": "c_judgement"
+        },
+        {
+          "id": "c_wraith"
+        },
+        {
+          "id": "c_soul"
+        },
+        {
+          "id": "v_antimatter"
+        },
+        {
+          "id": "p_buffoon_normal_1",
+          "ids": [
+            "p_buffoon_normal_1",
+            "p_buffoon_normal_2",
+            "p_buffoon_jumbo_1",
+            "p_buffoon_mega_1"
+          ]
+        }
+      ],
+      "banned_other": [
+        {
+          "id": "bl_final_acorn",
+          "type": "blind"
+        },
+        {
+          "id": "bl_final_heart",
+          "type": "blind"
+        },
+        {
+          "id": "bl_final_leaf",
+          "type": "blind"
+        }
+      ],
+      "banned_tags": [
+        {
+          "id": "tag_rare"
+        },
+        {
+          "id": "tag_uncommon"
+        },
+        {
+          "id": "tag_holo"
+        },
+        {
+          "id": "tag_polychrome"
+        },
+        {
+          "id": "tag_negative"
+        },
+        {
+          "id": "tag_foil"
+        },
+        {
+          "id": "tag_buffoon"
+        },
+        {
+          "id": "tag_top_up"
+        }
+      ]
+    },
+    "rules": {
+      "custom": [
+        {
+          "id": "no_shop_jokers"
+        }
+      ],
+      "modifiers": [
+        {
+          "id": "joker_slots",
+          "value": 0
+        }
+      ]
+    },
+    "vouchers": []
+  }
+]

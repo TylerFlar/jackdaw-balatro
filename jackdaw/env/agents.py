@@ -11,6 +11,7 @@ from jackdaw.env.action_space import (
     ActionMask,
     ActionType,
     FactoredAction,
+    get_consumable_target_info,
 )
 
 # ---------------------------------------------------------------------------
@@ -90,13 +91,9 @@ class RandomAgent:
             ActionType.PickPackCard: "pack_cards",
         }.get(ActionType(at))
         if source_key is not None and entity_target is not None:
-            gs = info.get("raw_state", {})
-            source = gs.get(source_key, [])
-            if entity_target < len(source):
-                from jackdaw.env.action_space import get_consumable_target_info
-
-                card = source[entity_target]
-                min_cards, max_cards, needs = get_consumable_target_info(card)
+            info_cards = _target_info(info, source_key, entity_target)
+            if info_cards is not None:
+                min_cards, max_cards, needs = info_cards
                 if needs:
                     legal_cards = np.nonzero(action_mask.card_mask)[0]
                     if len(legal_cards) >= min_cards:
@@ -110,6 +107,19 @@ class RandomAgent:
             card_target=card_target,
             entity_target=entity_target,
         )
+
+
+def _target_info(info: dict, area: str, index: int) -> tuple[int, int, bool] | None:
+    """``get_consumable_target_info`` for card ``index`` of ``area`` (``"consumables"`` or
+    ``"pack_cards"``) of the run in ``info["game"]``.  None without a run, or past the end
+    of the area."""
+    game = info.get("game")
+    if game is None:
+        return None
+    try:
+        return get_consumable_target_info(game, area, index)
+    except ValueError:  # no card there
+        return None
 
 
 __all__ = ["Agent", "RandomAgent"]

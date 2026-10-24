@@ -1,11 +1,11 @@
 """Factored action space for the RL agent.
 
-Converts between a 21-type factored action representation and the engine's
+Converts between a 23-type factored action representation and the engine's
 Action dataclasses.  The factored representation decomposes complex actions
 (arbitrary permutations, combinatorial card subsets) into tractable atomic
 operations that a policy network can learn.
 
-The 21 action types:
+The 23 action types (21 and 22 were appended, so 0-20 keep their indices):
 
 +-----+-------------------+---------------------------------------------------+
 | ID  | Name              | Targets                                           |
@@ -31,97 +31,40 @@ The 21 action types:
 | 18  | SwapHandRight     | entity_target (hand card index to swap right)     |
 | 19  | SortHandRank      | none                                              |
 | 20  | SortHandSuit      | none                                              |
+| 21  | RerollBoss        | none (Director's Cut / Retcon, $10)               |
+| 22  | BuyAndUse         | entity_target (shop card index)                   |
 +-----+-------------------+---------------------------------------------------+
+
+The masks, the conversions and the default card selections are computed by the
+Rust engine (``jackdaw._core``, wrapped in :mod:`jackdaw.env.rust_env`) for a
+:class:`jackdaw.core.Game`.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import Any
+from typing import TYPE_CHECKING
 
 import numpy as np
 
-from jackdaw.engine.actions import (
-    Action,
-    GamePhase,
-)
-from jackdaw.engine.actions import (
-    BuyCard as EngineBuyCard,
-)
-from jackdaw.engine.actions import (
-    CashOut as EngineCashOut,
-)
-from jackdaw.engine.actions import (
-    Discard as EngineDiscard,
-)
-from jackdaw.engine.actions import (
-    NextRound as EngineNextRound,
-)
-from jackdaw.engine.actions import (
-    OpenBooster as EngineOpenBooster,
-)
-from jackdaw.engine.actions import (
-    PickPackCard as EnginePickPackCard,
-)
-from jackdaw.engine.actions import (
-    PlayHand as EnginePlayHand,
-)
-from jackdaw.engine.actions import (
-    RedeemVoucher as EngineRedeemVoucher,
-)
-from jackdaw.engine.actions import (
-    Reroll as EngineReroll,
-)
-from jackdaw.engine.actions import (
-    SelectBlind as EngineSelectBlind,
-)
-from jackdaw.engine.actions import (
-    SellCard as EngineSellCard,
-)
-from jackdaw.engine.actions import (
-    SkipBlind as EngineSkipBlind,
-)
-from jackdaw.engine.actions import (
-    SkipPack as EngineSkipPack,
-)
-from jackdaw.engine.actions import (
-    SortHand as EngineSortHand,
-)
-from jackdaw.engine.actions import (
-    SwapHandLeft as EngineSwapHandLeft,
-)
-from jackdaw.engine.actions import (
-    SwapHandRight as EngineSwapHandRight,
-)
-from jackdaw.engine.actions import (
-    SwapJokersLeft as EngineSwapJokersLeft,
-)
-from jackdaw.engine.actions import (
-    SwapJokersRight as EngineSwapJokersRight,
-)
-from jackdaw.engine.actions import (
-    UseConsumable as EngineUseConsumable,
-)
-from jackdaw.engine.consumables import (
-    _resolve_consumable_config,
-    consumable_block_reason,
-    default_use_targets,
-    pack_pick_block_reason,
-)
-from jackdaw.engine.economy import can_afford, spendable_dollars
-from jackdaw.engine.game import forced_card_index
+from jackdaw import _core
+from jackdaw.core.game import Legality
+from jackdaw.engine.actions import Action
 from jackdaw.env.game_spec import FactoredAction  # noqa: F401 — re-export
+
+if TYPE_CHECKING:
+    from jackdaw.core import Game
 
 # ---------------------------------------------------------------------------
 # ActionType enum
 # ---------------------------------------------------------------------------
 
-NUM_ACTION_TYPES = 21
+NUM_ACTION_TYPES = 23
 
 
 class ActionType(IntEnum):
-    """The 21 factored action types for the RL agent."""
+    """The 23 factored action types for the RL agent."""
 
     PlayHand = 0
     Discard = 1
@@ -144,6 +87,31 @@ class ActionType(IntEnum):
     SwapHandRight = 18
     SortHandRank = 19
     SortHandSuit = 20
+    RerollBoss = 21
+    BuyAndUse = 22
+
+
+#: The action types that only reorder cards (joker and hand swaps, the hand sorts): the run
+#: doesn't move on, so the envs cap how many come in a row (``max_free_moves``).
+FREE_ACTION_TYPES: frozenset[ActionType] = frozenset(
+    {
+        ActionType.SwapJokersLeft,
+        ActionType.SwapJokersRight,
+        ActionType.SwapHandLeft,
+        ActionType.SwapHandRight,
+        ActionType.SortHandRank,
+        ActionType.SortHandSuit,
+    }
+)
+
+#: The action space's version: what the action types mean, which ones a mask allows where, and
+#: how the Gym action table is built. A policy is tied to the masks it was trained with, so this
+#: goes up whenever they change. 2 (jackdaw 0.2): reordering follows the game's drag and drop,
+#: and the envs cap consecutive free moves.
+ACTION_VERSION: int = _core.ACTION_VERSION
+
+#: The envs' default cap on free moves in a row (enough to put five jokers in any order).
+DEFAULT_MAX_FREE_MOVES: int = _core.DEFAULT_MAX_FREE_MOVES
 
 
 # ---------------------------------------------------------------------------
@@ -158,13 +126,13 @@ class ActionMask:
     Attributes
     ----------
     type_mask:
-        Shape ``(21,)`` bool array — which action types are legal.
+        Shape ``(23,)`` bool array — which action types are legal.
     card_mask:
         Shape ``(N_hand,)`` bool array — which hand cards can be selected
         (for PlayHand, Discard, UseConsumable with targeting).
     entity_masks:
         ``{action_type: np.ndarray}`` — for entity-targeted action types
-        (8–18), which specific entity indices are legal targets.
+        (8–18, 22), which specific entity indices are legal targets.
     max_card_select:
         Maximum cards that can be selected (5 for play/discard, varies
         for consumable targeting).
@@ -186,647 +154,48 @@ class ActionMask:
 
 
 # ---------------------------------------------------------------------------
-# get_action_mask
+# The Rust engine's masks and conversions
 # ---------------------------------------------------------------------------
 
 
-def get_action_mask(game_state: dict[str, Any]) -> ActionMask:
-    """Build the action mask from a game state dict.
+def get_action_mask(game: Game, legality: Legality = Legality.VANILLA) -> ActionMask:
+    """The action mask of a run's current state.
 
-    Parameters
-    ----------
-    game_state:
-        Full engine game state dict (same schema as
-        ``get_legal_actions`` expects).
-
-    Returns
-    -------
-    ActionMask
-        The complete mask structure for the current state.
+    ``legality`` :attr:`~Legality.BALATROBOT` narrows vanilla's actions to the
+    ones BalatroBot's endpoints execute (``docs/balatrobot.md``).
     """
-    phase = game_state.get("phase")
-    if isinstance(phase, str):
-        phase = GamePhase(phase)
+    from jackdaw.env.rust_env import action_mask
 
-    type_mask = np.zeros(NUM_ACTION_TYPES, dtype=bool)
-    entity_masks: dict[int, np.ndarray] = {}
-
-    hand = game_state.get("hand", [])
-    jokers = game_state.get("jokers", [])
-    consumables = game_state.get("consumables", [])
-    cr = game_state.get("current_round", {})
-
-    # Card mask: all hand cards are selectable by default
-    card_mask = np.ones(len(hand), dtype=bool) if hand else np.zeros(0, dtype=bool)
-
-    # Default card selection limits (play/discard)
-    max_card_select = 5
-    min_card_select = 1
-    forced_card: int | None = None
-
-    if phase is None or phase == GamePhase.GAME_OVER:
-        return ActionMask(type_mask, card_mask, entity_masks, max_card_select, min_card_select)
-
-    # --- BLIND_SELECT ---
-    # Selling is available wherever vanilla's sell button is live, which
-    # is everywhere except mid-scoring: Card:can_sell_card (card.lua:1640)
-    # has no state gate and the blind-select restriction is commented out
-    # in the source. Keep these call sites in step with
-    # _SELLABLE_PHASES in game.py or the mask and executor will drift.
-    if phase == GamePhase.BLIND_SELECT:
-        type_mask[ActionType.SelectBlind] = True
-        blind_on_deck = game_state.get("blind_on_deck", "Small")
-        if blind_on_deck in ("Small", "Big"):
-            type_mask[ActionType.SkipBlind] = True
-        _mask_sell_jokers(type_mask, entity_masks, jokers)
-        _mask_sell_consumables(type_mask, entity_masks, consumables)
-        _mask_consumables(type_mask, entity_masks, game_state)
-
-    # --- SELECTING_HAND ---
-    elif phase == GamePhase.SELECTING_HAND:
-        if hand and cr.get("hands_left", 0) > 0:
-            type_mask[ActionType.PlayHand] = True
-        if hand and cr.get("discards_left", 0) > 0:
-            type_mask[ActionType.Discard] = True
-        # The same check the play/discard executors raise on.
-        forced_card = forced_card_index(hand)
-        if len(hand) > 1:
-            type_mask[ActionType.SortHandRank] = True
-            type_mask[ActionType.SortHandSuit] = True
-            _mask_hand_swaps(type_mask, entity_masks, hand)
-        _mask_joker_swaps(type_mask, entity_masks, jokers)
-        _mask_sell_jokers(type_mask, entity_masks, jokers)
-        _mask_sell_consumables(type_mask, entity_masks, consumables)
-        _mask_consumables(type_mask, entity_masks, game_state)
-
-    # --- ROUND_EVAL ---
-    elif phase == GamePhase.ROUND_EVAL:
-        type_mask[ActionType.CashOut] = True
-        _mask_consumables(type_mask, entity_masks, game_state)
-
-    # --- SHOP ---
-    elif phase == GamePhase.SHOP:
-        _mask_shop_buy(type_mask, entity_masks, game_state)
-        _mask_sell_jokers(type_mask, entity_masks, jokers)
-        _mask_sell_consumables(type_mask, entity_masks, consumables)
-        _mask_consumables(type_mask, entity_masks, game_state)
-        _mask_vouchers(type_mask, entity_masks, game_state)
-        _mask_boosters(type_mask, entity_masks, game_state)
-
-        # Reroll
-        reroll_cost = cr.get("reroll_cost", 5)
-        free_rerolls = cr.get("free_rerolls", 0)
-        if free_rerolls > 0 or can_afford(game_state, reroll_cost):
-            type_mask[ActionType.Reroll] = True
-
-        type_mask[ActionType.NextRound] = True
-        _mask_joker_swaps(type_mask, entity_masks, jokers)
-
-    # --- PACK_OPENING ---
-    elif phase == GamePhase.PACK_OPENING:
-        pack_cards = game_state.get("pack_cards", [])
-        remaining = game_state.get("pack_choices_remaining", 0)
-        # NOTE: Spectral packs were once excluded here wholesale, on the
-        # grounds that balatrobot cannot express Spectral card
-        # highlighting over RPC.  That is a LIVE-ORACLE limitation, not a
-        # rule of the game: ``_pick_pack_card`` deals a targeting hand for
-        # Spectral packs (game.py:1427) and accepts their picks.  Masking
-        # them here made every Spectral pack skip-only for every agent —
-        # the same mask-vs-step() disagreement class as bugs #71/#72, and
-        # the most valuable pack in the game.  The lockstep policy now
-        # carries the veto (``pick:spectral(balatrobot-no-highlight)``),
-        # which is where oracle constraints belong.
-        if remaining > 0 and pack_cards:
-            # Vanilla greys out a pack card with nowhere to go: a Joker
-            # without a free slot (button_callbacks.lua:2112), and a creator
-            # consumable without room for what it makes
-            # (can_use_consumeable, card.lua:1550-1563).  This is the same
-            # helper the PickPackCard executor raises on, so the mask can
-            # never offer a pick that step() then rejects.
-            pick_mask = np.array(
-                [pack_pick_block_reason(card, game_state) is None for card in pack_cards],
-                dtype=bool,
-            )
-            if pick_mask.any():
-                type_mask[ActionType.PickPackCard] = True
-                entity_masks[ActionType.PickPackCard] = pick_mask
-        type_mask[ActionType.SkipPack] = True
-        _mask_sell_jokers(type_mask, entity_masks, jokers)
-        _mask_sell_consumables(type_mask, entity_masks, consumables)
-        # Owned consumables stay usable while a pack is open; an Arcana or
-        # Spectral pack's dealt hand is their target.  The pick is not
-        # spent (button_callbacks.lua:2269: a G.consumeables use just
-        # restores the pack).
-        _mask_consumables(type_mask, entity_masks, game_state)
-
-    return ActionMask(
-        type_mask, card_mask, entity_masks, max_card_select, min_card_select, forced_card
-    )
+    return action_mask(game, legality)
 
 
-# ---------------------------------------------------------------------------
-# Mask helpers
-# ---------------------------------------------------------------------------
+def get_consumable_target_info(game: Game, area: str, index: int) -> tuple[int, int, bool]:
+    """``(min_cards, max_cards, needs_targets)`` for the consumable at ``index`` of ``area``
+    (``"consumables"`` or ``"pack_cards"``): how many hand cards a policy picks as its
+    ``card_target``.  If ``needs_targets`` is False, ``card_target`` should be ``None``.
+    Raises ``ValueError`` past the end of the area."""
+    from jackdaw.env.rust_env import consumable_target_info
+
+    return consumable_target_info(game, area, index)
 
 
-def _mask_shop_buy(
-    type_mask: np.ndarray,
-    entity_masks: dict[int, np.ndarray],
-    gs: dict[str, Any],
-) -> None:
-    """Set BuyCard mask for affordable shop cards with available slots."""
-    shop_cards = gs.get("shop_cards", [])
-    if not shop_cards:
-        return
-    jokers = gs.get("jokers", [])
-    joker_slots = gs.get("joker_slots", 5)
-    consumables = gs.get("consumables", [])
-    consumable_slots = gs.get("consumable_slots", 2)
+def factored_to_engine_action(fa: FactoredAction, game: Game) -> Action:
+    """The engine action a factored action stands for in a run's current state.
 
-    mask = np.zeros(len(shop_cards), dtype=bool)
-    for i, card in enumerate(shop_cards):
-        if not can_afford(gs, card.cost):
-            continue
-        card_set = card.ability.get("set", "") if isinstance(card.ability, dict) else ""
-        # check_for_buy_space (button_callbacks.lua:2392) raises the limit by
-        # one for a Negative card on BOTH branches — a Negative consumable is
-        # buyable at full slots exactly like a Negative joker.
-        is_negative = bool(isinstance(card.edition, dict) and card.edition.get("negative"))
-        bonus = 1 if is_negative else 0
-        if card_set == "Joker":
-            if len(jokers) >= joker_slots + bonus:
-                continue
-        elif card_set in ("Tarot", "Planet", "Spectral"):
-            if len(consumables) >= consumable_slots + bonus:
-                continue
-        mask[i] = True
-
-    if mask.any():
-        type_mask[ActionType.BuyCard] = True
-        entity_masks[ActionType.BuyCard] = mask
-
-
-def _mask_sell_jokers(
-    type_mask: np.ndarray,
-    entity_masks: dict[int, np.ndarray],
-    jokers: list,
-) -> None:
-    """Set SellJoker mask for non-eternal jokers."""
-    if not jokers:
-        return
-    mask = np.array([not j.eternal for j in jokers], dtype=bool)
-    if mask.any():
-        type_mask[ActionType.SellJoker] = True
-        entity_masks[ActionType.SellJoker] = mask
-
-
-def _mask_sell_consumables(
-    type_mask: np.ndarray,
-    entity_masks: dict[int, np.ndarray],
-    consumables: list,
-) -> None:
-    """Set SellConsumable mask — all consumables are sellable."""
-    if not consumables:
-        return
-    type_mask[ActionType.SellConsumable] = True
-    entity_masks[ActionType.SellConsumable] = np.ones(len(consumables), dtype=bool)
-
-
-def _mask_consumables(
-    type_mask: np.ndarray,
-    entity_masks: dict[int, np.ndarray],
-    gs: dict[str, Any],
-) -> None:
-    """Set UseConsumable mask: consumables usable now with some selection.
-
-    Judged by :func:`~jackdaw.engine.consumables.consumable_block_reason`
-    against the default selection, so a targeting tarot is offered
-    whenever the hand can satisfy it — the policy picks the cards, or
-    :func:`factored_to_engine_action` falls back to that default.
+    A UseConsumable, PickPackCard or BuyAndUse without a ``card_target`` gets the
+    default selection the mask judged legal (the lowest-index legal cards).  Raises
+    ``ValueError`` when the action lacks a target its type needs.
     """
-    consumables = gs.get("consumables", [])
-    if not consumables:
-        return
-    mask = np.array(
-        [consumable_block_reason(card, gs) is None for card in consumables],
-        dtype=bool,
-    )
-    if mask.any():
-        type_mask[ActionType.UseConsumable] = True
-        entity_masks[ActionType.UseConsumable] = mask
+    from jackdaw.env.rust_env import factored_to_engine_action as convert
+
+    return convert(fa, game)
 
 
-def _mask_vouchers(
-    type_mask: np.ndarray,
-    entity_masks: dict[int, np.ndarray],
-    gs: dict[str, Any],
-) -> None:
-    """Set RedeemVoucher mask for affordable vouchers.
+def engine_action_to_factored(action: Action) -> FactoredAction:
+    """The factored form of an engine action (the conversion reads no state).
 
-    ``can_redeem`` has no free-item exemption, unlike buy/open/reroll.
+    Raises ``ValueError`` for an action with no factored form.
     """
-    vouchers = gs.get("shop_vouchers", [])
-    if not vouchers:
-        return
-    spendable = spendable_dollars(gs)
-    mask = np.array([v.cost <= spendable for v in vouchers], dtype=bool)
-    if mask.any():
-        type_mask[ActionType.RedeemVoucher] = True
-        entity_masks[ActionType.RedeemVoucher] = mask
+    from jackdaw.env.rust_env import engine_action_to_factored as convert
 
-
-def _mask_boosters(
-    type_mask: np.ndarray,
-    entity_masks: dict[int, np.ndarray],
-    gs: dict[str, Any],
-) -> None:
-    """Set OpenBooster mask for affordable boosters."""
-    boosters = gs.get("shop_boosters", [])
-    if not boosters:
-        return
-    mask = np.array([can_afford(gs, b.cost) for b in boosters], dtype=bool)
-    if mask.any():
-        type_mask[ActionType.OpenBooster] = True
-        entity_masks[ActionType.OpenBooster] = mask
-
-
-def _mask_joker_swaps(
-    type_mask: np.ndarray,
-    entity_masks: dict[int, np.ndarray],
-    jokers: list,
-) -> None:
-    """Set SwapJokersLeft/Right masks."""
-    n = len(jokers)
-    if n <= 1:
-        return
-    # SwapJokersLeft: all except index 0 (can't swap leftward from first position)
-    left_mask = np.ones(n, dtype=bool)
-    left_mask[0] = False
-    type_mask[ActionType.SwapJokersLeft] = True
-    entity_masks[ActionType.SwapJokersLeft] = left_mask
-
-    # SwapJokersRight: all except last index
-    right_mask = np.ones(n, dtype=bool)
-    right_mask[n - 1] = False
-    type_mask[ActionType.SwapJokersRight] = True
-    entity_masks[ActionType.SwapJokersRight] = right_mask
-
-
-def _mask_hand_swaps(
-    type_mask: np.ndarray,
-    entity_masks: dict[int, np.ndarray],
-    hand: list,
-) -> None:
-    """Set SwapHandLeft/Right masks."""
-    n = len(hand)
-    if n <= 1:
-        return
-    left_mask = np.ones(n, dtype=bool)
-    left_mask[0] = False
-    type_mask[ActionType.SwapHandLeft] = True
-    entity_masks[ActionType.SwapHandLeft] = left_mask
-
-    right_mask = np.ones(n, dtype=bool)
-    right_mask[n - 1] = False
-    type_mask[ActionType.SwapHandRight] = True
-    entity_masks[ActionType.SwapHandRight] = right_mask
-
-
-# ---------------------------------------------------------------------------
-# Consumable targeting info
-# ---------------------------------------------------------------------------
-
-
-def get_consumable_target_info(
-    card: Any,
-) -> tuple[int, int, bool]:
-    """Return (min_cards, max_cards, needs_targets) for a consumable.
-
-    Used by the policy network to know how many card targets to sample
-    after selecting a consumable.
-
-    Parameters
-    ----------
-    card:
-        A Card object with ``center_key`` and ``ability`` attributes.
-
-    Returns
-    -------
-    tuple[int, int, bool]
-        ``(min_cards, max_cards, needs_targets)``.  If ``needs_targets``
-        is False, ``card_target`` should be ``None``.
-    """
-    cfg = _resolve_consumable_config(card)
-    max_h = cfg.get("max_highlighted")
-    if not max_h:
-        return (0, 0, False)
-    min_h = cfg.get("min_highlighted", 1)
-    mod_num = cfg.get("mod_num", max_h)
-    return (min_h, mod_num, True)
-
-
-# ---------------------------------------------------------------------------
-# factored_to_engine_action
-# ---------------------------------------------------------------------------
-
-
-def _default_pick_targets(game_state: dict[str, Any], pack_index: int) -> tuple[int, ...] | None:
-    """Default hand targets for a targeting pack pick.
-
-    Returns None for non-targeting picks (planets, jokers, playing cards).
-
-    Delegates to the engine so the selection an agent gets by default is
-    the same one ``pack_pick_block_reason`` judged legal when it let the
-    mask offer the pick.
-    """
-    pack_cards = game_state.get("pack_cards", [])
-    if pack_index >= len(pack_cards):
-        return None
-    card = pack_cards[pack_index]
-    ability = getattr(card, "ability", None) or {}
-    if ability.get("set") not in ("Tarot", "Spectral"):
-        return None
-    return default_use_targets(card, game_state)
-
-
-def _default_use_targets(
-    game_state: dict[str, Any], consumable_index: int
-) -> tuple[int, ...] | None:
-    """Default hand targets for using an owned consumable.
-
-    The same engine default as pack picks, so a consumable the mask
-    offers is usable without card targets.  Returns None for
-    consumables that take no selection.
-    """
-    consumables = game_state.get("consumables", [])
-    if consumable_index >= len(consumables):
-        return None
-    return default_use_targets(consumables[consumable_index], game_state)
-
-
-def factored_to_engine_action(
-    fa: FactoredAction,
-    game_state: dict[str, Any],
-) -> Action:
-    """Convert a FactoredAction to an engine Action.
-
-    Parameters
-    ----------
-    fa:
-        The factored action from the policy network.
-    game_state:
-        Current game state dict.
-
-    Returns
-    -------
-    Action
-        Engine-compatible action dataclass.
-
-    Raises
-    ------
-    ValueError
-        If the action type or targets are invalid.
-    """
-    at = ActionType(fa.action_type)
-
-    if at == ActionType.PlayHand:
-        if not fa.card_target:
-            raise ValueError("PlayHand requires card_target")
-        return EnginePlayHand(card_indices=fa.card_target)
-
-    if at == ActionType.Discard:
-        if not fa.card_target:
-            raise ValueError("Discard requires card_target")
-        return EngineDiscard(card_indices=fa.card_target)
-
-    if at == ActionType.SelectBlind:
-        return EngineSelectBlind()
-
-    if at == ActionType.SkipBlind:
-        return EngineSkipBlind()
-
-    if at == ActionType.CashOut:
-        return EngineCashOut()
-
-    if at == ActionType.Reroll:
-        return EngineReroll()
-
-    if at == ActionType.NextRound:
-        return EngineNextRound()
-
-    if at == ActionType.SkipPack:
-        return EngineSkipPack()
-
-    if at == ActionType.BuyCard:
-        if fa.entity_target is None:
-            raise ValueError("BuyCard requires entity_target")
-        return EngineBuyCard(shop_index=fa.entity_target)
-
-    if at == ActionType.SellJoker:
-        if fa.entity_target is None:
-            raise ValueError("SellJoker requires entity_target")
-        return EngineSellCard(area="jokers", card_index=fa.entity_target)
-
-    if at == ActionType.SellConsumable:
-        if fa.entity_target is None:
-            raise ValueError("SellConsumable requires entity_target")
-        return EngineSellCard(area="consumables", card_index=fa.entity_target)
-
-    if at == ActionType.UseConsumable:
-        if fa.entity_target is None:
-            raise ValueError("UseConsumable requires entity_target")
-        target_indices = fa.card_target if fa.card_target else None
-        if target_indices is None:
-            # As with PickPackCard: a targeting consumable used without
-            # card targets gets the default selection the mask judged
-            # legal (c_aura included, whose target has to be editionless).
-            target_indices = _default_use_targets(game_state, fa.entity_target)
-        return EngineUseConsumable(
-            card_index=fa.entity_target,
-            target_indices=target_indices,
-        )
-
-    if at == ActionType.RedeemVoucher:
-        if fa.entity_target is None:
-            raise ValueError("RedeemVoucher requires entity_target")
-        return EngineRedeemVoucher(card_index=fa.entity_target)
-
-    if at == ActionType.OpenBooster:
-        if fa.entity_target is None:
-            raise ValueError("OpenBooster requires entity_target")
-        return EngineOpenBooster(card_index=fa.entity_target)
-
-    if at == ActionType.PickPackCard:
-        if fa.entity_target is None:
-            raise ValueError("PickPackCard requires entity_target")
-        targets = fa.card_target
-        if targets is None:
-            # Targeting tarot/spectral picks REQUIRE their highlight count
-            # (the engine now rejects bare picks, matching the live game).
-            # Agents that don't emit card targets get a default selection
-            # — the first min_highlighted dealt cards.
-            targets = _default_pick_targets(game_state, fa.entity_target)
-        return EnginePickPackCard(card_index=fa.entity_target, target_indices=targets)
-
-    if at == ActionType.SwapJokersLeft:
-        if fa.entity_target is None:
-            raise ValueError("SwapJokersLeft requires entity_target")
-        return EngineSwapJokersLeft(idx=fa.entity_target)
-
-    if at == ActionType.SwapJokersRight:
-        if fa.entity_target is None:
-            raise ValueError("SwapJokersRight requires entity_target")
-        return EngineSwapJokersRight(idx=fa.entity_target)
-
-    if at == ActionType.SwapHandLeft:
-        if fa.entity_target is None:
-            raise ValueError("SwapHandLeft requires entity_target")
-        return EngineSwapHandLeft(idx=fa.entity_target)
-
-    if at == ActionType.SwapHandRight:
-        if fa.entity_target is None:
-            raise ValueError("SwapHandRight requires entity_target")
-        return EngineSwapHandRight(idx=fa.entity_target)
-
-    if at == ActionType.SortHandRank:
-        return EngineSortHand(mode="rank")
-
-    if at == ActionType.SortHandSuit:
-        return EngineSortHand(mode="suit")
-
-    raise ValueError(f"Unknown action type: {fa.action_type}")
-
-
-# ---------------------------------------------------------------------------
-# engine_action_to_factored
-# ---------------------------------------------------------------------------
-
-
-def engine_action_to_factored(
-    action: Action,
-    game_state: dict[str, Any],
-) -> FactoredAction:
-    """Convert an engine Action back to a FactoredAction.
-
-    Parameters
-    ----------
-    action:
-        Engine action dataclass.
-    game_state:
-        Current game state dict.
-
-    Returns
-    -------
-    FactoredAction
-        The factored representation.
-
-    Raises
-    ------
-    ValueError
-        If the action type is not recognized.
-    """
-    if isinstance(action, EnginePlayHand):
-        return FactoredAction(
-            action_type=ActionType.PlayHand,
-            card_target=action.card_indices if action.card_indices else None,
-        )
-
-    if isinstance(action, EngineDiscard):
-        return FactoredAction(
-            action_type=ActionType.Discard,
-            card_target=action.card_indices if action.card_indices else None,
-        )
-
-    if isinstance(action, EngineSelectBlind):
-        return FactoredAction(action_type=ActionType.SelectBlind)
-
-    if isinstance(action, EngineSkipBlind):
-        return FactoredAction(action_type=ActionType.SkipBlind)
-
-    if isinstance(action, EngineCashOut):
-        return FactoredAction(action_type=ActionType.CashOut)
-
-    if isinstance(action, EngineReroll):
-        return FactoredAction(action_type=ActionType.Reroll)
-
-    if isinstance(action, EngineNextRound):
-        return FactoredAction(action_type=ActionType.NextRound)
-
-    if isinstance(action, EngineSkipPack):
-        return FactoredAction(action_type=ActionType.SkipPack)
-
-    if isinstance(action, EngineBuyCard):
-        return FactoredAction(
-            action_type=ActionType.BuyCard,
-            entity_target=action.shop_index,
-        )
-
-    if isinstance(action, EngineSellCard):
-        if action.area == "jokers":
-            return FactoredAction(
-                action_type=ActionType.SellJoker,
-                entity_target=action.card_index,
-            )
-        if action.area == "consumables":
-            return FactoredAction(
-                action_type=ActionType.SellConsumable,
-                entity_target=action.card_index,
-            )
-        raise ValueError(f"Unknown SellCard area: {action.area}")
-
-    if isinstance(action, EngineUseConsumable):
-        return FactoredAction(
-            action_type=ActionType.UseConsumable,
-            entity_target=action.card_index,
-            card_target=action.target_indices,
-        )
-
-    if isinstance(action, EngineRedeemVoucher):
-        return FactoredAction(
-            action_type=ActionType.RedeemVoucher,
-            entity_target=action.card_index,
-        )
-
-    if isinstance(action, EngineOpenBooster):
-        return FactoredAction(
-            action_type=ActionType.OpenBooster,
-            entity_target=action.card_index,
-        )
-
-    if isinstance(action, EnginePickPackCard):
-        return FactoredAction(
-            action_type=ActionType.PickPackCard,
-            entity_target=action.card_index,
-            card_target=action.target_indices,
-        )
-
-    if isinstance(action, EngineSortHand):
-        if action.mode == "rank":
-            return FactoredAction(action_type=ActionType.SortHandRank)
-        return FactoredAction(action_type=ActionType.SortHandSuit)
-
-    if isinstance(action, EngineSwapJokersLeft):
-        return FactoredAction(
-            action_type=ActionType.SwapJokersLeft,
-            entity_target=action.idx,
-        )
-
-    if isinstance(action, EngineSwapJokersRight):
-        return FactoredAction(
-            action_type=ActionType.SwapJokersRight,
-            entity_target=action.idx,
-        )
-
-    if isinstance(action, EngineSwapHandLeft):
-        return FactoredAction(
-            action_type=ActionType.SwapHandLeft,
-            entity_target=action.idx,
-        )
-
-    if isinstance(action, EngineSwapHandRight):
-        return FactoredAction(
-            action_type=ActionType.SwapHandRight,
-            entity_target=action.idx,
-        )
-
-    raise ValueError(f"Unknown engine action type: {type(action).__name__}")
+    return convert(action)

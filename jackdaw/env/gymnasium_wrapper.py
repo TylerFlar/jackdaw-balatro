@@ -6,6 +6,13 @@ enumerating all legal :class:`FactoredAction` instances each step.  Exposes an
 
 The reward is pluggable: pass ``reward_fn`` (see :mod:`jackdaw.env.rewards`).
 
+With :class:`~jackdaw.env.game_interface.DirectAdapter` the whole step (the
+engine, the observation, the mask, the action table and the built-in rewards)
+runs in Rust (``jackdaw._core.GymEnv``).  Any other adapter (a
+:class:`~jackdaw.bridge.live.LiveAdapter`) takes the generic path: a
+:class:`BalatroEnvironment` step, then the action table and the reward in
+Python.  The two paths play the same.
+
 Example::
 
     from jackdaw.env import BalatroGymnasiumEnv, DirectAdapter, ShapedReward
@@ -19,6 +26,7 @@ from __future__ import annotations
 
 import math
 import operator
+import secrets
 from collections.abc import Callable, Sequence
 from functools import lru_cache
 from itertools import combinations
@@ -28,12 +36,23 @@ import gymnasium
 import numpy as np
 from gymnasium import spaces
 
-from jackdaw.env.action_space import ActionType, get_consumable_target_info
+from jackdaw import _core
+from jackdaw.core import Game
+from jackdaw.env.action_space import ACTION_VERSION, DEFAULT_MAX_FREE_MOVES, ActionType
 from jackdaw.env.balatro_env import BalatroEnvironment
 from jackdaw.env.balatro_spec import balatro_game_spec
-from jackdaw.env.game_interface import GameAdapter
+from jackdaw.env.game_interface import DirectAdapter, GameAdapter, game_state_from_parts
 from jackdaw.env.game_spec import FactoredAction, GameActionMask, GameObservation
 from jackdaw.env.rewards import RewardFn, ShapedReward, Transition, sparse_reward
+from jackdaw.env.rust_gym import (
+    EpisodeStarts,
+    RustActionTable,
+    factored_from_parts,
+    gym_obs,
+    rust_reward,
+    sampler_seed,
+)
+from jackdaw.env.sampler import Xoshiro256, subsample
 
 MAX_ACTIONS: int = 500
 CARD_COMBO_BUDGET: int = 200
@@ -55,7 +74,7 @@ _ENTITY_ONLY_TYPES: frozenset[int] = frozenset(
     for i, at in enumerate(_SPEC.action_types)
     if at.needs_entity_target and not at.needs_card_select
 )
-# Entity + optional card select — the game_state list each entity indexes.
+# Entity + optional card select — the area of the run each entity indexes.
 # A targeting Tarot/Spectral takes card targets; anything else takes none.
 _TARGETED_ENTITY_SOURCES: dict[int, str] = {
     ActionType.UseConsumable: "consumables",
@@ -69,13 +88,9 @@ _CARD_ONLY_TYPES: frozenset[int] = frozenset(
 )
 
 
-def _subsample(items: Sequence[Any], budget: int, rng: np.random.Generator) -> Sequence[Any]:
+def _subsample(items: Sequence[Any], budget: int, rng: Xoshiro256) -> Sequence[Any]:
     """Return *items* if within budget, else a random subsample (order kept)."""
-    if len(items) <= budget:
-        return items
-    indices = rng.choice(len(items), size=budget, replace=False)
-    indices.sort()
-    return [items[i] for i in indices.tolist()]
+    return subsample(items, budget, rng)
 
 
 def _selection_sizes(n_cards: int, min_select: Any, max_select: Any) -> tuple[int, int]:
@@ -130,7 +145,7 @@ def _card_actions(
     legal_cards: tuple[int, ...],
     min_select: Any,
     max_select: Any,
-    rng: np.random.Generator,
+    rng: Xoshiro256,
     required: int | None = None,
 ) -> Sequence[FactoredAction]:
     """Card-selecting actions for one action type/entity, subsampled to budget.
@@ -180,9 +195,24 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         Shorthand when ``reward_fn`` is not given: True selects
         :class:`~jackdaw.env.rewards.ShapedReward`, False (default)
         :func:`~jackdaw.env.rewards.sparse_reward`.
+    max_free_moves:
+        After this many free moves in a row (joker and hand swaps, hand sorts) the
+        table holds none until another action.  ``None``: no cap.
+    on_refusal:
+        ``"truncate"`` (default) ends the episode on a table action the engine
+        refuses, with the reason in ``info["balatro/refused"]``; ``"raise"`` raises
+        its ``IllegalActionError``.  (A refusal means the masks and the engine
+        disagree: an env bug.)
+
+    With :class:`~jackdaw.env.game_interface.DirectAdapter` a step the engine can't
+    take yet ends the episode as truncated, with the reason in
+    ``info["balatro/not_ported"]``.  :attr:`game` is a copy of the current run.
+    :attr:`action_version` (also in :attr:`metadata`) is the action space's
+    :data:`~jackdaw.env.action_space.ACTION_VERSION`: save it with a trained policy.
     """
 
-    metadata: dict[str, Any] = {"render_modes": []}
+    metadata: dict[str, Any] = {"render_modes": [], "action_version": ACTION_VERSION}
+    action_version: int = ACTION_VERSION
 
     def __init__(
         self,
@@ -194,21 +224,51 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         reward_shaping: bool = False,
         reward_fn: RewardFn | None = None,
         end_on_win: bool = True,
+        max_free_moves: int | None = DEFAULT_MAX_FREE_MOVES,
+        on_refusal: str = "truncate",
     ) -> None:
         super().__init__()
-        self._inner = BalatroEnvironment(
-            adapter_factory=adapter_factory,
-            back_keys=back_keys,
-            stakes=stakes,
-            max_steps=max_steps,
-            seed_prefix=seed_prefix,
-            end_on_win=end_on_win,
-        )
         if reward_fn is not None and reward_shaping:
             raise ValueError("Pass either reward_fn or reward_shaping=True, not both")
+        if on_refusal not in ("truncate", "raise"):
+            raise ValueError(f"on_refusal must be 'truncate' or 'raise', not {on_refusal!r}")
+        if max_free_moves is not None and max_free_moves < 0:
+            raise ValueError("max_free_moves must be None or at least 0")
+        self.max_free_moves = max_free_moves
+        self.on_refusal = on_refusal
         if reward_fn is None:
             reward_fn = ShapedReward() if reward_shaping else sparse_reward
         self.reward_fn: RewardFn = reward_fn
+
+        # A DirectAdapter run takes the whole step in jackdaw._core.GymEnv; other
+        # adapters go through BalatroEnvironment.
+        self._core: Any = None
+        self._inner: BalatroEnvironment | None = None
+        if isinstance(adapter_factory(), DirectAdapter):
+            builtin = rust_reward(reward_fn)
+            # A custom reward (or an override of _compute_reward) is computed in Python.
+            self._python_reward = (
+                builtin is None
+                or type(self)._compute_reward is not BalatroGymnasiumEnv._compute_reward
+            )
+            kind, weights = ("none", None) if self._python_reward else builtin  # type: ignore[misc]
+            self._starts = EpisodeStarts(back_keys, stakes, seed_prefix)
+            back, stake, run_seed = self._starts.back_keys[0], self._starts.stakes[0], "INIT"
+            self._core = _core.GymEnv(
+                back, stake, run_seed, None, secrets.randbits(64), max_steps, end_on_win,
+                kind, weights, max_free_moves,
+            )  # fmt: skip
+        else:
+            self._inner = BalatroEnvironment(
+                adapter_factory=adapter_factory,
+                back_keys=back_keys,
+                stakes=stakes,
+                max_steps=max_steps,
+                seed_prefix=seed_prefix,
+                end_on_win=end_on_win,
+                max_free_moves=max_free_moves,
+                on_refusal=on_refusal,
+            )
 
         # Observation space
         obs_spaces: dict[str, spaces.Space] = {
@@ -233,9 +293,12 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         # Action space
         self.action_space = spaces.Discrete(MAX_ACTIONS)
 
-        # Internal state
-        self._action_table: list[FactoredAction] = []
-        self._rng = np.random.default_rng()
+        # Internal state.  The table's subsampling draws from a seeded xoshiro256**
+        # (jackdaw.env.sampler), the generator the Rust table uses too.
+        self._action_table: Sequence[FactoredAction] = []
+        if self._core is not None:
+            self._action_table = RustActionTable(self._core)
+        self._rng = Xoshiro256(secrets.randbits(64))
         self._episode_max_ante: int = 1
         self._episode_blinds_beaten: int = 0
 
@@ -250,13 +313,16 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         options: dict[str, Any] | None = None,
     ) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
         super().reset(seed=seed)
+        if self._core is not None:
+            return self._rust_reset(seed)
         if seed is not None:
-            self._rng = np.random.default_rng(seed)
+            self._rng = Xoshiro256(seed)
 
         kwargs: dict[str, Any] = {}
         if seed is not None:
             kwargs["seed"] = str(seed)
 
+        assert self._inner is not None
         game_obs, game_mask, info = self._inner.reset(**kwargs)
         self._episode_max_ante = self._inner.episode_ante
         self._episode_blinds_beaten = 0
@@ -268,6 +334,9 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         return obs, {"action_mask": self.action_masks()}
 
     def step(self, action: int) -> tuple[dict[str, np.ndarray], float, bool, bool, dict[str, Any]]:
+        if self._core is not None:
+            return self._rust_step(action)
+        assert self._inner is not None
         factored = self._action_table[action]
         game_obs, terminated, truncated, game_mask, info = self._inner.step(factored)
 
@@ -291,6 +360,8 @@ class BalatroGymnasiumEnv(gymnasium.Env):
             step_info["balatro/ante_reached"] = self._episode_max_ante
             step_info["balatro/rounds_beaten"] = self._episode_blinds_beaten
             step_info["balatro/won"] = self._inner.episode_won
+            if "refused" in info:
+                step_info["balatro/refused"] = info["refused"]
         return obs, reward, terminated, truncated, step_info
 
     def action_masks(self) -> np.ndarray:
@@ -298,6 +369,60 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         mask = np.zeros(MAX_ACTIONS, dtype=bool)
         mask[: len(self._action_table)] = True
         return mask
+
+    @property
+    def game(self) -> Game:
+        """A copy of the current run."""
+        if self._core is None:
+            assert self._inner is not None
+            return self._inner._adapter.game.clone()  # type: ignore[attr-defined]
+        return Game(self._core.game())
+
+    # ------------------------------------------------------------------
+    # The Rust engine
+    # ------------------------------------------------------------------
+
+    def _rust_reset(self, seed: int | None) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
+        back, stake, run_seed = self._starts.next(None if seed is None else str(seed))
+        rng_seed = None if seed is None else sampler_seed(seed)
+        data, _ = self._core.reset(back, stake, run_seed, None, rng_seed)
+        self._episode_max_ante = 1
+        self._episode_blinds_beaten = 0
+        reward_reset = getattr(self.reward_fn, "reset", None)
+        if callable(reward_reset):
+            reward_reset()
+        return gym_obs(data), {"action_mask": self.action_masks()}
+
+    def _rust_step(
+        self, action: int
+    ) -> tuple[dict[str, np.ndarray], float, bool, bool, dict[str, Any]]:
+        data, reward, terminated, truncated, _, episode, not_ported, refused = self._core.step(
+            int(action), self.on_refusal == "truncate"
+        )
+        if self._python_reward:
+            prev, curr, fa = self._core.last_transition()
+            transition = Transition(
+                prev=game_state_from_parts(prev),
+                curr=game_state_from_parts(curr),
+                action=factored_from_parts(fa),
+                terminated=terminated,
+                truncated=truncated,
+                game=Game(self._core.game()),
+            )
+            reward = self._compute_reward(transition)
+        info: dict[str, Any] = {"action_mask": self.action_masks()}
+        if terminated or truncated:
+            ante, rounds, won = episode
+            self._episode_max_ante = ante
+            self._episode_blinds_beaten = rounds
+            info["balatro/ante_reached"] = ante
+            info["balatro/rounds_beaten"] = rounds
+            info["balatro/won"] = won
+            if not_ported is not None:
+                info["balatro/not_ported"] = not_ported
+            if refused is not None:
+                info["balatro/refused"] = refused
+        return gym_obs(data), reward, terminated, truncated, info
 
     # ------------------------------------------------------------------
     # Internals
@@ -362,21 +487,24 @@ class BalatroGymnasiumEnv(gymnasium.Env):
             elif t in _TARGETED_ENTITY_SOURCES:
                 if t in mask.entity_masks:
                     legal_entities = np.nonzero(mask.entity_masks[t])[0].tolist()
-                    source = info.get("raw_state", {}).get(_TARGETED_ENTITY_SOURCES[t], [])
+                    area = _TARGETED_ENTITY_SOURCES[t]
+                    game = info["game"]  # the run (LiveAdapter's shadow)
                     for e_idx in legal_entities:
-                        if e_idx < len(source):
-                            card = source[e_idx]
-                            min_cards, max_cards, needs = get_consumable_target_info(card)
-                            if needs:
-                                if legal_cards is None:
-                                    legal_cards = tuple(np.nonzero(mask.card_mask)[0].tolist())
-                                actions.extend(
-                                    _card_actions(
-                                        t, e_idx, legal_cards, min_cards, max_cards, self._rng
-                                    )
+                        try:
+                            target_info = game._g.consumable_target_info(area, e_idx)
+                        except ValueError:  # past the end of the area
+                            continue
+                        min_cards, max_cards, needs = target_info
+                        if needs:
+                            if legal_cards is None:
+                                legal_cards = tuple(np.nonzero(mask.card_mask)[0].tolist())
+                            actions.extend(
+                                _card_actions(
+                                    t, e_idx, legal_cards, min_cards, max_cards, self._rng
                                 )
-                            else:
-                                actions.append(_target_action(t, e_idx))
+                            )
+                        else:
+                            actions.append(_target_action(t, e_idx))
 
         # Subsample to budget if needed
         if len(actions) > MAX_ACTIONS:

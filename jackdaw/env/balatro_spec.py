@@ -2,7 +2,7 @@
 
 Provides ``balatro_game_spec()`` which returns a :class:`GameSpec` describing
 Balatro's entity types (hand cards, jokers, consumables, shop items, pack cards),
-21 action types, and feature dimensions.
+23 action types, and feature dimensions.
 """
 
 from __future__ import annotations
@@ -163,6 +163,16 @@ def balatro_game_spec() -> GameSpec:
         ActionTypeSpec("sort_hand_rank", needs_entity_target=False, needs_card_select=False),
         # 20: SortHandSuit
         ActionTypeSpec("sort_hand_suit", needs_entity_target=False, needs_card_select=False),
+        # 21: RerollBoss — Director's Cut / Retcon at the blind select screen
+        ActionTypeSpec("reroll_boss", needs_entity_target=False, needs_card_select=False),
+        # 22: BuyAndUse — target a shop consumable; it is used on the spot (the hand
+        # is empty in the shop, so it never takes card targets)
+        ActionTypeSpec(
+            "buy_and_use",
+            needs_entity_target=True,
+            needs_card_select=False,
+            entity_type_index=SHOP_ITEM,
+        ),
     )
 
     spec = GameSpec(

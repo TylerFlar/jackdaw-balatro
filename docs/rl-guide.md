@@ -1,3 +1,8 @@
+---
+layout: default
+title: RL Project Guide
+---
+
 # RL Project Guide
 
 How to set up an RL project using Jackdaw as the environment.
@@ -7,6 +12,9 @@ How to set up an RL project using Jackdaw as the environment.
 ```bash
 uv add git+https://github.com/TylerFlar/jackdaw-balatro.git
 ```
+
+Installing from git compiles the Rust extension, so it needs a Rust toolchain
+([rustup](https://rustup.rs)).
 
 ## The Loop
 
@@ -27,6 +35,8 @@ while not (terminated or truncated):
 ```
 
 That's the whole interface. The rest of this page explains what `obs`, `mask`, and `action` actually look like so you can wire them into your model.
+
+`DirectAdapter` runs the game on the Rust engine (`jackdaw.core.Game`) in process, the adapter to train on. `LiveAdapter` plays the live game instead (see [Live Validation Adapter](#live-validation-adapter)).
 
 ## Observations
 
@@ -71,7 +81,7 @@ This encoding works naturally with transformers, set encoders, or pointer networ
 `mask` is a `GameActionMask` that tells you what's legal right now:
 
 ```python
-mask.type_mask        # np.ndarray, shape (21,) bool — which action types are legal
+mask.type_mask        # np.ndarray, shape (23,) bool — which action types are legal
 mask.card_mask        # np.ndarray, shape (N_hand,) bool — which hand cards can be selected
 mask.entity_masks     # dict[int, np.ndarray] — per action type, which entities are legal targets
 mask.min_card_select  # int — minimum cards to select (for play/discard)
@@ -89,13 +99,13 @@ Actions are `FactoredAction` with three components:
 from jackdaw.env import FactoredAction
 
 action = FactoredAction(
-    action_type=0,                  # int: which action (0-20)
+    action_type=0,                  # int: which action (0-22)
     card_target=(0, 2, 4),          # tuple[int, ...] | None: hand card indices
     entity_target=None,             # int | None: entity index
 )
 ```
 
-### The 21 Action Types
+### The 23 Action Types
 
 | ID | Name | Targets | When |
 |----|------|---------|------|
@@ -106,22 +116,30 @@ action = FactoredAction(
 | 4 | CashOut | — | Round eval |
 | 5 | Reroll | — | Shop |
 | 6 | NextRound | — | Shop |
-| 7 | SkipPack | — | Pack opening |
+| 7 | SkipPack | — | Pack opening (an Arcana or Spectral pack once its hand is dealt) |
 | 8 | BuyCard | entity_target (shop index) | Shop |
-| 9 | SellJoker | entity_target (joker index) | Blind select / Play / Shop / Pack opening |
-| 10 | SellConsumable | entity_target (consumable index) | Blind select / Play / Shop / Pack opening |
+| 9 | SellJoker | entity_target (joker index) | Blind select / Play / Round eval / Shop / Pack opening |
+| 10 | SellConsumable | entity_target (consumable index) | Blind select / Play / Round eval / Shop / Pack opening |
 | 11 | UseConsumable | entity_target + card_target | Any phase but game over |
 | 12 | RedeemVoucher | entity_target (shop index) | Shop |
 | 13 | OpenBooster | entity_target (shop index) | Shop |
 | 14 | PickPackCard | entity_target + card_target | Pack opening |
-| 15 | SwapJokersLeft | entity_target (joker index) | Play / Shop |
-| 16 | SwapJokersRight | entity_target (joker index) | Play / Shop |
-| 17 | SwapHandLeft | entity_target (card index) | Playing phase |
-| 18 | SwapHandRight | entity_target (card index) | Playing phase |
+| 15 | SwapJokersLeft | entity_target (joker index) | Any phase but game over |
+| 16 | SwapJokersRight | entity_target (joker index) | Any phase but game over |
+| 17 | SwapHandLeft | entity_target (card index) | Playing phase / Pack opening (an Arcana or Spectral pack's dealt hand) |
+| 18 | SwapHandRight | entity_target (card index) | Playing phase / Pack opening (an Arcana or Spectral pack's dealt hand) |
 | 19 | SortHandRank | — | Playing phase |
 | 20 | SortHandSuit | — | Playing phase |
+| 21 | RerollBoss | — | Blind select, with Director's Cut or Retcon ($10) |
+| 22 | BuyAndUse | entity_target (shop index) | Shop: buy a consumable and use it at once |
 
-`UseConsumable` and `PickPackCard` take a `card_target` when the consumable works on hand cards (The Magician, Death, Aura...). Bound it with `get_consumable_target_info(card)`, which returns `(min_cards, max_cards, needs_targets)`. Leave `card_target` as `None` to get the engine's default selection: the lowest-index legal cards.
+The swaps follow the game's drag and drop: the jokers can be reordered whenever the game waits for a move, the hand whenever it holds cards (while choosing a hand, and in an Arcana or Spectral pack, where the order decides which card Death copies and the order the cards go back into the deck). The sort buttons exist only while choosing a hand. Consumables can be dragged in the game too, but their order changes nothing, so there is no action for it. Under BALATROBOT legality (the live bot) the jokers can't be reordered at blind select or on the cash-out screen: BalatroBot's `rearrange` refuses there.
+
+`UseConsumable` and `PickPackCard` take a `card_target` when the consumable works on hand cards (The Magician, Death, Aura...). Bound it with `get_consumable_target_info(info["game"], "consumables", index)` (or `"pack_cards"`), which returns `(min_cards, max_cards, needs_targets)`. Leave `card_target` as `None` to get the engine's default selection: the lowest-index legal cards.
+
+### Free moves
+
+The swaps and sorts (types 15-20, `FREE_ACTION_TYPES`) cost nothing in the game, so a policy could take them forever. After `max_free_moves` of them in a row (10 by default, enough to put five jokers in any order) the mask offers none until another action. `max_free_moves=None` turns the cap off. Every env applies it the same way.
 
 ## Environment Config
 
@@ -133,10 +151,14 @@ env = BalatroEnvironment(
     max_steps=10_000,          # steps before truncation
     seed_prefix="TRAIN",       # prefix for deterministic seed generation
     end_on_win=True,           # end the episode when ante 8 is beaten
+    max_free_moves=10,         # free moves in a row before the mask holds none; None: no cap
+    on_refusal="truncate",     # an action the engine refuses: "truncate" or "raise"
 )
 ```
 
 With `end_on_win=True` (the default) a won run ends the episode, as vanilla stops at its win screen. Pass `end_on_win=False` to keep playing into endless mode until the run is lost or truncated.
+
+An action the masks allow but the engine refuses would be an env bug. By default it ends the episode as truncated, with the run unchanged and the reason in `info["refused"]` (`info["balatro/refused"]` in the Gym envs), so a bug can't stop a long training run; `on_refusal="raise"` raises the engine's `IllegalActionError` instead. A step the Rust engine can't take yet ends the episode the same way, with the reason in `info["not_ported"]`; every rule is ported, so none should.
 
 ## Reward
 
@@ -145,10 +167,10 @@ With `end_on_win=True` (the default) a won run ends the episode, as vanilla stop
 ```python
 info["prev_state"]  # GameState snapshot taken before this step
 info["state"]       # GameState snapshot taken after this step
-info["raw_state"]   # the live engine state dict
+info["game"]        # the run itself, a jackdaw.core.Game
 ```
 
-`GameState` is a small frozen snapshot: `phase`, `ante`, `round`, `dollars`, `hands_left`, `discards_left`, `hand_size`, `joker_slots`, `consumable_slots`, `blind_on_deck`, `blind_chips`, `chips`, `won`, `done`. Compare `prev_state` with `state` for before/after deltas. `raw_state` is the engine's own dict, which the next step mutates in place, so read from it immediately and don't hold on to it.
+`GameState` is a small frozen snapshot: `phase`, `ante`, `round`, `dollars`, `hands_left`, `discards_left`, `hand_size`, `joker_slots`, `consumable_slots`, `blind_on_deck`, `blind_chips`, `chips`, `won`, `done`. Compare `prev_state` with `state` for before/after deltas. `info["game"]` is the live run, which the next step moves on, so read from it immediately or keep `info["game"].freeze()`.
 
 The easiest route is a reward function from `jackdaw.env.rewards` (see [Rewards](#rewards)). Wrap each step in a `Transition`:
 
@@ -250,7 +272,7 @@ If you want to use standard RL libraries like Stable-Baselines3 instead of writi
 
 The wrapper sits between SB3 and the factored `BalatroEnvironment`:
 
-1. **Action flattening**: Each step, it enumerates all legal `FactoredAction` instances from the `ActionMask` into a flat list. The agent picks an index into this list. Card-selecting actions enumerate all legal card combinations up to a budget of 200 per action: PlayHand and Discard, plus each targeting Tarot/Spectral used from the consumable slots or picked from a pack. If the combinatorial space exceeds the budget, subsets are randomly sampled.
+1. **Action flattening**: Each step, it enumerates all legal `FactoredAction` instances from the `ActionMask` into a flat list. The agent picks an index into this list. Card-selecting actions enumerate all legal card combinations up to a budget of 200 per action: PlayHand and Discard, plus each targeting Tarot/Spectral used from the consumable slots or picked from a pack. If the combinatorial space exceeds the budget, subsets are randomly sampled, as is the whole list when it exceeds 500 actions. The sampler is a xoshiro256** generator seeded by `reset(seed=...)`, the same in Python and Rust.
 
 2. **Action masking**: The `action_masks()` method returns a `bool[500]` array — `True` for indices that map to a legal action, `False` for padding. MaskablePPO uses this to zero out logits for illegal actions.
 
@@ -287,6 +309,8 @@ action = int(np.random.choice(legal))
 obs, reward, terminated, truncated, info = env.step(action)
 ```
 
+`BalatroGymnasiumEnv` takes `max_free_moves` and `on_refusal` like `BalatroEnvironment`.
+
 ### With MaskablePPO
 
 Jackdaw doesn't depend on any RL library. Install [sb3-contrib](https://sb3-contrib.readthedocs.io/) in your own project, then:
@@ -301,6 +325,8 @@ model = MaskablePPO("MultiInputPolicy", env, verbose=1)
 model.learn(total_timesteps=500_000)
 model.save("balatro_ppo")
 ```
+
+The repository's [`examples/`](https://github.com/TylerFlar/jackdaw-balatro/tree/main/examples) trains this setup for real: 32 envs in a `BalatroVectorEnv` behind a small SB3 `VecEnv` adapter (`examples/balatro_sb3.py`), TensorBoard logs, checkpoints, and an evaluation against a random agent and the hand-written `smart_agent` on the same seeds. In a clone, `uv sync --group train` installs what it needs.
 
 ### Rewards
 
@@ -322,7 +348,7 @@ A reward function receives a `Transition`:
 t.prev, t.curr          # GameState snapshots before / after the action
 t.action                # the FactoredAction taken
 t.terminated, t.truncated, t.done
-t.raw_state             # live engine dict after the step (read now, don't keep)
+t.game                  # the run after the step, a jackdaw.core.Game
 
 # Derived events
 t.blind_beaten          # this step's hand cleared a blind
@@ -364,6 +390,8 @@ A reward function that keeps per-episode state can define a `reset()` method, wh
 
 `ante` is the ante of the blind just beaten. Override any weight by keyword: `ShapedReward(win=1.0, step_cost=0.0)`. The penalties (`step_cost`, `shop_step_cost`, `loss`) are positive magnitudes that get subtracted, so write `loss=0.5`, not `-0.5`. The step cost discourages stalling in shops and menus, while the blind-beaten and score-progress signals give credit for partial progress even when the agent fails to clear a blind.
 
+Mind the discount factor: a policy that puts off the end of a lost run gains `loss * (1 - gamma)` per step from the discounted `loss`. With the default weights that gain matches `step_cost` at `gamma = 0.995` and exceeds it below, so stalling costs nothing or pays. The [free-move cap](#free-moves) keeps a policy from stalling on swaps and sorts alone, but a higher `gamma`, a smaller `loss` or a larger `step_cost` removes the incentive itself; the [training demo](https://github.com/TylerFlar/jackdaw-balatro/tree/main/examples) uses `loss=0`.
+
 By default, beating ante 8 ends the episode (`end_on_win=True`), so `run_won` and `done` arrive on the same step. With `end_on_win=False`, play continues into endless mode: `run_won` still fires once on the winning step, and a run that dies later in endless mode still counts as won.
 
 ### Episode-End Metrics
@@ -374,23 +402,66 @@ At episode end, the `info` dict returned by `step()` includes:
 info["balatro/ante_reached"]    # int — highest ante reached this episode
 info["balatro/rounds_beaten"]   # int — blinds beaten (skipped blinds don't count)
 info["balatro/won"]             # bool — whether the run was won
+info["balatro/refused"]         # str — only when the engine refused the action (an env bug)
+info["balatro/not_ported"]      # str — only when the Rust engine couldn't take the step
 ```
 
 These are tracked the same way whatever reward function is in use, and are useful for custom callbacks or logging.
+
+## Vector Environment
+
+`BalatroVectorEnv` is a `gymnasium.vector.VectorEnv` of `num_envs` Gym environments stepped together in Rust: one `step` runs them all on worker threads with the GIL released and writes the observations and action masks straight into numpy arrays. On a 16-core machine it runs about 1.1 million steps per second on 8 threads (256 envs), against about 180,000 for one `BalatroGymnasiumEnv`.
+
+```python
+import numpy as np
+from jackdaw.env import BalatroVectorEnv
+
+envs = BalatroVectorEnv(num_envs=256, num_threads=8, reward_shaping=True)
+obs, info = envs.reset(seed=0)
+masks = info["action_mask"]                    # (256, 500) bool, also envs.action_masks()
+
+for _ in range(1000):
+    actions = np.array([np.random.choice(np.flatnonzero(m)) if m.any() else 0 for m in masks])
+    obs, rewards, terminated, truncated, info = envs.step(actions)
+    masks = info["action_mask"]
+```
+
+- Sub-env `i` plays exactly as `BalatroGymnasiumEnv(DirectAdapter, seed_prefix=f"{seed_prefix}_{i}")` with the same arguments; `reset(seed=s)` gives it seed `s + i`. The results don't depend on the number of threads.
+- **Autoreset.** By default an episode resets on the step after it ends (gymnasium's `AutoresetMode.NEXT_STEP`): that step ignores the env's action and returns the new episode's first observation with reward 0. Until then the ended env's mask is all False. With `autoreset_mode=AutoresetMode.SAME_STEP`, the step that ends an episode returns the next episode's first observation and mask, with the last observation in `info["final_obs"]` and the episode-end metrics in `info["final_info"]` (both with gymnasium's `_` masks). That is what Stable-Baselines3 expects; the [training demo](https://github.com/TylerFlar/jackdaw-balatro/tree/main/examples) wraps it this way.
+- **Partial resets.** `reset(seed=..., options={"reset_mask": mask})` resets only the envs `mask` selects; the others keep their runs.
+- The rewards are computed in Rust, so only the built-in ones are available: `sparse_reward` (the default), `blind_progress_reward` and `ShapedReward` with any weights.
+- The episode-end metrics come as arrays with gymnasium's `_key` masks: `info["balatro/won"]` and `info["_balatro/won"]`, and so on.
+- `max_free_moves` and `on_refusal` work as in the other envs; a refusal shows in the episode-end metrics as `info["balatro/refused"]`, a bool per env.
+- `copy=False` returns views of buffers the next step overwrites, skipping a copy per step.
+
+## Saving a Policy: the Action Version
+
+A trained policy only knows the masks it was trained with: when a new release makes more moves legal, table slots it never saw unmasked appear, and it may take them often. `jackdaw.env.ACTION_VERSION` numbers the action space (also `env.action_version`, and in the Gym and vector envs' `metadata`). Save it with a model, and retrain or fine-tune when it changes. The training demo records it in its `config.json`, and its evaluation refuses a model trained on another version.
+
+| Version | Release | What changed |
+|---|---|---|
+| 1 | 0.1 | the first action space |
+| 2 | 0.2 | joker swaps at every decision point, as the game's drag and drop allows; the free-move cap |
+
+## Known Limitations
+
+- **Two dead global features.** `global[26]` (the blind's key) and `global[29]` (the Four Fingers, Shortcut, Smeared Joker and Splash flags) are always 0, and a playing card's `is_scoring` feature is just "not debuffed". Encoder v1 keeps the original Python encoder's output bit for bit, quirks included. The jokers themselves are visible in the `joker` rows.
+- **Observation rows past the maximum counts.** The Gym observation holds at most 8 hand cards, 5 jokers, 2 consumables, 10 shop items and 5 pack cards. Rows past those are dropped (`entity_counts` is capped too), but the action table can still target them: a sixth joker (Negative), a ninth hand card (a bigger hand size), a third consumable. A policy then picks such an action without seeing its target. The factored `BalatroEnvironment` has no such limit.
 
 ## Live Validation Adapter
 
 To validate your agent against real Balatro, swap the adapter:
 
 ```python
-from jackdaw.bridge import LiveBackend, BridgeAdapter
+from jackdaw.bridge import LiveAdapter, LiveBackend
+from jackdaw.env import BalatroEnvironment
 
 env = BalatroEnvironment(
-    adapter_factory=lambda: BridgeAdapter(LiveBackend("127.0.0.1", 12346))
+    adapter_factory=lambda: LiveAdapter(LiveBackend("127.0.0.1", 12346), bundle_dir="bundles")
 )
 # Same observations and actions; the mask is narrowed to what BalatroBot executes
 ```
 
-You must have Balatro running with BalatroBot configured to listen on the same host and port.
+You must have Balatro running with BalatroBot configured to listen on the same host and port. `LiveAdapter` (also what `BridgeAdapter(backend)` gives) keeps a shadow run in the Rust engine: every action is taken by the shadow first, then by the game, and the game's answer is compared with the shadow. `info["game"]` is the shadow, and the observation and mask come from it, exactly as in training. An unexplained difference raises `DivergenceError` and writes a repro bundle; see [Lockstep against the live game](live). With `SimBackend()` in place of the `LiveBackend`, the same adapter plays BalatroBot's API on the simulator, in process.
 
-The simulator follows vanilla, which allows a few things BalatroBot's endpoints refuse: using a consumable at blind select, on the cash-out screen or while a pack is open, selling while a pack is open or at blind select, and using a card-targeting consumable in the shop. Over a `BridgeAdapter` those actions are masked out (and `SimBackend` refuses them the same way), so an agent is never offered a move the bot can't make.
+The simulator follows vanilla, which allows a few things BalatroBot's endpoints refuse: using a consumable at blind select, on the cash-out screen or while a pack is open, selling while a pack is open or at blind select, and using a card-targeting consumable in the shop. Over a `LiveAdapter` those actions are masked out (and `SimBackend`, which runs BalatroBot's endpoints on the simulator, refuses them the same way), so an agent is never offered a move the bot can't make. `Game.legal_actions(Legality.BALATROBOT)` gives the same list from the Rust engine. See [BalatroBot on the simulator](balatrobot) for the full policy and `jackdaw serve`.

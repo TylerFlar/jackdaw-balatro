@@ -1,0 +1,3 @@
+# Vendored upstream files are hashed byte-for-byte (v1.5.2/MANIFEST.sha256).
+# Never let git rewrite line endings here, on any platform.
+* -text

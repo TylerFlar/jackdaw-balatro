@@ -1,0 +1,17 @@
+[package]
+name = "jackdaw-bot"
+description = "BalatroBot v1.5.2 command and gamestate layer for the jackdaw engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+jackdaw-core.workspace = true
+jackdaw-data.workspace = true
+# Snapshots (`save`/`load`) are the engine's canonical JSON trees.
+serde_json.workspace = true
+
+[lints]
+workspace = true

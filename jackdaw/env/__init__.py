@@ -7,13 +7,22 @@ Canonical usage::
     spec = balatro_game_spec()
     env = BalatroEnvironment(adapter_factory=DirectAdapter)
     obs, mask, info = env.reset()
+
+``DirectAdapter`` runs the Rust engine (``jackdaw.core.Game``) in process;
+``LiveAdapter`` plays the live game through BalatroBot, in step with a Rust
+shadow run.  ``BalatroVectorEnv`` steps many environments in parallel in Rust.
 """
 
+from jackdaw.bridge.live import LiveAdapter
 from jackdaw.env.action_space import (
+    ACTION_VERSION,
+    DEFAULT_MAX_FREE_MOVES,
+    FREE_ACTION_TYPES,
     NUM_ACTION_TYPES,
     ActionMask,
     ActionType,
     FactoredAction,
+    Legality,
     engine_action_to_factored,
     factored_to_engine_action,
     get_action_mask,
@@ -57,13 +66,16 @@ from jackdaw.env.rewards import (
     blind_progress_reward,
     sparse_reward,
 )
+from jackdaw.env.vector_env import BalatroVectorEnv
 
 __all__ = [
+    "ACTION_VERSION",
     "ActionMask",
     "ActionType",
     "Agent",
     "BalatroEnvironment",
     "BalatroGymnasiumEnv",
+    "BalatroVectorEnv",
     "BridgeAdapter",
     "ConsumableTargetSpec",
     "D_CONSUMABLE",
@@ -71,13 +83,17 @@ __all__ = [
     "D_JOKER",
     "D_PLAYING_CARD",
     "D_SHOP",
+    "DEFAULT_MAX_FREE_MOVES",
     "DirectAdapter",
+    "FREE_ACTION_TYPES",
     "FactoredAction",
     "GameActionMask",
     "GameAdapter",
     "GameObservation",
     "GameSpec",
     "GameState",
+    "Legality",
+    "LiveAdapter",
     "NUM_ACTION_TYPES",
     "NUM_CENTER_KEYS",
     "Observation",

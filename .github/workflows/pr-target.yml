@@ -1,0 +1,26 @@
+name: PR target
+
+# Pull requests go to dev. main takes only the release merges from dev and hotfix/* branches
+# of this repository (CONTRIBUTING.md).
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, edited, synchronize]
+
+permissions: {}
+
+jobs:
+  base:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Only dev and hotfix/* merge into main
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          SAME_REPO: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+        run: |
+          if [ "$SAME_REPO" = "true" ] && { [ "$HEAD_REF" = "dev" ] || [[ "$HEAD_REF" == hotfix/* ]]; }; then
+            echo "$HEAD_REF -> main: allowed"
+          else
+            echo "::error::Pull requests go to the dev branch, not main. Change the base branch to dev (see CONTRIBUTING.md)."
+            exit 1
+          fi

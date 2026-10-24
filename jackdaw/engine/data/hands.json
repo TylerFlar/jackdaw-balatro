@@ -1,0 +1,422 @@
+{
+  "Five of a Kind": {
+    "chips": 120,
+    "example": [
+      [
+        "S_A",
+        true
+      ],
+      [
+        "H_A",
+        true
+      ],
+      [
+        "H_A",
+        true
+      ],
+      [
+        "C_A",
+        true
+      ],
+      [
+        "D_A",
+        true
+      ]
+    ],
+    "l_chips": 35,
+    "l_mult": 3,
+    "level": 1,
+    "mult": 12,
+    "order": 3,
+    "played": 0,
+    "played_this_round": 0,
+    "s_chips": 120,
+    "s_mult": 12,
+    "visible": false
+  },
+  "Flush": {
+    "chips": 35,
+    "example": [
+      [
+        "H_A",
+        true
+      ],
+      [
+        "H_K",
+        true
+      ],
+      [
+        "H_T",
+        true
+      ],
+      [
+        "H_5",
+        true
+      ],
+      [
+        "H_4",
+        true
+      ]
+    ],
+    "l_chips": 15,
+    "l_mult": 2,
+    "level": 1,
+    "mult": 4,
+    "order": 7,
+    "played": 0,
+    "played_this_round": 0,
+    "s_chips": 35,
+    "s_mult": 4,
+    "visible": true
+  },
+  "Flush Five": {
+    "chips": 160,
+    "example": [
+      [
+        "S_A",
+        true
+      ],
+      [
+        "S_A",
+        true
+      ],
+      [
+        "S_A",
+        true
+      ],
+      [
+        "S_A",
+        true
+      ],
+      [
+        "S_A",
+        true
+      ]
+    ],
+    "l_chips": 50,
+    "l_mult": 3,
+    "level": 1,
+    "mult": 16,
+    "order": 1,
+    "played": 0,
+    "played_this_round": 0,
+    "s_chips": 160,
+    "s_mult": 16,
+    "visible": false
+  },
+  "Flush House": {
+    "chips": 140,
+    "example": [
+      [
+        "D_7",
+        true
+      ],
+      [
+        "D_7",
+        true
+      ],
+      [
+        "D_7",
+        true
+      ],
+      [
+        "D_4",
+        true
+      ],
+      [
+        "D_4",
+        true
+      ]
+    ],
+    "l_chips": 40,
+    "l_mult": 4,
+    "level": 1,
+    "mult": 14,
+    "order": 2,
+    "played": 0,
+    "played_this_round": 0,
+    "s_chips": 140,
+    "s_mult": 14,
+    "visible": false
+  },
+  "Four of a Kind": {
+    "chips": 60,
+    "example": [
+      [
+        "S_J",
+        true
+      ],
+      [
+        "H_J",
+        true
+      ],
+      [
+        "C_J",
+        true
+      ],
+      [
+        "D_J",
+        true
+      ],
+      [
+        "C_3",
+        false
+      ]
+    ],
+    "l_chips": 30,
+    "l_mult": 3,
+    "level": 1,
+    "mult": 7,
+    "order": 5,
+    "played": 0,
+    "played_this_round": 0,
+    "s_chips": 60,
+    "s_mult": 7,
+    "visible": true
+  },
+  "Full House": {
+    "chips": 40,
+    "example": [
+      [
+        "H_K",
+        true
+      ],
+      [
+        "C_K",
+        true
+      ],
+      [
+        "D_K",
+        true
+      ],
+      [
+        "S_2",
+        true
+      ],
+      [
+        "D_2",
+        true
+      ]
+    ],
+    "l_chips": 25,
+    "l_mult": 2,
+    "level": 1,
+    "mult": 4,
+    "order": 6,
+    "played": 0,
+    "played_this_round": 0,
+    "s_chips": 40,
+    "s_mult": 4,
+    "visible": true
+  },
+  "High Card": {
+    "chips": 5,
+    "example": [
+      [
+        "S_A",
+        true
+      ],
+      [
+        "D_Q",
+        false
+      ],
+      [
+        "D_9",
+        false
+      ],
+      [
+        "C_4",
+        false
+      ],
+      [
+        "D_3",
+        false
+      ]
+    ],
+    "l_chips": 10,
+    "l_mult": 1,
+    "level": 1,
+    "mult": 1,
+    "order": 12,
+    "played": 0,
+    "played_this_round": 0,
+    "s_chips": 5,
+    "s_mult": 1,
+    "visible": true
+  },
+  "Pair": {
+    "chips": 10,
+    "example": [
+      [
+        "S_K",
+        false
+      ],
+      [
+        "S_9",
+        true
+      ],
+      [
+        "D_9",
+        true
+      ],
+      [
+        "H_6",
+        false
+      ],
+      [
+        "D_3",
+        false
+      ]
+    ],
+    "l_chips": 15,
+    "l_mult": 1,
+    "level": 1,
+    "mult": 2,
+    "order": 11,
+    "played": 0,
+    "played_this_round": 0,
+    "s_chips": 10,
+    "s_mult": 2,
+    "visible": true
+  },
+  "Straight": {
+    "chips": 30,
+    "example": [
+      [
+        "D_J",
+        true
+      ],
+      [
+        "C_T",
+        true
+      ],
+      [
+        "C_9",
+        true
+      ],
+      [
+        "S_8",
+        true
+      ],
+      [
+        "H_7",
+        true
+      ]
+    ],
+    "l_chips": 30,
+    "l_mult": 3,
+    "level": 1,
+    "mult": 4,
+    "order": 8,
+    "played": 0,
+    "played_this_round": 0,
+    "s_chips": 30,
+    "s_mult": 4,
+    "visible": true
+  },
+  "Straight Flush": {
+    "chips": 100,
+    "example": [
+      [
+        "S_Q",
+        true
+      ],
+      [
+        "S_J",
+        true
+      ],
+      [
+        "S_T",
+        true
+      ],
+      [
+        "S_9",
+        true
+      ],
+      [
+        "S_8",
+        true
+      ]
+    ],
+    "l_chips": 40,
+    "l_mult": 4,
+    "level": 1,
+    "mult": 8,
+    "order": 4,
+    "played": 0,
+    "played_this_round": 0,
+    "s_chips": 100,
+    "s_mult": 8,
+    "visible": true
+  },
+  "Three of a Kind": {
+    "chips": 30,
+    "example": [
+      [
+        "S_T",
+        true
+      ],
+      [
+        "C_T",
+        true
+      ],
+      [
+        "D_T",
+        true
+      ],
+      [
+        "H_6",
+        false
+      ],
+      [
+        "D_5",
+        false
+      ]
+    ],
+    "l_chips": 20,
+    "l_mult": 2,
+    "level": 1,
+    "mult": 3,
+    "order": 9,
+    "played": 0,
+    "played_this_round": 0,
+    "s_chips": 30,
+    "s_mult": 3,
+    "visible": true
+  },
+  "Two Pair": {
+    "chips": 20,
+    "example": [
+      [
+        "H_A",
+        true
+      ],
+      [
+        "D_A",
+        true
+      ],
+      [
+        "C_Q",
+        false
+      ],
+      [
+        "H_4",
+        true
+      ],
+      [
+        "C_4",
+        true
+      ]
+    ],
+    "l_chips": 20,
+    "l_mult": 1,
+    "level": 1,
+    "mult": 2,
+    "order": 10,
+    "played": 0,
+    "played_this_round": 0,
+    "s_chips": 20,
+    "s_mult": 2,
+    "visible": true
+  }
+}

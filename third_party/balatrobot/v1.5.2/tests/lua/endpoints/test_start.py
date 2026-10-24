@@ -1,0 +1,164 @@
+"""Tests for the start endpoint."""
+
+from typing import Any
+
+import httpx
+import pytest
+
+from tests.lua.conftest import (
+    api,
+    assert_error_response,
+    assert_gamestate_response,
+    load_fixture,
+)
+
+
+class TestStartEndpoint:
+    """Parametrized tests for the start endpoint."""
+
+    @pytest.mark.parametrize(
+        "arguments,expected",
+        [
+            # Test basic start with RED deck and WHITE stake
+            (
+                {"deck": "RED", "stake": "WHITE"},
+                {
+                    "state": "BLIND_SELECT",
+                    "deck": "RED",
+                    "stake": "WHITE",
+                    "ante_num": 1,
+                    "round_num": 0,
+                },
+            ),
+            # Test with BLUE deck
+            (
+                {"deck": "BLUE", "stake": "WHITE"},
+                {
+                    "state": "BLIND_SELECT",
+                    "deck": "BLUE",
+                    "stake": "WHITE",
+                    "ante_num": 1,
+                    "round_num": 0,
+                },
+            ),
+            # Test with higher stake (BLACK)
+            (
+                {"deck": "RED", "stake": "BLACK"},
+                {
+                    "state": "BLIND_SELECT",
+                    "deck": "RED",
+                    "stake": "BLACK",
+                    "ante_num": 1,
+                    "round_num": 0,
+                },
+            ),
+            # Test with seed
+            (
+                {"deck": "RED", "stake": "WHITE", "seed": "TEST123"},
+                {
+                    "state": "BLIND_SELECT",
+                    "deck": "RED",
+                    "stake": "WHITE",
+                    "ante_num": 1,
+                    "round_num": 0,
+                    "seed": "TEST123",
+                },
+            ),
+        ],
+    )
+    def test_start_from_MENU(
+        self,
+        client: httpx.Client,
+        arguments: dict[str, Any],
+        expected: dict[str, Any],
+    ):
+        """Test start endpoint with various valid parameters."""
+        response = api(client, "menu", {})
+        assert_gamestate_response(response, state="MENU")
+        response = api(client, "start", arguments)
+        assert_gamestate_response(response, **expected)
+
+
+class TestStartEndpointValidation:
+    """Test start endpoint parameter validation."""
+
+    def test_missing_deck_parameter(self, client: httpx.Client):
+        """Test that start fails when deck parameter is missing."""
+        response = api(client, "menu", {})
+        assert_gamestate_response(response, state="MENU")
+        response = api(client, "start", {"stake": "WHITE"})
+        assert_error_response(
+            response,
+            "BAD_REQUEST",
+            "Missing required field 'deck'",
+        )
+
+    def test_missing_stake_parameter(self, client: httpx.Client):
+        """Test that start fails when stake parameter is missing."""
+        response = api(client, "menu", {})
+        assert_gamestate_response(response, state="MENU")
+        response = api(client, "start", {"deck": "RED"})
+        assert_error_response(
+            response,
+            "BAD_REQUEST",
+            "Missing required field 'stake'",
+        )
+
+    def test_invalid_deck_value(self, client: httpx.Client):
+        """Test that start fails with invalid deck enum."""
+        response = api(client, "menu", {})
+        assert_gamestate_response(response, state="MENU")
+        response = api(client, "start", {"deck": "INVALID_DECK", "stake": "WHITE"})
+        assert_error_response(
+            response,
+            "BAD_REQUEST",
+            "Invalid deck enum. Must be one of:",
+        )
+
+    def test_invalid_stake_value(self, client: httpx.Client):
+        """Test that start fails when invalid stake enum is provided."""
+        response = api(client, "menu", {})
+        assert_gamestate_response(response, state="MENU")
+        response = api(client, "start", {"deck": "RED", "stake": "INVALID_STAKE"})
+        assert_error_response(
+            response,
+            "BAD_REQUEST",
+            "Invalid stake enum. Must be one of:",
+        )
+
+    def test_invalid_deck_type(self, client: httpx.Client):
+        """Test that start fails when deck is not a string."""
+        response = api(client, "menu", {})
+        assert_gamestate_response(response, state="MENU")
+        response = api(client, "start", {"deck": 123, "stake": "WHITE"})
+        assert_error_response(
+            response,
+            "BAD_REQUEST",
+            "Field 'deck' must be of type string",
+        )
+
+    def test_invalid_stake_type(self, client: httpx.Client):
+        """Test that start fails when stake is not a string."""
+        response = api(client, "menu", {})
+        assert_gamestate_response(response, state="MENU")
+        response = api(client, "start", {"deck": "RED", "stake": 1})
+        assert_error_response(
+            response,
+            "BAD_REQUEST",
+            "Field 'stake' must be of type string",
+        )
+
+
+class TestStartEndpointStateRequirements:
+    """Test start endpoint state requirements."""
+
+    def test_start_from_BLIND_SELECT(self, client: httpx.Client):
+        """Test that start fails when not in MENU state."""
+        gamestate = load_fixture(client, "start", "state-BLIND_SELECT")
+        assert gamestate["state"] == "BLIND_SELECT"
+        response = api(client, "start", {"deck": "RED", "stake": "WHITE"})
+        assert_error_response(
+            response,
+            "INVALID_STATE",
+            "Method 'start' requires one of these states: MENU",
+        )

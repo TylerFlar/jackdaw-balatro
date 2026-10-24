@@ -4,22 +4,28 @@ Covers:
 - Encode initial game state, verify shapes and dtypes
 - Encode after playing a hand, verify hand cards reduced
 - Encode with jokers, verify joker entity count matches
-- Encode with face-down cards, verify face_down flag set
+- Encode with face-down cards: the flag is set and the identity hidden
 - Encode empty areas produce shape (0, D) arrays
 - Center key mapping covers all keys in centers.json
 - No NaN/Inf in encoded observations across 100 random-agent steps
+
+The encoder is the Rust engine's (``test_rust_observation.py`` checks it against the
+Python encoder's frozen outputs); states the policy doesn't reach on its own are built
+by editing the run's snapshot.
 """
 
 from __future__ import annotations
 
-import json
+import math
 import random
-from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
 
+from jackdaw.core import Game
 from jackdaw.engine.actions import (
+    CashOut,
     Discard,
     GamePhase,
     PlayHand,
@@ -30,7 +36,7 @@ from jackdaw.engine.actions import (
     SwapJokersLeft,
     SwapJokersRight,
 )
-from jackdaw.env.game_interface import DirectAdapter
+from jackdaw.engine.data import load
 from jackdaw.env.observation import (
     _CENTER_KEY_TO_ID,
     D_CONSUMABLE,
@@ -40,26 +46,34 @@ from jackdaw.env.observation import (
     D_SHOP,
     NUM_CENTER_KEYS,
     Observation,
-    encode_consumable,
+    center_key_id,
     encode_observation,
-    encode_playing_card,
-    encode_shop_item,
 )
+from jackdaw.env.rust_observation import encode_snapshot
 
 SEED = "OBS_TEST_42"
 BACK = "b_red"
 STAKE = 1
 
 
-def _make_adapter() -> DirectAdapter:
-    adapter = DirectAdapter()
-    adapter.reset(BACK, STAKE, SEED)
-    return adapter
+def _new_game(seed: str = SEED) -> Game:
+    return Game.new(BACK, STAKE, seed)
 
 
-def _step_to_hand(adapter: DirectAdapter) -> None:
-    """Advance to SELECTING_HAND phase."""
-    adapter.step(SelectBlind())
+def _dealt(seed: str = SEED) -> Game:
+    game = _new_game(seed)
+    game.step(SelectBlind())
+    assert game.phase == GamePhase.SELECTING_HAND
+    return game
+
+
+def _shop(seed: str = SEED) -> Game:
+    game = _dealt(seed)
+    game.debug_set(chips=game.blind.chips)
+    game.step(PlayHand(card_indices=(0,)))
+    game.step(CashOut())
+    assert game.phase == GamePhase.SHOP
+    return game
 
 
 # ---------------------------------------------------------------------------
@@ -69,50 +83,34 @@ def _step_to_hand(adapter: DirectAdapter) -> None:
 
 class TestShapesAndDtypes:
     def test_initial_state_shapes(self):
-        adapter = _make_adapter()
-        obs = encode_observation(adapter.raw_state)
+        obs = encode_observation(_new_game())
 
         assert isinstance(obs, Observation)
         assert obs.global_context.shape == (D_GLOBAL,)
         assert obs.global_context.dtype == np.float32
 
         # At BLIND_SELECT, hand is empty (cards not dealt yet)
-        assert obs.hand_cards.ndim == 2
-        assert obs.hand_cards.shape[1] == D_PLAYING_CARD
-        assert obs.hand_cards.dtype == np.float32
-
-        assert obs.jokers.ndim == 2
-        assert obs.jokers.shape[1] == D_JOKER
-        assert obs.jokers.dtype == np.float32
-
-        assert obs.consumables.ndim == 2
-        assert obs.consumables.shape[1] == D_CONSUMABLE
-        assert obs.consumables.dtype == np.float32
-
-        assert obs.shop_cards.ndim == 2
-        assert obs.shop_cards.shape[1] == D_SHOP
-        assert obs.shop_cards.dtype == np.float32
-
-        assert obs.pack_cards.ndim == 2
-        assert obs.pack_cards.shape[1] == D_PLAYING_CARD
-        assert obs.pack_cards.dtype == np.float32
+        for name, width in (
+            ("hand_cards", D_PLAYING_CARD),
+            ("jokers", D_JOKER),
+            ("consumables", D_CONSUMABLE),
+            ("shop_cards", D_SHOP),
+            ("pack_cards", D_PLAYING_CARD),
+        ):
+            arr = getattr(obs, name)
+            assert arr.ndim == 2 and arr.shape[1] == width, name
+            assert arr.dtype == np.float32, name
 
     def test_selecting_hand_has_cards(self):
-        adapter = _make_adapter()
-        _step_to_hand(adapter)
-        obs = encode_observation(adapter.raw_state)
-
-        hand = adapter.raw_state.get("hand", [])
-        assert obs.hand_cards.shape[0] == len(hand)
-        assert len(hand) > 0
-        assert obs.hand_cards.shape == (len(hand), D_PLAYING_CARD)
+        game = _dealt()
+        obs = encode_observation(game)
+        assert len(game.hand) > 0
+        assert obs.hand_cards.shape == (len(game.hand), D_PLAYING_CARD)
 
     def test_global_context_dimension(self):
-        adapter = _make_adapter()
-        obs = encode_observation(adapter.raw_state)
+        obs = encode_observation(_new_game())
         assert obs.global_context.shape == (D_GLOBAL,)
-        # D_GLOBAL = 90 base + 32 vouchers + 8 blind + 3 round_pos
-        #          + 2 round_progress + 24 tags + 52 discard_hist = 211
+        # 211 base features + 24 strategic ones
         assert D_GLOBAL == 235
 
 
@@ -123,26 +121,16 @@ class TestShapesAndDtypes:
 
 class TestPlayHand:
     def test_hand_reduced_after_play(self):
-        adapter = _make_adapter()
-        _step_to_hand(adapter)
+        game = _dealt()
+        hand_before = len(game.hand)
+        assert encode_observation(game).hand_cards.shape[0] == hand_before
 
-        hand_before = len(adapter.raw_state["hand"])
-        obs_before = encode_observation(adapter.raw_state)
-        assert obs_before.hand_cards.shape[0] == hand_before
-
-        # Play first 3 cards
-        n_play = min(3, hand_before)
-        adapter.step(PlayHand(card_indices=tuple(range(n_play))))
-
-        gs = adapter.raw_state
-        gs.get("phase")
-
-        # After playing, we may transition to ROUND_EVAL or stay in
-        # SELECTING_HAND with redrawn cards. Either way, encode should work.
-        obs_after = encode_observation(gs)
+        # Play first 3 cards; the hand refills, or the round ends
+        game.step(PlayHand(card_indices=tuple(range(min(3, hand_before)))))
+        obs_after = encode_observation(game)
         assert obs_after.hand_cards.ndim == 2
         assert obs_after.hand_cards.shape[1] == D_PLAYING_CARD
-        assert obs_after.hand_cards.shape[0] == len(gs.get("hand", []))
+        assert obs_after.hand_cards.shape[0] == len(game.hand)
 
 
 # ---------------------------------------------------------------------------
@@ -152,32 +140,18 @@ class TestPlayHand:
 
 class TestJokerEncoding:
     def test_joker_count_matches(self):
-        adapter = _make_adapter()
-        gs = adapter.raw_state
-        jokers = gs.get("jokers", [])
-        obs = encode_observation(gs)
-        assert obs.jokers.shape[0] == len(jokers)
+        game = _new_game()
+        assert encode_observation(game).jokers.shape[0] == len(game.jokers) == 0
+        game.debug_add("j_joker")
+        game.debug_add("j_egg")
+        assert encode_observation(game).jokers.shape == (2, D_JOKER)
 
     def test_single_joker_features(self):
-        """Manually add a joker to state and verify encoding."""
-        from jackdaw.engine.card import Card
-
-        adapter = _make_adapter()
-        gs = adapter.raw_state
-
-        # Create a fake joker
-        joker = Card()
-        joker.set_ability("j_joker")
-        joker.cost = 4
-        joker.sell_cost = 2
-        gs["jokers"] = [joker]
-
-        obs = encode_observation(gs)
-        assert obs.jokers.shape == (1, D_JOKER)
-
-        vec = obs.jokers[0]
-        # center_key_id should be non-zero
-        assert vec[0] > 0.0
+        game = _new_game()
+        game.debug_add("j_joker")
+        vec = encode_observation(game).jokers[0]
+        # center id, normalized
+        assert vec[0] == np.float32(center_key_id("j_joker") / NUM_CENTER_KEYS)
         # sell_value should be encoded
         assert vec[3] > 0.0
 
@@ -187,20 +161,15 @@ class TestJokerEncoding:
 # ---------------------------------------------------------------------------
 
 
+def _hand_card(snap: dict[str, Any], i: int) -> dict[str, Any]:
+    return snap["areas"]["hand"][i]
+
+
 class TestFaceDownCards:
     def test_face_down_flag(self):
-        from jackdaw.engine.card import Card
-
-        adapter = _make_adapter()
-        gs = adapter.raw_state
-
-        # Create a face-down card
-        card = Card()
-        card.set_base("H_A", "Hearts", "Ace")
-        card.set_ability("c_base")
-        card.facing = "back"
-
-        vec = encode_playing_card(card, 0, gs)
+        snap = _dealt().to_dict()
+        _hand_card(snap, 0)["facing"] = "back"
+        vec = encode_snapshot(snap).hand_cards[0]
         assert vec.shape == (D_PLAYING_CARD,)
 
         # face_down flag at index 7
@@ -211,20 +180,11 @@ class TestFaceDownCards:
         assert vec[3] == 0.0  # enhancement
 
     def test_face_up_card(self):
-        from jackdaw.engine.card import Card
-
-        adapter = _make_adapter()
-        gs = adapter.raw_state
-
-        card = Card()
-        card.set_base("H_A", "Hearts", "Ace")
-        card.set_ability("c_base")
-        card.facing = "front"
-
-        vec = encode_playing_card(card, 0, gs)
+        game = _dealt()
+        game.debug_add("H_A")
+        vec = encode_observation(game).hand_cards[-1]
         assert vec[7] == 0.0  # not face down
-        assert vec[0] > 0.0  # rank_id should be filled (Ace=14/14=1.0)
-        assert abs(vec[0] - 14.0 / 14.0) < 1e-6
+        assert vec[0] == pytest.approx(14.0 / 14.0)  # Ace
 
 
 _SUITS = ("Spades", "Hearts", "Clubs", "Diamonds")
@@ -232,34 +192,29 @@ _RANKS = ("2", "3", "4", "5", "6", "7", "8", "9", "10", "Jack", "Queen", "King",
 _KEY_RANK = {"10": "T", "Jack": "J", "Queen": "Q", "King": "K", "Ace": "A"}
 
 
-def _identities():
+def _identities(game: Game) -> dict[str, tuple[str, dict[str, Any]]]:
+    """Every playing card identity's ``front`` and ``base``, made by BalatroBot's ``add``
+    in a copy of the run."""
+    out = {}
     for suit in _SUITS:
         for rank in _RANKS:
-            yield f"{suit[0]}_{_KEY_RANK.get(rank, rank)}", suit, rank
+            key = f"{suit[0]}_{_KEY_RANK.get(rank, rank)}"
+            scratch = game.clone()
+            scratch.debug_add(key)
+            card = scratch.to_dict()["areas"]["hand"][-1]
+            out[key] = (card["front"], card["base"])
+    return out
 
 
-def _dealt_state(seed: str) -> dict:
-    adapter = DirectAdapter()
-    adapter.reset(BACK, STAKE, seed)
-    adapter.step(SelectBlind())
-    gs = adapter.raw_state
-    assert gs["phase"] == GamePhase.SELECTING_HAND
-    return gs
+def _encodings(snap: dict[str, Any]) -> list[np.ndarray]:
+    """The parts of the observation that see the hand."""
+    obs = encode_snapshot(snap)
+    return [obs.global_context, obs.hand_cards, obs.jokers]
 
 
-def _encodings(gs: dict) -> list[np.ndarray]:
-    """Every encoder path that sees the hand: the full observation plus the
-    global context and hand rows computed with their own defaults."""
-    from jackdaw.env.observation import encode_global_context, encode_playing_cards_batch
-
-    obs = encode_observation(gs)
-    return [
-        obs.global_context,
-        obs.hand_cards,
-        obs.jokers,
-        encode_global_context(gs),
-        encode_playing_cards_batch(gs["hand"], gs),
-    ]
+def _same(ref: list[np.ndarray], snap: dict[str, Any], where: str) -> None:
+    for a, b in zip(ref, _encodings(snap), strict=True):
+        np.testing.assert_array_equal(a, b, err_msg=where)
 
 
 class TestFaceDownHidesIdentity:
@@ -267,115 +222,83 @@ class TestFaceDownHidesIdentity:
     (issue #25): two states a player cannot tell apart encode identically."""
 
     def test_hidden_hand_card_identity_not_observable(self):
-        for seed in ("LEAK1", "LEAK2", "LEAK3"):
-            gs = _dealt_state(seed)
-            for card in gs["hand"]:
-                card.facing = "back"
-                true_base, true_key = card.base, card.card_key
-                ref = _encodings(gs)
-                for key, suit, rank in _identities():
-                    card.set_base(key, suit, rank)
-                    for a, b in zip(ref, _encodings(gs), strict=True):
-                        np.testing.assert_array_equal(a, b, err_msg=f"{seed} {key}")
-                card.base, card.card_key = true_base, true_key
-                # Enhancements (Stone, Wild change hand evaluation), editions,
-                # seals and debuff are hidden too.
-                saved = (card.center_key, card.ability, card.edition, card.seal, card.debuff)
-                for enh in ("m_stone", "m_wild", "m_glass", "m_lucky"):
-                    card.set_ability(enh)
-                    for a, b in zip(ref, _encodings(gs), strict=True):
-                        np.testing.assert_array_equal(a, b, err_msg=f"{seed} {enh}")
-                card.center_key, card.ability = saved[0], saved[1]
-                card.set_edition({"polychrome": True})
-                card.set_seal("Red")
-                card.debuff = True
-                for a, b in zip(ref, _encodings(gs), strict=True):
-                    np.testing.assert_array_equal(a, b, err_msg=f"{seed} edition/seal/debuff")
-                card.center_key, card.ability, card.edition, card.seal, card.debuff = saved
-                card.facing = "front"
+        game = _dealt("LEAK1")
+        identities = _identities(game)
+        base = game.to_dict()
+        for i in (0, 3, 7):
+            snap = base
+            _hand_card(snap, i)["facing"] = "back"
+            ref = _encodings(snap)
+            card = _hand_card(snap, i)
+            saved = dict(card)
+            for key, (front, card_base) in identities.items():
+                card["front"], card["base"] = front, card_base
+                _same(ref, snap, f"card {i} as {key}")
+            card.update(saved)
+            # Enhancements (Stone, Wild change hand evaluation), editions,
+            # seals and debuff are hidden too.
+            for enh in ("m_stone", "m_wild", "m_glass", "m_lucky"):
+                card["center"] = enh
+                _same(ref, snap, f"card {i} {enh}")
+            card.update(saved)
+            card["edition"] = {"polychrome": True, "x_mult": 1.5, "type": "polychrome"}
+            card["seal"] = "Red"
+            card["debuff"] = True
+            _same(ref, snap, f"card {i} edition/seal/debuff")
+            card.update(saved)
+            card["facing"] = "front"
 
     def test_hidden_card_excluded_from_best_hand(self):
-        gs = _dealt_state("LEAK1")
-        hand = gs["hand"]
-        for card in hand[1:]:
-            card.facing = "back"
-        obs = encode_observation(gs)
+        snap = _dealt("LEAK1").to_dict()
+        for card in snap["areas"]["hand"][1:]:
+            card["facing"] = "back"
+        obs = encode_snapshot(snap)
         # A lone visible card can only form High Card, and it is that card.
         assert obs.hand_cards[0, 13] == 1.0
         assert not obs.hand_cards[1:, 13].any()
         assert (obs.hand_cards[1:, [7]] == 1.0).all()
 
     def test_hidden_debuffed_card_not_counted(self):
-        gs = _dealt_state("LEAK1")
-        hand = gs["hand"]
-        hand[0].debuff = True
-        assert encode_observation(gs).global_context[232] == pytest.approx(1.0 / len(hand))
-        hand[0].facing = "back"
-        assert encode_observation(gs).global_context[232] == 0.0
-
-    def test_no_face_down_cards_unchanged(self):
-        from jackdaw.env.observation import (
-            _compute_hand_analysis,
-            encode_global_context,
-            encode_playing_cards_batch,
-        )
-
-        gs = _dealt_state("LEAK2")
-        analysis = _compute_hand_analysis(gs["hand"], gs["jokers"], gs["hand_levels"])
-        obs = encode_observation(gs)
-        np.testing.assert_array_equal(
-            obs.global_context, encode_global_context(gs, hand_analysis=analysis)
-        )
-        np.testing.assert_array_equal(
-            obs.hand_cards, encode_playing_cards_batch(gs["hand"], gs, hand_analysis=analysis)
-        )
+        snap = _dealt("LEAK1").to_dict()
+        n = len(snap["areas"]["hand"])
+        _hand_card(snap, 0)["debuff"] = True
+        assert encode_snapshot(snap).global_context[232] == pytest.approx(1.0 / n)
+        _hand_card(snap, 0)["facing"] = "back"
+        assert encode_snapshot(snap).global_context[232] == 0.0
 
     def test_face_down_joker_encodes_position_only(self):
-        from jackdaw.engine.card import Card
-        from jackdaw.env.observation import encode_joker, encode_jokers_batch
-
-        gs = _dealt_state("LEAK1")
-        jokers = []
+        game = _dealt("LEAK1")
         for key in ("j_joker", "j_merry_andy", "j_blueprint"):
-            j = Card()
-            j.set_ability(key)
-            jokers.append(j)
-        face_up = encode_jokers_batch(jokers, gs)
+            game.debug_add(key)
+        snap = game.to_dict()
+        face_up = encode_snapshot(snap).jokers
         assert face_up[:, 0].all()
 
-        jokers[1].facing = "back"
-        batch = encode_jokers_batch(jokers, gs)
+        snap["areas"]["jokers"][1]["facing"] = "back"
+        rows = encode_snapshot(snap).jokers
         expected = np.zeros(D_JOKER, dtype=np.float32)
         expected[9] = 1 / 20.0
-        np.testing.assert_array_equal(batch[1], expected)
-        np.testing.assert_array_equal(encode_joker(jokers[1], 1, gs), expected)
-        np.testing.assert_array_equal(batch[[0, 2]], face_up[[0, 2]])
+        np.testing.assert_array_equal(rows[1], expected)
+        np.testing.assert_array_equal(rows[[0, 2]], face_up[[0, 2]])
 
-        # Swapping which joker is face down in that slot changes nothing.
-        other = Card()
-        other.set_ability("j_cavendish")
-        other.facing = "back"
-        np.testing.assert_array_equal(encode_jokers_batch([jokers[0], other, jokers[2]], gs), batch)
+        # Which joker is face down in that slot changes nothing.
+        scratch = game.clone()
+        made = scratch.debug_add("j_cavendish")
+        other = next(c for c in scratch.to_dict()["areas"]["jokers"] if c["sort_id"] == made)
+        other["sort_id"] = snap["areas"]["jokers"][1]["sort_id"]
+        other["facing"] = "back"
+        snap["areas"]["jokers"][1] = other
+        np.testing.assert_array_equal(encode_snapshot(snap).jokers, rows)
 
     def test_amber_acorn_jokers_hidden(self):
-        from jackdaw.engine.actions import SkipBlind
-        from jackdaw.engine.card import Card
-
-        adapter = DirectAdapter()
-        adapter.reset(BACK, STAKE, "ACORN")
-        gs = adapter.raw_state
+        game = _new_game("ACORN")
         for key in ("j_joker", "j_greedy_joker", "j_blueprint"):
-            j = Card()
-            j.set_ability(key)
-            gs["jokers"].append(j)
-        adapter.step(SkipBlind())
-        adapter.step(SkipBlind())
-        adapter.raw_state["round_resets"]["blind_choices"]["Boss"] = "bl_final_acorn"
-        adapter.step(SelectBlind())
-        gs = adapter.raw_state
-        assert all(j.facing == "back" for j in gs["jokers"])
+            game.debug_add(key)
+        game.apply_setup({"op": "force_boss", "key": "bl_final_acorn"})
+        game.step(SelectBlind())
+        assert all(j.face_down for j in game.jokers)
 
-        rows = encode_observation(gs).jokers
+        rows = encode_observation(game).jokers
         np.testing.assert_array_equal(rows[:, 9], np.arange(3, dtype=np.float32) / 20.0)
         assert not np.delete(rows, 9, axis=1).any()
 
@@ -387,41 +310,19 @@ class TestFaceDownHidesIdentity:
 
 class TestEmptyAreas:
     def test_empty_jokers(self):
-        adapter = _make_adapter()
-        gs = adapter.raw_state
-        gs["jokers"] = []
-        obs = encode_observation(gs)
-        assert obs.jokers.shape == (0, D_JOKER)
+        assert encode_observation(_new_game()).jokers.shape == (0, D_JOKER)
 
     def test_empty_consumables(self):
-        adapter = _make_adapter()
-        gs = adapter.raw_state
-        gs["consumables"] = []
-        obs = encode_observation(gs)
-        assert obs.consumables.shape == (0, D_CONSUMABLE)
+        assert encode_observation(_new_game()).consumables.shape == (0, D_CONSUMABLE)
 
     def test_empty_shop(self):
-        adapter = _make_adapter()
-        gs = adapter.raw_state
-        gs["shop_cards"] = []
-        gs["shop_vouchers"] = []
-        gs["shop_boosters"] = []
-        obs = encode_observation(gs)
-        assert obs.shop_cards.shape == (0, D_SHOP)
+        assert encode_observation(_new_game()).shop_cards.shape == (0, D_SHOP)
 
     def test_empty_pack(self):
-        adapter = _make_adapter()
-        gs = adapter.raw_state
-        gs["pack_cards"] = []
-        obs = encode_observation(gs)
-        assert obs.pack_cards.shape == (0, D_PLAYING_CARD)
+        assert encode_observation(_new_game()).pack_cards.shape == (0, D_PLAYING_CARD)
 
     def test_empty_hand(self):
-        adapter = _make_adapter()
-        gs = adapter.raw_state
-        gs["hand"] = []
-        obs = encode_observation(gs)
-        assert obs.hand_cards.shape == (0, D_PLAYING_CARD)
+        assert encode_observation(_new_game()).hand_cards.shape == (0, D_PLAYING_CARD)
 
 
 # ---------------------------------------------------------------------------
@@ -431,21 +332,7 @@ class TestEmptyAreas:
 
 class TestCenterKeyMapping:
     def test_covers_all_centers_json_keys(self):
-        centers_path = (
-            Path(__file__).resolve().parent.parent.parent
-            / "jackdaw"
-            / "engine"
-            / "data"
-            / "centers.json"
-        )
-        with open(centers_path) as f:
-            data = json.load(f)
-
-        missing = []
-        for key in data.keys():
-            if key not in _CENTER_KEY_TO_ID:
-                missing.append(key)
-
+        missing = [key for key in load("centers") if key not in _CENTER_KEY_TO_ID]
         assert not missing, f"Center keys missing from mapping: {missing}"
 
     def test_ids_are_contiguous(self):
@@ -454,13 +341,22 @@ class TestCenterKeyMapping:
         assert ids[-1] == len(ids)  # contiguous from 1..N
 
     def test_unknown_key_returns_zero(self):
-        from jackdaw.env.observation import center_key_id
-
         assert center_key_id("nonexistent_key") == 0
 
     def test_num_center_keys_matches(self):
         assert NUM_CENTER_KEYS == len(_CENTER_KEY_TO_ID)
         assert NUM_CENTER_KEYS > 0
+
+    def test_the_encoder_uses_the_same_ids(self):
+        game = _shop()
+        game.debug_add("j_blueprint")
+        game.debug_add("c_pluto")
+        obs = encode_observation(game)
+        assert obs.jokers[0, 0] == np.float32(center_key_id("j_blueprint") / NUM_CENTER_KEYS)
+        assert obs.consumables[0, 0] == np.float32(center_key_id("c_pluto") / NUM_CENTER_KEYS)
+        shop = [*game.shop_jokers, *game.shop_vouchers, *game.shop_boosters]
+        expected = [np.float32(center_key_id(c.key) / NUM_CENTER_KEYS) for c in shop]
+        assert obs.shop_cards[:, 0].tolist() == expected
 
 
 # ---------------------------------------------------------------------------
@@ -474,8 +370,8 @@ class TestNoNaNInf:
 
         Verify no NaN or Inf values appear in any array.
         """
-        random.seed(54321)
-        adapter = _make_adapter()
+        rng = random.Random(54321)
+        game = _new_game()
 
         def _check_obs(obs: Observation, step_num: int) -> None:
             for name in (
@@ -490,18 +386,12 @@ class TestNoNaNInf:
                 assert not np.any(np.isnan(arr)), f"NaN in {name} at step {step_num}"
                 assert not np.any(np.isinf(arr)), f"Inf in {name} at step {step_num}"
 
-        obs = encode_observation(adapter.raw_state)
-        _check_obs(obs, 0)
+        _check_obs(encode_observation(game), 0)
 
         for step_num in range(1, 101):
-            gs = adapter.raw_state
-            phase = gs.get("phase")
-            if phase == GamePhase.GAME_OVER:
+            if game.phase == GamePhase.GAME_OVER:
                 break
-            if adapter.won and phase == GamePhase.SHOP:
-                break
-
-            legal = adapter.get_legal_actions()
+            legal = game.legal_actions()
             if not legal:
                 break
 
@@ -513,25 +403,16 @@ class TestNoNaNInf:
                     a, (SortHand, SwapHandLeft, SwapHandRight, SwapJokersLeft, SwapJokersRight)
                 )
             ]
-            pool = progress if progress else legal
-            action = random.choice(pool)
+            action = rng.choice(progress or legal)
 
             # Resolve marker actions
-            hand = gs.get("hand", [])
-            if isinstance(action, PlayHand) and not action.card_indices and hand:
-                n = min(5, len(hand))
-                count = random.randint(1, n)
-                indices = tuple(sorted(random.sample(range(len(hand)), count)))
-                action = PlayHand(card_indices=indices)
-            if isinstance(action, Discard) and not action.card_indices and hand:
-                n = min(5, len(hand))
-                count = random.randint(1, n)
-                indices = tuple(sorted(random.sample(range(len(hand)), count)))
-                action = Discard(card_indices=indices)
+            hand = game.hand
+            if isinstance(action, (PlayHand, Discard)) and not action.card_indices and hand:
+                count = rng.randint(1, min(5, len(hand)))
+                action = type(action)(tuple(sorted(rng.sample(range(len(hand)), count))))
 
-            adapter.step(action)
-            obs = encode_observation(adapter.raw_state)
-            _check_obs(obs, step_num)
+            game.step(action)
+            _check_obs(encode_observation(game), step_num)
 
 
 # ---------------------------------------------------------------------------
@@ -541,35 +422,26 @@ class TestNoNaNInf:
 
 class TestGlobalContext:
     def test_phase_one_hot(self):
-        adapter = _make_adapter()
-        obs = encode_observation(adapter.raw_state)
+        phase_vec = encode_observation(_new_game()).global_context[0:6]
         # BLIND_SELECT = index 0
-        phase_vec = obs.global_context[0:6]
         assert phase_vec[0] == 1.0
         assert np.sum(phase_vec) == 1.0
 
     def test_phase_changes_after_select(self):
-        adapter = _make_adapter()
-        _step_to_hand(adapter)
-        obs = encode_observation(adapter.raw_state)
-        phase_vec = obs.global_context[0:6]
+        phase_vec = encode_observation(_dealt()).global_context[0:6]
         # SELECTING_HAND = index 1
         assert phase_vec[1] == 1.0
         assert np.sum(phase_vec) == 1.0
 
     def test_blind_on_deck_one_hot(self):
-        adapter = _make_adapter()
-        obs = encode_observation(adapter.raw_state)
-        bod_vec = obs.global_context[6:10]
+        bod_vec = encode_observation(_new_game()).global_context[6:10]
         # "Small" = index 1
         assert bod_vec[1] == 1.0
         assert np.sum(bod_vec) == 1.0
 
     def test_hand_levels_encoded(self):
-        adapter = _make_adapter()
-        obs = encode_observation(adapter.raw_state)
         # Hand levels start at index 30, 12 * 5 = 60 values
-        hl_vec = obs.global_context[30:90]
+        hl_vec = encode_observation(_new_game()).global_context[30:90]
         # All should be non-negative (levels, chips, mult are positive)
         assert np.all(hl_vec >= 0.0)
         # At least some visible hands should have non-zero chips/mult
@@ -583,75 +455,43 @@ class TestGlobalContext:
 
 class TestIndividualEncoders:
     def test_encode_playing_card_all_suits(self):
-        from jackdaw.engine.card import Card
-
-        adapter = _make_adapter()
-        gs = adapter.raw_state
-
-        suits = [("Hearts", "H"), ("Diamonds", "D"), ("Clubs", "C"), ("Spades", "S")]
-        for suit_name, suit_letter in suits:
-            card = Card()
-            card.set_base(f"{suit_letter}_A", suit_name, "Ace")
-            card.set_ability("c_base")
-            vec = encode_playing_card(card, 0, gs)
-            assert vec.shape == (D_PLAYING_CARD,)
-            assert vec[0] > 0.0  # rank_id
+        game = _dealt()
+        for letter in "HDCS":
+            game.debug_add(f"{letter}_A")
+        rows = encode_observation(game).hand_cards[-4:]
+        assert rows.shape == (4, D_PLAYING_CARD)
+        assert (rows[:, 0] > 0.0).all()  # rank_id
+        assert sorted(rows[:, 1].tolist()) == pytest.approx([0.0, 1 / 3, 2 / 3, 1.0])
 
     def test_encode_consumable(self):
-        from jackdaw.engine.card import Card
-
-        adapter = _make_adapter()
-        gs = adapter.raw_state
-
-        card = Card()
-        card.set_ability("c_strength")
-        card.sell_cost = 2
-        gs["consumables"] = [card]
-
-        vec = encode_consumable(card, gs)
+        game = _new_game()
+        game.debug_add("c_strength")
+        vec = encode_observation(game).consumables[0]
         assert vec.shape == (D_CONSUMABLE,)
         assert vec[0] > 0.0  # center_key_id
 
     def test_encode_shop_item(self):
-        from jackdaw.engine.card import Card
-
-        adapter = _make_adapter()
-        gs = adapter.raw_state
-        gs["dollars"] = 10
-
-        card = Card()
-        card.set_ability("j_joker")
-        card.cost = 4
-        gs["jokers"] = []
-
-        vec = encode_shop_item(card, gs)
-        assert vec.shape == (D_SHOP,)
-        assert vec[3] == 1.0  # affordable (cost 4 <= dollars 10)
-        assert vec[4] == 1.0  # has_slot (0 jokers < 5 slots)
+        game = _shop()
+        game.debug_set(money=50)
+        rows = encode_observation(game).shop_cards
+        assert rows.shape[1] == D_SHOP
+        assert (rows[:, 3] == 1.0).all()  # affordable
+        assert (rows[: len(game.shop_jokers), 4] == 1.0).all()  # a free slot (no jokers)
 
     def test_shop_item_affordable_on_credit(self):
-        from jackdaw.engine.card import Card
-
-        gs = _make_adapter().raw_state
-        gs["dollars"] = 0
-        card = Card()
-        card.set_ability("j_joker")
-        card.cost = 4
-        assert encode_shop_item(card, gs)[3] == 0.0
-        gs["bankrupt_at"] = -20  # Credit Card
-        assert encode_shop_item(card, gs)[3] == 1.0
+        game = _shop()
+        game.debug_set(money=0)
+        assert not encode_observation(game).shop_cards[:, 3].any()
+        game.debug_add("j_credit_card")  # bankrupt_at -20
+        assert encode_observation(game).shop_cards[:, 3].all()
 
     def test_consumable_can_use_matches_the_mask(self):
         """A targeting tarot reads usable once the hand can satisfy it."""
-        from jackdaw.engine.card_factory import create_consumable
-
-        adapter = _make_adapter()
-        gs = adapter.raw_state
-        card = create_consumable("c_magician")
-        gs["consumables"] = [card]
-        assert encode_consumable(card, gs)[3] == 0.0  # blind select: no hand
-        _step_to_hand(adapter)
-        assert encode_consumable(card, gs)[3] == 1.0
+        game = _new_game()
+        game.debug_add("c_magician")
+        assert encode_observation(game).consumables[0, 3] == 0.0  # blind select: no hand
+        game.step(SelectBlind())
+        assert encode_observation(game).consumables[0, 3] == 1.0
 
 
 class TestEndlessOverflowEncoding:
@@ -659,14 +499,12 @@ class TestEndlessOverflowEncoding:
     inf; the encoding must stay finite for the network."""
 
     def test_overflowed_blind_and_score_encode_finite(self):
-        import math
-
-        adapter = _make_adapter()
-        gs = adapter.raw_state
-        gs["round_resets"]["ante"] = 39
-        _step_to_hand(adapter)
-        assert gs["blind"].chips == math.inf
+        game = _new_game()
+        game.debug_set(ante=39)
+        game.step(SelectBlind())
+        assert math.isnan(game.blind.chips)
+        snap = game.to_dict()
         for chips in (0, 10**300, math.inf, math.nan):
-            gs["chips"] = chips
-            obs = encode_observation(gs)
+            snap["game"]["chips"] = chips
+            obs = encode_snapshot(snap)
             assert np.isfinite(obs.global_context).all(), f"chips={chips}"

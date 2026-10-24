@@ -168,8 +168,8 @@ class TestBalatroSpec:
     def test_needs_cards_matches_hardcoded(self, spec: GameSpec) -> None:
         assert spec.needs_cards_set == NEEDS_CARDS
 
-    def test_action_type_count_is_21(self, spec: GameSpec) -> None:
-        assert len(spec.action_types) == 21
+    def test_action_type_count_is_23(self, spec: GameSpec) -> None:
+        assert len(spec.action_types) == 23
 
     def test_action_names_match_enum_order(self, spec: GameSpec) -> None:
         """Verify action type indices line up with the ActionType enum."""
@@ -245,11 +245,11 @@ class TestGameActionMask:
 
     def test_construction(self) -> None:
         mask = GameActionMask(
-            type_mask=np.ones(21, dtype=np.bool_),
+            type_mask=np.ones(23, dtype=np.bool_),
             card_mask=np.ones(5, dtype=np.bool_),
             entity_masks={8: np.ones(3, dtype=np.bool_)},
             min_card_select=1,
             max_card_select=5,
         )
-        assert mask.type_mask.shape == (21,)
+        assert mask.type_mask.shape == (23,)
         assert mask.min_card_select == 1

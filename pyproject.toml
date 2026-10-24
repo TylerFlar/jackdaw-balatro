@@ -1,10 +1,11 @@
 [project]
 name = "jackdaw"
-version = "0.1.0"
+version = "0.2.0"
 description = "Headless Balatro simulator for reinforcement learning research"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
+license-files = ["LICENSE"]
 authors = [{name = "Tyler Flar"}]
 classifiers = [
     "Programming Language :: Python :: 3.12",
@@ -15,14 +16,22 @@ classifiers = [
 dependencies = ["gymnasium>=1.0", "numpy>=1.24"]
 
 [build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.build_meta"
+# maturin >= 1.9.4 sets PYO3_BUILD_EXTENSION_MODULE, which replaces PyO3's deprecated
+# `extension-module` feature.
+requires = ["maturin>=1.9.4,<2"]
+build-backend = "maturin"
 
-[tool.setuptools.packages.find]
-include = ["jackdaw*"]
-
-[tool.setuptools.package-data]
-jackdaw = ["engine/data/*.json"]
+[tool.maturin]
+# Mixed Rust/Python project: the `jackdaw/` package next to this file plus the PyO3 crate,
+# installed as `jackdaw/_core.*`.
+manifest-path = "crates/jackdaw-py/Cargo.toml"
+module-name = "jackdaw._core"
+include = [
+    { path = "jackdaw/engine/data/*.json", format = ["sdist", "wheel"] },
+    # jackdaw-bot embeds BalatroBot's OpenRPC document (include_str!) for rpc.discover.
+    { path = "third_party/balatrobot/v1.5.2/src/lua/utils/openrpc.json", format = "sdist" },
+]
+exclude = ["**/__pycache__/**"]
 
 [project.scripts]
 jackdaw = "jackdaw.cli.main:main"
@@ -38,14 +47,46 @@ dev = [
     "pytest-cov>=7.1",
     "ruff>=0.17.2",
 ]
+# The training demo in examples/ (MaskablePPO): `uv sync --group train`. Not part of the
+# package's dependencies, and not installed by a plain `uv sync`.
+train = [
+    "matplotlib>=3.10",
+    "sb3-contrib>=2.9",
+    "stable-baselines3>=2.9",
+    "tensorboard>=2.20",
+    "torch>=2.9",
+]
+
+[tool.uv.sources]
+# CPU wheels for torch: the demo trains a small MLP on the CPU, and the PyPI wheels for Linux
+# pull in several GB of CUDA libraries.
+torch = [{ index = "pytorch-cpu" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv]
+# Rebuild the extension on `uv sync` / `uv run` whenever the Rust side changes.
+cache-keys = [
+    { file = "pyproject.toml" },
+    { file = "Cargo.toml" },
+    { file = "Cargo.lock" },
+    { file = "rust-toolchain.toml" },
+    { file = ".cargo/config.toml" },
+    { file = "crates/**/Cargo.toml" },
+    { file = "crates/**/*.rs" },
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = ["-v", "--tb=short", "-m", "not benchmark and not live"]
+addopts = ["-v", "--tb=short", "-m", "not benchmark and not live and not lockstep"]
 markers = [
     "benchmark: performance benchmarks (deselect with -m 'not benchmark')",
     "live: requires a running balatrobot instance (deselect with -m 'not live')",
     "slow: tests that take >10s (run with -m slow or include via -m 'not benchmark and not live')",
+    "lockstep: long sim-against-sim lockstep runs over jackdaw serve (run with -m lockstep)",
 ]
 
 [tool.ruff]

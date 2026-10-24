@@ -210,3 +210,14 @@ balatro_source/
 runs/
 logs/
 checkpoints/
+
+# Rust
+/target/
+
+# Native extension copied into the package by editable installs (`uv sync`)
+jackdaw/_core*.pyd
+jackdaw/_core*.so
+jackdaw/_core*.dll
+
+# jackdaw lockstep output (bundles, summaries)
+lockstep-out/

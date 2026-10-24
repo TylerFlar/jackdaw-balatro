@@ -1,4 +1,9 @@
-"""Tests for the Gymnasium wrapper around BalatroEnvironment."""
+"""Tests for the Gymnasium wrapper around BalatroEnvironment.
+
+Most run on ``DirectAdapter`` (the whole step in Rust); the ones that set up a state by
+editing the run use :class:`tests.env.generic.GenericAdapter`, whose steps go through
+``BalatroEnvironment`` and the wrapper's Python action table.
+"""
 
 from __future__ import annotations
 
@@ -6,15 +11,19 @@ import numpy as np
 import pytest
 from gymnasium import spaces
 
-from jackdaw.env.action_space import ActionType
+from jackdaw.core import Game
+from jackdaw.engine.actions import CashOut, GamePhase, OpenBooster, PlayHand, SelectBlind
+from jackdaw.env.action_space import ActionType, get_action_mask
+from jackdaw.env.balatro_env import _action_mask_to_game
 from jackdaw.env.game_interface import DirectAdapter
 from jackdaw.env.gymnasium_wrapper import MAX_ACTIONS, BalatroGymnasiumEnv
 from jackdaw.env.rewards import ShapedReward, Transition, sparse_reward
+from tests.env.generic import GenericAdapter
 
 
-@pytest.fixture()
-def env() -> BalatroGymnasiumEnv:
-    return BalatroGymnasiumEnv(adapter_factory=DirectAdapter, max_steps=200)
+@pytest.fixture(params=[DirectAdapter, GenericAdapter], ids=["direct", "generic"])
+def env(request: pytest.FixtureRequest) -> BalatroGymnasiumEnv:
+    return BalatroGymnasiumEnv(adapter_factory=request.param, max_steps=200)
 
 
 # ------------------------------------------------------------------
@@ -66,6 +75,13 @@ class TestReset:
     def test_at_least_one_legal_action(self, env: BalatroGymnasiumEnv) -> None:
         _, info = env.reset(seed=42)
         assert info["action_mask"].any()
+
+    def test_game_is_a_copy_of_the_run(self, env: BalatroGymnasiumEnv) -> None:
+        env.reset(seed=42)
+        copy = env.game
+        assert isinstance(copy, Game) and copy.phase == GamePhase.BLIND_SELECT
+        copy.step(SelectBlind())
+        assert env.game.phase == GamePhase.BLIND_SELECT
 
 
 # ------------------------------------------------------------------
@@ -135,8 +151,9 @@ class TestActionMasks:
 
 class TestRandomEpisodes:
     @pytest.mark.slow
-    def test_ten_random_episodes(self) -> None:
-        env = BalatroGymnasiumEnv(adapter_factory=DirectAdapter, max_steps=500)
+    @pytest.mark.parametrize("adapter", [DirectAdapter, GenericAdapter])
+    def test_ten_random_episodes(self, adapter: type) -> None:
+        env = BalatroGymnasiumEnv(adapter_factory=adapter, max_steps=500)
         rng = np.random.default_rng(123)
 
         for ep in range(10):
@@ -174,27 +191,21 @@ class TestPackPickTargets:
     def test_targeting_pick_enumerates_each_selection(self) -> None:
         """A pack Tarot that works on hand cards is offered once per legal
         selection, so the agent chooses which dealt card it hits."""
-        from jackdaw.engine.actions import GamePhase, SelectBlind
-        from jackdaw.engine.card_factory import create_consumable
-        from jackdaw.engine.game import step
-        from jackdaw.env.action_space import get_action_mask
-
-        env = BalatroGymnasiumEnv(adapter_factory=DirectAdapter)
+        env = BalatroGymnasiumEnv(adapter_factory=GenericAdapter)
         env.reset(seed=5)
-        gs = env._inner._adapter.raw_state
-        step(gs, SelectBlind())  # deal a hand to target
-        gs["phase"] = GamePhase.PACK_OPENING
-        gs["pack_type"] = "Arcana"
-        gs["pack_cards"] = [create_consumable("c_justice")]  # exactly 1 target
-        gs["pack_choices_remaining"] = 1
-        env._action_table = env._enumerate_actions(get_action_mask(gs), {"raw_state": gs})
+        game = env._inner._adapter.game
+        _open_arcana_pack(game)
+        _make_pack(game, "c_justice")  # exactly 1 target
+        _rebuild_table(env, game)
 
+        hand = game.hand
         picks = [fa for fa in env._action_table if fa.action_type == ActionType.PickPackCard]
-        assert sorted(fa.card_target for fa in picks) == [(i,) for i in range(len(gs["hand"]))]
+        assert sorted(fa.card_target for fa in picks) == [(i,) for i in range(len(hand))]
 
-        chosen = gs["hand"][3]
+        chosen = hand[3].sort_id
         env.step(env._action_table.index(next(fa for fa in picks if fa.card_target == (3,))))
-        assert chosen.center_key == "m_glass"
+        card = next(c for c in game.deck + game.hand if c.sort_id == chosen)
+        assert card.key == "m_glass"
 
 
 class TestCeruleanBell:
@@ -203,29 +214,22 @@ class TestCeruleanBell:
 
     @staticmethod
     def _bell_env(seed: int = 7) -> BalatroGymnasiumEnv:
-        from jackdaw.engine.actions import SelectBlind
-        from jackdaw.engine.game import step
-        from jackdaw.env.action_space import get_action_mask
-
-        env = BalatroGymnasiumEnv(adapter_factory=DirectAdapter)
+        env = BalatroGymnasiumEnv(adapter_factory=GenericAdapter)
         env.reset(seed=seed)
-        gs = env._inner._adapter.raw_state
-        gs["blind_on_deck"] = "Boss"
-        gs["round_resets"]["blind_choices"]["Boss"] = "bl_final_bell"
-        step(gs, SelectBlind())
-        env._action_table = env._enumerate_actions(get_action_mask(gs), {"raw_state": gs})
+        game = env._inner._adapter.game
+        game.apply_setup({"op": "force_boss", "key": "bl_final_bell"})
+        game.step(SelectBlind())
+        _rebuild_table(env, game)
         return env
 
     def test_selections_are_exactly_those_with_the_forced_card(self) -> None:
         from itertools import combinations
 
-        from jackdaw.engine.game import forced_card_index
-
         env = self._bell_env()
-        hand = env._inner._adapter.raw_state["hand"]
-        forced = forced_card_index(hand)
+        game = env._inner._adapter.game
+        forced = get_action_mask(game).forced_card
         assert forced is not None
-        others = [i for i in range(len(hand)) if i != forced]
+        others = [i for i in range(len(game.hand)) if i != forced]
         expected = sorted(
             tuple(sorted((forced, *rest))) for k in range(5) for rest in combinations(others, k)
         )
@@ -234,22 +238,20 @@ class TestCeruleanBell:
             assert got == expected
 
     def test_random_policy_plays_through_the_bell(self) -> None:
-        from jackdaw.engine.actions import GamePhase
-
         env = self._bell_env()
-        gs = env._inner._adapter.raw_state
+        game = env._inner._adapter.game
         rng = np.random.default_rng(0)
         mask = env.action_masks()
         selections = 0
         for _ in range(500):
-            if gs["phase"] != GamePhase.SELECTING_HAND:
+            if game.phase != GamePhase.SELECTING_HAND:
                 break
             action = int(rng.choice(np.flatnonzero(mask)))
             if env._action_table[action].action_type in (ActionType.PlayHand, ActionType.Discard):
                 selections += 1
             *_, info = env.step(action)  # used to raise IllegalActionError
             mask = info["action_mask"]
-        assert gs["phase"] != GamePhase.SELECTING_HAND
+        assert game.phase != GamePhase.SELECTING_HAND
         assert selections > 1
 
 
@@ -260,7 +262,7 @@ class TestCeruleanBell:
 
 def _step_beating_every_blind(env: BalatroGymnasiumEnv) -> tuple[float, bool, bool, dict]:
     """Take one step down the main line (select, play, cash out, leave the
-    shop), shrinking each blind's target so the first hand beats it."""
+    shop), setting each round's score so the first hand beats the blind."""
     table = env._action_table
     for wanted in (
         ActionType.SelectBlind,
@@ -272,7 +274,8 @@ def _step_beating_every_blind(env: BalatroGymnasiumEnv) -> tuple[float, bool, bo
             if fa.action_type == wanted:
                 _, reward, terminated, truncated, info = env.step(i)
                 return reward, terminated, truncated, info
-    env._inner._adapter.raw_state["blind"].chips = 1
+    game = env._inner._adapter.game
+    game.debug_set(chips=game.blind.chips)
     play = next(i for i, fa in enumerate(table) if fa.action_type == ActionType.PlayHand)
     _, reward, terminated, truncated, info = env.step(play)
     return reward, terminated, truncated, info
@@ -293,23 +296,27 @@ class TestRewardFn:
                 adapter_factory=DirectAdapter, reward_shaping=True, reward_fn=sparse_reward
             )
 
-    def test_custom_reward_fn_sees_each_transition(self) -> None:
+    @pytest.mark.parametrize("adapter", [DirectAdapter, GenericAdapter])
+    def test_custom_reward_fn_sees_each_transition(self, adapter: type) -> None:
         seen: list[Transition] = []
 
         def reward_fn(t: Transition) -> float:
             seen.append(t)
             return 7.0
 
-        env = BalatroGymnasiumEnv(adapter_factory=DirectAdapter, reward_fn=reward_fn)
+        env = BalatroGymnasiumEnv(adapter_factory=adapter, reward_fn=reward_fn)
         env.reset(seed=1)
-        reward, *_ = _step_beating_every_blind(env)  # SelectBlind
+        select = next(i for i, fa in enumerate(env._action_table) if fa.action_type == 2)
+        _, reward, *_ = env.step(select)
         assert reward == 7.0
         [t] = seen
         assert t.action.action_type == ActionType.SelectBlind
         assert t.prev.phase.value == "blind_select"
         assert t.curr.phase.value == "selecting_hand"
+        assert isinstance(t.game, Game) and t.game.round == 1
 
-    def test_reward_fn_reset_called_on_env_reset(self) -> None:
+    @pytest.mark.parametrize("adapter", [DirectAdapter, GenericAdapter])
+    def test_reward_fn_reset_called_on_env_reset(self, adapter: type) -> None:
         class Stateful:
             resets = 0
 
@@ -320,13 +327,13 @@ class TestRewardFn:
                 return 0.0
 
         fn = Stateful()
-        env = BalatroGymnasiumEnv(adapter_factory=DirectAdapter, reward_fn=fn)
+        env = BalatroGymnasiumEnv(adapter_factory=adapter, reward_fn=fn)
         env.reset(seed=1)
         env.reset(seed=2)
         assert fn.resets == 2
 
     def test_blind_bonus_paid_on_the_clearing_hand_not_the_select(self) -> None:
-        env = BalatroGymnasiumEnv(adapter_factory=DirectAdapter, reward_shaping=True)
+        env = BalatroGymnasiumEnv(adapter_factory=GenericAdapter, reward_shaping=True)
         env.reset(seed=3)
         select_reward, *_ = _step_beating_every_blind(env)
         clear_reward, *_ = _step_beating_every_blind(env)
@@ -336,7 +343,7 @@ class TestRewardFn:
     @pytest.mark.parametrize("reward_shaping", [False, True])
     def test_metrics_count_blinds_beaten_for_any_reward(self, reward_shaping: bool) -> None:
         env = BalatroGymnasiumEnv(
-            adapter_factory=DirectAdapter, max_steps=30, reward_shaping=reward_shaping
+            adapter_factory=GenericAdapter, max_steps=30, reward_shaping=reward_shaping
         )
         env.reset(seed=4)
         for _ in range(30):
@@ -348,3 +355,38 @@ class TestRewardFn:
         # beat 8 blinds — two full antes plus two blinds of ante 3.
         assert info["balatro/rounds_beaten"] == 8
         assert info["balatro/ante_reached"] == 3
+
+
+# ------------------------------------------------------------------
+# Helpers: states the policy doesn't reach on its own
+# ------------------------------------------------------------------
+
+
+def _open_arcana_pack(game: Game) -> None:
+    """Beat the first blind, cash out and open an Arcana pack (its hand is dealt)."""
+    game.step(SelectBlind())
+    game.debug_set(chips=game.blind.chips)
+    game.step(PlayHand(card_indices=(0,)))
+    game.step(CashOut())
+    game.debug_add("p_arcana_normal_1")
+    game.debug_set(money=50)
+    game.step(OpenBooster(card_index=len(game.shop_boosters) - 1))
+    assert game.phase == GamePhase.PACK_OPENING and game.hand
+
+
+def _make_pack(game: Game, key: str) -> None:
+    """Make the open pack's only card ``key``: a card BalatroBot's ``add`` makes in a copy
+    of the run, put in the pack under the first pack card's sort id."""
+    scratch = game.clone()
+    made = scratch.debug_add(key)
+    snap = game.to_dict()
+    card = next(c for c in scratch.to_dict()["areas"]["consumables"] if c["sort_id"] == made)
+    card["sort_id"] = snap["areas"]["pack_cards"][0]["sort_id"]
+    snap["areas"]["pack_cards"] = [card]
+    game.replace_state(snap)
+
+
+def _rebuild_table(env: BalatroGymnasiumEnv, game: Game) -> None:
+    """The Gym table of the edited run, as the next step would build it."""
+    mask = _action_mask_to_game(get_action_mask(game))
+    env._action_table = env._enumerate_actions(mask, {"game": game})

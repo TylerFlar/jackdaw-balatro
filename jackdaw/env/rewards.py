@@ -64,9 +64,10 @@ class Transition:
     truncated: bool
     """The episode hit its step limit on this step."""
 
-    raw_state: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
-    """The live engine state after the step.  The next step mutates it in
-    place: read what you need now, don't keep a reference."""
+    game: Any = field(default=None, repr=False, compare=False)
+    """The run after the step (:class:`jackdaw.core.Game`), a live view the next
+    step moves on: read what you need now, or ``.freeze()`` it.  ``None`` when the
+    transition was built without one."""
 
     @classmethod
     def from_step(
@@ -84,7 +85,7 @@ class Transition:
             action=action,
             terminated=terminated,
             truncated=truncated,
-            raw_state=info.get("raw_state", {}),
+            game=info.get("game"),
         )
 
     @property
@@ -207,9 +208,11 @@ class ShapedReward:
                 reward += self.boss_beaten * ante_scale
             reward += self.hands_left * t.curr.hands_left
 
-        # Progress toward the blind.  An overflowed target (endless ante
-        # 39+) can't be progressed against.
-        target = t.curr.blind_chips
+        # Progress toward the blind the hand was played against: once a hand
+        # clears it, the state after the step holds the empty blind (reset
+        # at defeat, blind.lua:336).  An overflowed target (endless ante 39+,
+        # NaN) can't be progressed against.
+        target = t.prev.blind_chips
         if 0 < target < math.inf and t.chips_scored:
             reward += self.score_progress * min(t.chips_scored / target, 1.0)
 

@@ -1,7 +1,7 @@
 """Tag validation scenarios — all 24 tag types.
 
-Each scenario skips a blind to trigger a specific tag, then compares the
-effect between sim and live.
+Each scenario skips a blind to trigger a specific tag, in lockstep with the
+shadow run.
 
 Tag types by context:
   immediate        — fires on skip, effect applied instantly (money, jokers, hand level)
@@ -18,16 +18,19 @@ Seeds from: uv run python scripts/find_seeds.py --max-seeds 2000 --max-ante 8
 
 from __future__ import annotations
 
-import time
-
 from jackdaw.cli.scenarios import ScenarioResult, register
 from jackdaw.cli.scenarios.helpers import (
-    Handle,
+    Lockstep,
+    cash_out,
     compare_state,
+    current_blind_score,
     get_state,
+    next_round,
+    pause,
     play_hand,
     select_blind,
     set_both,
+    skip_blind,
     start_both,
 )
 
@@ -68,107 +71,60 @@ _TAG_SEEDS: dict[str, tuple[str, int, str]] = {
     "tag_double": ("FIND_11", 8, "Small"),
 }
 
-# Pack-creating tags that crash balatrobot when interacted with via RPC
+# Pack-creating tags. Skipping a blind for one opens its pack at once; the live
+# `skip` then waits for BLIND_SELECT and never answers, so the lockstep vetoes
+# the skip (BB-SKIP-PACK) and these scenarios report a skip.
 _PACK_TAGS = {"tag_buffoon", "tag_charm", "tag_ethereal", "tag_meteor", "tag_standard"}
 
 
-def _wait_for_state(
-    handle: Handle,
-    expected: str,
-    *,
-    timeout: float = 15.0,
-    poll: float = 0.5,
-) -> bool:
-    """Poll until the backend reaches the expected state, or timeout."""
-    elapsed = 0.0
-    while elapsed < timeout:
-        if get_state(handle) == expected:
-            return True
-        time.sleep(poll)
-        elapsed += poll
-    return False
-
-
 def _force_beat_blind(
-    sim: Handle,
-    live: Handle,
+    ls: Lockstep,
     *,
     delay: float = 0.3,
-) -> bool | None:
+) -> bool:
     """Select blind, cheat chips, play one hand to beat it immediately.
 
-    Returns True on success, False if the sim lost, None if the live
-    backend crashed (balatrobot RPC error).
+    Returns True on success, False if the game was lost.
     """
-    _wait_for_state(live, "BLIND_SELECT")
+    select_blind(ls, delay=delay)
 
-    try:
-        select_blind(sim, live, delay=delay)
-    except Exception:
-        return None
-
-    state = get_state(sim)
+    state = get_state(ls)
     if state != "SELECTING_HAND":
         return state == "ROUND_EVAL"
 
-    sim_gs = sim("gamestate", None)
-    blind_target = 600
-    for b in sim_gs.get("blinds", {}).values():
-        if isinstance(b, dict) and b.get("status") == "CURRENT":
-            blind_target = b.get("score", 600)
-            break
-    set_both(sim, live, chips=blind_target - 1)
+    set_both(ls, chips=current_blind_score(ls) - 1)
+    play_hand(ls, [0, 1, 2, 3, 4], delay=delay)
 
-    try:
-        play_hand(sim, live, [0, 1, 2, 3, 4], delay=delay)
-    except Exception:
-        # Balatrobot can crash accessing G.buttons during state transition
-        return None
-
-    state = get_state(sim)
-    if state != "ROUND_EVAL":
+    if get_state(ls) != "ROUND_EVAL":
         return False
 
-    from jackdaw.cli.scenarios.helpers import cash_out, next_round
-
-    time.sleep(2.0)
-
-    try:
-        cash_out(sim, live, delay=delay)
-        time.sleep(2.0)
-        next_round(sim, live, delay=delay)
-    except Exception:
-        return None
-
-    time.sleep(1.0)
+    pause(delay, 2.0)
+    cash_out(ls, delay=delay)
+    pause(delay, 2.0)
+    next_round(ls, delay=delay)
+    pause(delay, 1.0)
     return True
 
 
 def _advance_to_ante(
-    sim: Handle,
-    live: Handle,
+    ls: Lockstep,
     target_ante: int,
     *,
     delay: float = 0.3,
-) -> bool | None:
+) -> bool:
     """Play through blinds to reach the target ante.
 
-    Returns True on success, False if the sim lost, None if the live
-    backend crashed.
+    Returns True on success, False if the game was lost.
     """
     for _ in range(1, target_ante):
         for _ in range(3):  # Small, Big, Boss
-            result = _force_beat_blind(sim, live, delay=delay)
-            if result is None:
-                return None
-            if not result:
+            if not _force_beat_blind(ls, delay=delay):
                 return False
     return True
 
 
 def _tag_scenario(
-    sim: Handle,
-    live: Handle,
+    ls: Lockstep,
     *,
     tag_key: str,
     seed: str,
@@ -177,70 +133,27 @@ def _tag_scenario(
     delay: float = 0.3,
 ) -> ScenarioResult:
     """Navigate to the right ante, skip the right blind, compare tag effect."""
-    start_both(sim, live, seed=seed, delay=delay)
+    start_both(ls, seed=seed, delay=delay)
 
     # Advance to the target ante
-    advance = _advance_to_ante(sim, live, ante, delay=delay)
-    if advance is None:
-        return ScenarioResult(
-            passed=True,
-            details=f"Tag {tag_key}: SKIP (balatrobot crash during advance)",
-        )
-    if not advance:
+    if not _advance_to_ante(ls, ante, delay=delay):
         return ScenarioResult(
             passed=True,
             details=f"Tag {tag_key}: SKIP (game ended before ante {ante})",
         )
 
     # If tag is on Big blind, beat Small first
-    if blind_pos == "Big":
-        beat = _force_beat_blind(sim, live, delay=delay)
-        if beat is None:
-            return ScenarioResult(
-                passed=True,
-                details=f"Tag {tag_key}: SKIP (balatrobot crash at Small)",
-            )
-        if not beat:
-            return ScenarioResult(passed=True, details=f"Tag {tag_key}: SKIP (lost at Small)")
+    if blind_pos == "Big" and not _force_beat_blind(ls, delay=delay):
+        return ScenarioResult(passed=True, details=f"Tag {tag_key}: SKIP (lost at Small)")
 
-    # Skip the blind to trigger the tag
-    _wait_for_state(live, "BLIND_SELECT")
+    # Skip the blind to trigger the tag (vetoed for a pack tag: BB-SKIP-PACK).
+    skip_blind(ls, delay=delay)
+    pause(delay, 1.0)
+    if get_state(ls) == "SMODS_BOOSTER_OPENED":
+        ls.request("pack", {"card": 0})
+        pause(delay, 1.0)
 
-    # For pack-creating tags, handle the pack interaction
-    is_pack_tag = tag_key in _PACK_TAGS
-
-    sim("skip", {})
-    live("skip", {})
-    time.sleep(1.0 if not is_pack_tag else 3.0)
-
-    if is_pack_tag:
-        # Wait for both to enter pack opening, then pick card 0
-        sim_state = get_state(sim)
-        if sim_state == "SMODS_BOOSTER_OPENED":
-            sim("pack", {"card": 0})
-            time.sleep(0.5)
-
-        if _wait_for_state(live, "SMODS_BOOSTER_OPENED", timeout=5.0):
-            try:
-                live("pack", {"card": 0})
-                time.sleep(1.0)
-            except Exception:
-                # Balatrobot crashes on tag packs — known bug
-                return ScenarioResult(
-                    passed=True,
-                    details=f"Tag {tag_key}: SKIP (balatrobot tag pack crash)",
-                )
-        else:
-            return ScenarioResult(
-                passed=True,
-                details=f"Tag {tag_key}: SKIP (live didn't open pack)",
-            )
-
-    # Compare state after tag fired
-    # Wait for both to settle
-    time.sleep(1.0)
-    diffs = compare_state(sim, live, label=f"after {tag_key}", check_round=False)
-
+    diffs = compare_state(ls, label=f"after {tag_key}", check_round=False)
     return ScenarioResult(
         passed=not diffs,
         diffs=diffs,
@@ -289,10 +202,9 @@ for _key, (_seed, _ante, _pos) in _TAG_SEEDS.items():
     _desc = _TAG_DESCS.get(_key, _key)
 
     def _make_fn(key: str = _key, seed: str = _seed, ante: int = _ante, pos: str = _pos):
-        def fn(sim: Handle, live: Handle, *, delay: float = 0.3) -> ScenarioResult:
+        def fn(ls: Lockstep, *, delay: float = 0.3) -> ScenarioResult:
             return _tag_scenario(
-                sim,
-                live,
+                ls,
                 tag_key=key,
                 seed=seed,
                 ante=ante,
