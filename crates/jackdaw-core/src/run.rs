@@ -305,6 +305,7 @@ impl Game {
                 state_complete: false,
                 ..Runtime::default()
             },
+            trace: crate::trace::ScoreTrace::default(),
         };
         g.apply_stake();
         g.back_apply_to_run();

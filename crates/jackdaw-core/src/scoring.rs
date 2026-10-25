@@ -12,6 +12,7 @@ use crate::hand_eval::{EvalCard, EvalCards, EvalFlags, HandType, PokerHands, get
 use crate::joker::{Ctx, Kind};
 use crate::lua;
 use crate::state::LastScore;
+use crate::trace::{ScoreEvent, ScoreKind};
 
 /// `card:get_edition()` (card.lua:1016-1031): an edition's scoring bonuses.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -262,8 +263,14 @@ impl Game {
         };
         let full_hand = &s.full_hand;
         let scoring = &s.scoring_hand;
+        self.trace_play(text, full_hand, scoring);
         // One effect list, refilled for each card: the first entry is the card's own effect.
         let mut effects: Vec<Effect> = Vec::with_capacity(1 + self.gs.areas.jokers.len());
+        // Recording only: the joker each later effect came from, and what repeats a card (one
+        // entry per repetition). Empty vectors don't allocate.
+        let mut whose: Vec<u32> = Vec::new();
+        let mut again: Vec<u32> = Vec::new();
+        let tracing = self.trace.enabled;
 
         let mut mult;
         let mut hand_chips;
@@ -272,39 +279,73 @@ impl Game {
             for j in self.gs.areas.ids(AreaId::Jokers) {
                 let mut ctx = self.scoring_ctx(Kind::Before, &s);
                 ctx.cardarea = Some(AreaId::Jokers);
-                if let Some(e) = self.eval_joker(j, &mut ctx)
-                    && e.level_up
-                {
+                let Some(e) = self.eval_joker(j, &mut ctx) else {
+                    continue;
+                };
+                let by = Some(e.card.unwrap_or(j));
+                if let Some(x) = e.dollars {
+                    // To Do List: paid as it triggers.
+                    let h = self.gs.hand(text);
+                    let (c, m) = (h.chips, h.mult);
+                    self.record(|| ScoreEvent::new(ScoreKind::Joker, by, c, m).dollars(x));
+                }
+                if e.level_up {
                     self.level_up_hand(text, 1.0);
+                    let h = self.gs.hand(text);
+                    let (level, c, m) = (h.level, h.chips, h.mult);
+                    self.record(|| ScoreEvent::new(ScoreKind::LevelUp, by, c, m).level(level));
                 }
             }
             mult = mod_mult(self.gs.hand(text).mult);
             hand_chips = self.mod_chips(self.gs.hand(text).chips);
-            let (m, c, _) = self.blind_modify_hand(mult, hand_chips);
+            let level = self.gs.hand(text).level;
+            self.record(|| ScoreEvent::new(ScoreKind::Hand, None, hand_chips, mult).level(level));
+            let (m, c, changed) = self.blind_modify_hand(mult, hand_chips);
             mult = mod_mult(m);
             hand_chips = self.mod_chips(c);
+            if changed {
+                self.record(|| ScoreEvent::new(ScoreKind::Blind, None, hand_chips, mult));
+            }
 
             for &id in scoring {
                 if self.gs.areas.card(id).is_some_and(|c| c.debuff) {
                     if let Some(b) = self.gs.blind.as_mut() {
                         b.triggered = true;
                     }
+                    self.record(|| {
+                        ScoreEvent::new(ScoreKind::Debuffed, Some(id), hand_chips, mult)
+                    });
                     continue;
                 }
                 let mut reps = 1usize;
+                again.clear();
                 if let Some(n) = self.red_seal_repetitions(id) {
                     reps += n;
+                    if tracing {
+                        again.extend(std::iter::repeat_n(id, n));
+                    }
                 }
                 for j in self.gs.areas.ids(AreaId::Jokers) {
                     let mut ctx = self.scoring_ctx(Kind::Repetition, &s);
                     ctx.cardarea = Some(AreaId::Play);
                     ctx.other_card = Some(id);
                     if let Some(e) = self.eval_joker(j, &mut ctx) {
-                        reps += e.repetitions.unwrap_or(0.0) as usize;
+                        let n = e.repetitions.unwrap_or(0.0) as usize;
+                        reps += n;
+                        if tracing {
+                            again.extend(std::iter::repeat_n(e.card.unwrap_or(j), n));
+                        }
                     }
                 }
-                for _ in 0..reps {
+                for r in 0..reps {
+                    if r > 0 {
+                        let by = again.get(r - 1).copied();
+                        self.record(|| {
+                            ScoreEvent::new(ScoreKind::Retrigger, by, hand_chips, mult).target(id)
+                        });
+                    }
                     effects.clear();
+                    whose.clear();
                     effects.push(self.eval_played_card(id));
                     for k in self.gs.areas.ids(AreaId::Jokers) {
                         let mut ctx = self.scoring_ctx(Kind::Individual, &s);
@@ -312,35 +353,56 @@ impl Game {
                         ctx.other_card = Some(id);
                         if let Some(e) = self.calculate_joker(k, &mut ctx) {
                             effects.push(e);
+                            if tracing {
+                                whose.push(k);
+                            }
                         }
                     }
                     if let Some(c) = self.gs.areas.card_mut(id) {
                         c.lucky_trigger = false;
                     }
-                    for e in &effects {
+                    for (n, e) in effects.iter().enumerate() {
+                        // The card's own bonus, or a joker's effect on it.
+                        let (kind, by, on) = if n == 0 {
+                            (ScoreKind::Card, Some(id), None)
+                        } else {
+                            let by = e.card.or_else(|| whose.get(n - 1).copied());
+                            (ScoreKind::Joker, by, Some(id))
+                        };
+                        let ev = |kind, c, m| {
+                            let ev = ScoreEvent::new(kind, by, c, m);
+                            if let Some(t) = on { ev.target(t) } else { ev }
+                        };
                         if let Some(x) = e.chips {
                             hand_chips = self.mod_chips(lua::add(hand_chips, x));
+                            self.record(|| ev(kind, hand_chips, mult).chips(x));
                         }
                         if let Some(x) = e.mult {
                             mult = mod_mult(lua::add(mult, x));
+                            self.record(|| ev(kind, hand_chips, mult).mult(x));
                         }
                         if let Some(x) = e.p_dollars {
                             self.queue(Event::EaseDollars(x));
+                            self.record(|| ev(kind, hand_chips, mult).dollars(x));
                         }
                         if let Some(x) = e.dollars {
                             self.queue(Event::EaseDollars(x));
+                            self.record(|| ev(kind, hand_chips, mult).dollars(x));
                         }
                         if let Some(x) = &e.extra {
                             if let Some(m) = x.mult_mod {
                                 mult = mod_mult(lua::add(mult, m));
+                                self.record(|| ev(kind, hand_chips, mult).mult(m));
                             }
                             if let Some(c) = x.chip_mod {
                                 hand_chips = self.mod_chips(lua::add(hand_chips, c));
+                                self.record(|| ev(kind, hand_chips, mult).chips(c));
                             }
                             if x.swap {
                                 let old = mult;
                                 mult = mod_mult(hand_chips);
                                 hand_chips = self.mod_chips(old);
+                                self.record(|| ev(kind, hand_chips, mult).swapped());
                             }
                             if let Some(ev) = &x.event {
                                 self.queue(ev.clone());
@@ -348,12 +410,23 @@ impl Game {
                         }
                         if let Some(x) = e.x_mult {
                             mult = mod_mult(lua::mul(mult, x));
+                            self.record(|| ev(kind, hand_chips, mult).x_mult(x));
                         }
                         if let Some(ed) = e.edition {
+                            let kind = ScoreKind::Edition;
                             hand_chips =
                                 self.mod_chips(lua::add(hand_chips, ed.chip_mod.unwrap_or(0.0)));
+                            if let Some(x) = ed.chip_mod {
+                                self.record(|| ev(kind, hand_chips, mult).chips(x));
+                            }
                             mult = lua::add(mult, ed.mult_mod.unwrap_or(0.0));
+                            if let Some(x) = ed.mult_mod {
+                                self.record(|| ev(kind, hand_chips, mult).mult(x));
+                            }
                             mult = mod_mult(lua::mul(mult, ed.x_mult_mod.unwrap_or(1.0)));
+                            if let Some(x) = ed.x_mult_mod {
+                                self.record(|| ev(kind, hand_chips, mult).x_mult(x));
+                            }
                         }
                     }
                 }
@@ -362,8 +435,16 @@ impl Game {
             for id in self.gs.areas.ids(AreaId::Hand) {
                 let mut reps = 1usize;
                 let mut j = 0;
+                again.clear();
                 while j < reps {
+                    if j > 0 {
+                        let by = again.get(j - 1).copied();
+                        self.record(|| {
+                            ScoreEvent::new(ScoreKind::Retrigger, by, hand_chips, mult).target(id)
+                        });
+                    }
                     effects.clear();
+                    whose.clear();
                     effects.push(self.eval_held_card(id));
                     for k in self.gs.areas.ids(AreaId::Jokers) {
                         let mut ctx = self.scoring_ctx(Kind::Individual, &s);
@@ -371,12 +452,18 @@ impl Game {
                         ctx.other_card = Some(id);
                         if let Some(e) = self.calculate_joker(k, &mut ctx) {
                             effects.push(e);
+                            if tracing {
+                                whose.push(k);
+                            }
                         }
                     }
                     if j == 0 {
                         let has_effect = !effects[0].is_empty() || effects.len() > 1;
                         if has_effect && let Some(n) = self.red_seal_repetitions(id) {
                             reps += n;
+                            if tracing {
+                                again.extend(std::iter::repeat_n(id, n));
+                            }
                         }
                         let jokers = self.gs.areas.ids(AreaId::Jokers);
                         let card_effects: Vec<bool> = if jokers.is_empty() {
@@ -390,19 +477,37 @@ impl Game {
                             ctx.other_card = Some(id);
                             ctx.card_effects = &card_effects;
                             if let Some(e) = self.eval_joker(k, &mut ctx) {
-                                reps += e.repetitions.unwrap_or(0.0) as usize;
+                                let n = e.repetitions.unwrap_or(0.0) as usize;
+                                reps += n;
+                                if tracing {
+                                    again.extend(std::iter::repeat_n(e.card.unwrap_or(k), n));
+                                }
                             }
                         }
                     }
-                    for e in &effects {
+                    for (n, e) in effects.iter().enumerate() {
+                        // The held card's own bonus, or a joker's effect on it.
+                        let (kind, by, on) = if n == 0 {
+                            (ScoreKind::Held, Some(id), None)
+                        } else {
+                            let by = e.card.or_else(|| whose.get(n - 1).copied());
+                            (ScoreKind::Joker, by, Some(id))
+                        };
+                        let ev = |c, m| {
+                            let ev = ScoreEvent::new(kind, by, c, m);
+                            if let Some(t) = on { ev.target(t) } else { ev }
+                        };
                         if let Some(x) = e.dollars {
                             self.queue(Event::EaseDollars(x));
+                            self.record(|| ev(hand_chips, mult).dollars(x));
                         }
                         if let Some(x) = e.h_mult {
                             mult = mod_mult(lua::add(mult, x));
+                            self.record(|| ev(hand_chips, mult).mult(x));
                         }
                         if let Some(x) = e.x_mult {
                             mult = mod_mult(lua::mul(mult, x));
+                            self.record(|| ev(hand_chips, mult).x_mult(x));
                         }
                     }
                     j += 1;
@@ -413,50 +518,69 @@ impl Game {
             let consumables = self.gs.areas.ids(AreaId::Consumables);
             for id in jokers.iter().chain(consumables.iter()).copied() {
                 let edition = self.edition_mods(id);
+                let ed_event = |c, m| ScoreEvent::new(ScoreKind::Edition, Some(id), c, m);
                 if let Some(ed) = edition {
                     if let Some(c) = ed.chip_mod {
                         hand_chips = self.mod_chips(lua::add(hand_chips, c));
+                        self.record(|| ed_event(hand_chips, mult).chips(c));
                     }
                     if let Some(m) = ed.mult_mod {
                         mult = mod_mult(lua::add(mult, m));
+                        self.record(|| ed_event(hand_chips, mult).mult(m));
                     }
                 }
                 let mut ctx = self.scoring_ctx(Kind::JokerMain, &s);
                 ctx.cardarea = Some(AreaId::Jokers);
                 if let Some(e) = self.eval_joker(id, &mut ctx) {
+                    let by = Some(e.card.unwrap_or(id));
+                    let ev = |c, m| ScoreEvent::new(ScoreKind::Joker, by, c, m);
                     if let Some(m) = e.mult_mod {
                         mult = mod_mult(lua::add(mult, m));
+                        self.record(|| ev(hand_chips, mult).mult(m));
                     }
                     if let Some(c) = e.chip_mod {
                         hand_chips = self.mod_chips(lua::add(hand_chips, c));
+                        self.record(|| ev(hand_chips, mult).chips(c));
                     }
                     if let Some(x) = e.xmult_mod {
                         mult = mod_mult(lua::mul(mult, x));
+                        self.record(|| ev(hand_chips, mult).x_mult(x));
+                    }
+                    if let Some(x) = e.dollars {
+                        // Matador: paid as it triggers.
+                        self.record(|| ev(hand_chips, mult).dollars(x));
                     }
                 }
                 for v in self.gs.areas.ids(AreaId::Jokers) {
                     let mut ctx = self.scoring_ctx(Kind::OtherJoker, &s);
                     ctx.other_joker = Some(id);
                     if let Some(e) = self.calculate_joker(v, &mut ctx) {
+                        let by = Some(e.card.unwrap_or(v));
+                        let ev = |c, m| ScoreEvent::new(ScoreKind::Joker, by, c, m).target(id);
                         if let Some(m) = e.mult_mod {
                             mult = mod_mult(lua::add(mult, m));
+                            self.record(|| ev(hand_chips, mult).mult(m));
                         }
                         if let Some(c) = e.chip_mod {
                             hand_chips = self.mod_chips(lua::add(hand_chips, c));
+                            self.record(|| ev(hand_chips, mult).chips(c));
                         }
                         if let Some(x) = e.xmult_mod {
                             mult = mod_mult(lua::mul(mult, x));
+                            self.record(|| ev(hand_chips, mult).x_mult(x));
                         }
                     }
                 }
                 if let Some(x) = edition.and_then(|e| e.x_mult_mod) {
                     mult = mod_mult(lua::mul(mult, x));
+                    self.record(|| ed_event(hand_chips, mult).x_mult(x));
                 }
             }
 
             if let Some((c, m)) = self.back_final_scoring_step(hand_chips, mult) {
                 mult = mod_mult(m);
                 hand_chips = self.mod_chips(c);
+                self.record(|| ScoreEvent::new(ScoreKind::Plasma, None, hand_chips, mult));
             }
 
             let mut destroyed = Vec::new();
@@ -494,6 +618,10 @@ impl Game {
                         }
                     }
                     destroyed.push(id);
+                    self.record(|| {
+                        ScoreEvent::new(ScoreKind::Destroyed, Some(id), hand_chips, mult)
+                            .shattered(is_glass)
+                    });
                 }
             }
             for j in self.gs.areas.ids(AreaId::Jokers) {
@@ -506,12 +634,26 @@ impl Game {
                 self.queue(Event::RemoveCard(id));
             }
         } else {
+            if tracing {
+                let h = self.gs.hand(text);
+                let (level, c, m) = (h.level, self.mod_chips(h.chips), mod_mult(h.mult));
+                self.record(|| ScoreEvent::new(ScoreKind::Hand, None, c, m).level(level));
+            }
             mult = mod_mult(0.0);
             hand_chips = self.mod_chips(0.0);
+            self.record(|| ScoreEvent::new(ScoreKind::NotAllowed, None, hand_chips, mult));
             for j in self.gs.areas.ids(AreaId::Jokers) {
                 let mut ctx = self.scoring_ctx(Kind::DebuffedHand, &s);
                 ctx.cardarea = Some(AreaId::Jokers);
-                self.eval_joker(j, &mut ctx);
+                if let Some(e) = self.eval_joker(j, &mut ctx)
+                    && let Some(x) = e.dollars
+                {
+                    // Matador: paid as it triggers.
+                    let by = Some(e.card.unwrap_or(j));
+                    self.record(|| {
+                        ScoreEvent::new(ScoreKind::Joker, by, hand_chips, mult).dollars(x)
+                    });
+                }
             }
         }
 

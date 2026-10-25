@@ -20,6 +20,7 @@ use crate::area::AreaId;
 use crate::event::Event;
 use crate::snapshot::{self, SnapshotError};
 use crate::state::{GameState, Phase};
+use crate::trace::ScoreTrace;
 
 /// `G.STATE`: the game's state machine (globals.lua `G.STATES`), the states a run passes through.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
@@ -161,12 +162,15 @@ pub struct StaleShop {
     pub booster: (f64, f64),
 }
 
-/// A run: the persistent [`GameState`] and the engine's [`Runtime`]. `clone_from` copies a run
-/// into a game that held one, reusing its allocations.
+/// A run: the persistent [`GameState`] and the engine's [`Runtime`], and the scoring recorder
+/// beside them. `clone_from` copies a run into a game that held one, reusing its allocations.
 #[derive(Debug)]
 pub struct Game {
     pub gs: GameState,
     pub rt: Runtime,
+    /// How the last step's hand scored, when recording ([`crate::trace`]); never part of the
+    /// run's state.
+    pub trace: ScoreTrace,
 }
 
 impl Game {
@@ -227,7 +231,11 @@ impl Game {
             areas,
             ..Runtime::default()
         };
-        let mut game = Game { gs, rt };
+        let mut game = Game {
+            gs,
+            rt,
+            trace: ScoreTrace::default(),
+        };
         // Card:update's perma_debuff line (card.lua:4158), for a snapshot that was edited:
         // the engine itself never leaves such a card undebuffed (`update_cards`).
         for a in AreaId::PLAYING {
@@ -355,4 +363,4 @@ crate::state::clone_fields!(Runtime {
     event_base,
 });
 
-crate::state::clone_fields!(Game { gs, rt });
+crate::state::clone_fields!(Game { gs, rt, trace });
