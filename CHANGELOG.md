@@ -5,6 +5,11 @@ while it is 0.x, a minor release (0.2 → 0.3) can break things, and a patch rel
 
 ## Unreleased
 
+## [0.2.2] - 2026-10-25
+
+The engine plays the same runs as 0.2.1, with the same observations and actions. What's new is
+a record of how each hand scored.
+
 ### Added
 
 - How a hand scored: with `Game.record_scoring` on, `Game.last_play` gives the step's play event
