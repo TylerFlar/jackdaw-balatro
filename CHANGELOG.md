@@ -5,6 +5,14 @@ while it is 0.x, a minor release (0.2 → 0.3) can break things, and a patch rel
 
 ## Unreleased
 
+### Added
+
+- How a hand scored: with `Game.record_scoring` on, `Game.last_play` gives the step's play event
+  by event. That covers each card's, edition's and joker's chips and mult, retriggers, the boss's
+  changes and destroyed cards, with the hand's chips and mult after each
+  ([docs/api.md](docs/api.md#how-a-hand-scored)). Recording changes nothing: a seed plays the
+  same run, with the same observations and actions.
+
 ## [0.2.1] - 2026-10-24
 
 Documentation only: the engine, the environments and the API are unchanged, so a seed plays the

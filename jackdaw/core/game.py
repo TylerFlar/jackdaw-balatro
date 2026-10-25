@@ -10,7 +10,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from jackdaw import _core
-from jackdaw.core.views import BlindView, CardView, HandLevel, Score, hand_levels
+from jackdaw.core.views import BlindView, CardView, HandLevel, Play, Score, hand_levels
 from jackdaw.engine import actions as _actions
 from jackdaw.engine.actions import GamePhase, decode_action, encode_action
 
@@ -301,6 +301,25 @@ class Game:
         """What the last play scored, or ``None`` before any play."""
         d = self._view("last_score")
         return Score.from_snapshot(d) if d else None
+
+    @property
+    def record_scoring(self) -> bool:
+        """Whether each play records how it scores (:attr:`last_play`). Off by default;
+        recording never changes the run."""
+        return self._g.record_scoring
+
+    @record_scoring.setter
+    def record_scoring(self, on: bool) -> None:
+        self._g.record_scoring = bool(on)
+
+    @property
+    def last_play(self) -> Play | None:
+        """How the hand the last step played scored, event by event: each card's, edition's
+        and joker's chips and mult, retriggers, the boss's changes, with the hand's chips and
+        mult after each. Only while :attr:`record_scoring` is on; ``None`` after a step that
+        played no hand."""
+        text = self._g.last_play_json()
+        return None if text is None else Play.from_json(_from_json(json.loads(text)))
 
     def check(self, action: Any) -> str | None:
         """Why the rules refuse ``action`` here, or ``None`` when it is legal. The run is

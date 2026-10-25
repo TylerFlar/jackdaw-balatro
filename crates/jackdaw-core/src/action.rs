@@ -200,6 +200,7 @@ impl Game {
     /// raise now that every rule is ported, leaves the run mid-step, and so does a panic. For
     /// callers that drop the run then, like the envs' hot paths.
     pub fn step_in_place(&mut self, action: &Action) -> Result<(), StepError> {
+        self.trace.play = None;
         self.apply(action)?;
         self.settle();
         if self.poll_hand_size() {
@@ -213,6 +214,7 @@ impl Game {
 
     pub fn step(&mut self, action: &Action) -> Result<(), StepError> {
         let mut next = self.clone();
+        next.trace.play = None;
         next.apply(action)?;
         next.settle();
         if next.poll_hand_size() {
