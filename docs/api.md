@@ -97,6 +97,47 @@ seal, the boss and the RNG. The run itself is unchanged. `clone()` is cheap enou
 search. `scoring_cards(positions)` gives the hand those cards make and which of them would score
 (`("Pair", [1, 3])`), without playing them.
 
+## How a hand scored
+
+```python
+game.record_scoring = True
+game.step(PlayHand(card_indices=(0, 1, 2, 3, 4)))
+play = game.last_play                  # a Play; None after a step that played no hand
+print(play.hand, play.level, play.score.total)
+for e in play.events:
+    print(e.kind, e.card, e.target, e.chips, e.mult, e.x_mult, e.hand_chips, e.hand_mult)
+```
+
+With `record_scoring` on, each play records how it scored, in the order `G.FUNCS.evaluate_play`
+shows it. A `Play` has:
+- `hand`, and its `level` when played (before any level-up);
+- `played` and `scoring`, the cards' sort ids in play order;
+- `events`;
+- `score`, a `Score`.
+
+Each `ScoreEvent` has a `kind`, the `card` it belongs to (where the game shows it) and its
+`target` when that's another card. It records what changed: `chips` and `mult` added, `x_mult`
+multiplied, `dollars` paid. It also carries the hand's chips and mult after it (`hand_chips`,
+`hand_mult`), so the last event's pair is the score's.
+
+| `kind` | What happened |
+|---|---|
+| `level_up` | a joker levelled the hand up before it scored (Space Joker): the new `level` and base |
+| `hand` | scoring starts: the hand's base chips and mult at `level` |
+| `blind` | the boss changed them (The Flint) |
+| `card` | a scoring card's own chips, mult, x mult or money (enhancements, Gold Seal) |
+| `held` | a held card's bonus (Steel Card) |
+| `edition` | an edition's bonus, on a scoring card, a joker or a consumable |
+| `joker` | a joker's effect, on `target` when it acts on a card |
+| `retrigger` | `target` scores again, or counts again in hand: `card` is the Red Seal's card or the joker |
+| `debuffed` | a scoring card the boss debuffs, which adds nothing |
+| `not_allowed` | the boss doesn't allow the hand: it scores nothing |
+| `plasma` | Plasma Deck balanced the chips and mult |
+| `destroyed` | a scoring card destroyed after the hand: a Glass Card that `shattered`, or Sixth Sense's 6 |
+
+Recording is off by default and changes nothing: the run, its snapshot and hash, the observations
+and the masks are the same either way.
+
 ## Building a state
 
 ```python

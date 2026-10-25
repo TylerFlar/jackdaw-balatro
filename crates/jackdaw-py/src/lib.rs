@@ -187,8 +187,16 @@ impl Game {
         }
         let mut rt = old.rt.clone();
         rt.highlighted = highlighted;
+        let trace = jackdaw_core::trace::ScoreTrace {
+            enabled: old.trace.enabled,
+            play: None,
+        };
         // `from_state` already ran a frame of `Card:update` on the new cards.
-        self.inner = jackdaw_core::game::Game { gs: fresh.gs, rt };
+        self.inner = jackdaw_core::game::Game {
+            gs: fresh.gs,
+            rt,
+            trace,
+        };
         Ok(())
     }
 
@@ -490,6 +498,26 @@ impl Game {
     /// The SHA-256 hex digest of the canonical snapshot's encoding.
     fn state_hash(&self) -> String {
         jackdaw_core::canon::digest(&self.inner.snapshot())
+    }
+
+    /// Whether each play records how it scores (``last_play_json``). Off by default; recording
+    /// never changes the run.
+    #[getter]
+    fn record_scoring(&self) -> bool {
+        self.inner.record_scoring()
+    }
+
+    #[setter]
+    fn set_record_scoring(&mut self, on: bool) {
+        self.inner.set_record_scoring(on);
+    }
+
+    /// How the hand the last step played scored (JSON text), when recording was on: the hand
+    /// and its level, the played and scoring cards (sort ids), the events in order, and what it
+    /// scored. ``None`` after a step that played no hand.
+    fn last_play_json(&self) -> Option<String> {
+        let score = self.inner.gs.sim.last_score.as_ref();
+        self.inner.last_play().map(|p| p.to_json(score).to_string())
     }
 
     /// The decision point: ``blind_select``, ``selecting_hand``, ``round_eval``, ``shop``,

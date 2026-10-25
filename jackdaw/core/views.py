@@ -134,6 +134,84 @@ class Score:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class ScoreEvent:
+    """One step of a hand's scoring (:attr:`Game.last_play <jackdaw.core.Game.last_play>`)."""
+
+    kind: str
+    """``level_up``, ``hand``, ``blind``, ``card``, ``held``, ``edition``, ``joker``,
+    ``retrigger``, ``debuffed``, ``not_allowed``, ``plasma`` or ``destroyed``
+    (``docs/api.md``)."""
+    card: int | None
+    """The card the event belongs to (sort id), where the game shows it: the scoring or held
+    card for its own bonus, the joker for a joker's effect."""
+    target: int | None
+    """The card it happens to, when that's another one: the card a joker acts on or a
+    retrigger repeats, the joker Baseball Card boosts."""
+    chips: float | None
+    """Chips added."""
+    mult: float | None
+    """Mult added."""
+    x_mult: float | None
+    """Mult multiplied."""
+    dollars: float | None
+    """Money paid, after the hand."""
+    level: float | None
+    """The hand's level (``level_up``, ``hand``)."""
+    swap: bool
+    shattered: bool
+    """The destroyed card was a Glass Card."""
+    hand_chips: float
+    """The hand's chips after the event."""
+    hand_mult: float
+    """The hand's mult after the event."""
+
+    @classmethod
+    def from_json(cls, d: Mapping[str, Any]) -> ScoreEvent:
+        return cls(
+            kind=d["kind"],
+            card=d.get("card"),
+            target=d.get("target"),
+            chips=d.get("chips"),
+            mult=d.get("mult"),
+            x_mult=d.get("x_mult"),
+            dollars=d.get("dollars"),
+            level=d.get("level"),
+            swap=bool(d.get("swap", False)),
+            shattered=bool(d.get("shattered", False)),
+            hand_chips=d["hand_chips"],
+            hand_mult=d["hand_mult"],
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class Play:
+    """How a played hand scored, event by event (:attr:`Game.last_play
+    <jackdaw.core.Game.last_play>`)."""
+
+    hand: str
+    level: float
+    """The hand's level when it was played, before any level-up."""
+    played: tuple[int, ...]
+    """The played cards (sort ids), in play order."""
+    scoring: tuple[int, ...]
+    """The played cards that score."""
+    events: tuple[ScoreEvent, ...]
+    score: Score
+    """What it scored: the last event's chips and mult, and their product."""
+
+    @classmethod
+    def from_json(cls, d: Mapping[str, Any]) -> Play:
+        return cls(
+            hand=d["hand"],
+            level=d["level"],
+            played=tuple(d["played"]),
+            scoring=tuple(d["scoring"]),
+            events=tuple(ScoreEvent.from_json(e) for e in d["events"]),
+            score=Score.from_snapshot({**d, "hand_type": d["hand"]}),
+        )
+
+
 def hand_levels(d: Mapping[str, Any]) -> Mapping[str, HandLevel]:
     """The ``hands`` section as a read-only mapping by hand name."""
     return MappingProxyType(

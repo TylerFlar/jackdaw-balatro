@@ -39,6 +39,7 @@ mod shop;
 pub mod snapshot;
 pub mod state;
 mod tags;
+pub mod trace;
 mod vouchers;
 
 /// The generated data tables the engine runs on.
