@@ -5,6 +5,11 @@ while it is 0.x, a minor release (0.2 → 0.3) can break things, and a patch rel
 
 ## Unreleased
 
+### Documentation
+
+- [Jackdaw Arena](https://arena.tylerflar.com), a hosted, verifiable benchmark for jackdaw
+  agents: a README section and a docs page on evaluating an agent and verifying its episodes.
+
 ## [0.2.0] - 2026-10-23
 
 The game engine is now written in Rust and runs in process through the `jackdaw._core`
