@@ -5,6 +5,18 @@ while it is 0.x, a minor release (0.2 → 0.3) can break things, and a patch rel
 
 ## Unreleased
 
+## [0.2.1] - 2026-10-24
+
+Documentation only: the engine, the environments and the API are unchanged, so a seed plays the
+same run as in 0.2.0, with the same observations and actions.
+
+### Documentation
+
+- [Jackdaw Arena](https://arena.tylerflar.com), a hosted, verifiable benchmark for jackdaw
+  agents: a README section and a docs page on evaluating an agent and verifying its episodes.
+- Install from `main`, which only moves at a release, or from a release tag. `dev` is now the
+  default branch, where pull requests go.
+
 ## [0.2.0] - 2026-10-23
 
 The game engine is now written in Rust and runs in process through the `jackdaw._core`

@@ -60,6 +60,10 @@ while not (terminated or truncated):
 
 See the [RL Project Guide](https://tylerflar.github.io/jackdaw-balatro/rl-guide) for the observations, actions, rewards and environments.
 
+## Jackdaw Arena
+
+[Jackdaw Arena](https://arena.tylerflar.com) is a hosted, verifiable benchmark for agents trained on jackdaw. Your agent plays over HTTPS on seeds the server picks and keeps secret until each episode ends. Every episode counts against a fixed budget (500 on `red-1`, the protocol of [`examples/`](examples)), and every result is verified by replay, then published with its seed and tape. Its client provides `ArenaEnv`, a drop-in for `BalatroGymnasiumEnv`, and an `evaluate()` that takes the examples' chooser signature. See [Evaluating on Jackdaw Arena](https://tylerflar.github.io/jackdaw-balatro/arena).
+
 ## Live Validation
 
 Swap the adapter to play against real Balatro via [BalatroBot](https://github.com/coder/balatrobot) — the interface is identical. `LiveAdapter` keeps a shadow run in the simulator, checks every live answer against it, and takes observations and masks from it, so an agent sees exactly what it saw in training:
