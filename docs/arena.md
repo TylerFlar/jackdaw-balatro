@@ -29,7 +29,7 @@ Arena takes that freedom away:
 2. Install the client. It doesn't depend on jackdaw:
 
    ```bash
-   uv add "jackdaw-arena @ git+https://github.com/TylerFlar/jackdaw-arena#subdirectory=client"
+   uv add "jackdaw-arena @ git+https://github.com/TylerFlar/jackdaw-arena@main#subdirectory=client"
    ```
 
 3. Play. `ArenaEnv` is a drop-in for `BalatroGymnasiumEnv`: the same observation space,
