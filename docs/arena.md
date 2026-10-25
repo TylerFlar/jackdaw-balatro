@@ -79,8 +79,7 @@ season.
 
 ## Verify an episode
 
-Once an episode has ended, its seed and tape are public. With the same jackdaw version
-installed:
+Once an episode has ended, its seed and tape are public. With jackdaw installed:
 
 ```bash
 jackdaw-arena tape <episode-id> -o tape.json
@@ -88,7 +87,10 @@ jackdaw-arena verify tape.json
 ```
 
 `verify` starts a game from the tape's deck, stake and seed, plays every action, and compares
-the final `state_hash` with the one the server published. The same in Python:
+the final `state_hash` with the one the server published. Any jackdaw release that reproduces
+it verifies the episode. One that doesn't may have changed the rules since the release the
+tape was recorded with (its `engine_version`), and `verify` then says to check with that one.
+The same in Python:
 
 ```python
 import json
