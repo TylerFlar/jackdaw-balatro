@@ -9,7 +9,8 @@
 //! flush is every card of its suit, a straight every card whose rank is in the run, so the scoring
 //! cards are kept as rank and suit masks.
 
-use jackdaw_core::card::{Card, Facing, Suit};
+use jackdaw_core::area::Cards;
+use jackdaw_core::card::{Facing, Suit};
 use jackdaw_core::hand_eval::HandType;
 use jackdaw_data::centers;
 
@@ -23,7 +24,7 @@ pub(crate) struct Flags {
 }
 
 impl Flags {
-    pub fn from_jokers(jokers: &[Card]) -> Flags {
+    pub fn from_jokers(jokers: Cards<'_>) -> Flags {
         let mut f = Flags::default();
         for j in jokers.iter().filter(|j| !j.debuff) {
             match j.center {
@@ -87,7 +88,7 @@ pub(crate) struct Analyzer {
 impl Analyzer {
     /// `_compute_hand_analysis(_face_up(cards), jokers, ...)`: the hand types present among the
     /// face-up cards and the best one; marks the best hand's cards in [`Analyzer::scoring`].
-    pub fn analyze(&mut self, cards: &[Card], flags: Flags) -> HandAnalysis {
+    pub fn analyze(&mut self, cards: Cards<'_>, flags: Flags) -> HandAnalysis {
         self.items.clear();
         for (pos, c) in cards.iter().enumerate() {
             if c.facing == Facing::Back {
@@ -264,7 +265,7 @@ fn get_straight(present: u16, need: usize, shortcut: bool) -> u16 {
 }
 
 /// `_analyze_draws(_face_up(cards))`: raw base suits and ranks, Stone cards included.
-pub(crate) fn analyze_draws(cards: &[Card]) -> Draws {
+pub(crate) fn analyze_draws(cards: Cards<'_>) -> Draws {
     let mut seen: [Suit; 4] = [Suit::Hearts; 4];
     let mut n_seen = 0;
     let mut counts = [0usize; 4];
@@ -361,7 +362,7 @@ pub(crate) fn py_max(a: f64, b: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use jackdaw_core::card::CostContext;
+    use jackdaw_core::card::{Card, CostContext};
     use jackdaw_data::card_by_key;
 
     fn card(key: &str, sort_id: u32) -> Card {
@@ -383,7 +384,7 @@ mod tests {
 
     fn analyze(cards: &[Card], flags: Flags) -> (HandAnalysis, Vec<bool>) {
         let mut a = Analyzer::default();
-        let r = a.analyze(cards, flags);
+        let r = a.analyze(Cards::from_slice(cards), flags);
         (r, a.scoring)
     }
 
@@ -442,7 +443,7 @@ mod tests {
     #[test]
     fn draws_find_runs_and_gaps() {
         let cards = hand(&["H_5", "S_6", "C_7", "D_K", "H_2"]);
-        let d = analyze_draws(&cards);
+        let d = analyze_draws(Cards::from_slice(&cards));
         assert_eq!(d.best_flush_suit, Some(Suit::Hearts));
         assert_eq!(d.best_flush_count, 2);
         assert_eq!(d.straight_proximity, 3.0 / 5.0);
@@ -454,7 +455,7 @@ mod tests {
     #[test]
     fn ace_low_run_has_no_gap_below() {
         let cards = hand(&["H_A", "S_2", "C_3"]);
-        let d = analyze_draws(&cards);
+        let d = analyze_draws(Cards::from_slice(&cards));
         assert_eq!(d.straight_gap_ranks, (1 << 4) | (1 << 5));
     }
 }

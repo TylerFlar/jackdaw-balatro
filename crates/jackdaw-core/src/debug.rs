@@ -214,7 +214,7 @@ impl Game {
                     // The Python engine appended to its deck list: the top of the draw pile.
                     let mut card = card;
                     card.facing = crate::card::Facing::Back;
-                    self.gs.areas.deck.push(card);
+                    self.gs.areas.push(AreaId::Deck, card);
                 }
                 self.settle();
                 id
@@ -227,8 +227,8 @@ impl Game {
     /// cards, each sorted in.
     fn fill_hand(&mut self) {
         self.poll_hand_size();
-        let room = self.gs.hand_size - self.gs.areas.hand.len() as f64;
-        let n = (self.gs.areas.deck.len() as f64).min(room);
+        let room = self.gs.hand_size - self.gs.areas.hand().len() as f64;
+        let n = (self.gs.areas.deck().len() as f64).min(room);
         let mut i = 0.0;
         while i < n {
             self.queue(crate::event::Event::DrawCard {
@@ -298,8 +298,7 @@ impl Game {
                 cards.len()
             )));
         }
-        let new: Vec<_> = order.iter().map(|&i| cards[i]).collect();
-        *self.gs.areas.get_mut(area) = new;
+        self.gs.areas.reorder(area, order);
         self.gs.areas.align(area);
         Ok(())
     }
@@ -425,14 +424,14 @@ mod tests {
     fn add_joker_in_a_round_fills_a_bigger_hand() {
         let mut g = run("ADD_TEST");
         g.step(&Action::SelectBlind).unwrap();
-        let hand = g.gs.areas.hand.len();
+        let hand = g.gs.areas.hand().len();
         let id = g
             .debug_add(&AddSpec::new(AddKey::parse("j_juggler").unwrap()))
             .unwrap();
-        assert_eq!(g.gs.areas.jokers.last().map(|c| c.sort_id), Some(id));
-        assert!(g.gs.areas.jokers[0].added_to_deck);
+        assert_eq!(g.gs.areas.jokers().last().map(|c| c.sort_id), Some(id));
+        assert!(g.gs.areas.jokers()[0].added_to_deck);
         assert_eq!(
-            g.gs.areas.hand.len(),
+            g.gs.areas.hand().len(),
             hand + 1,
             "Juggler's +1 hand size draws"
         );
@@ -446,7 +445,7 @@ mod tests {
         spec.enhancement = jackdaw_data::center_by_key("m_glass");
         spec.seal = Some(Seal::Red);
         let id = g.debug_add(&spec).unwrap();
-        let c = g.gs.areas.hand.last().unwrap();
+        let c = g.gs.areas.hand().last().unwrap();
         assert_eq!(
             (c.sort_id, c.name(), c.seal),
             (id, "Glass Card", Some(Seal::Red))
@@ -455,7 +454,7 @@ mod tests {
         spec.eternal = true;
         spec.perishable = Some(3.0);
         g.debug_add(&spec).unwrap();
-        let j = g.gs.areas.jokers.last().unwrap();
+        let j = g.gs.areas.jokers().last().unwrap();
         assert!(j.ability.eternal && j.ability.perishable);
         assert_eq!(j.ability.perish_tally.get(), Some(3.0));
     }

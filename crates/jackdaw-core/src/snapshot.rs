@@ -611,8 +611,8 @@ pub fn card_from(v: &Value, path: &str) -> Result<Card> {
     })
 }
 
-fn cards_json(cards: &[Card]) -> Value {
-    Value::Array(cards.iter().map(card_json).collect())
+fn cards_json<'a>(cards: impl IntoIterator<Item = &'a Card>) -> Value {
+    Value::Array(cards.into_iter().map(card_json).collect())
 }
 
 fn cards_from(v: &[Value], path: &str) -> Result<Vec<Card>> {
@@ -718,7 +718,7 @@ fn pack_json(gs: &GameState) -> Value {
             .dealt
             .iter()
             .copied()
-            .filter(|&id| gs.areas.hand.iter().any(|c| c.sort_id == id))
+            .filter(|&id| gs.areas.hand().iter().any(|c| c.sort_id == id))
             .collect();
         held.sort_unstable();
         json!({
@@ -1226,7 +1226,7 @@ pub fn import(v: &Value) -> Result<GameState> {
                 c.facing = Facing::Back;
             }
         }
-        *areas.get_mut(a) = cards;
+        areas.set(a, cards);
     }
     ao.done()?;
 

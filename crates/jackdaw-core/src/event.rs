@@ -242,7 +242,7 @@ impl Game {
             Event::EndRound => self.end_round_body(),
             Event::EndRoundFinal => self.end_round_final(),
             Event::DiscardToDeck => {
-                let n = self.gs.areas.discard.len();
+                let n = self.gs.areas.discard().len();
                 for _ in 0..n {
                     self.queue(Event::DrawCard {
                         from: AreaId::Discard,
@@ -262,7 +262,7 @@ impl Game {
             Event::RemoveCard(id) => self.remove_card(id),
             Event::HookDiscard => self.hook_discard(),
             Event::Tooth => {
-                for _ in 0..self.gs.areas.play.len() {
+                for _ in 0..self.gs.areas.play().len() {
                     self.queue(Event::EaseDollars(-1.0));
                 }
             }
@@ -294,9 +294,9 @@ impl Game {
             Event::SetCostAll => {
                 for a in AreaId::ALL {
                     let ctx = self.cost_context(a);
-                    for c in self.gs.areas.get_mut(a) {
+                    self.gs.areas.get_mut(a).for_each(|c| {
                         c.set_cost(&ctx);
-                    }
+                    });
                 }
             }
             Event::CreateConsumable { ty, append, forced } => {

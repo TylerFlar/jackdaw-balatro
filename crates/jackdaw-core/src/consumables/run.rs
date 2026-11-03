@@ -18,7 +18,7 @@ impl Game {
             .config_num("tarots")
             .or_else(|| center.config_num("planets"))
             .expect("the number of cards to make");
-        let room = self.gs.consumable_slots - self.gs.areas.consumables.len() as f64;
+        let room = self.gs.consumable_slots - self.gs.areas.consumables().len() as f64;
         let mut i = 1.0;
         while i <= n.min(room) {
             self.queue(Event::Call(emperor_priestess, id, 0.0));
@@ -37,7 +37,7 @@ impl Game {
         let deletable: Vec<u32> = self
             .gs
             .areas
-            .jokers
+            .jokers()
             .iter()
             .filter(|j| !j.ability.eternal)
             .map(|j| j.sort_id)
@@ -72,7 +72,7 @@ impl Game {
 /// `G.GAME.last_tarot_planet` still holds the card before The Fool: The Fool's own entry is set
 /// two events later.
 pub(super) fn fool(g: &mut Game, _: u32, _: f64) {
-    if g.gs.consumable_slots > g.gs.areas.consumables.len() as f64 {
+    if g.gs.consumable_slots > g.gs.areas.consumables().len() as f64 {
         let forced = g.gs.last_tarot_planet;
         let spec = CardSpec::new(PoolType::TarotPlanet, AreaId::Consumables, "fool").forced(forced);
         g.create_and_emplace(spec, AreaId::Consumables);
@@ -95,7 +95,7 @@ pub(super) fn temperance(g: &mut Game, id: u32, _: f64) {
 /// One card of The Emperor ('emp' Tarot) or The High Priestess ('pri' Planet), if there is
 /// still room (card.lua:1403-1411).
 fn emperor_priestess(g: &mut Game, id: u32, _: f64) {
-    if g.gs.consumable_slots > g.gs.areas.consumables.len() as f64 {
+    if g.gs.consumable_slots > g.gs.areas.consumables().len() as f64 {
         let spec = if g.card(id).name() == "The Emperor" {
             CardSpec::new(PoolType::Tarot, AreaId::Consumables, "emp")
         } else {

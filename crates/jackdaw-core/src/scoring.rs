@@ -129,10 +129,10 @@ impl Game {
     }
 
     /// The evaluation view of cards (`get_id`, flush suits with Smeared Joker, `get_nominal`).
-    pub fn eval_cards(&self, cards: &[Card]) -> EvalCards {
+    pub fn eval_cards<'a>(&self, cards: impl IntoIterator<Item = &'a Card>) -> EvalCards {
         let smeared = self.has_joker("Smeared Joker");
         cards
-            .iter()
+            .into_iter()
             .map(|c| EvalCard {
                 id: c.get_id(),
                 flush_suits: c.flush_suits(smeared),
@@ -229,7 +229,7 @@ impl Game {
     /// `G.FUNCS.evaluate_play()` (state_events.lua:571-1086).
     pub(crate) fn evaluate_play(&mut self) {
         let full_hand = self.gs.areas.ids(AreaId::Play);
-        let info = get_poker_hand_info(&self.eval_cards(&self.gs.areas.play), self.eval_flags());
+        let info = get_poker_hand_info(&self.eval_cards(self.gs.areas.play()), self.eval_flags());
         let Some(text) = info.hand else {
             return;
         };
@@ -248,7 +248,7 @@ impl Game {
         if self.has_joker("Splash") {
             scoring = full_hand.clone();
         } else {
-            for c in &self.gs.areas.play {
+            for c in self.gs.areas.play() {
                 if c.is_stone() && !scoring.contains(&c.sort_id) {
                     scoring.push(c.sort_id);
                 }
@@ -265,7 +265,7 @@ impl Game {
         let scoring = &s.scoring_hand;
         self.trace_play(text, full_hand, scoring);
         // One effect list, refilled for each card: the first entry is the card's own effect.
-        let mut effects: Vec<Effect> = Vec::with_capacity(1 + self.gs.areas.jokers.len());
+        let mut effects: Vec<Effect> = Vec::with_capacity(1 + self.gs.areas.jokers().len());
         // Recording only: the joker each later effect came from, and what repeats a card (one
         // entry per repetition). Empty vectors don't allocate.
         let mut whose: Vec<u32> = Vec::new();

@@ -23,6 +23,7 @@
 
 mod analysis;
 
+use jackdaw_core::area::Cards;
 use jackdaw_core::card::{Card, EditionKind, Extra, ExtraVal, Facing, Rank, Seal, Suit};
 use jackdaw_core::state::{BlindSlot, GameState, Phase};
 use jackdaw_data::{CenterId, CenterSet, Value, centers};
@@ -257,11 +258,11 @@ impl Encoder {
     pub fn encode(&mut self, gs: &GameState) -> &Observation {
         let areas = &gs.areas;
         let rows = [
-            areas.hand.len(),
-            areas.jokers.len(),
-            areas.consumables.len(),
-            areas.shop_jokers.len() + areas.shop_vouchers.len() + areas.shop_booster.len(),
-            areas.pack_cards.len(),
+            areas.hand().len(),
+            areas.jokers().len(),
+            areas.consumables().len(),
+            areas.shop_jokers().len() + areas.shop_vouchers().len() + areas.shop_booster().len(),
+            areas.pack_cards().len(),
         ];
         let total = D_GLOBAL
             + rows
@@ -274,23 +275,23 @@ impl Encoder {
         self.obs.data.resize(total, 0.0);
 
         // The best-hand analysis of the live hand serves the global context and the hand rows.
-        let flags = Flags::from_jokers(&areas.jokers);
-        let hand_analysis = self.analyzer.analyze(&areas.hand, flags);
+        let flags = Flags::from_jokers(areas.jokers());
+        let hand_analysis = self.analyzer.analyze(areas.hand(), flags);
 
         let (global, rest) = self.obs.data.split_at_mut(D_GLOBAL);
         encode_global(gs, &hand_analysis, global);
         let (hand, rest) = rest.split_at_mut(rows[0] * D_PLAYING_CARD);
-        encode_playing_cards(&areas.hand, &self.analyzer.scoring, hand);
+        encode_playing_cards(areas.hand(), &self.analyzer.scoring, hand);
         let (jokers, rest) = rest.split_at_mut(rows[1] * D_JOKER);
-        encode_jokers(&areas.jokers, jokers);
+        encode_jokers(areas.jokers(), jokers);
         let (consumables, rest) = rest.split_at_mut(rows[2] * D_CONSUMABLE);
         encode_consumables(gs, consumables);
         let (shop, pack) = rest.split_at_mut(rows[3] * D_SHOP);
         encode_shop(gs, shop);
         // Pack cards get their own analysis (only their scoring flags are encoded).
-        if !areas.pack_cards.is_empty() {
-            self.analyzer.analyze(&areas.pack_cards, flags);
-            encode_playing_cards(&areas.pack_cards, &self.analyzer.scoring, pack);
+        if !areas.pack_cards().is_empty() {
+            self.analyzer.analyze(areas.pack_cards(), flags);
+            encode_playing_cards(areas.pack_cards(), &self.analyzer.scoring, pack);
         }
         &self.obs
     }
@@ -303,30 +304,30 @@ impl Encoder {
     pub fn encode_padded(&mut self, gs: &GameState, max_rows: [usize; 5], out: &mut [f32]) {
         let areas = &gs.areas;
         let rows = [
-            areas.hand.len(),
-            areas.jokers.len(),
-            areas.consumables.len(),
-            areas.shop_jokers.len() + areas.shop_vouchers.len() + areas.shop_booster.len(),
-            areas.pack_cards.len(),
+            areas.hand().len(),
+            areas.jokers().len(),
+            areas.consumables().len(),
+            areas.shop_jokers().len() + areas.shop_vouchers().len() + areas.shop_booster().len(),
+            areas.pack_cards().len(),
         ];
         out.fill(0.0);
-        let flags = Flags::from_jokers(&areas.jokers);
-        let hand_analysis = self.analyzer.analyze(&areas.hand, flags);
+        let flags = Flags::from_jokers(areas.jokers());
+        let hand_analysis = self.analyzer.analyze(areas.hand(), flags);
 
         let (global, rest) = out.split_at_mut(D_GLOBAL);
         encode_global(gs, &hand_analysis, global);
         let (hand, rest) = rest.split_at_mut(max_rows[0] * D_PLAYING_CARD);
-        encode_playing_cards(&areas.hand, &self.analyzer.scoring, hand);
+        encode_playing_cards(areas.hand(), &self.analyzer.scoring, hand);
         let (jokers, rest) = rest.split_at_mut(max_rows[1] * D_JOKER);
-        encode_jokers(&areas.jokers, jokers);
+        encode_jokers(areas.jokers(), jokers);
         let (consumables, rest) = rest.split_at_mut(max_rows[2] * D_CONSUMABLE);
         encode_consumables(gs, consumables);
         let (shop, rest) = rest.split_at_mut(max_rows[3] * D_SHOP);
         encode_shop(gs, shop);
         let (pack, counts) = rest.split_at_mut(max_rows[4] * D_PLAYING_CARD);
-        if !areas.pack_cards.is_empty() {
-            self.analyzer.analyze(&areas.pack_cards, flags);
-            encode_playing_cards(&areas.pack_cards, &self.analyzer.scoring, pack);
+        if !areas.pack_cards().is_empty() {
+            self.analyzer.analyze(areas.pack_cards(), flags);
+            encode_playing_cards(areas.pack_cards(), &self.analyzer.scoring, pack);
         }
         for (k, slot) in counts.iter_mut().enumerate() {
             *slot = rows[k].min(max_rows[k]) as f32;
@@ -540,8 +541,8 @@ fn encode_global(gs: &GameState, ha: &HandAnalysis, v: &mut [f32]) {
     // center_key_id(blind key): blinds aren't centers, so this is 0 for every blind (checked
     // by `center_key_ids_follow_sorted_keys`), without a key search per observation.
     set(26, 0.0);
-    set(27, log_scale(areas.deck.len() as f64));
-    set(28, log_scale(areas.discard.len() as f64));
+    set(27, log_scale(areas.deck().len() as f64));
+    set(28, log_scale(areas.discard().len() as f64));
     // [29]: the four_fingers/shortcut/smeared/splash game-state flags, never set: 0.
 
     // Hand levels [30:90].
@@ -601,7 +602,7 @@ fn encode_global(gs: &GameState, ha: &HandAnalysis, v: &mut [f32]) {
     }
 
     // Discard pile [159:211]: which suit/rank pairs it holds.
-    for c in &areas.discard {
+    for c in areas.discard() {
         if let Some(b) = c.base {
             set(
                 G_DISCARDS + suit_index(b.suit) * NUM_RANKS + rank_index(b.value),
@@ -639,7 +640,7 @@ fn encode_global(gs: &GameState, ha: &HandAnalysis, v: &mut [f32]) {
     }
 
     // Draw proximity [227:229].
-    let draws = analysis::analyze_draws(&areas.hand);
+    let draws = analysis::analyze_draws(areas.hand());
     set(G_DRAWS, draws.flush_proximity);
     set(G_DRAWS + 1, draws.straight_proximity);
 
@@ -650,7 +651,7 @@ fn encode_global(gs: &GameState, ha: &HandAnalysis, v: &mut [f32]) {
     set(G_INTEREST, interest / py_max(max_interest, 1.0));
 
     // Draw outs [230:232]: the deck's share of cards completing the flush or straight draw.
-    let deck = &areas.deck;
+    let deck = areas.deck();
     if !deck.is_empty() {
         let n = deck.len() as f64;
         if let Some(suit) = draws.best_flush_suit
@@ -673,7 +674,7 @@ fn encode_global(gs: &GameState, ha: &HandAnalysis, v: &mut [f32]) {
     }
 
     // Debuffed share of the hand [232]: face-up debuffed cards over all hand cards.
-    let hand = &areas.hand;
+    let hand = areas.hand();
     if !hand.is_empty() {
         let debuffed = hand
             .iter()
@@ -700,7 +701,7 @@ fn encode_global(gs: &GameState, ha: &HandAnalysis, v: &mut [f32]) {
 // ---------------------------------------------------------------------------
 
 /// `encode_playing_cards_batch(cards, gs, analysis)`; `scoring` marks the best hand's cards.
-fn encode_playing_cards(cards: &[Card], scoring: &[bool], out: &mut [f32]) {
+fn encode_playing_cards(cards: Cards<'_>, scoring: &[bool], out: &mut [f32]) {
     let rows = out.as_chunks_mut::<D_PLAYING_CARD>().0;
     for (i, (c, row)) in cards.iter().zip(rows).enumerate() {
         let position = (i as f64 / 20.0) as f32;
@@ -764,7 +765,7 @@ fn extra_feature(extra: &Extra) -> Option<f64> {
 }
 
 /// `encode_jokers_batch(jokers)`.
-fn encode_jokers(jokers: &[Card], out: &mut [f32]) {
+fn encode_jokers(jokers: Cards<'_>, out: &mut [f32]) {
     let rows = out.as_chunks_mut::<D_JOKER>().0;
     for (i, (c, row)) in jokers.iter().zip(rows).enumerate() {
         let position = (i as f64 / 20.0) as f32;
@@ -844,7 +845,7 @@ fn consumable_usable(card: &Card, gs: &GameState) -> bool {
     let Some(k) = size else {
         return can_use_consumable(card, gs, cfg, 0.0, false);
     };
-    let hand = &gs.areas.hand;
+    let hand = gs.areas.hand();
     if (hand.len() as f64) < k {
         return false;
     }
@@ -878,7 +879,7 @@ fn can_use_consumable(
     editionless: bool,
 ) -> bool {
     use centers::*;
-    let jokers = &gs.areas.jokers;
+    let jokers = gs.areas.jokers();
     let key = card.center;
     if matches!(
         key,
@@ -930,7 +931,7 @@ fn can_use_consumable(
         key,
         C_FAMILIAR | C_GRIM | C_INCANTATION | C_IMMOLATE | C_SIGIL | C_OUIJA
     ) {
-        return gs.areas.hand.len() > 1;
+        return gs.areas.hand().len() > 1;
     }
     if config_truthy(cfg, "max_highlighted") {
         let max_h = config_num(cfg, "max_highlighted").unwrap_or(0.0);
@@ -944,7 +945,7 @@ fn can_use_consumable(
 /// `encode_consumable(card, gs)` for each consumable.
 fn encode_consumables(gs: &GameState, out: &mut [f32]) {
     let rows = out.as_chunks_mut::<D_CONSUMABLE>().0;
-    for (c, row) in gs.areas.consumables.iter().zip(rows) {
+    for (c, row) in gs.areas.consumables().iter().zip(rows) {
         row[0] = center_feature(c.center) as f32;
         row[1] = (set_index(c.set()) / 9.0) as f32;
         row[2] = log_scale(c.sell_cost) as f32;
@@ -962,10 +963,10 @@ fn encode_consumables(gs: &GameState, out: &mut [f32]) {
 fn encode_shop(gs: &GameState, out: &mut [f32]) {
     let areas = &gs.areas;
     let items = areas
-        .shop_jokers
+        .shop_jokers()
         .iter()
-        .chain(&areas.shop_vouchers)
-        .chain(&areas.shop_booster);
+        .chain(areas.shop_vouchers())
+        .chain(areas.shop_booster());
     let rows = out.as_chunks_mut::<D_SHOP>().0;
     for (c, row) in items.zip(rows) {
         let set = c.set();
@@ -981,9 +982,9 @@ fn encode_shop(gs: &GameState, out: &mut [f32]) {
             0.0
         };
         row[4] = flag(match set {
-            CenterSet::Joker => (areas.jokers.len() as f64) < gs.joker_slots + bonus,
+            CenterSet::Joker => (areas.jokers().len() as f64) < gs.joker_slots + bonus,
             CenterSet::Tarot | CenterSet::Planet | CenterSet::Spectral => {
-                (areas.consumables.len() as f64) < gs.consumable_slots + bonus
+                (areas.consumables().len() as f64) < gs.consumable_slots + bonus
             }
             _ => true,
         });

@@ -60,9 +60,9 @@ impl Game {
             if let Some(ante) = self.modifier_num("set_eternal_ante")
                 && self.gs.round_resets.ante == ante
             {
-                for c in &mut self.gs.areas.jokers {
+                self.gs.areas.jokers_mut().for_each(|c| {
                     c.set_eternal(true);
-                }
+                });
             }
             if let Some(ante) = self.modifier_num("set_joker_slots_ante")
                 && self.gs.round_resets.ante == ante
@@ -138,7 +138,7 @@ impl Game {
             ret.card = Some(id);
         }
         if c.seal == Some(crate::card::Seal::Blue)
-            && (self.gs.areas.consumables.len() as f64) + self.rt.consumeable_buffer
+            && (self.gs.areas.consumables().len() as f64) + self.rt.consumeable_buffer
                 < self.gs.consumable_slots
         {
             self.rt.consumeable_buffer += 1.0;
@@ -199,9 +199,9 @@ impl Game {
                     .round_resets
                     .set_blind_state(BlindSlot::Boss, "Defeated");
                 for a in AreaId::PLAYING {
-                    for c in self.gs.areas.get_mut(a) {
+                    self.gs.areas.get_mut(a).for_each(|c| {
                         c.ability.played_this_ante = false;
-                    }
+                    });
                 }
             }
         }
@@ -216,10 +216,10 @@ impl Game {
         self.reset_ancient_card();
         self.reset_castle_card();
         for a in AreaId::PLAYING {
-            for c in self.gs.areas.get_mut(a) {
+            self.gs.areas.get_mut(a).for_each(|c| {
                 c.ability.discarded = false;
                 c.ability.forced_selection = false;
-            }
+            });
         }
     }
 

@@ -191,7 +191,7 @@ impl Game {
         // Cerulean Bell's forced card stays highlighted (CardArea:update, cardarea.lua:255-259).
         let highlighted = gs
             .areas
-            .hand
+            .hand()
             .iter()
             .filter(|c| c.ability.forced_selection)
             .map(|c| c.sort_id)
@@ -213,7 +213,7 @@ impl Game {
             + gs.sim.pending_deck_bottom.len();
         let areas = AreaMemo {
             deck_limit: playing as f64,
-            voucher_limit: (gs.areas.shop_vouchers.len() as f64).max(1.0),
+            voucher_limit: (gs.areas.shop_vouchers().len() as f64).max(1.0),
             stale_shop: None,
             no_buy_button: Vec::new(),
         };
@@ -239,11 +239,11 @@ impl Game {
         // Card:update's perma_debuff line (card.lua:4158), for a snapshot that was edited:
         // the engine itself never leaves such a card undebuffed (`update_cards`).
         for a in AreaId::PLAYING {
-            for c in game.gs.areas.get_mut(a) {
+            game.gs.areas.get_mut(a).for_each(|c| {
                 if c.ability.perma_debuff {
                     c.debuff = true;
                 }
-            }
+            });
         }
         game.update_cards();
         game

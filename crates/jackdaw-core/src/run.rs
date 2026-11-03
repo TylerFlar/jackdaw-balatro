@@ -702,10 +702,10 @@ impl Game {
             }
         }
         debug_assert!(
-            self.gs.areas.deck.is_empty(),
+            self.gs.areas.deck().is_empty(),
             "a new run's deck starts empty"
         );
-        self.gs.areas.deck = deck;
+        self.gs.areas.set(AreaId::Deck, deck);
         self.gs.starting_deck_size = self.playing_card_count() as f64;
     }
 }

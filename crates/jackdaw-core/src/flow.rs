@@ -160,13 +160,13 @@ impl Game {
             self.rt.state,
             LuaState::TarotPack | LuaState::SpectralPack | LuaState::PlanetPack
         );
-        if !pack && self.hand_limit() <= 0.0 && self.gs.areas.hand.is_empty() {
+        if !pack && self.hand_limit() <= 0.0 && self.gs.areas.hand().is_empty() {
             self.set_state(LuaState::GameOver, false);
             return true;
         }
-        let deck = self.gs.areas.deck.len() as i64;
+        let deck = self.gs.areas.deck().len() as i64;
         let mut space = e.unwrap_or_else(|| {
-            deck.min(self.hand_limit() as i64 - self.gs.areas.hand.len() as i64)
+            deck.min(self.hand_limit() as i64 - self.gs.areas.hand().len() as i64)
         });
         if self.active_boss_name() == "The Serpent"
             && (self.gs.current_round.hands_played > 0.0
@@ -206,7 +206,7 @@ impl Game {
             return;
         }
         let moved = match card {
-            Some(id) => self.gs.areas.remove_card(from, Some(id)),
+            Some(id) => self.gs.areas.detach(from, Some(id)),
             // CardArea:draw_card_from (cardarea.lua:592-611): every area accepts here except a
             // full one that is neither the deck nor the hand.
             None => {
@@ -214,18 +214,19 @@ impl Game {
                     || to == AreaId::Hand
                     || (self.gs.areas.get(to).len() as f64) < self.area_limit(to);
                 if room {
-                    self.gs.areas.remove_card(from, None)
+                    self.gs.areas.detach(from, None)
                 } else {
                     None
                 }
             }
         };
-        if let Some(c) = moved {
+        if let Some(d) = moved {
             if from == AreaId::Hand {
-                self.rt.highlighted.retain(|&h| h != c.sort_id);
+                let id = self.gs.areas.detached(&d).sort_id;
+                self.rt.highlighted.retain(|&h| h != id);
             }
-            let flipped = self.stay_flipped(to, &c);
-            self.gs.areas.emplace(to, c, false, flipped);
+            let flipped = self.stay_flipped(to, &d);
+            self.gs.areas.attach(to, d, false, flipped);
         }
         if sort {
             debug_assert_eq!(to, AreaId::Hand, "only hand draws sort");
@@ -303,11 +304,11 @@ impl Game {
         if to == AreaId::Hand {
             // `draw_card_from`: the hand always has room.
             for _ in 0..count {
-                let Some(c) = self.gs.areas.remove_card(from, None) else {
+                let Some(d) = self.gs.areas.detach(from, None) else {
                     break;
                 };
-                let flipped = self.stay_flipped(to, &c);
-                self.gs.areas.emplace(to, c, false, flipped);
+                let flipped = self.stay_flipped(to, &d);
+                self.gs.areas.attach(to, d, false, flipped);
             }
             if sort {
                 self.sort_after_draw();
@@ -349,7 +350,7 @@ impl Game {
     /// `G.hand:sort()` with `G.hand.config.sort` (cardarea.lua:577-590).
     pub(crate) fn sort_hand(&mut self) {
         let suit = self.gs.hand_sort == HandSort::SuitDesc;
-        let hand = &mut self.gs.areas.hand;
+        let hand = self.gs.areas.hand();
         // get_nominal is unique per card (unique_val), so the order is total and every correct
         // sort gives the same hand. After a draw only the new last card is out of place: move it
         // into position.
@@ -362,7 +363,7 @@ impl Game {
             let (rest, last) = (&keys[..n - 1], keys[n - 1]);
             if rest.windows(2).all(|w| w[0] > w[1]) {
                 let at = rest.partition_point(|&k| k > last);
-                hand[at..].rotate_right(1);
+                self.gs.areas.move_card(AreaId::Hand, n - 1, at);
                 return;
             }
             // Otherwise sort the positions by their keys, then move each card once.
@@ -372,10 +373,10 @@ impl Game {
             }
             order[..n]
                 .sort_by(|&a, &b| keys[b].partial_cmp(&keys[a]).expect("nominals are finite"));
-            crate::area::permute(hand, &order[..n]);
+            self.gs.areas.reorder(AreaId::Hand, &order[..n]);
             return;
         }
-        hand.sort_by(|a, b| {
+        self.gs.areas.sort_by(AreaId::Hand, |a, b| {
             b.get_nominal(suit)
                 .partial_cmp(&a.get_nominal(suit))
                 .expect("nominals are finite")
@@ -405,7 +406,7 @@ impl Game {
 
     /// `G.FUNCS.play_cards_from_highlighted(e)` (state_events.lua:450-538).
     pub(crate) fn play_cards_from_highlighted(&mut self) {
-        if !self.gs.areas.play.is_empty() {
+        if !self.gs.areas.play().is_empty() {
             return;
         }
         if let Some(b) = self.gs.blind.as_mut() {
@@ -435,13 +436,12 @@ impl Game {
 
     /// `ability.forced_selection = nil` on every playing card (state_events.lua:384, 459).
     fn clear_forced_selection(&mut self) {
-        for a in AreaId::PLAYING {
-            for c in self.gs.areas.get_mut(a) {
-                if c.ability.forced_selection {
-                    c.ability.forced_selection = false;
-                }
+        // Clearing a flag: any order does.
+        self.gs.areas.for_each_card_mut(|a, c| {
+            if c.ability.forced_selection && AreaId::PLAYING.contains(&a) {
+                c.ability.forced_selection = false;
             }
-        }
+        });
     }
 
     /// `G.FUNCS.discard_cards_from_highlighted(e, hook)` (state_events.lua:379-448).
@@ -451,7 +451,7 @@ impl Game {
             .rt
             .highlighted
             .len()
-            .min(500usize.saturating_sub(self.gs.areas.play.len()));
+            .min(500usize.saturating_sub(self.gs.areas.play().len()));
         if count == 0 {
             return;
         }
@@ -522,7 +522,7 @@ impl Game {
         if c.debuff || c.seal != Some(crate::card::Seal::Purple) {
             return;
         }
-        if (self.gs.areas.consumables.len() as f64) + self.rt.consumeable_buffer
+        if (self.gs.areas.consumables().len() as f64) + self.rt.consumeable_buffer
             < self.gs.consumable_slots
         {
             self.rt.consumeable_buffer += 1.0;
@@ -572,7 +572,7 @@ impl Game {
 
     /// `G.FUNCS.draw_from_hand_to_discard()` (state_events.lua:1128-1133).
     pub(crate) fn draw_from_hand_to_discard(&mut self) {
-        for _ in 0..self.gs.areas.hand.len() {
+        for _ in 0..self.gs.areas.hand().len() {
             self.queue(Event::DrawCard {
                 from: AreaId::Hand,
                 to: AreaId::Discard,
@@ -590,7 +590,7 @@ impl Game {
     pub(crate) fn update_state(&mut self) -> bool {
         match self.rt.state {
             LuaState::SelectingHand => {
-                if self.gs.areas.hand.is_empty() && !self.gs.areas.deck.is_empty() {
+                if self.gs.areas.hand().is_empty() && !self.gs.areas.deck().is_empty() {
                     self.set_state(LuaState::DrawToHand, false);
                     return true;
                 }
@@ -650,9 +650,9 @@ impl Game {
     /// `Game:update_selecting_hand` (game.lua:3010-3070): with hand, deck and play empty the
     /// round ends.
     fn update_selecting_hand(&mut self) -> bool {
-        let empty = self.gs.areas.hand.is_empty() && self.gs.areas.deck.is_empty();
+        let empty = self.gs.areas.hand().is_empty() && self.gs.areas.deck().is_empty();
         let mut acted = false;
-        if empty && self.gs.areas.play.is_empty() && !self.rt.end_round_called {
+        if empty && self.gs.areas.play().is_empty() && !self.rt.end_round_called {
             self.rt.end_round_called = true;
             self.end_round();
             acted = true;

@@ -191,7 +191,7 @@ fn burglar_event(g: &mut Game, id: u32, _: f64) {
 /// two slots and creates that many Common jokers (`'rif'`) in an event.
 fn riff_raff(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
     if ctx.kind == Kind::SettingBlind && !g.source_sliced(id, ctx) && g.joker_room() {
-        let held = g.gs.areas.jokers.len() as f64 + g.rt.joker_buffer;
+        let held = g.gs.areas.jokers().len() as f64 + g.rt.joker_buffer;
         let n = 2.0f64.min(g.gs.joker_slots - held);
         g.rt.joker_buffer += n;
         g.queue(Event::Call(riff_raff_event, id, n));
@@ -737,10 +737,10 @@ fn gift_card(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
     let extra = g.extra(id);
     for area in [AreaId::Jokers, AreaId::Consumables] {
         let cost = g.cost_context(area);
-        for c in g.gs.areas.get_mut(area) {
+        g.gs.areas.get_mut(area).for_each(|c| {
             c.ability.extra_value += extra;
             c.set_cost(&cost);
-        }
+        });
     }
     Some(message())
 }

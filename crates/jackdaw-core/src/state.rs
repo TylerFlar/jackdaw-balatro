@@ -389,68 +389,7 @@ pub struct ConsumeableUsage {
     pub totals: BTreeMap<String, f64>,
 }
 
-/// The card areas, in area order.
-#[derive(Debug, PartialEq, Default)]
-pub struct Areas {
-    /// The draw pile; index 0 is the bottom, cards are drawn from the end.
-    pub deck: Vec<Card>,
-    pub hand: Vec<Card>,
-    pub discard: Vec<Card>,
-    pub play: Vec<Card>,
-    pub jokers: Vec<Card>,
-    pub consumables: Vec<Card>,
-    pub shop_jokers: Vec<Card>,
-    pub shop_vouchers: Vec<Card>,
-    pub shop_booster: Vec<Card>,
-    pub pack_cards: Vec<Card>,
-}
-
-impl Areas {
-    pub const NAMES: [&'static str; 10] = [
-        "deck",
-        "hand",
-        "discard",
-        "play",
-        "jokers",
-        "consumables",
-        "shop_jokers",
-        "shop_vouchers",
-        "shop_booster",
-        "pack_cards",
-    ];
-
-    pub fn by_name(&self, name: &str) -> Option<&Vec<Card>> {
-        Some(match name {
-            "deck" => &self.deck,
-            "hand" => &self.hand,
-            "discard" => &self.discard,
-            "play" => &self.play,
-            "jokers" => &self.jokers,
-            "consumables" => &self.consumables,
-            "shop_jokers" => &self.shop_jokers,
-            "shop_vouchers" => &self.shop_vouchers,
-            "shop_booster" => &self.shop_booster,
-            "pack_cards" => &self.pack_cards,
-            _ => return None,
-        })
-    }
-
-    pub fn by_name_mut(&mut self, name: &str) -> Option<&mut Vec<Card>> {
-        Some(match name {
-            "deck" => &mut self.deck,
-            "hand" => &mut self.hand,
-            "discard" => &mut self.discard,
-            "play" => &mut self.play,
-            "jokers" => &mut self.jokers,
-            "consumables" => &mut self.consumables,
-            "shop_jokers" => &mut self.shop_jokers,
-            "shop_vouchers" => &mut self.shop_vouchers,
-            "shop_booster" => &mut self.shop_booster,
-            "pack_cards" => &mut self.pack_cards,
-            _ => return None,
-        })
-    }
-}
+pub use crate::area::Areas;
 
 /// An open booster pack.
 #[derive(Clone, Debug, PartialEq)]
@@ -612,19 +551,6 @@ clone_fields!(Sets {
     banned_keys,
     pool_flags,
     bosses_used,
-});
-
-clone_fields!(Areas {
-    deck,
-    hand,
-    discard,
-    play,
-    jokers,
-    consumables,
-    shop_jokers,
-    shop_vouchers,
-    shop_booster,
-    pack_cards,
 });
 
 clone_fields!(SimState {

@@ -161,13 +161,13 @@ impl Game {
 
     /// `#G.consumeables.cards + G.GAME.consumeable_buffer < G.consumeables.config.card_limit`.
     pub fn consumable_room(&self) -> bool {
-        (self.gs.areas.consumables.len() as f64) + self.rt.consumeable_buffer
+        (self.gs.areas.consumables().len() as f64) + self.rt.consumeable_buffer
             < self.gs.consumable_slots
     }
 
     /// `#G.jokers.cards + G.GAME.joker_buffer < G.jokers.config.card_limit`.
     pub fn joker_room(&self) -> bool {
-        (self.gs.areas.jokers.len() as f64) + self.rt.joker_buffer < self.gs.joker_slots
+        (self.gs.areas.jokers().len() as f64) + self.rt.joker_buffer < self.gs.joker_slots
     }
 
     /// Reserve a consumable slot and queue the card's creation (`consumeable_buffer += 1`,
@@ -217,7 +217,7 @@ impl Game {
     pub fn joker_count(&self) -> f64 {
         self.gs
             .areas
-            .jokers
+            .jokers()
             .iter()
             .filter(|c| c.set() == CenterSet::Joker)
             .count() as f64

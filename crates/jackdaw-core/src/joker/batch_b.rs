@@ -90,7 +90,7 @@ fn half(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
 /// the same `x_mult` while a slot is empty (card.lua:3966-3972); it can only run when the
 /// shared rule did not, so it never fires with a fresh `x_mult`.
 fn stencil(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
-    let empty = g.gs.joker_slots - g.gs.areas.jokers.len() as f64;
+    let empty = g.gs.joker_slots - g.gs.areas.jokers().len() as f64;
     (ctx.kind == Kind::JokerMain && empty > 0.0).then(|| xmult_mod(g.card(id).ability.x_mult))
 }
 
@@ -138,7 +138,7 @@ fn supernova(g: &mut Game, _id: u32, ctx: &mut Ctx) -> Option<Effect> {
 
 /// Blue Joker: +Chips per card left in the deck (card.lua:3887-3893).
 fn blue_joker(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
-    let deck = g.gs.areas.deck.len() as f64;
+    let deck = g.gs.areas.deck().len() as f64;
     (ctx.kind == Kind::JokerMain && deck > 0.0).then(|| chip_mod(g.extra(id) * deck))
 }
 
@@ -211,7 +211,7 @@ fn blackboard(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
         return None;
     }
     let smeared = g.has_joker("Smeared Joker");
-    let all_black = g.gs.areas.hand.iter().all(|c| {
+    let all_black = g.gs.areas.hand().iter().all(|c| {
         c.is_suit(Suit::Clubs, false, true, smeared) == Some(true)
             || c.is_suit(Suit::Spades, false, true, smeared) == Some(true)
     });

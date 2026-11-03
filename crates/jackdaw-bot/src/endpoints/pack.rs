@@ -83,7 +83,7 @@ fn run(ctx: &mut Ctx) -> Result<Json, BotError> {
         .unwrap_or_default();
     let game = ctx.game();
     let gs = &game.gs;
-    let hand_size = gs.areas.hand.len();
+    let hand_size = gs.areas.hand().len();
     let in_hand = |t: f64| t + 1.0 >= 1.0 && t + 1.0 <= hand_size as f64;
     let target_error = |t: f64| {
         BotError::bad_request(format!(
@@ -94,14 +94,14 @@ fn run(ctx: &mut Ctx) -> Result<Json, BotError> {
     // Arcana and Spectral packs wait for the dealt hand, then check every target first.
     let needs_hand = gs
         .areas
-        .pack_cards
+        .pack_cards()
         .first()
         .is_some_and(|c| matches!(c.set(), CenterSet::Tarot | CenterSet::Spectral));
     if needs_hand && let Some(&bad) = targets.iter().find(|&&t| !in_hand(t)) {
         return Err(target_error(bad));
     }
     // select_card().
-    let pack = &gs.areas.pack_cards;
+    let pack = gs.areas.pack_cards();
     let pos = index + 1.0;
     if !(pos >= 1.0 && pos <= pack.len() as f64) {
         return Err(BotError::bad_request(format!(
@@ -112,7 +112,7 @@ fn run(ctx: &mut Ctx) -> Result<Json, BotError> {
     }
     let i = index as usize;
     let card = &pack[i];
-    let jokers = gs.areas.jokers.len() as f64;
+    let jokers = gs.areas.jokers().len() as f64;
     if card.set() == CenterSet::Joker && jokers >= gs.joker_slots {
         return Err(BotError::not_allowed(format!(
             "Cannot select joker, joker slots are full. Current: {}, Limit: {}",

@@ -151,7 +151,7 @@ impl ActionMask {
     pub fn compute(&mut self, game: &Game, legality: Legality<'_>) {
         let gs = &game.gs;
         let areas = &gs.areas;
-        self.clear(areas.hand.len());
+        self.clear(areas.hand().len());
         match gs.phase {
             Phase::GameOver => return,
             Phase::BlindSelect => {
@@ -169,7 +169,7 @@ impl ActionMask {
                 self.joker_swaps(game);
             }
             Phase::SelectingHand => {
-                let n = areas.hand.len();
+                let n = areas.hand().len();
                 let cr = &gs.current_round;
                 if n > 0 && cr.hands_left > 0.0 {
                     self.set(ActionType::PlayHand);
@@ -177,7 +177,7 @@ impl ActionMask {
                 if n > 0 && cr.discards_left > 0.0 {
                     self.set(ActionType::Discard);
                 }
-                self.forced_card = areas.hand.iter().position(|c| c.ability.forced_selection);
+                self.forced_card = areas.hand().iter().position(|c| c.ability.forced_selection);
                 if n > 1 {
                     self.set(ActionType::SortHandRank);
                     self.set(ActionType::SortHandSuit);
@@ -203,11 +203,13 @@ impl ActionMask {
                 self.sell_consumables(game);
                 self.consumables(game);
                 let spendable = gs.dollars - gs.bankrupt_at;
-                self.entities(ActionType::RedeemVoucher, areas.shop_vouchers.len(), |i| {
-                    areas.shop_vouchers[i].cost <= spendable
-                });
-                self.entities(ActionType::OpenBooster, areas.shop_booster.len(), |i| {
-                    can_afford(game, areas.shop_booster[i].cost)
+                self.entities(
+                    ActionType::RedeemVoucher,
+                    areas.shop_vouchers().len(),
+                    |i| areas.shop_vouchers()[i].cost <= spendable,
+                );
+                self.entities(ActionType::OpenBooster, areas.shop_booster().len(), |i| {
+                    can_afford(game, areas.shop_booster()[i].cost)
                 });
                 let cr = &gs.current_round;
                 if cr.free_rerolls > 0.0 || can_afford(game, cr.reroll_cost) {
@@ -218,7 +220,7 @@ impl ActionMask {
             }
             Phase::PackOpening => {
                 let remaining = gs.pack.as_ref().map_or(0.0, |p| p.choices_remaining);
-                let pack = &areas.pack_cards;
+                let pack = areas.pack_cards();
                 if remaining > 0.0 {
                     self.entities(ActionType::PickPackCard, pack.len(), |i| {
                         pack_pick_allowed(game, &pack[i])
@@ -242,7 +244,7 @@ impl ActionMask {
     }
 
     fn sell_jokers(&mut self, game: &Game) {
-        let jokers = &game.gs.areas.jokers;
+        let jokers = game.gs.areas.jokers();
         self.entities(ActionType::SellJoker, jokers.len(), |i| {
             !jokers[i].ability.eternal
         });
@@ -251,14 +253,14 @@ impl ActionMask {
     fn sell_consumables(&mut self, game: &Game) {
         self.entities(
             ActionType::SellConsumable,
-            game.gs.areas.consumables.len(),
+            game.gs.areas.consumables().len(),
             |_| true,
         );
     }
 
     /// UseConsumable: the consumables usable now with some selection.
     fn consumables(&mut self, game: &Game) {
-        let cons = &game.gs.areas.consumables;
+        let cons = game.gs.areas.consumables();
         self.entities(ActionType::UseConsumable, cons.len(), |i| {
             game.consumable_use(cons[i].sort_id, true).is_some()
         });
@@ -267,7 +269,7 @@ impl ActionMask {
     /// Neighbour swaps of the hand (two cards or more): any card but the first moves left, any
     /// but the last moves right.
     fn hand_swaps(&mut self, game: &Game) {
-        let n = game.gs.areas.hand.len();
+        let n = game.gs.areas.hand().len();
         if n > 1 {
             self.entities(ActionType::SwapHandLeft, n, |i| i != 0);
             self.entities(ActionType::SwapHandRight, n, |i| i != n - 1);
@@ -276,7 +278,7 @@ impl ActionMask {
 
     /// Neighbour swaps that move no pinned joker.
     fn joker_swaps(&mut self, game: &Game) {
-        let jokers = &game.gs.areas.jokers;
+        let jokers = game.gs.areas.jokers();
         let n = jokers.len();
         if n <= 1 {
             return;
@@ -292,9 +294,9 @@ impl ActionMask {
     /// the joker or consumable limit by one).
     fn shop_buy(&mut self, game: &Game) {
         let gs = &game.gs;
-        let shop = &gs.areas.shop_jokers;
-        let jokers = gs.areas.jokers.len() as f64;
-        let consumables = gs.areas.consumables.len() as f64;
+        let shop = gs.areas.shop_jokers();
+        let jokers = gs.areas.jokers().len() as f64;
+        let consumables = gs.areas.consumables().len() as f64;
         self.entities(ActionType::BuyCard, shop.len(), |i| {
             let card = &shop[i];
             if !can_afford(game, card.cost) {
@@ -313,7 +315,7 @@ impl ActionMask {
 
     /// BuyAndUse: affordable shop consumables usable now (`can_use_consumeable` only, G138).
     fn buy_and_use(&mut self, game: &Game) {
-        let shop = &game.gs.areas.shop_jokers;
+        let shop = game.gs.areas.shop_jokers();
         self.entities(ActionType::BuyAndUse, shop.len(), |i| {
             let card = &shop[i];
             card.center().consumeable
@@ -412,7 +414,7 @@ fn is_negative(card: &Card) -> bool {
 fn pack_pick_allowed(game: &Game, card: &Card) -> bool {
     match card.set() {
         CenterSet::Joker => {
-            is_negative(card) || (game.gs.areas.jokers.len() as f64) < game.gs.joker_slots
+            is_negative(card) || (game.gs.areas.jokers().len() as f64) < game.gs.joker_slots
         }
         CenterSet::Tarot | CenterSet::Planet | CenterSet::Spectral => {
             game.consumable_use(card.sort_id, true).is_some()

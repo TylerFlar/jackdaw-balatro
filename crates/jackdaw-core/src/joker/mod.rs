@@ -299,20 +299,20 @@ impl Game {
         // Blueprint copies the joker to its right, Brainstorm the leftmost one.
         let copied = match what {
             Dispatch::Blueprint => {
-                let jokers = &self.gs.areas.jokers;
+                let jokers = self.gs.areas.jokers();
                 jokers
                     .iter()
                     .position(|c| c.sort_id == id)
                     .and_then(|i| jokers.get(i + 1))
                     .map(|c| c.sort_id)
             }
-            Dispatch::Brainstorm => self.gs.areas.jokers.first().map(|c| c.sort_id),
+            Dispatch::Brainstorm => self.gs.areas.jokers().first().map(|c| c.sort_id),
             _ => None,
         };
         if let Some(other) = copied.filter(|&o| o != id) {
             ctx.blueprint += 1;
             ctx.blueprint_card = Some(ctx.blueprint_card.unwrap_or(id));
-            if ctx.blueprint as usize > self.gs.areas.jokers.len() + 1 {
+            if ctx.blueprint as usize > self.gs.areas.jokers().len() + 1 {
                 return None;
             }
             if let Some(mut ret) = self.calculate_joker(other, ctx) {

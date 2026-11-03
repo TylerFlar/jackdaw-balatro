@@ -393,8 +393,8 @@ impl ActionTable {
             mask.forced_card,
             |t, e| {
                 let source = match t {
-                    ActionType::UseConsumable => &areas.consumables,
-                    _ => &areas.pack_cards,
+                    ActionType::UseConsumable => areas.consumables(),
+                    _ => areas.pack_cards(),
                 };
                 source.get(e).map(consumable_target_info)
             },

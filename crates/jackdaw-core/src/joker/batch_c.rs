@@ -382,7 +382,7 @@ fn raised_fist(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
     let other = other_card(ctx, Kind::Individual, AreaId::Hand)?;
     let (mut temp_mult, mut temp_id) = (15.0, 15);
     let mut raised = None;
-    for c in &g.gs.areas.hand {
+    for c in g.gs.areas.hand() {
         let Some(base) = c.base else { continue };
         if temp_id >= base.id() && !c.is_stone() {
             temp_mult = base.nominal();

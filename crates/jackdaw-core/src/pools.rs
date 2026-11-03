@@ -212,7 +212,7 @@ impl Game {
                         jackdaw_data::center_by_key(r)
                             .is_some_and(|c| sets.used_vouchers.contains(c))
                     });
-                    let in_shop = self.gs.areas.shop_vouchers.iter().any(|c| c.center == id);
+                    let in_shop = self.gs.areas.shop_vouchers().iter().any(|c| c.center == id);
                     add = requires_met && !in_shop;
                 }
             } else if v.set == CenterSet::Planet {

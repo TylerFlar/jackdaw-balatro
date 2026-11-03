@@ -39,7 +39,7 @@ fn spec(i: u64) -> RunSpec {
 /// out, buy, open or pick from a pack, move on), else any action.
 fn heuristic(env: &GymEnv, pick: &mut Xoshiro256) -> usize {
     let table = env.table();
-    let hand = &env.game().gs.areas.hand;
+    let hand = &env.game().gs.areas.hand();
     let mut best: Option<(i64, usize)> = None;
     let mut progress: Vec<usize> = Vec::new();
     let mut discards: Vec<usize> = Vec::new();

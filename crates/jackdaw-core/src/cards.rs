@@ -209,7 +209,7 @@ impl Game {
         let Some((area, i)) = self.gs.areas.locate(id) else {
             return;
         };
-        let card = self.gs.areas.get_mut(area).remove(i);
+        let card = self.gs.areas.remove(area, i);
         self.rt.highlighted.retain(|&h| h != id);
         self.remove_from_deck_card(id, card, false);
         if card.ability.queue_negative_removal {
@@ -244,7 +244,7 @@ impl Game {
         // `G.deck.config.card_limit`: an emplace that overfills the deck raised it
         // (cardarea.lua:47-51), and this frame's `CardArea:update` lowers it to the run's
         // playing cards (cardarea.lua:263). Only BalatroBot's view reads it.
-        let deck = self.gs.areas.deck.len() as f64;
+        let deck = self.gs.areas.deck().len() as f64;
         let playing = (AreaId::PLAYING
             .into_iter()
             .map(|a| self.gs.areas.get(a).len())
@@ -292,7 +292,7 @@ impl Game {
         let nine = (present & 4 != 0).then(|| count(self, &|c| c.get_id() == Some(9)));
         let driver = (present & 8 != 0).then(|| count(self, &|c| c.center != C_BASE));
         let joker_limit = self.gs.joker_slots;
-        let jokers = &self.gs.areas.jokers;
+        let jokers = self.gs.areas.jokers();
         let n_jokers = jokers.len() as f64;
         let stencils = jokers.iter().filter(|c| c.center == J_STENCIL).count() as f64;
         let joker_sell: f64 = jokers
@@ -307,7 +307,7 @@ impl Game {
         };
         let skips = self.gs.skips;
         for a in AreaId::NOT_PLAYING {
-            for c in self.gs.areas.get_mut(a) {
+            self.gs.areas.get_mut(a).for_each(|c| {
                 match c.center {
                     C_TEMPERANCE => {
                         let cap = c.ability.extra.num().unwrap_or(0.0);
@@ -332,7 +332,7 @@ impl Game {
                     }
                     _ => {}
                 }
-            }
+            });
         }
     }
 
@@ -356,7 +356,7 @@ impl Game {
         if delta > 0.0
             && real > 1.0
             && area == AreaId::Hand
-            && !self.gs.areas.hand.is_empty()
+            && !self.gs.areas.hand().is_empty()
             && matches!(
                 self.rt.state,
                 crate::game::LuaState::DrawToHand | crate::game::LuaState::SelectingHand

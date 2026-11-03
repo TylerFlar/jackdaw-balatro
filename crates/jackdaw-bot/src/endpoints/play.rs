@@ -30,7 +30,7 @@ pub const ENDPOINT: Endpoint = Endpoint {
 
 /// The indices of `cards` (an integer array) that name hand cards, or the first that doesn't.
 pub fn hand_indices(game: &Game, cards: &Table) -> Result<Vec<usize>, f64> {
-    let n = game.gs.areas.hand.len();
+    let n = game.gs.areas.hand().len();
     cards
         .ipairs()
         .map(|v| {
@@ -47,7 +47,7 @@ pub fn hand_indices(game: &Game, cards: &Table) -> Result<Vec<usize>, f64> {
 /// `G.hand:unhighlight_all()`, then `card:click()` on each index: the hand positions left
 /// highlighted, in hand order.
 pub fn click_select(game: &Game, indices: &[usize]) -> Vec<usize> {
-    let hand = &game.gs.areas.hand;
+    let hand = game.gs.areas.hand();
     let forced = |id: u32| {
         hand.iter()
             .any(|c| c.sort_id == id && c.ability.forced_selection)

@@ -204,7 +204,7 @@ impl Game {
 
     /// [`Game::can_use_consumeable`] with `highlighted` (sort ids) as `G.hand.highlighted`.
     pub fn can_use_consumeable_with(&self, id: u32, highlighted: &[u32]) -> bool {
-        if !self.gs.areas.play.is_empty() {
+        if !self.gs.areas.play().is_empty() {
             return false;
         }
         let state = self.rt.state;
@@ -232,7 +232,7 @@ impl Game {
             && self
                 .gs
                 .areas
-                .jokers
+                .jokers()
                 .iter()
                 .any(|j| j.set() == CenterSet::Joker && self.gs.joker_slots > 1.0)
         {
@@ -252,7 +252,7 @@ impl Game {
             return true;
         }
         let consumable_room =
-            (self.gs.areas.consumables.len() as f64) < self.gs.consumable_slots || in_consumables;
+            (self.gs.areas.consumables().len() as f64) < self.gs.consumable_slots || in_consumables;
         if (name == "The Emperor" || name == "The High Priestess") && consumable_room {
             return true;
         }
@@ -266,7 +266,7 @@ impl Game {
             return true;
         }
         if matches!(name, "Judgement" | "The Soul" | "Wraith") {
-            return (self.gs.areas.jokers.len() as f64) < self.gs.joker_slots;
+            return (self.gs.areas.jokers().len() as f64) < self.gs.joker_slots;
         }
         if matches!(
             state,
@@ -288,7 +288,7 @@ impl Game {
             if matches!(
                 name,
                 "Familiar" | "Grim" | "Incantation" | "Immolate" | "Sigil" | "Ouija"
-            ) && self.gs.areas.hand.len() > 1
+            ) && self.gs.areas.hand().len() > 1
             {
                 return true;
             }
@@ -298,7 +298,8 @@ impl Game {
 
     /// `card:check_use()`: Ankh refuses to be used with the joker slots full (card.lua:1581-1588).
     pub(crate) fn check_use(&self, id: u32) -> bool {
-        self.card(id).name() == "Ankh" && (self.gs.areas.jokers.len() as f64) >= self.gs.joker_slots
+        self.card(id).name() == "Ankh"
+            && (self.gs.areas.jokers().len() as f64) >= self.gs.joker_slots
     }
 
     /// `eligible_strength_jokers` (The Wheel of Fortune) and `eligible_editionless_jokers`
@@ -309,7 +310,7 @@ impl Game {
         let mut ids: Vec<u32> = self
             .gs
             .areas
-            .jokers
+            .jokers()
             .iter()
             .filter(|j| j.set() == CenterSet::Joker && j.edition.is_none())
             .map(|j| j.sort_id)

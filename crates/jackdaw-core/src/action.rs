@@ -256,7 +256,7 @@ impl Game {
         let mut ids: Vec<u32> = self
             .gs
             .areas
-            .hand
+            .hand()
             .iter()
             .find(|c| c.ability.forced_selection)
             .map(|c| c.sort_id)
@@ -329,7 +329,7 @@ impl Game {
         if let Some(forced) = self
             .gs
             .areas
-            .hand
+            .hand()
             .iter()
             .find(|c| c.ability.forced_selection)
             && !ids.contains(&forced.sort_id)
@@ -385,9 +385,9 @@ impl Game {
                     Action::SwapHandLeft(_) => i.checked_sub(1),
                     _ => Some(i + 1),
                 };
-                let hand = &mut self.gs.areas.hand;
+                let len = self.gs.areas.hand().len();
                 match other {
-                    Some(o) if *i < hand.len() && o < hand.len() => hand.swap(*i, o),
+                    Some(o) if *i < len && o < len => self.gs.areas.swap(AreaId::Hand, *i, o),
                     _ => return illegal("swap index out of range"),
                 }
             }
@@ -404,13 +404,13 @@ impl Game {
                     Action::SwapJokersLeft(_) => i.checked_sub(1),
                     _ => Some(i + 1),
                 };
-                let jokers = &mut self.gs.areas.jokers;
+                let jokers = self.gs.areas.jokers();
                 match other {
                     Some(o) if *i < jokers.len() && o < jokers.len() => {
                         if jokers[*i].pinned || jokers[o].pinned {
                             return illegal("a pinned joker can't move");
                         }
-                        jokers.swap(*i, o);
+                        self.gs.areas.swap(AreaId::Jokers, *i, o);
                     }
                     _ => return illegal("swap index out of range"),
                 }
@@ -461,7 +461,7 @@ impl Game {
                     None => return illegal(format!("{area:?} index {index} out of range")),
                 };
                 // Card:can_sell_card (card.lua:1653-1665).
-                if !self.gs.areas.play.is_empty() {
+                if !self.gs.areas.play().is_empty() {
                     return illegal("cards are being played");
                 }
                 if card.ability.eternal {
@@ -528,7 +528,7 @@ impl Game {
                     let negative = card
                         .edition
                         .is_some_and(|e| e.kind == crate::card::EditionKind::Negative);
-                    if !negative && (self.gs.areas.jokers.len() as f64) >= self.gs.joker_slots {
+                    if !negative && (self.gs.areas.jokers().len() as f64) >= self.gs.joker_slots {
                         return illegal("no room for the joker");
                     }
                 }
@@ -542,7 +542,7 @@ impl Game {
                 self.skip_booster();
             }
             Action::UseConsumable { index, targets } => {
-                let card = match self.gs.areas.consumables.get(*index) {
+                let card = match self.gs.areas.consumables().get(*index) {
                     Some(c) => c,
                     None => return illegal(format!("consumable index {index} out of range")),
                 };
