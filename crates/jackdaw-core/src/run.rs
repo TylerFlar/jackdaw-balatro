@@ -808,15 +808,24 @@ impl DeckTemplate {
         }
     }
 
-    /// Whether the cards were made with these values (bit for bit).
+    /// Whether the cards were made with these values (bit for bit). The pattern names every
+    /// field, so a value `Card:set_cost` comes to read can't be left out of the check.
     fn made_with(&self, cost: &CostContext, hands_played: f64) -> bool {
+        let CostContext {
+            inflation,
+            discount_percent,
+            booster_ante_scaling,
+            ante,
+            astronomer,
+            in_shop,
+        } = *cost;
         let a = &self.cost;
-        a.inflation.to_bits() == cost.inflation.to_bits()
-            && a.discount_percent.to_bits() == cost.discount_percent.to_bits()
-            && a.booster_ante_scaling == cost.booster_ante_scaling
-            && a.ante.to_bits() == cost.ante.to_bits()
-            && a.astronomer == cost.astronomer
-            && a.in_shop == cost.in_shop
+        a.inflation.to_bits() == inflation.to_bits()
+            && a.discount_percent.to_bits() == discount_percent.to_bits()
+            && a.booster_ante_scaling == booster_ante_scaling
+            && a.ante.to_bits() == ante.to_bits()
+            && a.astronomer == astronomer
+            && a.in_shop == in_shop
             && self.hands_played.to_bits() == hands_played.to_bits()
     }
 }
