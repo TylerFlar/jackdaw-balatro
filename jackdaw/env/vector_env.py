@@ -97,7 +97,11 @@ class BalatroVectorEnv(VectorEnv):
     reward_shaping, reward_fn:
         As for the Gym env, limited to the built-in rewards.
     num_threads:
-        Worker threads (0: one per core).
+        Threads that step the sub-envs, the calling thread included (0: one per core).
+        Between steps the others poll for the next one for 100 microseconds, giving their
+        core up to any thread that wants it after the first 20, then sleep.  A step doesn't
+        wait for a thread that is descheduled or asleep, so more threads than free cores
+        (other processes, a policy on the same cores) cost little.
     copy:
         Return copies of the observation arrays (default), or views of the buffers the
         next step overwrites.

@@ -57,7 +57,8 @@ impl VectorEnv {
             threads
         };
         let mut pool = Pool::new(threads).map_err(|e| e.to_string())?;
-        // Each env is built on its home thread, so its memory starts out there.
+        // Each env is built on its home thread if that thread joins in time, so its memory
+        // starts out there.
         let mut built: Vec<Option<GymEnv>> = resets.iter().map(|_| None).collect();
         for_each_home(&mut pool, built.iter_mut().zip(resets), |(slot, r)| {
             *slot = Some(GymEnv::new(&r.spec, config, r.rng_seed.unwrap_or(0))?);
@@ -86,9 +87,13 @@ impl VectorEnv {
         self.pool.threads()
     }
 
-    /// How long idle worker threads spin for the next step before they sleep (default
-    /// [`DEFAULT_SPIN`], at most [`MAX_SPIN`]). Longer suits a caller that steps again after a
-    /// longer pause; zero frees the cores as soon as a step is done.
+    /// How long idle worker threads wait for the next step before they sleep (default
+    /// [`DEFAULT_SPIN`], at most [`MAX_SPIN`]). They poll flat out for the first 20 us of it
+    /// and with `yield_now` between looks after, so a thread that wants the core gets it.
+    /// Longer suits a caller that steps again after a longer pause; zero frees the cores as
+    /// soon as a step is done. A step never waits for a worker that hasn't started on it
+    /// (asleep, or descheduled when the threads outnumber the free cores): the threads that
+    /// are running do its share.
     pub fn set_spin(&self, spin: Duration) {
         self.pool.set_spin(spin);
     }
@@ -205,7 +210,8 @@ struct Counter(AtomicUsize);
 /// per thread; each thread works through its own share, then helps with the others'. So an env
 /// is stepped on the same thread step after step, its run still in that core's caches (a
 /// work-stealing split moves envs between threads, and is markedly slower for it), while the
-/// helping keeps the threads evenly loaded. Returns the error of the first item that failed.
+/// helping keeps the threads evenly loaded, and gets the job done on the calling thread alone
+/// if no worker joins. Returns the error of the first item that failed.
 fn for_each_home<T: Send>(
     pool: &mut Pool,
     items: impl Iterator<Item = T>,
