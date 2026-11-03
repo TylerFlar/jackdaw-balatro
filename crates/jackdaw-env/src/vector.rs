@@ -12,8 +12,8 @@ use jackdaw_core::run::RunSpec;
 
 use crate::env::{EnvConfig, GYM_OBS_LEN, GymEnv, StepError};
 use crate::gym::MAX_ACTIONS;
-pub use crate::pool::DEFAULT_SPIN;
 use crate::pool::Pool;
+pub use crate::pool::{DEFAULT_SPIN, MAX_SPIN};
 
 /// A reset: the run to start and, optionally, a new sampler seed.
 #[derive(Clone, Debug)]
@@ -87,8 +87,8 @@ impl VectorEnv {
     }
 
     /// How long idle worker threads spin for the next step before they sleep (default
-    /// [`DEFAULT_SPIN`]). Longer suits a caller that steps again after a longer
-    /// pause; zero frees the cores as soon as a step is done.
+    /// [`DEFAULT_SPIN`], at most [`MAX_SPIN`]). Longer suits a caller that steps again after a
+    /// longer pause; zero frees the cores as soon as a step is done.
     pub fn set_spin(&self, spin: Duration) {
         self.pool.set_spin(spin);
     }

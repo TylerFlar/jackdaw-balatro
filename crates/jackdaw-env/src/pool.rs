@@ -23,6 +23,10 @@ use std::time::{Duration, Instant};
 /// between included, for small batches); one left alone stops costing CPU soon after.
 pub const DEFAULT_SPIN: Duration = Duration::from_micros(100);
 
+/// The longest spin [`Pool::set_spin`] sets: past a few milliseconds a parked worker's wakeup
+/// costs next to nothing beside the wait, and a spinning one holds a core all along.
+pub const MAX_SPIN: Duration = Duration::from_millis(10);
+
 /// A job: worker `k` calls `f(k)`.
 struct Job<'a> {
     f: &'a (dyn Fn(usize) + Sync + 'a),
@@ -45,6 +49,9 @@ struct Shared {
     /// Spin time in nanoseconds.
     spin_ns: AtomicU64,
     quit: AtomicBool,
+    /// Tests: make the workers panic while they wait for a job.
+    #[cfg(test)]
+    fail_idle: AtomicBool,
 }
 
 /// `threads` threads to run jobs on: the caller and `threads - 1` workers.
@@ -63,6 +70,8 @@ impl Pool {
             panic: Mutex::new(None),
             spin_ns: AtomicU64::new(DEFAULT_SPIN.as_nanos() as u64),
             quit: AtomicBool::new(false),
+            #[cfg(test)]
+            fail_idle: AtomicBool::new(false),
         });
         let mut pool = Pool {
             shared,
@@ -83,9 +92,9 @@ impl Pool {
         self.workers.len() + 1
     }
 
-    /// How long idle workers spin for the next job before they sleep.
+    /// How long idle workers spin for the next job before they sleep, at most [`MAX_SPIN`].
     pub fn set_spin(&self, spin: Duration) {
-        let ns = u64::try_from(spin.as_nanos()).unwrap_or(u64::MAX);
+        let ns = spin.min(MAX_SPIN).as_nanos() as u64;
         self.shared.spin_ns.store(ns, Ordering::Relaxed);
     }
 
@@ -155,26 +164,38 @@ impl Drop for Pool {
     }
 }
 
-/// Worker `k`'s loop: wait for a job, run it, report it done.
+/// Worker `k`: run [`work_loop`], aborting the process if it panics. Jobs' panics are caught
+/// and handed to the caller; one outside a job would end the thread and leave the next
+/// [`Pool::run`] waiting for it forever.
 fn work(shared: &Shared, k: usize) {
+    if catch_unwind(AssertUnwindSafe(|| work_loop(shared, k))).is_err() {
+        std::process::abort();
+    }
+}
+
+/// Worker `k`'s loop: wait for a job, run it, report it done.
+fn work_loop(shared: &Shared, k: usize) {
     let mut seen = 0u64;
     loop {
-        let mut polls = 0u32;
         let mut idle_since: Option<Instant> = None;
-        loop {
-            let g = shared.generation.0.load(Ordering::Acquire);
-            if g != seen {
-                seen = g;
-                break;
-            }
-            if shared.quit.load(Ordering::Acquire) {
-                return;
-            }
-            polls += 1;
-            if !polls.is_multiple_of(64) {
+        'wait: loop {
+            // Poll a while between looks at the clock.
+            for _ in 0..64 {
+                let g = shared.generation.0.load(Ordering::Acquire);
+                if g != seen {
+                    seen = g;
+                    break 'wait;
+                }
+                if shared.quit.load(Ordering::Acquire) {
+                    return;
+                }
                 std::hint::spin_loop();
-                continue;
             }
+            #[cfg(test)]
+            assert!(
+                !shared.fail_idle.load(Ordering::Relaxed),
+                "worker {k} fails"
+            );
             let since = *idle_since.get_or_insert_with(Instant::now);
             let spin = Duration::from_nanos(shared.spin_ns.load(Ordering::Relaxed));
             if since.elapsed() >= spin {
@@ -242,5 +263,78 @@ mod tests {
             ran.fetch_add(1, Ordering::Relaxed);
         });
         assert_eq!(ran.load(Ordering::Relaxed), 3);
+    }
+
+    #[test]
+    fn the_spin_is_capped() {
+        let pool = Pool::new(2).unwrap();
+        pool.set_spin(Duration::MAX);
+        assert_eq!(
+            pool.shared.spin_ns.load(Ordering::Relaxed),
+            MAX_SPIN.as_nanos() as u64
+        );
+        pool.set_spin(Duration::from_micros(7));
+        assert_eq!(pool.shared.spin_ns.load(Ordering::Relaxed), 7_000);
+    }
+
+    #[test]
+    fn workers_keep_running_jobs_after_a_long_spin() {
+        let mut pool = Pool::new(3).unwrap();
+        pool.set_spin(Duration::MAX);
+        for _ in 0..3 {
+            thread::sleep(MAX_SPIN + Duration::from_millis(5));
+            let ran = AtomicUsize::new(0);
+            pool.run(&|_| {
+                ran.fetch_add(1, Ordering::Relaxed);
+            });
+            assert_eq!(ran.load(Ordering::Relaxed), 3);
+        }
+    }
+
+    /// The child half of `a_worker_dying_outside_a_job_aborts`: run only in the child process.
+    #[test]
+    fn worker_dies_outside_a_job() {
+        if std::env::var_os("JACKDAW_POOL_DEATH_CHILD").is_none() {
+            return;
+        }
+        let mut pool = Pool::new(2).unwrap();
+        pool.shared.fail_idle.store(true, Ordering::Relaxed);
+        thread::sleep(Duration::from_millis(50));
+        // The worker is dead (or the process with it): this must not hang.
+        pool.run(&|_| {});
+        thread::sleep(Duration::from_secs(5));
+    }
+
+    #[test]
+    fn a_worker_dying_outside_a_job_aborts() {
+        let exe = std::env::current_exe().unwrap();
+        let mut child = std::process::Command::new(exe)
+            .args([
+                "--exact",
+                "pool::tests::worker_dies_outside_a_job",
+                "--test-threads=1",
+            ])
+            .env("JACKDAW_POOL_DEATH_CHILD", "1")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let start = Instant::now();
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break status;
+            }
+            if start.elapsed() > Duration::from_secs(30) {
+                child.kill().unwrap();
+                panic!("the pool deadlocked after a worker died");
+            }
+            thread::sleep(Duration::from_millis(10));
+        };
+        assert!(!status.success());
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::ExitStatusExt;
+            assert_eq!(status.signal(), Some(6), "SIGABRT: {status:?}");
+        }
     }
 }
