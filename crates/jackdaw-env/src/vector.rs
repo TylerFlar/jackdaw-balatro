@@ -6,11 +6,14 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, PoisonError};
+use std::time::Duration;
 
 use jackdaw_core::run::RunSpec;
 
 use crate::env::{EnvConfig, GYM_OBS_LEN, GymEnv, StepError};
 use crate::gym::MAX_ACTIONS;
+use crate::pool::Pool;
+pub use crate::pool::{DEFAULT_SPIN, MAX_SPIN};
 
 /// A reset: the run to start and, optionally, a new sampler seed.
 #[derive(Clone, Debug)]
@@ -40,20 +43,24 @@ pub struct EnvOut {
 /// Envs stepped together on a thread pool.
 pub struct VectorEnv {
     envs: Vec<GymEnv>,
-    pool: rayon::ThreadPool,
+    pool: Pool,
 }
 
 impl VectorEnv {
-    /// One env per reset spec (each must carry a sampler seed), on `threads` worker threads
-    /// (0: one per core).
+    /// One env per reset spec (each must carry a sampler seed), on `threads` threads (0: one
+    /// per core). The calling thread is one of them: a step runs on it and `threads - 1`
+    /// workers.
     pub fn new(resets: &[ResetSpec], config: EnvConfig, threads: usize) -> Result<Self, String> {
-        let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(threads)
-            .build()
-            .map_err(|e| e.to_string())?;
-        // Each env is built on its home thread, so its memory starts out there.
+        let threads = if threads == 0 {
+            std::thread::available_parallelism().map_or(1, usize::from)
+        } else {
+            threads
+        };
+        let mut pool = Pool::new(threads).map_err(|e| e.to_string())?;
+        // Each env is built on its home thread if that thread joins in time, so its memory
+        // starts out there.
         let mut built: Vec<Option<GymEnv>> = resets.iter().map(|_| None).collect();
-        for_each_home(&pool, built.iter_mut().zip(resets), |(slot, r)| {
+        for_each_home(&mut pool, built.iter_mut().zip(resets), |(slot, r)| {
             *slot = Some(GymEnv::new(&r.spec, config, r.rng_seed.unwrap_or(0))?);
             Ok(())
         })?;
@@ -77,7 +84,18 @@ impl VectorEnv {
     }
 
     pub fn threads(&self) -> usize {
-        self.pool.current_num_threads()
+        self.pool.threads()
+    }
+
+    /// How long idle worker threads wait for the next step before they sleep (default
+    /// [`DEFAULT_SPIN`], at most [`MAX_SPIN`]). They poll flat out for the first 20 us of it
+    /// and with `yield_now` between looks after, so a thread that wants the core gets it.
+    /// Longer suits a caller that steps again after a longer pause; zero frees the cores as
+    /// soon as a step is done. A step never waits for a worker that hasn't started on it
+    /// (asleep, or descheduled when the threads outnumber the free cores): the threads that
+    /// are running do its share.
+    pub fn set_spin(&self, spin: Duration) {
+        self.pool.set_spin(spin);
     }
 
     /// Reset every env, writing the observations (`len * GYM_OBS_LEN`) and action masks
@@ -95,7 +113,7 @@ impl VectorEnv {
             .zip(resets)
             .zip(obs.chunks_mut(GYM_OBS_LEN))
             .zip(masks.chunks_mut(MAX_ACTIONS));
-        for_each_home(&self.pool, items, |(((env, reset), o), m)| {
+        for_each_home(&mut self.pool, items, |(((env, reset), o), m)| {
             env.reset(&reset.spec, reset.rng_seed)?;
             env.write_obs(o);
             env.write_action_mask(m);
@@ -126,7 +144,7 @@ impl VectorEnv {
             .zip(obs.chunks_mut(GYM_OBS_LEN))
             .zip(masks.chunks_mut(MAX_ACTIONS))
             .filter(|(((_, r), _), _)| r.is_some());
-        for_each_home(&self.pool, items, |(((env, reset), o), m)| {
+        for_each_home(&mut self.pool, items, |(((env, reset), o), m)| {
             let reset = reset.expect("filtered");
             env.reset(&reset.spec, reset.rng_seed)?;
             env.write_obs(o);
@@ -165,18 +183,22 @@ impl VectorEnv {
             .zip(obs.chunks_mut(GYM_OBS_LEN))
             .zip(masks.chunks_mut(MAX_ACTIONS))
             .zip(out.iter_mut());
-        for_each_home(&self.pool, items, |(((((env, &a), reset), o), m), r)| {
-            *r = match reset {
-                Some(reset) => {
-                    env.reset(&reset.spec, reset.rng_seed)?;
-                    EnvOut::default()
-                }
-                None => step_one(env, a),
-            };
-            env.write_obs(o);
-            env.write_action_mask(m);
-            Ok(())
-        })
+        for_each_home(
+            &mut self.pool,
+            items,
+            |(((((env, &a), reset), o), m), r)| {
+                *r = match reset {
+                    Some(reset) => {
+                        env.reset(&reset.spec, reset.rng_seed)?;
+                        EnvOut::default()
+                    }
+                    None => step_one(env, a),
+                };
+                env.write_obs(o);
+                env.write_action_mask(m);
+                Ok(())
+            },
+        )
     }
 }
 
@@ -186,22 +208,22 @@ struct Counter(AtomicUsize);
 
 /// Run `f` on every item on the pool's threads. The items are split into one contiguous share
 /// per thread; each thread works through its own share, then helps with the others'. So an env
-/// is stepped on the same thread step after step, its run still in that core's caches (rayon's
+/// is stepped on the same thread step after step, its run still in that core's caches (a
 /// work-stealing split moves envs between threads, and is markedly slower for it), while the
-/// helping keeps the threads evenly loaded. Returns the error of the first item that failed.
+/// helping keeps the threads evenly loaded, and gets the job done on the calling thread alone
+/// if no worker joins. Returns the error of the first item that failed.
 fn for_each_home<T: Send>(
-    pool: &rayon::ThreadPool,
+    pool: &mut Pool,
     items: impl Iterator<Item = T>,
     f: impl Fn(T) -> Result<(), String> + Sync,
 ) -> Result<(), String> {
     let cells: Vec<Mutex<Option<T>>> = items.map(|x| Mutex::new(Some(x))).collect();
     let n = cells.len();
-    let threads = pool.current_num_threads().max(1);
+    let threads = pool.threads();
     let bounds: Vec<usize> = (0..=threads).map(|k| k * n / threads).collect();
     let next: Vec<Counter> = (0..threads).map(|_| Counter(AtomicUsize::new(0))).collect();
     let failed: Mutex<Option<(usize, String)>> = Mutex::new(None);
-    pool.broadcast(|ctx| {
-        let home = ctx.index();
+    pool.run(&|home| {
         for share in (home..home + threads).map(|k| k % threads) {
             let (lo, hi) = (bounds[share], bounds[share + 1]);
             loop {

@@ -1,7 +1,8 @@
 //! Reinforcement-learning hot paths on top of the engine: the observation encoder, the action
 //! masks and the factored action space, the Gym action enumeration, and the batched vector
 //! environment.
-#![forbid(unsafe_code)]
+// `deny` rather than `forbid`: the vector env's thread pool (`pool`) is the one exception.
+#![deny(unsafe_code)]
 
 /// The version of the action space: what the action types mean, which ones a mask allows where,
 /// and how the Gym action table is built. A policy is tied to the masks it was trained with, so
@@ -17,6 +18,8 @@ pub mod env;
 pub mod gym;
 pub mod mask;
 pub mod observation;
+#[allow(unsafe_code)]
+mod pool;
 pub mod reward;
 pub mod vector;
 

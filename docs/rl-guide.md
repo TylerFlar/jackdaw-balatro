@@ -313,6 +313,8 @@ obs, reward, terminated, truncated, info = env.step(action)
 
 `BalatroGymnasiumEnv` takes `max_free_moves` and `on_refusal` like `BalatroEnvironment`.
 
+With `copy=False` it hands out the same values without allocating them each step: the observation's arrays and `info["action_mask"]` are views of buffers the env owns, which the next `reset` or `step` overwrites in place. Copy whatever you keep across steps (a previous observation, a rollout buffer that stores the arrays themselves); `action_masks()` still returns a fresh array. On the Rust engine this saves about a third of the wrapper's per-step time.
+
 ### With MaskablePPO
 
 Jackdaw doesn't depend on any RL library. Install [sb3-contrib](https://sb3-contrib.readthedocs.io/) in your own project, then:
@@ -435,6 +437,7 @@ for _ in range(1000):
 - The episode-end metrics come as arrays with gymnasium's `_key` masks: `info["balatro/won"]` and `info["_balatro/won"]`, and so on.
 - `max_free_moves` and `on_refusal` work as in the other envs; a refusal shows in the episode-end metrics as `info["balatro/refused"]`, a bool per env.
 - `copy=False` returns views of buffers the next step overwrites, skipping a copy per step.
+- **Threads.** `num_threads` counts the calling thread; the default, 0, is one per core. Between steps the other threads poll for the next step for 100 µs, giving their core up to any thread that wants it after the first 20 µs, and then sleep, so a loop that steps again soon pays no wakeup and an idle env costs no CPU. A step doesn't wait for a thread that is descheduled or asleep: the running threads take its share. So more threads than free cores (other processes, or a policy's forward pass on the same cores) cost little, though with the policy on the CPU, giving each its own cores (`num_threads` here, `torch.set_num_threads` there) keeps them from competing.
 
 ## Saving a Policy: the Action Version
 
