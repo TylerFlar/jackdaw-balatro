@@ -64,8 +64,20 @@ from jackdaw.env.rust_gym import (
     sampler_seed,
 )
 
-# Columns of the per-env results jackdaw._core.VectorEnv writes.
-_REWARD, _TERMINATED, _TRUNCATED, _ENDED, _ANTE, _ROUNDS, _WON, _NOT_PORTED, _REFUSED = range(9)
+# The record of per-env results jackdaw._core.VectorEnv.step writes: one num_envs array per
+# field, in this order.
+_RECORD_FIELDS = (
+    ("reward", np.float64),
+    ("ante", np.int64),
+    ("rounds", np.int64),
+    ("terminated", np.bool_),
+    ("truncated", np.bool_),
+    ("ended", np.bool_),
+    ("won", np.bool_),
+    ("not_ported", np.bool_),
+    ("refused", np.bool_),
+)
+_RECORD = sum(np.dtype(t).itemsize for _, t in _RECORD_FIELDS)
 
 
 def single_observation_space() -> spaces.Dict:
@@ -183,8 +195,13 @@ class BalatroVectorEnv(VectorEnv):
         # Each step writes fresh observation and mask arrays (copy=True) or reuses these.
         self._obs = np.zeros((num_envs, OBS_LEN), dtype=np.float32)
         self._masks = np.zeros((num_envs, MAX_ACTIONS), dtype=np.bool_)
-        self._stats = np.zeros((num_envs, 9), dtype=np.float64)
         self._obs_views = batched_gym_obs(self._obs)
+        # The dtype and byte offset of each field's array in a step's record.
+        self._fields: dict[str, tuple[np.dtype, int]] = {}
+        offset = 0
+        for name, t in _RECORD_FIELDS:
+            self._fields[name] = (np.dtype(t), offset)
+            offset += np.dtype(t).itemsize * num_envs
         # Sub-envs whose episode ended on the last step: the next step resets them.
         self._pending: list[int] = []
         self._reset_once = False
@@ -243,18 +260,21 @@ class BalatroVectorEnv(VectorEnv):
         actions = np.ascontiguousarray(actions, dtype=np.int64).reshape(self.num_envs)
         resets = [(i, self._reset_tuple(i, None)) for i in self._pending]
         obs, masks = self._outputs()
-        self._core.step(actions, resets, obs, masks.view(np.uint8), self._stats)
-        stats = self._stats
-        rewards = stats[:, _REWARD].copy()
-        terminated = stats[:, _TERMINATED] != 0
-        truncated = stats[:, _TRUNCATED] != 0
-        ended = stats[:, _ENDED] != 0
+        # A fresh record each step: the arrays viewing it are the caller's to keep.
+        record = np.empty(self.num_envs * _RECORD, dtype=np.uint8)
+        ended_envs, not_ported, refused = self._core.step(
+            actions, resets, obs, masks.view(np.uint8), record
+        )
+        field = self._field
+        rewards = field(record, "reward")
+        terminated = field(record, "terminated")
+        truncated = field(record, "truncated")
         info: dict[str, Any] = {"action_mask": masks}
-        if ended.any():
-            episode = self._episode_info(stats, ended)
+        if ended_envs:
+            ended = field(record, "ended")
+            episode = self._episode_info(record, ended, not_ported, refused)
             if self.autoreset_mode is AutoresetMode.SAME_STEP:
-                ended_envs = np.flatnonzero(ended).tolist()
-                final = batched_gym_obs(obs[ended_envs].copy())
+                final = batched_gym_obs(obs[ended_envs])
                 final_obs = np.full(self.num_envs, None, dtype=object)
                 for row, i in enumerate(ended_envs):
                     final_obs[i] = {key: value[row] for key, value in final.items()}
@@ -267,13 +287,13 @@ class BalatroVectorEnv(VectorEnv):
                 self._pending = []
             else:
                 info.update(episode)
-                self._pending = np.flatnonzero(ended).tolist()
+                self._pending = ended_envs
         else:
             self._pending = []
-        if self.on_refusal == "raise" and stats[:, _REFUSED].any():
-            refused = np.flatnonzero(stats[:, _REFUSED]).tolist()
+        if refused and self.on_refusal == "raise":
+            which = np.flatnonzero(field(record, "refused")).tolist()
             raise IllegalActionError(
-                f"BalatroVectorEnv: the engine refused the action of sub-envs {refused}"
+                f"BalatroVectorEnv: the engine refused the action of sub-envs {which}"
             )
         return self._observations(obs), rewards, terminated, truncated, info
 
@@ -325,21 +345,31 @@ class BalatroVectorEnv(VectorEnv):
                 self._masks = np.empty((self.num_envs, MAX_ACTIONS), dtype=np.bool_)
         return self._obs, self._masks
 
-    @staticmethod
-    def _episode_info(stats: np.ndarray, ended: np.ndarray) -> dict[str, Any]:
+    def _field(self, record: np.ndarray, name: str) -> np.ndarray:
+        """The ``num_envs`` array of one field of a step's record (a view of it)."""
+        dtype, offset = self._fields[name]
+        return np.ndarray(self.num_envs, dtype, record, offset)
+
+    def _episode_info(
+        self, record: np.ndarray, ended: np.ndarray, not_ported: bool, refused: bool
+    ) -> dict[str, Any]:
         """The ended episodes' stats, in gymnasium's vector info form (a value array and a
         ``_``-prefixed mask per key)."""
+        field = self._field
         info: dict[str, Any] = {
-            "balatro/ante_reached": stats[:, _ANTE].astype(np.int64),
+            "balatro/ante_reached": field(record, "ante"),
             "_balatro/ante_reached": ended,
-            "balatro/rounds_beaten": stats[:, _ROUNDS].astype(np.int64),
+            "balatro/rounds_beaten": field(record, "rounds"),
             "_balatro/rounds_beaten": ended,
-            "balatro/won": stats[:, _WON] != 0,
+            "balatro/won": field(record, "won"),
             "_balatro/won": ended,
         }
-        for key, col in (("balatro/not_ported", _NOT_PORTED), ("balatro/refused", _REFUSED)):
-            flags = stats[:, col] != 0
-            if flags.any():
+        for key, name, any_set in (
+            ("balatro/not_ported", "not_ported", not_ported),
+            ("balatro/refused", "refused", refused),
+        ):
+            if any_set:
+                flags = field(record, name)
                 info[key] = flags
                 info["_" + key] = flags
         return info

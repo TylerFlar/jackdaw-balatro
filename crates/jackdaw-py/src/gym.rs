@@ -381,17 +381,57 @@ fn writable<'a, T: Element>(
 /// Envs stepped together on worker threads, the GIL released (`BalatroVectorEnv`'s engine).
 ///
 /// The worker threads write straight into caller-owned buffers: observations (``num_envs x
-/// 614`` float32), action masks (``num_envs x 500`` bytes) and per-env stats (``num_envs x 9``
-/// float64: reward, terminated, truncated, episode_end, ante_reached, rounds_beaten, won,
-/// not_ported, refused).
+/// 614`` float32) and action masks (``num_envs x 500`` bytes); a step also writes the per-env
+/// results as a record (see `write_record`).
 #[pyclass(name = "VectorEnv", module = "jackdaw._core")]
 pub struct VectorEnv {
     inner: CoreVectorEnv,
     out: Vec<EnvOut>,
 }
 
-/// Columns of the stats buffer.
-pub const STATS: usize = 9;
+/// Bytes per env of a step's record.
+pub const RECORD: usize = 30;
+
+/// Write the envs' results into `record` (`RECORD` bytes per env) as one array per field, each
+/// `n` long, in native byte order: reward (f64), ante_reached and rounds_beaten (i64), then
+/// terminated, truncated, episode_end, won, not_ported and refused (one byte each, 0 or 1).
+/// Returns the envs whose episode ended, and whether any was cut as not ported or refused.
+fn write_record(out: &[EnvOut], record: &mut [u8]) -> (Vec<usize>, bool, bool) {
+    let n = out.len();
+    let (reward, rest) = record.split_at_mut(8 * n);
+    let (ante, rest) = rest.split_at_mut(8 * n);
+    let (rounds, flags) = rest.split_at_mut(8 * n);
+    let (reward, ante, rounds) = (
+        reward.as_chunks_mut::<8>().0,
+        ante.as_chunks_mut::<8>().0,
+        rounds.as_chunks_mut::<8>().0,
+    );
+    let mut ended = Vec::new();
+    let (mut not_ported, mut refused) = (false, false);
+    for (i, e) in out.iter().enumerate() {
+        reward[i] = e.reward.to_ne_bytes();
+        // As numpy's float64 -> int64 cast: truncate toward zero.
+        ante[i] = (e.ante_reached as i64).to_ne_bytes();
+        rounds[i] = (e.rounds_beaten as i64).to_ne_bytes();
+        let fields = [
+            e.terminated,
+            e.truncated,
+            e.episode_end,
+            e.won,
+            e.not_ported,
+            e.refused,
+        ];
+        for (k, f) in fields.into_iter().enumerate() {
+            flags[k * n + i] = u8::from(f);
+        }
+        if e.episode_end {
+            ended.push(i);
+        }
+        not_ported |= e.not_ported;
+        refused |= e.refused;
+    }
+    (ended, not_ported, refused)
+}
 
 #[pymethods]
 impl VectorEnv {
@@ -479,8 +519,12 @@ impl VectorEnv {
     }
 
     /// Step every env: the envs listed in ``resets`` as ``(env, reset tuple)`` start their next
-    /// run instead (their stats are zero), every other takes its action from ``actions``
-    /// (int64, an index into its table). Writes the observations, action masks and stats.
+    /// run instead (their results are zero), every other takes its action from ``actions``
+    /// (int64, an index into its table). Writes the observations, action masks and the
+    /// results' record (``num_envs x 30`` bytes: reward f64, ante_reached i64, rounds_beaten
+    /// i64, then terminated, truncated, episode_end, won, not_ported and refused as bytes; one
+    /// ``num_envs`` array per field, in that order). Returns ``(ended, not_ported, refused)``:
+    /// the envs whose episode ended, and whether any was cut as not ported or refused.
     /// Raises ``IndexError`` without stepping anything when an action is past its env's table.
     fn step(
         &mut self,
@@ -489,8 +533,8 @@ impl VectorEnv {
         resets: Vec<(usize, ResetTuple)>,
         mut obs: PyBuffer<f32>,
         mut masks: PyBuffer<u8>,
-        mut stats: PyBuffer<f64>,
-    ) -> PyResult<()> {
+        mut record: PyBuffer<u8>,
+    ) -> PyResult<(Vec<usize>, bool, bool)> {
         let n = self.inner.len();
         let actions: Vec<usize> = actions
             .to_vec(py)?
@@ -507,27 +551,14 @@ impl VectorEnv {
                 .ok_or_else(|| PyIndexError::new_err(format!("no env {i}")))?;
             *slot = Some(reset_spec(t)?);
         }
-        disjoint(&[span(&obs), span(&masks), span(&stats)])?;
+        disjoint(&[span(&obs), span(&masks), span(&record)])?;
         let obs = writable(&mut obs, n * GYM_OBS_LEN, "obs")?;
         let masks = writable(&mut masks, n * MAX_ACTIONS, "masks")?;
-        let stats = writable(&mut stats, n * STATS, "stats")?;
+        let record = writable(&mut record, n * RECORD, "record")?;
         let VectorEnv { inner, out } = self;
-        py.detach(|| -> Result<(), String> {
+        py.detach(|| -> Result<_, String> {
             inner.step(&actions, &specs, obs, masks, out)?;
-            for (row, e) in stats.as_chunks_mut::<STATS>().0.iter_mut().zip(out.iter()) {
-                *row = [
-                    e.reward,
-                    f64::from(u8::from(e.terminated)),
-                    f64::from(u8::from(e.truncated)),
-                    f64::from(u8::from(e.episode_end)),
-                    e.ante_reached,
-                    e.rounds_beaten as f64,
-                    f64::from(u8::from(e.won)),
-                    f64::from(u8::from(e.not_ported)),
-                    f64::from(u8::from(e.refused)),
-                ];
-            }
-            Ok(())
+            Ok(write_record(out, record))
         })
         .map_err(PyIndexError::new_err)
     }
