@@ -262,7 +262,7 @@ impl ActionMask {
     fn consumables(&mut self, game: &Game) {
         let cons = game.gs.areas.consumables();
         self.entities(ActionType::UseConsumable, cons.len(), |i| {
-            game.consumable_use(cons[i].sort_id, true).is_some()
+            game.consumable_usable(cons[i].sort_id, true)
         });
     }
 
@@ -320,7 +320,7 @@ impl ActionMask {
             let card = &shop[i];
             card.center().consumeable
                 && can_afford(game, card.cost)
-                && game.consumable_use(card.sort_id, false).is_some()
+                && game.consumable_usable(card.sort_id, false)
         });
     }
 
@@ -417,7 +417,7 @@ fn pack_pick_allowed(game: &Game, card: &Card) -> bool {
             is_negative(card) || (game.gs.areas.jokers().len() as f64) < game.gs.joker_slots
         }
         CenterSet::Tarot | CenterSet::Planet | CenterSet::Spectral => {
-            game.consumable_use(card.sort_id, true).is_some()
+            game.consumable_usable(card.sort_id, true)
         }
         _ => true,
     }

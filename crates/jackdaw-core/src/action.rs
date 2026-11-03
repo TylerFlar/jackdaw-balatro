@@ -246,24 +246,25 @@ impl Game {
     /// that turns the action down afterwards.
     fn highlight_targets(&mut self, targets: Option<&[usize]>) -> Result<Vec<u32>, StepError> {
         let highlighted = self.consumable_highlight(targets.unwrap_or(&[]))?;
-        Ok(std::mem::replace(&mut self.rt.highlighted, highlighted))
+        Ok(std::mem::replace(
+            &mut self.rt.highlighted,
+            highlighted.to_vec(),
+        ))
     }
 
     /// `G.hand.highlighted` for a consumable used on these hand indices: the first forced card,
     /// then the targets in order, repeats skipped.
-    pub(crate) fn consumable_highlight(&self, targets: &[usize]) -> Result<Vec<u32>, StepError> {
-        let hand = self.gs.areas.ids(AreaId::Hand);
-        let mut ids: Vec<u32> = self
-            .gs
-            .areas
-            .hand()
-            .iter()
-            .find(|c| c.ability.forced_selection)
-            .map(|c| c.sort_id)
-            .into_iter()
-            .collect();
+    pub(crate) fn consumable_highlight(
+        &self,
+        targets: &[usize],
+    ) -> Result<crate::area::Ids, StepError> {
+        let hand = self.gs.areas.hand();
+        let mut ids = crate::area::Ids::from_slice(&[]);
+        if let Some(c) = hand.iter().find(|c| c.ability.forced_selection) {
+            ids.push(c.sort_id);
+        }
         for &i in targets {
-            let Some(&id) = hand.get(i) else {
+            let Some(id) = hand.get(i).map(|c| c.sort_id) else {
                 return illegal(format!("hand index {i} out of range"));
             };
             if ids.contains(&id) {

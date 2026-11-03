@@ -308,7 +308,7 @@ impl Game {
     /// (the second is true when the use is refused for lack of room).
     pub fn consumable_gates(&self, id: u32, targets: &[usize]) -> Result<(bool, bool), StepError> {
         let mut g = self.clone();
-        g.rt.highlighted = g.consumable_highlight(targets)?;
+        g.rt.highlighted = g.consumable_highlight(targets)?.to_vec();
         Ok((g.can_use_consumeable(id), g.check_use(id)))
     }
 

@@ -264,6 +264,27 @@ impl Game {
         self.can_skip_booster()
     }
 
+    /// `consumable_use(id, check_use).is_some()`, without building the selections it tries
+    /// (for one that takes up to 16 cards).
+    pub fn consumable_usable(&self, id: u32, check_use: bool) -> bool {
+        const FIRST: [usize; 16] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+        let Some(size) = self.selection_size(id) else {
+            return self.usable_with(id, &[], check_use);
+        };
+        let n = self.gs.areas.hand().len();
+        if n < size {
+            return false;
+        }
+        if size > FIRST.len() {
+            return self.consumable_use(id, check_use).is_some();
+        }
+        let first = &FIRST[..size];
+        self.usable_with(id, first, check_use)
+            || combinations(n, size)
+                .into_iter()
+                .any(|sel| sel != first && self.usable_with(id, &sel, check_use))
+    }
+
     /// `Some(targets)` when the consumable (by sort id) can be used now: `Some(None)` for one
     /// that takes no selection, `Some(Some(selection))` with its default selection.
     pub fn consumable_use(&self, id: u32, check_use: bool) -> Option<Option<Vec<usize>>> {
