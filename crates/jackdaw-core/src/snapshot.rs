@@ -1540,7 +1540,10 @@ mod tests {
         v["areas"]["deck"][0]["sort_id"] = json!(4_000_000_000u64);
         v["sim"]["next_sort_id"] = json!(4_000_000_001u64);
         let e = import(&v).unwrap_err().0;
-        assert!(e.starts_with("$.areas.deck: sort id 4000000000 is not below"), "{e}");
+        assert!(
+            e.starts_with("$.areas.deck: sort id 4000000000 is not below"),
+            "{e}"
+        );
         // So is a huge next_sort_id, which the run would hand to its next new card.
         let mut v = run_snapshot();
         v["sim"]["next_sort_id"] = json!(u64::from(SORT_ID_LIMIT) + 1);

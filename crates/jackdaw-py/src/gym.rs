@@ -292,7 +292,10 @@ impl GymEnv {
         let spec = run_spec(back, stake, seed, challenge)?;
         self.inner.reset(&spec, rng_seed).map_err(value_error)?;
         self.last = None;
-        Ok((obs_bytes(py, &mut self.inner, mask)?, self.inner.table().len()))
+        Ok((
+            obs_bytes(py, &mut self.inner, mask)?,
+            self.inner.table().len(),
+        ))
     }
 
     /// Take action ``index`` of the table. Raises ``IndexError`` for an index past the table.
