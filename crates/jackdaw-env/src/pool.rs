@@ -74,6 +74,9 @@ struct Shared {
     /// Tests: worker `k` stalls this long before it joins each job.
     #[cfg(test)]
     stall: Mutex<Option<(usize, Duration)>>,
+    /// Tests: how many times the workers have gone to sleep.
+    #[cfg(test)]
+    parks: AtomicUsize,
 }
 
 /// `threads` threads to run jobs on: the caller and `threads - 1` workers.
@@ -98,6 +101,8 @@ impl Pool {
             fail_idle: AtomicBool::new(false),
             #[cfg(test)]
             stall: Mutex::new(None),
+            #[cfg(test)]
+            parks: AtomicUsize::new(0),
         });
         let mut pool = Pool {
             shared,
@@ -298,9 +303,15 @@ fn wait_for_job(shared: &Shared, seen: u64) -> Option<u64> {
             }
             thread::yield_now();
         }
+        // Drop the wakeup left by a job this worker joined while it polled (`Pool::run` unparks
+        // every worker), or the park below would return at once and the worker would poll for
+        // a second spin. Any wakeup this takes is for a store that the poll after it sees.
+        thread::park_timeout(Duration::ZERO);
         if let Some(r) = poll() {
             return r;
         }
+        #[cfg(test)]
+        shared.parks.fetch_add(1, Ordering::Relaxed);
         // `Pool::run` and `drop` unpark every worker after their store, so a job or a quit
         // that lands between the poll above and this park ends the park at once.
         thread::park();
@@ -440,6 +451,21 @@ mod tests {
             pool.run(&|k| with_everyone(3, &joined, k));
             assert_eq!(joined.load(Ordering::Relaxed), 3);
         }
+    }
+
+    #[test]
+    fn idle_workers_spin_once_before_they_sleep() {
+        // `run` wakes every worker, spinning ones too. A worker that joined a job while it spun
+        // used to keep that wakeup, so its next park returned at once and it spun twice.
+        let mut pool = Pool::new(4).unwrap();
+        pool.set_spin(MAX_SPIN);
+        let joined = AtomicUsize::new(0);
+        pool.run(&|k| with_everyone(4, &joined, k));
+        let before = pool.shared.parks.load(Ordering::Relaxed);
+        thread::sleep(MAX_SPIN * 10);
+        let parks = pool.shared.parks.load(Ordering::Relaxed) - before;
+        // One sleep per worker (a spurious wakeup may add one); a second spin each makes 6.
+        assert!(parks < 2 * 3, "{parks} parks for 3 workers after a job");
     }
 
     /// The child half of `a_worker_dying_outside_a_job_aborts`: run only in the child process.
