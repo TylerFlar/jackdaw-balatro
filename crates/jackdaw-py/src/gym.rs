@@ -129,13 +129,17 @@ pub fn state_to_py(s: &StateSummary) -> StateParts {
     )
 }
 
+/// The observation and the action mask in one fresh ``bytearray``: ``GYM_OBS_LEN`` float32 (native
+/// byte order), then ``MAX_ACTIONS`` bytes of mask (the first ``n_actions`` set).
 fn obs_bytes<'py>(py: Python<'py>, env: &mut CoreGymEnv) -> PyResult<Bound<'py, PyByteArray>> {
     let mut obs = [0f32; GYM_OBS_LEN];
     env.write_obs(&mut obs);
-    PyByteArray::new_with(py, GYM_OBS_LEN * 4, |buf| {
-        for (dst, x) in buf.as_chunks_mut::<4>().0.iter_mut().zip(&obs) {
+    PyByteArray::new_with(py, GYM_OBS_LEN * 4 + MAX_ACTIONS, |buf| {
+        let (obs_buf, mask) = buf.split_at_mut(GYM_OBS_LEN * 4);
+        for (dst, x) in obs_buf.as_chunks_mut::<4>().0.iter_mut().zip(&obs) {
             *dst = x.to_ne_bytes();
         }
+        env.write_action_mask(mask);
         Ok(())
     })
 }
@@ -151,7 +155,8 @@ fn reset_spec(t: &ResetTuple) -> PyResult<ResetSpec> {
 }
 
 /// What a Gym step returns: `(obs, reward, terminated, truncated, n_actions, episode,
-/// not_ported, refused)`, `episode` being `(ante_reached, rounds_beaten, won)` at an episode
+/// not_ported, refused)`, `obs` holding the observation and the action mask as `reset`'s does,
+/// `episode` being `(ante_reached, rounds_beaten, won)` at an episode
 /// end and `refused` the engine's reason when it refused the action (the episode was cut).
 type StepParts<'py> = (
     Bound<'py, PyByteArray>,
@@ -261,7 +266,8 @@ impl GymEnv {
     }
 
     /// Start a new run; reseed the sampler when ``rng_seed`` is given. Returns the observation
-    /// (``bytearray`` of float32) and the number of actions.
+    /// and action mask (one ``bytearray``: 614 float32, then 500 mask bytes) and the number of
+    /// actions.
     #[pyo3(signature = (back, stake, seed, challenge=None, rng_seed=None))]
     fn reset<'py>(
         &mut self,

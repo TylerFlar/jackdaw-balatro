@@ -50,12 +50,15 @@ from jackdaw.env.rust_gym import (
     RustActionTable,
     factored_from_parts,
     gym_obs,
+    gym_obs_and_mask,
     rust_reward,
     sampler_seed,
 )
 from jackdaw.env.sampler import Xoshiro256, subsample
 
 MAX_ACTIONS: int = 500
+# _MASK_TABLE[n]: the action mask of an n-action table (its first n slots set).
+_MASK_TABLE = np.tri(MAX_ACTIONS + 1, MAX_ACTIONS, -1, dtype=np.bool_)
 CARD_COMBO_BUDGET: int = 200
 
 # Pre-compute entity layout from spec
@@ -306,8 +309,11 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         # Internal state.  The table's subsampling draws from a seeded xoshiro256**
         # (jackdaw.env.sampler), the generator the Rust table uses too.
         self._action_table: Sequence[FactoredAction] = []
+        # The Rust table's length, as the last reset or step gave it.
+        self._n_actions = 0
         if self._core is not None:
             self._action_table = RustActionTable(self._core)
+            self._n_actions = self._core.n_actions
         self._rng = Xoshiro256(secrets.randbits(64))
         self._episode_max_ante: int = 1
         self._episode_blinds_beaten: int = 0
@@ -381,9 +387,8 @@ class BalatroGymnasiumEnv(gymnasium.Env):
 
     def action_masks(self) -> np.ndarray:
         """Return bool mask of shape ``(MAX_ACTIONS,)`` for MaskablePPO."""
-        mask = np.zeros(MAX_ACTIONS, dtype=bool)
-        mask[: len(self._action_table)] = True
-        return mask
+        n = self._n_actions if self._core is not None else len(self._action_table)
+        return _MASK_TABLE[min(n, MAX_ACTIONS)].copy()
 
     @property
     def game(self) -> Game:
@@ -401,9 +406,9 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         back, stake, run_seed = self._starts.next(None if seed is None else str(seed))
         rng_seed = None if seed is None else sampler_seed(seed)
         if self.copy:
-            data, _ = self._core.reset(back, stake, run_seed, None, rng_seed)
+            data, self._n_actions = self._core.reset(back, stake, run_seed, None, rng_seed)
         else:
-            self._core.reset_into(
+            self._n_actions = self._core.reset_into(
                 back, stake, run_seed, None, rng_seed, self._obs_buffer, self._mask_bytes
             )
         self._episode_max_ante = 1
@@ -412,7 +417,8 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         if callable(reward_reset):
             reward_reset()
         if self.copy:
-            return gym_obs(data), {"action_mask": self.action_masks()}
+            obs, mask = gym_obs_and_mask(data)
+            return obs, {"action_mask": mask}
         return self._obs_views, {"action_mask": self._mask_buffer}
 
     def _rust_step(
@@ -420,15 +426,16 @@ class BalatroGymnasiumEnv(gymnasium.Env):
     ) -> tuple[dict[str, np.ndarray], float, bool, bool, dict[str, Any]]:
         cut = self.on_refusal == "truncate"
         if self.copy:
-            data, reward, terminated, truncated, _, episode, not_ported, refused = self._core.step(
+            data, reward, terminated, truncated, n, episode, not_ported, refused = self._core.step(
                 int(action), cut
             )
-            obs, mask = gym_obs(data), self.action_masks()
+            obs, mask = gym_obs_and_mask(data)
         else:
-            reward, terminated, truncated, _, episode, not_ported, refused = self._core.step_into(
+            reward, terminated, truncated, n, episode, not_ported, refused = self._core.step_into(
                 int(action), cut, self._obs_buffer, self._mask_bytes
             )
             obs, mask = self._obs_views, self._mask_buffer
+        self._n_actions = n
         if self._python_reward:
             prev, curr, fa = self._core.last_transition()
             transition = Transition(

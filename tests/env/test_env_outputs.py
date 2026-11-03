@@ -178,3 +178,38 @@ def test_vector_env_outputs_are_unchanged(copy: bool, mode: AutoresetMode) -> No
     run = _vector_run(copy, mode)
     assert run.digest == _VECTOR[mode]
     run.check_owned()
+
+
+def _table_mask(env: BalatroGymnasiumEnv) -> np.ndarray:
+    """The action mask from the live action table (the engine's, on the Rust path)."""
+    mask = np.zeros(500, dtype=bool)
+    mask[: len(env._action_table)] = True
+    return mask
+
+
+@pytest.mark.parametrize("copy", [True, False], ids=["copy", "views"])
+@pytest.mark.parametrize("adapter", [DirectAdapter, GenericAdapter], ids=["direct", "generic"])
+def test_action_masks_follow_the_table(adapter: type, copy: bool) -> None:
+    """``action_masks()`` is the live table's mask before the first reset, after a reset, mid
+    episode and after an episode end (no actions), and matches ``info["action_mask"]``."""
+    env = BalatroGymnasiumEnv(adapter, seed_prefix="MASKS", max_steps=25, copy=copy)
+    rng = np.random.default_rng(3)
+    _same_mask(env.action_masks(), _table_mask(env))
+    _, info = env.reset(seed=8)
+    ends = 0
+    for _ in range(120):
+        mask = env.action_masks()
+        _same_mask(mask, _table_mask(env))
+        _same_mask(mask, info["action_mask"])
+        _, _, terminated, truncated, info = env.step(_pick(rng, mask))
+        if terminated or truncated:
+            assert not env.action_masks().any()
+            _same_mask(env.action_masks(), _table_mask(env))
+            _, info = env.reset()
+            ends += 1
+    assert ends >= 3
+
+
+def _same_mask(a: np.ndarray, b: np.ndarray) -> None:
+    assert (a.dtype, a.shape, a.flags.c_contiguous) == (b.dtype, b.shape, b.flags.c_contiguous)
+    assert a.tobytes() == b.tobytes()

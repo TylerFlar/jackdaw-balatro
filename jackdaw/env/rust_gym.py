@@ -55,6 +55,26 @@ _COLUMNS: list[tuple[str, tuple[int, ...], int, int]] = [
 ]
 
 
+# A reset's or step's output from jackdaw._core.GymEnv: the flattened observation, then the
+# action mask (MAX_ACTIONS bytes), as one structured item with a field per array.  numpy makes
+# the arrays faster from its fields than from the buffer at each offset.
+_PACKED = np.dtype(
+    [(key, _F32, shape) for key, shape, _ in _LAYOUT] + [("action_mask", np.bool_, (MAX_ACTIONS,))]
+)
+_OBS_KEYS: tuple[str, ...] = tuple(key for key, _, _ in _LAYOUT)
+if _PACKED.itemsize != OBS_LEN * 4 + MAX_ACTIONS or [
+    _PACKED.fields[key][1]  # type: ignore[index]
+    for key in _OBS_KEYS
+] != [off for _, _, off in _LAYOUT]:
+    raise ImportError("the packed observation's dtype differs from its layout")
+
+
+def gym_obs_and_mask(data: bytearray) -> tuple[dict[str, np.ndarray], np.ndarray]:
+    """The Gym observation dict and the action mask viewing a reset's or step's output."""
+    item = np.ndarray((), _PACKED, data)
+    return {key: item[key] for key in _OBS_KEYS}, item["action_mask"]
+
+
 def batched_gym_obs(flat: np.ndarray) -> dict[str, np.ndarray]:
     """The batched observation dict viewing ``flat`` (``num_envs x OBS_LEN`` float32)."""
     n = flat.shape[0]

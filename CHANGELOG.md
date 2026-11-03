@@ -20,7 +20,8 @@ while it is 0.x, a minor release (0.2 → 0.3) can break things, and a patch rel
 - Importing a snapshot fails when two of its cards share a sort id, or when its
   `next_sort_id` isn't above every card's.
 - `BalatroVectorEnv` spends less time in Python per step (its per-env results come from Rust in
-  their final dtypes). What it returns is unchanged.
+  their final dtypes), and `BalatroGymnasiumEnv` on the Rust engine too (the observation and
+  the action mask come in one buffer). What they return is unchanged.
 
 ## [0.2.2] - 2026-10-25
 
