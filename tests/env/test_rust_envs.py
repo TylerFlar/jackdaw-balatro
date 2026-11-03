@@ -237,6 +237,18 @@ def test_vector_env_results_do_not_depend_on_threads() -> None:
     assert one == _vector_run(8)
 
 
+def test_default_threads_honour_rayon_num_threads(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Up to 0.2.2 the vector env stepped on a rayon pool, whose default thread count
+    ``RAYON_NUM_THREADS`` sets; ``num_threads=0`` keeps honouring it."""
+    monkeypatch.delenv("RAYON_NUM_THREADS", raising=False)
+    per_core = BalatroVectorEnv(2).num_threads
+    monkeypatch.setenv("RAYON_NUM_THREADS", "3")
+    assert BalatroVectorEnv(2).num_threads == 3
+    assert BalatroVectorEnv(2, num_threads=5).num_threads == 5
+    monkeypatch.setenv("RAYON_NUM_THREADS", "0")
+    assert BalatroVectorEnv(2).num_threads == per_core
+
+
 def test_vector_env_api() -> None:
     vec = BalatroVectorEnv(3, num_threads=2, copy=False)
     obs, info = vec.reset(seed=[1, None, 3])

@@ -46,13 +46,23 @@ pub struct VectorEnv {
     pool: Pool,
 }
 
+/// The thread count `RAYON_NUM_THREADS` asks for: a positive whole number, read the way rayon
+/// reads it. The vector env stepped on a rayon pool up to jackdaw 0.2.2, so `threads == 0`
+/// keeps honouring it.
+fn rayon_num_threads(value: Option<&str>) -> Option<usize> {
+    value
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|&n| n > 0)
+}
+
 impl VectorEnv {
-    /// One env per reset spec (each must carry a sampler seed), on `threads` threads (0: one
-    /// per core). The calling thread is one of them: a step runs on it and `threads - 1`
-    /// workers.
+    /// One env per reset spec (each must carry a sampler seed), on `threads` threads (0:
+    /// `RAYON_NUM_THREADS` when it is set, else one per core). The calling thread is one of
+    /// them: a step runs on it and `threads - 1` workers.
     pub fn new(resets: &[ResetSpec], config: EnvConfig, threads: usize) -> Result<Self, String> {
         let threads = if threads == 0 {
-            std::thread::available_parallelism().map_or(1, usize::from)
+            rayon_num_threads(std::env::var("RAYON_NUM_THREADS").ok().as_deref())
+                .unwrap_or_else(|| std::thread::available_parallelism().map_or(1, usize::from))
         } else {
             threads
         };
@@ -362,5 +372,21 @@ mod tests {
         assert!(err.is_err());
         let after: Vec<_> = v.envs().iter().map(|e| e.game().snapshot()).collect();
         assert_eq!(before, after);
+    }
+
+    #[test]
+    fn rayon_num_threads_reads_as_rayon_does() {
+        assert_eq!(rayon_num_threads(Some("3")), Some(3));
+        // Unset, zero or not a whole number: one thread per core.
+        for v in [
+            None,
+            Some("0"),
+            Some(""),
+            Some("-2"),
+            Some("two"),
+            Some(" 3"),
+        ] {
+            assert_eq!(rayon_num_threads(v), None, "{v:?}");
+        }
     }
 }
