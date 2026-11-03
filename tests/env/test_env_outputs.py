@@ -18,6 +18,7 @@ import numpy as np
 import pytest
 from gymnasium.vector import AutoresetMode
 
+from jackdaw import _core
 from jackdaw.env import BalatroGymnasiumEnv, BalatroVectorEnv, DirectAdapter, Transition
 from tests.env.generic import GenericAdapter
 
@@ -213,3 +214,39 @@ def test_action_masks_follow_the_table(adapter: type, copy: bool) -> None:
 def _same_mask(a: np.ndarray, b: np.ndarray) -> None:
     assert (a.dtype, a.shape, a.flags.c_contiguous) == (b.dtype, b.shape, b.flags.c_contiguous)
     assert a.tobytes() == b.tobytes()
+
+
+def test_core_gym_env_returns_the_observation_alone() -> None:
+    """``_core.GymEnv``'s ``reset`` and ``step`` hand back the observation alone (614 float32),
+    which Jackdaw Arena sends to its agents as it is; ``mask=True`` appends the action mask (500
+    bytes, the first ``n_actions`` set) to the same observation."""
+    obs_len = _core.GYM_OBS_LEN * 4
+    run = ("b_red", 1, "CONTRACT", None, 7)
+    plain = _core.GymEnv(*run, 200, True, "sparse", None, 10)
+    packed = _core.GymEnv(*run, 200, True, "sparse", None, 10)
+
+    def check(obs: bytearray, data: bytearray, n: int) -> None:
+        assert isinstance(obs, bytearray) and len(obs) == obs_len
+        assert len(data) == obs_len + _core.MAX_ACTIONS
+        assert data[:obs_len] == obs
+        mask = np.frombuffer(data, dtype=np.uint8, offset=obs_len)
+        assert mask[:n].all() and not mask[n:].any()
+
+    obs, n = plain.reset(*run)
+    data, _ = packed.reset(*run, mask=True)
+    check(obs, data, n)
+    rng = np.random.default_rng(5)
+    ends = 0
+    for _ in range(150):
+        a = int(rng.integers(n))
+        step = plain.step(a, True)
+        step_packed = packed.step(a, True, mask=True)
+        assert len(step) == 8 and step[1:] == step_packed[1:]
+        n = step[4]
+        check(step[0], step_packed[0], n)
+        if step[2] or step[3]:
+            obs, n = plain.reset(*run)
+            data, _ = packed.reset(*run, mask=True)
+            check(obs, data, n)
+            ends += 1
+    assert ends >= 2
