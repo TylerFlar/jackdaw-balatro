@@ -77,6 +77,12 @@ jobs:
           args: --release --out target/pgo/instrumented
           sccache: false
 
+      # scripts/pgo.sh installs the training workload's dependencies from uv.lock, by hash.
+      - uses: astral-sh/setup-uv@v10.3.2
+        if: matrix.pgo
+        with:
+          enable-cache: false
+
       - name: Train the profile (PGO)
         if: matrix.pgo
         run: scripts/pgo.sh train target/pgo/instrumented target/pgo/jackdaw.profdata
@@ -132,6 +138,12 @@ jobs:
           args: --release --out target/pgo/instrumented
           sccache: false
 
+      # scripts/pgo.sh installs the training workload's dependencies from uv.lock, by hash.
+      - uses: astral-sh/setup-uv@v10.3.2
+        if: matrix.pgo
+        with:
+          enable-cache: false
+
       - name: Train the profile (PGO)
         if: matrix.pgo
         run: scripts/pgo.sh train target/pgo/instrumented target/pgo/jackdaw.profdata
@@ -176,6 +188,11 @@ jobs:
           target: x64
           args: --release --out target/pgo/instrumented
           sccache: false
+
+      # scripts/pgo.sh installs the training workload's dependencies from uv.lock, by hash.
+      - uses: astral-sh/setup-uv@v10.3.2
+        with:
+          enable-cache: false
 
       - name: Train the profile (PGO)
         shell: bash
