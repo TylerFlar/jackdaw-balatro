@@ -183,6 +183,82 @@ static TAG_SLOTS: std::sync::LazyLock<[u8; NUM_TAGS]> = std::sync::LazyLock::new
 
 const NUM_TAGS: usize = jackdaw_data::TAGS.len();
 
+/// The blind-effect features of a blind's `debuff` config.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct BlindDebuff {
+    /// `debuff.suit`, when it names a suit.
+    suit: Option<Suit>,
+    /// `debuff.is_face == "face"`.
+    face: bool,
+}
+
+impl BlindDebuff {
+    fn of(debuff: &'static [(&'static str, Value)]) -> BlindDebuff {
+        let suit = match jackdaw_data::lookup(debuff, "suit") {
+            Some(Value::Str(s)) => Suit::from_name(s),
+            _ => None,
+        };
+        let face = matches!(
+            jackdaw_data::lookup(debuff, "is_face"),
+            Some(Value::Str("face"))
+        );
+        BlindDebuff { suit, face }
+    }
+}
+
+const NUM_BLINDS: usize = jackdaw_data::BLINDS.len();
+
+/// [`BlindDebuff`] by `BlindId`, so an observation reads its blind's effect without key searches.
+static BLIND_DEBUFFS: std::sync::LazyLock<[BlindDebuff; NUM_BLINDS]> =
+    std::sync::LazyLock::new(|| {
+        std::array::from_fn(|i| BlindDebuff::of(jackdaw_data::BLINDS[i].debuff))
+    });
+
+/// What the consumable features read from `card.ability["consumeable"]` (the center's config
+/// for a consumable, else empty), by center.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct ConsumableConfig {
+    /// Python truthiness of `cfg.get("max_highlighted")`.
+    max_highlighted_truthy: bool,
+    /// Python truthiness of `cfg.get("hand_type")`.
+    hand_type_truthy: bool,
+    /// The numbers under `max_highlighted`, `min_highlighted` and `mod_num`.
+    max_highlighted: Option<f64>,
+    min_highlighted: Option<f64>,
+    mod_num: Option<f64>,
+}
+
+impl ConsumableConfig {
+    fn of(center: &jackdaw_data::Center) -> ConsumableConfig {
+        let cfg: &'static [(&'static str, Value)] = if center.consumeable {
+            center.config
+        } else {
+            &[]
+        };
+        ConsumableConfig {
+            max_highlighted_truthy: config_truthy(cfg, "max_highlighted"),
+            hand_type_truthy: config_truthy(cfg, "hand_type"),
+            max_highlighted: config_num(cfg, "max_highlighted"),
+            min_highlighted: config_num(cfg, "min_highlighted"),
+            mod_num: config_num(cfg, "mod_num"),
+        }
+    }
+}
+
+/// [`ConsumableConfig`] by [`CenterId`].
+static CONSUMABLE_CONFIGS: std::sync::LazyLock<Vec<ConsumableConfig>> =
+    std::sync::LazyLock::new(|| {
+        jackdaw_data::CENTERS
+            .iter()
+            .map(ConsumableConfig::of)
+            .collect()
+    });
+
+/// The [`ConsumableConfig`] of `c`'s center.
+fn consumable_config(c: &Card) -> &'static ConsumableConfig {
+    &CONSUMABLE_CONFIGS[usize::from(c.center.0)]
+}
+
 // ---------------------------------------------------------------------------
 // Output
 // ---------------------------------------------------------------------------
@@ -590,6 +666,7 @@ fn encode_global(
     memo: &mut LogMemo,
     v: &mut [f32],
 ) {
+    let v: &mut [f32; D_GLOBAL] = v.try_into().expect("the global context");
     let mut set = |i: usize, x: f64| v[i] = x as f32;
     let cr = &gs.current_round;
     let areas = &gs.areas;
@@ -648,13 +725,13 @@ fn encode_global(
         set(G_BLIND, if b.boss { 1.0 } else { 0.0 });
         set(G_BLIND + 1, if b.disabled { 1.0 } else { 0.0 });
         set(G_BLIND + 2, b.mult / 4.0);
-        let debuff = b.key.map_or(&[][..], |k| k.get().debuff);
-        if let Some(Value::Str(s)) = jackdaw_data::lookup(debuff, "suit")
-            && let Some(suit) = Suit::from_name(s)
-        {
+        let debuff = b
+            .key
+            .map_or(BlindDebuff::default(), |k| BLIND_DEBUFFS[usize::from(k.0)]);
+        if let Some(suit) = debuff.suit {
             set(G_BLIND + 3 + suit_index(suit), 1.0);
         }
-        if let Some(Value::Str("face")) = jackdaw_data::lookup(debuff, "is_face") {
+        if debuff.face {
             set(G_BLIND + 7, 1.0);
         }
     }
@@ -886,16 +963,6 @@ fn encode_jokers(jokers: Cards<'_>, log: LogScale, out: &mut [f32]) {
     }
 }
 
-/// `card.ability["consumeable"]`: the center's config for a consumable, else empty.
-fn consumeable_config(c: &Card) -> &'static [(&'static str, Value)] {
-    let center = c.center();
-    if center.consumeable {
-        center.config
-    } else {
-        &[]
-    }
-}
-
 fn config_num(cfg: &'static [(&'static str, Value)], key: &str) -> Option<f64> {
     jackdaw_data::lookup(cfg, key).and_then(Value::as_num)
 }
@@ -915,12 +982,12 @@ fn config_truthy(cfg: &'static [(&'static str, Value)], key: &str) -> bool {
 /// `consumable_block_reason(card, gs) is None`, for a card in the consumable area: usable now
 /// with the hand selection `default_use_targets` would pick.
 fn consumable_usable(card: &Card, gs: &GameState) -> bool {
-    let cfg = consumeable_config(card);
+    let cfg = consumable_config(card);
     // _selection_size: how many hand cards the use is made against.
     let size = if card.center == centers::C_AURA {
         Some(1.0)
-    } else if config_truthy(cfg, "max_highlighted") {
-        Some(config_num(cfg, "min_highlighted").unwrap_or(1.0))
+    } else if cfg.max_highlighted_truthy {
+        Some(cfg.min_highlighted.unwrap_or(1.0))
     } else {
         None
     };
@@ -956,7 +1023,7 @@ fn consumable_usable(card: &Card, gs: &GameState) -> bool {
 fn can_use_consumable(
     card: &Card,
     gs: &GameState,
-    cfg: &'static [(&'static str, Value)],
+    cfg: &ConsumableConfig,
     n_selected: f64,
     editionless: bool,
 ) -> bool {
@@ -983,7 +1050,7 @@ fn can_use_consumable(
     ) {
         return true;
     }
-    if config_truthy(cfg, "hand_type") {
+    if cfg.hand_type_truthy {
         return true;
     }
     if matches!(key, C_FOOL | C_EMPEROR | C_HIGH_PRIESTESS) {
@@ -1015,10 +1082,10 @@ fn can_use_consumable(
     ) {
         return gs.areas.hand().len() > 1;
     }
-    if config_truthy(cfg, "max_highlighted") {
-        let max_h = config_num(cfg, "max_highlighted").unwrap_or(0.0);
-        let min_h = config_num(cfg, "min_highlighted").unwrap_or(1.0);
-        let mod_num = config_num(cfg, "mod_num").unwrap_or(max_h);
+    if cfg.max_highlighted_truthy {
+        let max_h = cfg.max_highlighted.unwrap_or(0.0);
+        let min_h = cfg.min_highlighted.unwrap_or(1.0);
+        let mod_num = cfg.mod_num.unwrap_or(max_h);
         return min_h <= n_selected && n_selected <= mod_num;
     }
     false
@@ -1032,9 +1099,9 @@ fn encode_consumables(gs: &GameState, log: LogScale, out: &mut [f32]) {
         row[1] = (set_index(c.set()) / 9.0) as f32;
         row[2] = log.get(c.sell_cost) as f32;
         row[3] = flag(consumable_usable(c, gs));
-        let cfg = consumeable_config(c);
-        let max_h = config_num(cfg, "max_highlighted").unwrap_or(0.0);
-        let min_h = config_num(cfg, "min_highlighted").unwrap_or(0.0);
+        let cfg = consumable_config(c);
+        let max_h = cfg.max_highlighted.unwrap_or(0.0);
+        let min_h = cfg.min_highlighted.unwrap_or(0.0);
         row[4] = flag(max_h > 0.0);
         row[5] = (py_min(max_h, 5.0) / 5.0) as f32;
         row[6] = (py_min(min_h, 5.0) / 5.0) as f32;
@@ -1271,6 +1338,41 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn blind_and_consumable_tables_hold_the_configs() {
+        let debuff = |key: &str| {
+            let id = jackdaw_data::BLINDS
+                .iter()
+                .position(|b| b.key == key)
+                .unwrap();
+            BLIND_DEBUFFS[id]
+        };
+        let suit = |s| BlindDebuff {
+            suit: Some(s),
+            face: false,
+        };
+        assert_eq!(debuff("bl_club"), suit(Suit::Clubs));
+        assert_eq!(debuff("bl_goad"), suit(Suit::Spades));
+        assert_eq!(debuff("bl_head"), suit(Suit::Hearts));
+        assert_eq!(debuff("bl_window"), suit(Suit::Diamonds));
+        assert!(debuff("bl_plant").face);
+        let marked = BLIND_DEBUFFS
+            .iter()
+            .filter(|d| **d != BlindDebuff::default())
+            .count();
+        assert_eq!(marked, 5);
+
+        let cfg =
+            |key: &str| CONSUMABLE_CONFIGS[jackdaw_data::center_by_key(key).unwrap().0 as usize];
+        let magician = cfg("c_magician");
+        assert!(magician.max_highlighted_truthy && !magician.hand_type_truthy);
+        assert_eq!(magician.max_highlighted, Some(2.0));
+        assert!(cfg("c_mercury").hand_type_truthy);
+        // Not a consumable: its config is not read.
+        assert_eq!(cfg("j_joker"), ConsumableConfig::default());
+        assert_eq!(cfg("m_wild"), ConsumableConfig::default());
     }
 
     #[test]
