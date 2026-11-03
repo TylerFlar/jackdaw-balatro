@@ -22,6 +22,10 @@ while it is 0.x, a minor release (0.2 → 0.3) can break things, and a patch rel
 - `BalatroVectorEnv` spends less time in Python per step (its per-env results come from Rust in
   their final dtypes), and `BalatroGymnasiumEnv` on the Rust engine too (the observation and
   the action mask come in one buffer). What they return is unchanged.
+- `BalatroVectorEnv` steps its envs on its own thread pool instead of rayon's: with 4 threads,
+  1.4 (256 envs) to 2.3 (16 envs) times as many env-steps per second. `num_threads` counts the
+  calling thread, which now steps envs too, and idle threads sleep after 100 µs. The results
+  are the same for any thread count.
 
 ## [0.2.2] - 2026-10-25
 
