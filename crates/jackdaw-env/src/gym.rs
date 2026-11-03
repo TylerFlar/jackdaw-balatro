@@ -57,41 +57,61 @@ impl Xoshiro256 {
     }
 
     /// A uniform integer in `[0, bound)` (Lemire's multiply-and-reject), `bound >= 1`.
+    ///
+    /// The rejection threshold `2^64 mod bound` is below `bound`, so a draw whose low word is
+    /// at least `bound` is accepted without computing it: the division runs only on the rare
+    /// draws that could be rejected, and the accepted values are the same as always dividing.
+    #[inline]
     pub fn below(&mut self, bound: u64) -> u64 {
-        let threshold = bound.wrapping_neg() % bound;
-        loop {
-            let m = u128::from(self.next_u64()) * u128::from(bound);
-            if (m as u64) >= threshold {
-                return (m >> 64) as u64;
+        let mut m = u128::from(self.next_u64()) * u128::from(bound);
+        if (m as u64) < bound {
+            let threshold = bound.wrapping_neg() % bound;
+            while (m as u64) < threshold {
+                m = u128::from(self.next_u64()) * u128::from(bound);
             }
         }
+        (m >> 64) as u64
     }
 }
 
 /// `k` distinct indices of `0..n`, ascending, uniformly at random (`k <= n`), into `out`. Floyd's
 /// algorithm draws `min(k, n - k)` times: it picks the kept indices, or the dropped ones when
-/// fewer are dropped. `picked` is scratch space.
+/// fewer are dropped. `picked` is scratch space (a bitset, one bit per index).
 pub fn subsample_indices(
     n: usize,
     k: usize,
     rng: &mut Xoshiro256,
-    picked: &mut Vec<bool>,
+    picked: &mut Vec<u64>,
     out: &mut Vec<usize>,
 ) {
     let m = k.min(n - k);
+    let words = n.div_ceil(64);
     picked.clear();
-    picked.resize(n, false);
+    picked.resize(words, 0);
     for j in n - m..n {
         let t = rng.below(j as u64 + 1) as usize;
-        if picked[t] {
-            picked[j] = true;
+        let slot = if picked[t / 64] & (1 << (t % 64)) != 0 {
+            j
         } else {
-            picked[t] = true;
-        }
+            t
+        };
+        picked[slot / 64] |= 1 << (slot % 64);
     }
     out.clear();
+    out.reserve(k);
+    // Keep the picked indices, or every index but them: flip the bits, clearing those past `n`.
     let keep_picked = m == k;
-    out.extend((0..n).filter(|&i| picked[i] == keep_picked));
+    for (w, &bits) in picked.iter().enumerate() {
+        let mut bits = if keep_picked { bits } else { !bits };
+        let base = w * 64;
+        if base + 64 > n {
+            bits &= (1u64 << (n - base)) - 1;
+        }
+        while bits != 0 {
+            out.push(base + bits.trailing_zeros() as usize);
+            bits &= bits - 1;
+        }
+    }
 }
 
 /// The card selections of one enumeration: which cards, how many, which card each must hold.
@@ -203,7 +223,7 @@ pub struct ActionTable {
     actions: Vec<FactoredAction>,
     legal_cards: Vec<usize>,
     combos: ComboCache,
-    picked: Vec<bool>,
+    picked: Vec<u64>,
     chosen: Vec<usize>,
 }
 
@@ -362,10 +382,16 @@ impl ActionTable {
             card_target: Some(sel),
         };
         if combos.len() <= CARD_COMBO_BUDGET {
-            actions.extend(combos.iter().map(|&s| make(s)));
+            actions.reserve(combos.len());
+            for &sel in combos {
+                actions.push(make(sel));
+            }
         } else {
             subsample_indices(combos.len(), CARD_COMBO_BUDGET, rng, picked, chosen);
-            actions.extend(chosen.iter().map(|&i| make(combos[i])));
+            actions.reserve(chosen.len());
+            for &i in chosen.iter() {
+                actions.push(make(combos[i]));
+            }
         }
     }
 }

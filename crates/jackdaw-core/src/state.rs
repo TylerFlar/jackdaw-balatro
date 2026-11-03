@@ -290,9 +290,17 @@ impl CenterBits {
 
     /// The members, in center order.
     pub fn iter(&self) -> impl Iterator<Item = CenterId> + '_ {
-        (0..jackdaw_data::CENTERS.len())
-            .map(|i| CenterId(i as u16))
-            .filter(|&c| self.contains(c))
+        // The set bits of each word, lowest first: center order, skipping empty words.
+        self.0.iter().enumerate().flat_map(|(w, &word)| {
+            let mut bits = word;
+            std::iter::from_fn(move || {
+                (bits != 0).then(|| {
+                    let i = w * 64 + bits.trailing_zeros() as usize;
+                    bits &= bits - 1;
+                    CenterId(i as u16)
+                })
+            })
+        })
     }
 
     /// The members' keys in key order, as Lua's `pairs` order would never give but the snapshot

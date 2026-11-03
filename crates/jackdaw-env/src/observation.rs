@@ -157,6 +157,31 @@ static CENTER_KEY_IDS: [u16; NUM_CENTER_KEYS] = {
     ids
 };
 
+/// The position of each voucher's key in [`VOUCHER_KEYS`] by [`CenterId`] (`u8::MAX`: none), so
+/// an observation finds a voucher's slot without a string search.
+static VOUCHER_SLOTS: std::sync::LazyLock<[u8; NUM_CENTER_KEYS]> = std::sync::LazyLock::new(|| {
+    let mut slots = [u8::MAX; NUM_CENTER_KEYS];
+    for (id, c) in jackdaw_data::CENTERS.iter().enumerate() {
+        if let Ok(i) = VOUCHER_KEYS.binary_search(&c.key) {
+            slots[id] = i as u8;
+        }
+    }
+    slots
+});
+
+/// The position of each tag's key in [`TAG_KEYS`] by `TagId` (`u8::MAX`: none).
+static TAG_SLOTS: std::sync::LazyLock<[u8; NUM_TAGS]> = std::sync::LazyLock::new(|| {
+    let mut slots = [u8::MAX; NUM_TAGS];
+    for (id, t) in jackdaw_data::TAGS.iter().enumerate() {
+        if let Ok(i) = TAG_KEYS.binary_search(&t.key) {
+            slots[id] = i as u8;
+        }
+    }
+    slots
+});
+
+const NUM_TAGS: usize = jackdaw_data::TAGS.len();
+
 // ---------------------------------------------------------------------------
 // Output
 // ---------------------------------------------------------------------------
@@ -461,11 +486,9 @@ fn encode_global(gs: &GameState, ha: &HandAnalysis, v: &mut [f32]) {
     set(23, gs.interest_cap / 100.0);
     set(24, gs.discount_percent / 50.0);
     set(25, gs.skips / 10.0);
-    // center_key_id(blind key): blinds aren't centers, so this is 0 for every blind.
-    let blind_center = blind
-        .and_then(|b| b.key)
-        .and_then(|k| jackdaw_data::center_by_key(k.key()));
-    set(26, blind_center.map_or(0.0, center_feature));
+    // center_key_id(blind key): blinds aren't centers, so this is 0 for every blind (checked
+    // by `center_key_ids_follow_sorted_keys`), without a key search per observation.
+    set(26, 0.0);
     set(27, log_scale(areas.deck.len() as f64));
     set(28, log_scale(areas.discard.len() as f64));
     // [29]: the four_fingers/shortcut/smeared/splash game-state flags, never set: 0.
@@ -481,9 +504,11 @@ fn encode_global(gs: &GameState, ha: &HandAnalysis, v: &mut [f32]) {
     }
 
     // Vouchers owned [90:122].
+    let voucher_slots = &*VOUCHER_SLOTS;
     for voucher in gs.sets.used_vouchers.iter() {
-        if let Ok(i) = VOUCHER_KEYS.binary_search(&voucher.key()) {
-            set(G_VOUCHERS + i, 1.0);
+        let i = voucher_slots[voucher.0 as usize];
+        if i != u8::MAX {
+            set(G_VOUCHERS + usize::from(i), 1.0);
         }
     }
 
@@ -516,9 +541,11 @@ fn encode_global(gs: &GameState, ha: &HandAnalysis, v: &mut [f32]) {
     set(G_ROUND_PROGRESS + 1, cr.discards_used / 10.0);
 
     // Awarded tags [135:159]: every tag awarded this run.
+    let tag_slots = &*TAG_SLOTS;
     for tag in &gs.sim.tag_history {
-        if let Ok(i) = TAG_KEYS.binary_search(&tag.key()) {
-            set(G_TAGS + i, 1.0);
+        let i = tag_slots[tag.0 as usize];
+        if i != u8::MAX {
+            set(G_TAGS + usize::from(i), 1.0);
         }
     }
 
