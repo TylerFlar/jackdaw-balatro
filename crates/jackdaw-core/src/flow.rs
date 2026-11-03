@@ -2,7 +2,6 @@
 //! button_callbacks.lua) and the per-frame state handlers (`Game:update_*`, game.lua).
 
 use crate::area::{AreaId, Draw};
-use crate::card::Card;
 use crate::event::Event;
 use crate::game::{Game, LuaState};
 use crate::hand_eval::get_poker_hand_info;
@@ -42,13 +41,9 @@ impl Game {
     /// `CardArea:parse_highlighted()` (cardarea.lua:162-185): only the blind's `triggered`
     /// flag is gameplay state here (`debuff_hand` in check mode).
     pub(crate) fn parse_highlighted(&mut self) {
-        let cards: Vec<Card> = self
-            .rt
-            .highlighted
-            .iter()
-            .filter_map(|&id| self.gs.areas.card(id).cloned())
-            .collect();
-        let info = get_poker_hand_info(&self.eval_cards(&cards), self.eval_flags());
+        let areas = &self.gs.areas;
+        let cards = self.eval_cards(self.rt.highlighted.iter().filter_map(|&id| areas.card(id)));
+        let info = get_poker_hand_info(&cards, self.eval_flags());
         if let Some(text) = info.hand {
             self.blind_debuff_hand(cards.len(), &info.poker_hands, text, true);
         }

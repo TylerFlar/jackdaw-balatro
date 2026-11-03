@@ -213,8 +213,10 @@ impl Game {
         if pos.is_empty() || pos.len() > MAX_CARDS || pos.iter().any(|&p| p >= hand.len()) {
             return None;
         }
-        let cards: Vec<jackdaw_core::card::Card> = pos.iter().map(|&p| hand[p]).collect();
-        let info = get_poker_hand_info(&self.inner.eval_cards(&cards), self.inner.eval_flags());
+        let info = get_poker_hand_info(
+            &self.inner.eval_cards(pos.iter().map(|&p| hand.at(p))),
+            self.inner.eval_flags(),
+        );
         let text = info.hand?;
         let mut scoring: Vec<usize> = info
             .scoring
@@ -225,9 +227,9 @@ impl Game {
         if self.inner.has_joker("Splash") {
             scoring.clone_from(&pos);
         } else {
-            for (k, c) in cards.iter().enumerate() {
-                if c.is_stone() && !scoring.contains(&pos[k]) {
-                    scoring.push(pos[k]);
+            for &p in &pos {
+                if hand.at(p).is_stone() && !scoring.contains(&p) {
+                    scoring.push(p);
                 }
             }
         }

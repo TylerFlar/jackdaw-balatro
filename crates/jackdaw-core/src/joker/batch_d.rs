@@ -547,12 +547,9 @@ fn burnt_joker(g: &mut Game, _: u32, ctx: &mut Ctx) -> Option<Effect> {
     if ctx.kind != Kind::PreDiscard || ctx.hook || g.gs.current_round.discards_used > 0.0 {
         return None;
     }
-    let cards: Vec<_> = ctx
-        .full_hand
-        .iter()
-        .filter_map(|&c| g.gs.areas.card(c).cloned())
-        .collect();
-    let info = get_poker_hand_info(&g.eval_cards(&cards), g.eval_flags());
+    let areas = &g.gs.areas;
+    let cards = g.eval_cards(ctx.full_hand.iter().filter_map(|&c| areas.card(c)));
+    let info = get_poker_hand_info(&cards, g.eval_flags());
     if let Some(hand) = info.hand {
         g.level_up_hand(hand, 1.0);
     }
