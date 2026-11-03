@@ -5,6 +5,14 @@ while it is 0.x, a minor release (0.2 → 0.3) can break things, and a patch rel
 
 ## Unreleased
 
+### Changed
+
+- The engine and the environments run faster: the Rust env steps about 1.8 times as fast,
+  `BalatroGymnasiumEnv` about 1.25 times, and a new run starts a quarter faster. A seed plays
+  the same run, with the same observations, masks and action tables.
+- Importing a snapshot fails when two of its cards share a sort id, or when its
+  `next_sort_id` isn't above every card's.
+
 ## [0.2.2] - 2026-10-25
 
 The engine plays the same runs as 0.2.1, with the same observations and actions. What's new is
