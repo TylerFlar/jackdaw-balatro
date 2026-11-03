@@ -214,6 +214,9 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         place (the same values, without allocating them each step).  Copy what you
         keep across steps (a rollout buffer that stores the arrays themselves, a
         previous observation); :meth:`action_masks` still returns a fresh array.
+        Not under a wrapper that keeps an episode's last observation across the
+        ``reset`` after it: SB3's ``DummyVecEnv`` (``terminal_observation``) and
+        gymnasium's ``SyncVectorEnv`` in ``SAME_STEP`` mode (``final_obs``).
 
     With :class:`~jackdaw.env.game_interface.DirectAdapter` a step the engine can't
     take yet ends the episode as truncated, with the reason in
@@ -406,7 +409,9 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         back, stake, run_seed = self._starts.next(None if seed is None else str(seed))
         rng_seed = None if seed is None else sampler_seed(seed)
         if self.copy:
-            data, self._n_actions = self._core.reset(back, stake, run_seed, None, rng_seed)
+            data, self._n_actions = self._core.reset(
+                back, stake, run_seed, None, rng_seed, mask=True
+            )
         else:
             self._n_actions = self._core.reset_into(
                 back, stake, run_seed, None, rng_seed, self._obs_buffer, self._mask_bytes
@@ -427,7 +432,7 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         cut = self.on_refusal == "truncate"
         if self.copy:
             data, reward, terminated, truncated, n, episode, not_ported, refused = self._core.step(
-                int(action), cut
+                int(action), cut, mask=True
             )
             obs, mask = gym_obs_and_mask(data)
         else:

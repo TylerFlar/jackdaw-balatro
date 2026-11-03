@@ -129,17 +129,25 @@ pub fn state_to_py(s: &StateSummary) -> StateParts {
     )
 }
 
-/// The observation and the action mask in one fresh ``bytearray``: ``GYM_OBS_LEN`` float32 (native
-/// byte order), then ``MAX_ACTIONS`` bytes of mask (the first ``n_actions`` set).
-fn obs_bytes<'py>(py: Python<'py>, env: &mut CoreGymEnv) -> PyResult<Bound<'py, PyByteArray>> {
+/// The observation in a fresh ``bytearray``: ``GYM_OBS_LEN`` float32 (native byte order). With
+/// `mask`, the action mask follows it in the same buffer: ``MAX_ACTIONS`` bytes, the first
+/// ``n_actions`` set. Without, the buffer is the observation alone, as Jackdaw Arena sends it.
+fn obs_bytes<'py>(
+    py: Python<'py>,
+    env: &mut CoreGymEnv,
+    mask: bool,
+) -> PyResult<Bound<'py, PyByteArray>> {
     let mut obs = [0f32; GYM_OBS_LEN];
     env.write_obs(&mut obs);
-    PyByteArray::new_with(py, GYM_OBS_LEN * 4 + MAX_ACTIONS, |buf| {
-        let (obs_buf, mask) = buf.split_at_mut(GYM_OBS_LEN * 4);
+    let len = GYM_OBS_LEN * 4 + if mask { MAX_ACTIONS } else { 0 };
+    PyByteArray::new_with(py, len, |buf| {
+        let (obs_buf, mask_buf) = buf.split_at_mut(GYM_OBS_LEN * 4);
         for (dst, x) in obs_buf.as_chunks_mut::<4>().0.iter_mut().zip(&obs) {
             *dst = x.to_ne_bytes();
         }
-        env.write_action_mask(mask);
+        if mask {
+            env.write_action_mask(mask_buf);
+        }
         Ok(())
     })
 }
@@ -155,8 +163,8 @@ fn reset_spec(t: &ResetTuple) -> PyResult<ResetSpec> {
 }
 
 /// What a Gym step returns: `(obs, reward, terminated, truncated, n_actions, episode,
-/// not_ported, refused)`, `obs` holding the observation and the action mask as `reset`'s does,
-/// `episode` being `(ante_reached, rounds_beaten, won)` at an episode
+/// not_ported, refused)`, `obs` being the observation (and the action mask after it when asked
+/// for, as with `reset`), `episode` being `(ante_reached, rounds_beaten, won)` at an episode
 /// end and `refused` the engine's reason when it refused the action (the episode was cut).
 type StepParts<'py> = (
     Bound<'py, PyByteArray>,
@@ -266,9 +274,11 @@ impl GymEnv {
     }
 
     /// Start a new run; reseed the sampler when ``rng_seed`` is given. Returns the observation
-    /// and action mask (one ``bytearray``: 614 float32, then 500 mask bytes) and the number of
-    /// actions.
-    #[pyo3(signature = (back, stake, seed, challenge=None, rng_seed=None))]
+    /// (a ``bytearray`` of 614 float32) and the number of actions. With ``mask``, the action
+    /// mask follows the observation in the same ``bytearray``: 500 bytes, the first
+    /// ``n_actions`` set.
+    #[pyo3(signature = (back, stake, seed, challenge=None, rng_seed=None, *, mask=false))]
+    #[allow(clippy::too_many_arguments)]
     fn reset<'py>(
         &mut self,
         py: Python<'py>,
@@ -277,28 +287,34 @@ impl GymEnv {
         seed: &str,
         challenge: Option<&str>,
         rng_seed: Option<u64>,
+        mask: bool,
     ) -> PyResult<(Bound<'py, PyByteArray>, usize)> {
         let spec = run_spec(back, stake, seed, challenge)?;
         self.inner.reset(&spec, rng_seed).map_err(value_error)?;
         self.last = None;
-        Ok((obs_bytes(py, &mut self.inner)?, self.inner.table().len()))
+        Ok((
+            obs_bytes(py, &mut self.inner, mask)?,
+            self.inner.table().len(),
+        ))
     }
 
     /// Take action ``index`` of the table. Raises ``IndexError`` for an index past the table.
     /// When the engine refuses the action (the run is unchanged), ``cut_refused`` ends the
     /// episode as truncated, with the reason as the step's ``refused``; otherwise it raises
-    /// ``IllegalActionError``.
-    #[pyo3(signature = (index, cut_refused=false))]
+    /// ``IllegalActionError``. ``mask`` appends the action mask to the observation, as in
+    /// ``reset``.
+    #[pyo3(signature = (index, cut_refused=false, *, mask=false))]
     fn step<'py>(
         &mut self,
         py: Python<'py>,
         index: usize,
         cut_refused: bool,
+        mask: bool,
     ) -> PyResult<StepParts<'py>> {
         let (reward, terminated, truncated, n_actions, episode, not_ported, refused) =
             self.take_step(index, cut_refused)?;
         Ok((
-            obs_bytes(py, &mut self.inner)?,
+            obs_bytes(py, &mut self.inner, mask)?,
             reward,
             terminated,
             truncated,

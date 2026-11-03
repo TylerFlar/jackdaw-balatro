@@ -313,7 +313,7 @@ obs, reward, terminated, truncated, info = env.step(action)
 
 `BalatroGymnasiumEnv` takes `max_free_moves` and `on_refusal` like `BalatroEnvironment`.
 
-With `copy=False` it hands out the same values without allocating them each step: the observation's arrays and `info["action_mask"]` are views of buffers the env owns, which the next `reset` or `step` overwrites in place. Copy whatever you keep across steps (a previous observation, a rollout buffer that stores the arrays themselves); `action_masks()` still returns a fresh array. On the Rust engine this saves about a third of the wrapper's per-step time.
+With `copy=False` it hands out the same values without allocating them each step: the observation's arrays and `info["action_mask"]` are views of buffers the env owns, which the next `reset` or `step` overwrites in place. Copy whatever you keep across steps (a previous observation, a rollout buffer that stores the arrays themselves); `action_masks()` still returns a fresh array. That goes for wrappers too, and some keep an episode's last observation across the `reset` that overwrites it: Stable-Baselines3's `DummyVecEnv` (its `info["terminal_observation"]`, which MaskablePPO reads for truncated episodes) and gymnasium's `SyncVectorEnv` in `SAME_STEP` mode (its `info["final_obs"]`). Keep the default under those. On the Rust engine this saves about a third of the wrapper's per-step time.
 
 ### With MaskablePPO
 

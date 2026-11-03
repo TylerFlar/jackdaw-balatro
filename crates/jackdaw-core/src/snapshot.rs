@@ -688,6 +688,12 @@ fn hands_json(gs: &GameState) -> Value {
     )
 }
 
+/// The bound on an imported snapshot's sort ids and `next_sort_id`. The areas index their cards
+/// by sort id in a table as long as the largest (`Areas::by_sort`), so an imported id sizes that
+/// table: without a bound, one huge id would ask for gigabytes and abort the process. A run
+/// hands out one id per card it makes, far fewer than this.
+const SORT_ID_LIMIT: u32 = 1 << 24;
+
 /// The sort ids of an imported snapshot's cards: the list each was seen in, and the largest.
 #[derive(Default)]
 struct SortIds {
@@ -697,10 +703,17 @@ struct SortIds {
 }
 
 impl SortIds {
-    /// Add the sort ids of `cards` (the list at `path`), failing on one already seen.
+    /// Add the sort ids of `cards` (the list at `path`), failing on one already seen or one not
+    /// below `SORT_ID_LIMIT`.
     fn add(&mut self, cards: &[Card], path: &str) -> Result<()> {
         self.paths.push(path.to_owned());
         for c in cards {
+            if c.sort_id >= SORT_ID_LIMIT {
+                return err(format!(
+                    "{path}: sort id {} is not below {SORT_ID_LIMIT}",
+                    c.sort_id
+                ));
+            }
             if let Some(first) = self.seen.insert(c.sort_id, self.paths.len() - 1) {
                 return err(format!(
                     "{path}: two cards with sort id {} (the other in {})",
@@ -1333,6 +1346,12 @@ pub fn import(v: &Value) -> Result<GameState> {
     };
     s.done()?;
     sort_ids.add(&sim.pending_deck_bottom, "$.sim.pending_deck_bottom")?;
+    if sim.next_sort_id > SORT_ID_LIMIT {
+        return err(format!(
+            "$.sim.next_sort_id: {} is above {SORT_ID_LIMIT}",
+            sim.next_sort_id
+        ));
+    }
     if let Some(max) = sort_ids.max
         && sim.next_sort_id <= max
     {
@@ -1511,5 +1530,29 @@ mod tests {
         v["sim"]["next_sort_id"] = json!(max);
         let e = import(&v).unwrap_err().0;
         assert!(e.starts_with("$.sim.next_sort_id:"), "{e}");
+    }
+
+    #[test]
+    fn sort_ids_are_bounded() {
+        // A huge sort id is refused before the areas index it, instead of sizing their table
+        // (4e9 ids would be 16 GiB).
+        let mut v = run_snapshot();
+        v["areas"]["deck"][0]["sort_id"] = json!(4_000_000_000u64);
+        v["sim"]["next_sort_id"] = json!(4_000_000_001u64);
+        let e = import(&v).unwrap_err().0;
+        assert!(
+            e.starts_with("$.areas.deck: sort id 4000000000 is not below"),
+            "{e}"
+        );
+        // So is a huge next_sort_id, which the run would hand to its next new card.
+        let mut v = run_snapshot();
+        v["sim"]["next_sort_id"] = json!(u64::from(SORT_ID_LIMIT) + 1);
+        let e = import(&v).unwrap_err().0;
+        assert!(e.starts_with("$.sim.next_sort_id:"), "{e}");
+        // Up to the bound, both import.
+        let mut v = run_snapshot();
+        v["areas"]["deck"][0]["sort_id"] = json!(SORT_ID_LIMIT - 1);
+        v["sim"]["next_sort_id"] = json!(SORT_ID_LIMIT);
+        assert!(import(&v).is_ok());
     }
 }

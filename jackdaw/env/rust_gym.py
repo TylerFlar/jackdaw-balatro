@@ -70,7 +70,8 @@ if _PACKED.itemsize != OBS_LEN * 4 + MAX_ACTIONS or [
 
 
 def gym_obs_and_mask(data: bytearray) -> tuple[dict[str, np.ndarray], np.ndarray]:
-    """The Gym observation dict and the action mask viewing a reset's or step's output."""
+    """The Gym observation dict and the action mask viewing a reset's or step's output, taken
+    with ``mask=True`` (without it, ``_core.GymEnv`` returns the observation alone)."""
     item = np.ndarray((), _PACKED, data)
     return {key: item[key] for key in _OBS_KEYS}, item["action_mask"]
 

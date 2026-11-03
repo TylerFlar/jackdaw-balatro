@@ -153,7 +153,7 @@ Keys: `deck` (index 0 is the bottom; cards are drawn from the end), `hand`
 
 | Key | Meaning |
 |---|---|
-| `sort_id` | Per-run creation counter (`Card.sort_id`); the card's identity. Sorting and RNG picks use it |
+| `sort_id` | Per-run creation counter (`Card.sort_id`); the card's identity. Sorting and RNG picks use it. An import fails unless every card's is its own (across all areas and `sim.pending_deck_bottom`) and below 2^24 |
 | `center` | `P_CENTERS` key (`c_base`, `m_glass`, `j_joker`, `c_fool`, `v_hone`, `p_arcana_normal_1`, …) |
 | `front` | `P_CARDS` key for playing cards (`H_A`), else null |
 | `base` | Playing cards only: `{suit, value, id, nominal, suit_nominal, suit_nominal_original, face_nominal, original_value, times_played}`, else null. `suit_nominal_original` is the tiebreak of the suit the card was created with (kept across suit changes); `original_value` is the rank at creation and null once a suit or rank change has rebuilt the base (`Card:set_base`, card.lua:97-145) |
@@ -190,7 +190,7 @@ Stream insertion order is not part of the state.
 
 | Key | Meaning |
 |---|---|
-| `next_sort_id` | `sort_id` the next created card receives |
+| `next_sort_id` | `sort_id` the next created card receives. An import fails unless it is above every card's `sort_id` and at most 2^24 |
 | `pending_tag_packs` | Booster keys queued by tags, opened when the current pack closes. Always empty: a Double Tag's pack-tag copies stay in `tags` until a pack closes, since G106 |
 | `pending_deck_bottom` | Cards that join the bottom of the deck after the next round-start shuffle. Always empty: Marble Joker's Stones, which used to wait here, are shuffled in since G55 |
 | `shop_d6ed` | D6 Tag already applied this shop |
