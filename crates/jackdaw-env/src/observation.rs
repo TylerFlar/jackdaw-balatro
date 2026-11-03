@@ -247,6 +247,7 @@ impl Observation {
 pub struct Encoder {
     obs: Observation,
     analyzer: Analyzer,
+    memo: LogMemo,
 }
 
 impl Encoder {
@@ -278,20 +279,21 @@ impl Encoder {
         let flags = Flags::from_jokers(areas.jokers());
         let hand_analysis = self.analyzer.analyze(areas.hand(), flags);
 
+        let log = LogScale::new();
         let (global, rest) = self.obs.data.split_at_mut(D_GLOBAL);
-        encode_global(gs, &hand_analysis, global);
+        encode_global(gs, &hand_analysis, log, &mut self.memo, global);
         let (hand, rest) = rest.split_at_mut(rows[0] * D_PLAYING_CARD);
-        encode_playing_cards(areas.hand(), &self.analyzer.scoring, hand);
+        encode_playing_cards(areas.hand(), &self.analyzer.scoring, log, hand);
         let (jokers, rest) = rest.split_at_mut(rows[1] * D_JOKER);
-        encode_jokers(areas.jokers(), jokers);
+        encode_jokers(areas.jokers(), log, jokers);
         let (consumables, rest) = rest.split_at_mut(rows[2] * D_CONSUMABLE);
-        encode_consumables(gs, consumables);
+        encode_consumables(gs, log, consumables);
         let (shop, pack) = rest.split_at_mut(rows[3] * D_SHOP);
-        encode_shop(gs, shop);
+        encode_shop(gs, log, shop);
         // Pack cards get their own analysis (only their scoring flags are encoded).
         if !areas.pack_cards().is_empty() {
             self.analyzer.analyze(areas.pack_cards(), flags);
-            encode_playing_cards(areas.pack_cards(), &self.analyzer.scoring, pack);
+            encode_playing_cards(areas.pack_cards(), &self.analyzer.scoring, log, pack);
         }
         &self.obs
     }
@@ -314,20 +316,21 @@ impl Encoder {
         let flags = Flags::from_jokers(areas.jokers());
         let hand_analysis = self.analyzer.analyze(areas.hand(), flags);
 
+        let log = LogScale::new();
         let (global, rest) = out.split_at_mut(D_GLOBAL);
-        encode_global(gs, &hand_analysis, global);
+        encode_global(gs, &hand_analysis, log, &mut self.memo, global);
         let (hand, rest) = rest.split_at_mut(max_rows[0] * D_PLAYING_CARD);
-        encode_playing_cards(areas.hand(), &self.analyzer.scoring, hand);
+        encode_playing_cards(areas.hand(), &self.analyzer.scoring, log, hand);
         let (jokers, rest) = rest.split_at_mut(max_rows[1] * D_JOKER);
-        encode_jokers(areas.jokers(), jokers);
+        encode_jokers(areas.jokers(), log, jokers);
         let (consumables, rest) = rest.split_at_mut(max_rows[2] * D_CONSUMABLE);
-        encode_consumables(gs, consumables);
+        encode_consumables(gs, log, consumables);
         let (shop, rest) = rest.split_at_mut(max_rows[3] * D_SHOP);
-        encode_shop(gs, shop);
+        encode_shop(gs, log, shop);
         let (pack, counts) = rest.split_at_mut(max_rows[4] * D_PLAYING_CARD);
         if !areas.pack_cards().is_empty() {
             self.analyzer.analyze(areas.pack_cards(), flags);
-            encode_playing_cards(areas.pack_cards(), &self.analyzer.scoring, pack);
+            encode_playing_cards(areas.pack_cards(), &self.analyzer.scoring, log, pack);
         }
         for (k, slot) in counts.iter_mut().enumerate() {
             *slot = rows[k].min(max_rows[k]) as f32;
@@ -358,20 +361,90 @@ fn py_log1p(x: f64) -> f64 {
 static LOG_SCALE_INTS: std::sync::LazyLock<[f64; 1024]> =
     std::sync::LazyLock::new(|| std::array::from_fn(|i| py_log2(1.0 + i as f64)));
 
-/// `_log_scale(x)`: `sign(x) * log2(1 + |x|)`, as Python branches it. A whole number in the
-/// table's range reads the value the same `py_log2` call computed (`-0.0` too: `1 + -0.0` is
-/// `1.0`, as for `0.0`); anything else, NaN included, is computed.
+/// 2^52: adding it to a double in `[0, 1024)` rounds that to a whole number, exactly when it is
+/// one, and leaves the whole number in the low mantissa bits.
+const TWO_52: f64 = 4_503_599_627_370_496.0;
+
+/// `_log_scale(x)` ([`LogScale::get`]).
+#[cfg(test)]
 fn log_scale(x: f64) -> f64 {
-    if (0.0..1024.0).contains(&x) {
-        let i = x as usize;
-        if i as f64 == x {
-            return LOG_SCALE_INTS[i];
-        }
+    LogScale::new().get(x)
+}
+
+/// `_log_scale`, with [`LOG_SCALE_INTS`] resolved once per observation.
+#[derive(Clone, Copy)]
+struct LogScale(&'static [f64; 1024]);
+
+impl LogScale {
+    fn new() -> LogScale {
+        LogScale(&LOG_SCALE_INTS)
     }
+
+    /// `_log_scale(x)`: `sign(x) * log2(1 + |x|)`, as Python branches it. A whole number in the
+    /// table's range reads the value the same `py_log2` call computed (`-0.0` too: `1 + -0.0`
+    /// is `1.0`, as for `0.0`); anything else, NaN included, is computed.
+    #[inline]
+    fn get(self, x: f64) -> f64 {
+        if (0.0..1024.0).contains(&x) {
+            // `x + 2^52` is exact iff `x` is whole (else it rounds to a whole number, which then
+            // differs from `x`), and then its low mantissa bits are `x`: no float-int round trip.
+            let y = x + TWO_52;
+            if y - TWO_52 == x {
+                return self.0[(y.to_bits() & 1023) as usize];
+            }
+        }
+        log_scale_computed(x)
+    }
+
+    /// [`LogScale::get`] remembering, per slot, the last value computed off the table: a slot
+    /// sees the same chip count, blind target or dollars for many steps in a row.
+    #[inline]
+    fn memo(self, memo: &mut LogMemo, slot: usize, x: f64) -> f64 {
+        if (0.0..1024.0).contains(&x) {
+            let y = x + TWO_52;
+            if y - TWO_52 == x {
+                return self.0[(y.to_bits() & 1023) as usize];
+            }
+        }
+        let entry = &mut memo.0[slot];
+        if entry.0 != x.to_bits() {
+            *entry = (x.to_bits(), log_scale_computed(x));
+        }
+        debug_assert_eq!(entry.1.to_bits(), log_scale_computed(x).to_bits());
+        entry.1
+    }
+}
+
+/// `_log_scale(x)` computed, the value [`LOG_SCALE_INTS`] holds for a whole number.
+fn log_scale_computed(x: f64) -> f64 {
     if x >= 0.0 {
         py_log2(1.0 + x)
     } else {
         -py_log2(1.0 - x)
+    }
+}
+
+/// The memo slots of [`LogScale::memo`]: the global context's values that can leave the
+/// whole-number table (chip counts, the best hand's base score, money).
+const MEMO_DOLLARS: usize = 0;
+const MEMO_BLIND_CHIPS: usize = 1;
+const MEMO_CHIPS: usize = 2;
+const MEMO_BASE_CHIPS: usize = 3;
+const MEMO_BASE_MULT: usize = 4;
+const MEMO_BASE_SCORE: usize = 5;
+const MEMO_SPENDABLE: usize = 6;
+/// Two per hand type: its chips, its mult.
+const MEMO_HAND_LEVELS: usize = 7;
+const NUM_MEMO: usize = MEMO_HAND_LEVELS + 2 * NUM_HAND_TYPES;
+
+/// Per slot, the bits of the last input [`LogScale::memo`] computed and its `log_scale`. Every
+/// entry starts as `(+0.0, log_scale(+0.0) = 0.0)`, a true pair.
+#[derive(Clone, Debug)]
+struct LogMemo([(u64, f64); NUM_MEMO]);
+
+impl Default for LogMemo {
+    fn default() -> LogMemo {
+        LogMemo([(0, 0.0); NUM_MEMO])
     }
 }
 
@@ -510,7 +583,13 @@ fn phase_index(p: Phase) -> usize {
 // ---------------------------------------------------------------------------
 
 /// `encode_global_context(gs, hand_analysis)`.
-fn encode_global(gs: &GameState, ha: &HandAnalysis, v: &mut [f32]) {
+fn encode_global(
+    gs: &GameState,
+    ha: &HandAnalysis,
+    log: LogScale,
+    memo: &mut LogMemo,
+    v: &mut [f32],
+) {
     let mut set = |i: usize, x: f64| v[i] = x as f32;
     let cr = &gs.current_round;
     let areas = &gs.areas;
@@ -524,14 +603,14 @@ fn encode_global(gs: &GameState, ha: &HandAnalysis, v: &mut [f32]) {
     let chips = finite(gs.chips);
     set(10, gs.round_resets.ante / 8.0);
     set(11, gs.round / 30.0);
-    set(12, log_scale(gs.dollars));
+    set(12, log.memo(memo, MEMO_DOLLARS, gs.dollars));
     set(13, cr.hands_left / 10.0);
     set(14, cr.discards_left / 10.0);
     set(15, gs.hand_size / 15.0);
     set(16, gs.joker_slots / 10.0);
     set(17, gs.consumable_slots / 5.0);
-    set(18, log_scale(blind_chips));
-    set(19, log_scale(chips));
+    set(18, log.memo(memo, MEMO_BLIND_CHIPS, blind_chips));
+    set(19, log.memo(memo, MEMO_CHIPS, chips));
     set(20, py_min(chips / py_max(blind_chips, 1.0), 10.0) / 10.0);
     set(21, cr.reroll_cost / 10.0);
     set(22, py_min(cr.free_rerolls, 5.0) / 5.0);
@@ -541,17 +620,17 @@ fn encode_global(gs: &GameState, ha: &HandAnalysis, v: &mut [f32]) {
     // center_key_id(blind key): blinds aren't centers, so this is 0 for every blind (checked
     // by `center_key_ids_follow_sorted_keys`), without a key search per observation.
     set(26, 0.0);
-    set(27, log_scale(areas.deck().len() as f64));
-    set(28, log_scale(areas.discard().len() as f64));
+    set(27, log.get(areas.deck().len() as f64));
+    set(28, log.get(areas.discard().len() as f64));
     // [29]: the four_fingers/shortcut/smeared/splash game-state flags, never set: 0.
 
     // Hand levels [30:90].
     for (j, hs) in gs.hands.iter().enumerate() {
         let o = G_HAND_LEVELS + j * 5;
         set(o, hs.level / 20.0);
-        set(o + 1, log_scale(hs.chips));
-        set(o + 2, log_scale(hs.mult));
-        set(o + 3, log_scale(hs.played));
+        set(o + 1, log.memo(memo, MEMO_HAND_LEVELS + 2 * j, hs.chips));
+        set(o + 2, log.memo(memo, MEMO_HAND_LEVELS + 2 * j + 1, hs.mult));
+        set(o + 3, log.get(hs.played));
         set(o + 4, if hs.visible { 1.0 } else { 0.0 });
     }
 
@@ -626,9 +705,12 @@ fn encode_global(gs: &GameState, ha: &HandAnalysis, v: &mut [f32]) {
         let base_chips = py_max(0.0, base.s_chips + base.l_chips * (level - 1.0));
         let base_mult = py_max(1.0, base.s_mult + base.l_mult * (level - 1.0));
         base_score = base_chips * base_mult;
-        set(G_BASE_SCORE, log_scale(base_chips));
-        set(G_BASE_SCORE + 1, log_scale(base_mult));
-        set(G_BASE_SCORE + 2, log_scale(base_score));
+        set(G_BASE_SCORE, log.memo(memo, MEMO_BASE_CHIPS, base_chips));
+        set(G_BASE_SCORE + 1, log.memo(memo, MEMO_BASE_MULT, base_mult));
+        set(
+            G_BASE_SCORE + 2,
+            log.memo(memo, MEMO_BASE_SCORE, base_score),
+        );
     }
 
     // Score-to-blind ratio [226].
@@ -685,7 +767,7 @@ fn encode_global(gs: &GameState, ha: &HandAnalysis, v: &mut [f32]) {
 
     // Money above the interest floor [233].
     let spendable = py_max(0.0, dollars - interest * 5.0);
-    set(G_SPENDABLE, log_scale(spendable));
+    set(G_SPENDABLE, log.memo(memo, MEMO_SPENDABLE, spendable));
 
     // Urgency [234]: chips still needed over what the best hand scores in the hands left.
     let hands_left = cr.hands_left;
@@ -701,7 +783,7 @@ fn encode_global(gs: &GameState, ha: &HandAnalysis, v: &mut [f32]) {
 // ---------------------------------------------------------------------------
 
 /// `encode_playing_cards_batch(cards, gs, analysis)`; `scoring` marks the best hand's cards.
-fn encode_playing_cards(cards: Cards<'_>, scoring: &[bool], out: &mut [f32]) {
+fn encode_playing_cards(cards: Cards<'_>, scoring: &[bool], log: LogScale, out: &mut [f32]) {
     let rows = out.as_chunks_mut::<D_PLAYING_CARD>().0;
     for (i, (c, row)) in cards.iter().zip(rows).enumerate() {
         let position = (i as f64 / 20.0) as f32;
@@ -724,8 +806,8 @@ fn encode_playing_cards(cards: Cards<'_>, scoring: &[bool], out: &mut [f32]) {
         row[8] = flag(matches!(base.id(), 11..=13));
         // `splash or not debuff`, and the splash flag is never set.
         row[9] = flag(!c.debuff);
-        row[10] = log_scale(c.ability.bonus + c.ability.perma_bonus) as f32;
-        row[11] = log_scale(base.times_played) as f32;
+        row[10] = log.get(c.ability.bonus + c.ability.perma_bonus) as f32;
+        row[11] = log.get(base.times_played) as f32;
         row[12] = position;
         row[13] = flag(scoring[i]);
     }
@@ -744,9 +826,9 @@ fn python_mult_x_mult(c: &Card) -> (f64, f64) {
 }
 
 /// Row 13 of a joker: `ability.extra` flattened to one number, if it is a number or a table.
-fn extra_feature(extra: &Extra) -> Option<f64> {
+fn extra_feature(extra: &Extra, log: LogScale) -> Option<f64> {
     match extra {
-        Extra::Num(x) => Some(log_scale(*x)),
+        Extra::Num(x) => Some(log.get(*x)),
         Extra::Table(t) => {
             // Python sums the dict's int, float and bool values in insertion order, which is
             // key order here (the center configs list their keys sorted).
@@ -758,14 +840,14 @@ fn extra_feature(extra: &Extra) -> Option<f64> {
                     ExtraVal::Str(_) => {}
                 }
             }
-            Some(log_scale(total))
+            Some(log.get(total))
         }
         Extra::Nil | Extra::Str(_) => None,
     }
 }
 
 /// `encode_jokers_batch(jokers)`.
-fn encode_jokers(jokers: Cards<'_>, out: &mut [f32]) {
+fn encode_jokers(jokers: Cards<'_>, log: LogScale, out: &mut [f32]) {
     let rows = out.as_chunks_mut::<D_JOKER>().0;
     for (i, (c, row)) in jokers.iter().zip(rows).enumerate() {
         let position = (i as f64 / 20.0) as f32;
@@ -782,7 +864,7 @@ fn encode_jokers(jokers: Cards<'_>, out: &mut [f32]) {
             0.0
         };
         row[2] = (edition_index(c) / 4.0) as f32;
-        row[3] = log_scale(c.sell_cost) as f32;
+        row[3] = log.get(c.sell_cost) as f32;
         row[4] = flag(a.eternal);
         row[5] = flag(a.perishable);
         row[6] = if a.perishable {
@@ -794,10 +876,10 @@ fn encode_jokers(jokers: Cards<'_>, out: &mut [f32]) {
         row[8] = flag(c.debuff);
         row[9] = position;
         let (mult, x_mult) = python_mult_x_mult(c);
-        row[10] = log_scale(mult + a.t_mult) as f32;
+        row[10] = log.get(mult + a.t_mult) as f32;
         row[11] = x_mult as f32;
-        row[12] = log_scale(a.t_chips + a.bonus) as f32;
-        if let Some(x) = extra_feature(&a.extra) {
+        row[12] = log.get(a.t_chips + a.bonus) as f32;
+        if let Some(x) = extra_feature(&a.extra, log) {
             row[13] = x as f32;
         }
         row[14] = flag(!c.debuff);
@@ -943,12 +1025,12 @@ fn can_use_consumable(
 }
 
 /// `encode_consumable(card, gs)` for each consumable.
-fn encode_consumables(gs: &GameState, out: &mut [f32]) {
+fn encode_consumables(gs: &GameState, log: LogScale, out: &mut [f32]) {
     let rows = out.as_chunks_mut::<D_CONSUMABLE>().0;
     for (c, row) in gs.areas.consumables().iter().zip(rows) {
         row[0] = center_feature(c.center) as f32;
         row[1] = (set_index(c.set()) / 9.0) as f32;
-        row[2] = log_scale(c.sell_cost) as f32;
+        row[2] = log.get(c.sell_cost) as f32;
         row[3] = flag(consumable_usable(c, gs));
         let cfg = consumeable_config(c);
         let max_h = config_num(cfg, "max_highlighted").unwrap_or(0.0);
@@ -960,7 +1042,7 @@ fn encode_consumables(gs: &GameState, out: &mut [f32]) {
 }
 
 /// `encode_shop_item(card, gs)` for the shop's jokers, then vouchers, then boosters.
-fn encode_shop(gs: &GameState, out: &mut [f32]) {
+fn encode_shop(gs: &GameState, log: LogScale, out: &mut [f32]) {
     let areas = &gs.areas;
     let items = areas
         .shop_jokers()
@@ -972,7 +1054,7 @@ fn encode_shop(gs: &GameState, out: &mut [f32]) {
         let set = c.set();
         row[0] = center_feature(c.center) as f32;
         row[1] = (set_index(set) / 9.0) as f32;
-        row[2] = log_scale(c.cost) as f32;
+        row[2] = log.get(c.cost) as f32;
         // can_afford: free, or within dollars - bankrupt_at.
         row[3] = flag(c.cost <= 0.0 || c.cost <= gs.dollars - gs.bankrupt_at);
         // check_for_buy_space: a Negative card raises the limit by one (G264).
@@ -1033,6 +1115,143 @@ mod tests {
         for c in jackdaw_data::CENTERS.iter() {
             if let Some(Value::Table(entries)) = c.config("extra") {
                 assert!(entries.windows(2).all(|w| w[0].0 < w[1].0), "{}", c.key);
+            }
+        }
+    }
+
+    #[test]
+    fn log_scale_reads_the_table_exactly_for_whole_numbers() {
+        let log = LogScale::new();
+        let mut xs = vec![
+            -0.0,
+            0.5,
+            0.499_999_999_999_999_94,
+            1023.0,
+            1023.5,
+            1_023.999_999_999_999_9,
+            1024.0,
+            1024.5,
+            TWO_52,
+            TWO_52 + 1.0,
+            1e300,
+            f64::MAX,
+            f64::MIN_POSITIVE,
+            5e-324,
+            -0.5,
+            -1023.0,
+            -5e-324,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NAN,
+            -f64::NAN,
+        ];
+        xs.extend((0..1100).map(f64::from));
+        xs.extend((0..4400).map(|i| f64::from(i) * 0.25 - 50.0));
+        for x in xs {
+            let want = log_scale_computed(x);
+            assert_eq!(log.get(x).to_bits(), want.to_bits(), "{x}");
+            if (0.0..1024.0).contains(&x) && x.fract() == 0.0 {
+                assert_eq!(LOG_SCALE_INTS[x as usize].to_bits(), want.to_bits(), "{x}");
+            }
+        }
+        // The memo's starting entries are true pairs.
+        assert_eq!(log_scale_computed(0.0).to_bits(), 0.0f64.to_bits());
+    }
+
+    #[test]
+    fn log_memo_returns_the_computed_value() {
+        let log = LogScale::new();
+        let mut memo = LogMemo::default();
+        let xs = [
+            0.0,
+            1500.0,
+            1500.0,
+            0.5,
+            1e9,
+            1e9,
+            -3.25,
+            1500.0,
+            f64::NAN,
+            f64::NAN,
+            -0.0,
+            7.0,
+        ];
+        for (k, &x) in xs.iter().enumerate() {
+            for slot in [k % NUM_MEMO, NUM_MEMO - 1, 0] {
+                let got = log.memo(&mut memo, slot, x);
+                assert_eq!(got.to_bits(), log_scale_computed(x).to_bits(), "{x}");
+            }
+        }
+    }
+
+    /// The game states along random rollouts, one per step.
+    fn rollout_states(steps: usize) -> Vec<GameState> {
+        use crate::env::{EnvConfig, GymEnv};
+        use crate::gym::Xoshiro256;
+        let spec = |i: u64| jackdaw_core::run::RunSpec {
+            back: jackdaw_core::card::center_by_key("b_red").unwrap(),
+            stake: 1,
+            seed: format!("OBSCACHE{i}"),
+            challenge: None,
+        };
+        let mut env = GymEnv::new(&spec(0), EnvConfig::default(), 1).unwrap();
+        let mut rng = Xoshiro256::seed_from_u64(11);
+        let mut episodes = 0;
+        let mut states = Vec::with_capacity(steps);
+        while states.len() < steps {
+            if env.ended() {
+                episodes += 1;
+                env.reset(&spec(episodes), None).unwrap();
+            }
+            let n = env.table().len() as u64;
+            env.step_or_cut(rng.below(n) as usize).unwrap();
+            states.push(env.game().gs.clone());
+        }
+        states
+    }
+
+    /// `gs` with its chip counts, money and hand levels off the whole-number table.
+    fn with_big_values(gs: &GameState) -> GameState {
+        let mut big = gs.clone();
+        big.chips = gs.chips * 1234.5 + 2048.0;
+        big.dollars = gs.dollars * 97.0 + 1500.25;
+        if let Some(b) = big.blind.as_mut() {
+            b.chips = b.chips * 7.0 + 0.5;
+        }
+        for h in &mut big.hands {
+            h.chips += 2000.5;
+            h.mult *= 1100.0;
+        }
+        big
+    }
+
+    /// The bits of `gs`'s padded observation from `encoder`.
+    fn padded_bits(encoder: &mut Encoder, gs: &GameState) -> Vec<u32> {
+        use crate::env::{GYM_OBS_LEN, MAX_COUNTS};
+        let mut out = vec![0f32; GYM_OBS_LEN];
+        encoder.encode_padded(gs, MAX_COUNTS, &mut out);
+        out.iter().map(|x| x.to_bits()).collect()
+    }
+
+    #[test]
+    fn a_reused_encoder_matches_a_fresh_one() {
+        // The encoder's memos carry from one observation to the next; each observation must
+        // still equal a fresh encoder's, bit for bit.
+        let mut warm = Encoder::new();
+        let mut warm_full = Encoder::new();
+        for gs in rollout_states(3000) {
+            let big = with_big_values(&gs);
+            for s in [&gs, &big, &gs, &big] {
+                assert_eq!(
+                    padded_bits(&mut warm, s),
+                    padded_bits(&mut Encoder::new(), s)
+                );
+                let fresh = Encoder::new().encode(s).clone();
+                let got = warm_full.encode(s);
+                assert_eq!(got.rows(), fresh.rows());
+                let bits =
+                    |o: &Observation| o.data().iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+                assert_eq!(bits(got), bits(&fresh));
             }
         }
     }
