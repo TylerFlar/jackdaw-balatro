@@ -675,24 +675,24 @@ impl Game {
         let cost = self.cost_context(AreaId::Deck);
         let hands_played = self.gs.hands_played;
         let mut templates: Vec<Card> = Vec::new();
-        let deck: Vec<Card> = order
-            .iter()
-            .map(|&k| {
-                let p = &protos[k];
-                let center =
-                    p.e.map(|e| jackdaw_data::center_by_key(e).expect("an enhancement"))
-                        .unwrap_or(centers::C_BASE);
-                let template = match templates.iter().find(|t| t.center == center) {
-                    Some(t) => *t,
-                    None => {
-                        let t = Card::new(0, center, None, hands_played, &cost);
-                        templates.push(t);
-                        t
-                    }
-                };
-                card_from_control(p, template, first + k as u32, &cost)
-            })
-            .collect();
+        // Each card is copied once, from its template into its slot, and finished there.
+        let mut deck: Vec<Card> = Vec::with_capacity(n);
+        for &k in &order {
+            let p = &protos[k];
+            let center =
+                p.e.map(|e| jackdaw_data::center_by_key(e).expect("an enhancement"))
+                    .unwrap_or(centers::C_BASE);
+            let i = match templates.iter().position(|t| t.center == center) {
+                Some(i) => i,
+                None => {
+                    templates.push(Card::new(0, center, None, hands_played, &cost));
+                    templates.len() - 1
+                }
+            };
+            deck.push(templates[i]);
+            let card = deck.last_mut().expect("just pushed");
+            card_from_control(p, card, first + k as u32, &cost);
+        }
         // set_ability's `used_jokers` marks, once per center (no deck card is a To Do List).
         let mut marked = crate::state::CenterBits::default();
         for c in &deck {
@@ -711,22 +711,18 @@ impl Game {
 }
 
 /// `card_from_control(control)` (misc_functions.lua:1625-1633) for the card with sort id
-/// `sort_id`, face down in the deck, from `template`: `Card(...)` for its center with no front
-/// (`Card:init`'s `set_base` touches neither the ability nor the costs). The caller marks its
-/// center used.
-fn card_from_control(p: &Proto, template: Card, sort_id: u32, cost: &CostContext) -> Card {
-    {
-        let mut card = template;
-        card.sort_id = sort_id;
-        card.base = Some(crate::card::set_base(None, p.front, true));
-        card.facing = crate::card::Facing::Back;
-        if let Some(d) = p.d {
-            card.set_edition(Some(EditionKind::from_name(d).expect("an edition")), cost);
-        }
-        if let Some(gs) = p.g {
-            card.set_seal(Some(Seal::from_name(gs).expect("a seal")), cost);
-        }
-        card
+/// `sort_id`, face down in the deck, finishing `card` in place: a copy of the template
+/// `Card(...)` for its center with no front (`Card:init`'s `set_base` touches neither the ability
+/// nor the costs). The caller marks its center used.
+fn card_from_control(p: &Proto, card: &mut Card, sort_id: u32, cost: &CostContext) {
+    card.sort_id = sort_id;
+    card.base = Some(crate::card::set_base(None, p.front, true));
+    card.facing = crate::card::Facing::Back;
+    if let Some(d) = p.d {
+        card.set_edition(Some(EditionKind::from_name(d).expect("an edition")), cost);
+    }
+    if let Some(gs) = p.g {
+        card.set_seal(Some(Seal::from_name(gs).expect("a seal")), cost);
     }
 }
 

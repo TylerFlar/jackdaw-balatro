@@ -294,6 +294,44 @@ impl Encoder {
         }
         &self.obs
     }
+
+    /// [`Encoder::encode`] straight into a padded layout: the global context, then each entity
+    /// array as its first `max_rows[k]` rows (zeros past the area's cards), then the five row
+    /// counts (each capped at its `max_rows`). The values are the ones `encode` writes: every
+    /// row depends on its card, its index and the game only, and both analyses still see every
+    /// card. `out` holds exactly that many values.
+    pub fn encode_padded(&mut self, gs: &GameState, max_rows: [usize; 5], out: &mut [f32]) {
+        let areas = &gs.areas;
+        let rows = [
+            areas.hand.len(),
+            areas.jokers.len(),
+            areas.consumables.len(),
+            areas.shop_jokers.len() + areas.shop_vouchers.len() + areas.shop_booster.len(),
+            areas.pack_cards.len(),
+        ];
+        out.fill(0.0);
+        let flags = Flags::from_jokers(&areas.jokers);
+        let hand_analysis = self.analyzer.analyze(&areas.hand, flags);
+
+        let (global, rest) = out.split_at_mut(D_GLOBAL);
+        encode_global(gs, &hand_analysis, global);
+        let (hand, rest) = rest.split_at_mut(max_rows[0] * D_PLAYING_CARD);
+        encode_playing_cards(&areas.hand, &self.analyzer.scoring, hand);
+        let (jokers, rest) = rest.split_at_mut(max_rows[1] * D_JOKER);
+        encode_jokers(&areas.jokers, jokers);
+        let (consumables, rest) = rest.split_at_mut(max_rows[2] * D_CONSUMABLE);
+        encode_consumables(gs, consumables);
+        let (shop, rest) = rest.split_at_mut(max_rows[3] * D_SHOP);
+        encode_shop(gs, shop);
+        let (pack, counts) = rest.split_at_mut(max_rows[4] * D_PLAYING_CARD);
+        if !areas.pack_cards.is_empty() {
+            self.analyzer.analyze(&areas.pack_cards, flags);
+            encode_playing_cards(&areas.pack_cards, &self.analyzer.scoring, pack);
+        }
+        for (k, slot) in counts.iter_mut().enumerate() {
+            *slot = rows[k].min(max_rows[k]) as f32;
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -314,8 +352,21 @@ fn py_log1p(x: f64) -> f64 {
     if x == 0.0 { x } else { x.ln_1p() }
 }
 
-/// `_log_scale(x)`: `sign(x) * log2(1 + |x|)`, as Python branches it.
+/// [`log_scale`] of the whole numbers below its length: most of an observation's scaled values
+/// (hand levels, card counts, costs, times played) are small whole numbers.
+static LOG_SCALE_INTS: std::sync::LazyLock<[f64; 1024]> =
+    std::sync::LazyLock::new(|| std::array::from_fn(|i| py_log2(1.0 + i as f64)));
+
+/// `_log_scale(x)`: `sign(x) * log2(1 + |x|)`, as Python branches it. A whole number in the
+/// table's range reads the value the same `py_log2` call computed (`-0.0` too: `1 + -0.0` is
+/// `1.0`, as for `0.0`); anything else, NaN included, is computed.
 fn log_scale(x: f64) -> f64 {
+    if (0.0..1024.0).contains(&x) {
+        let i = x as usize;
+        if i as f64 == x {
+            return LOG_SCALE_INTS[i];
+        }
+    }
     if x >= 0.0 {
         py_log2(1.0 + x)
     } else {
@@ -801,6 +852,11 @@ fn consumable_usable(card: &Card, gs: &GameState) -> bool {
     // looks at which cards are picked (one card without an edition). Under Cerulean Bell the
     // forced card is always highlighted first (G137), so one card means that card.
     if k == 1.0 {
+        // Only Aura's answer depends on the card: every other one is the same for each card,
+        // and the hand isn't empty, so one call answers for all of them.
+        if card.center != centers::C_AURA {
+            return can_use_consumable(card, gs, cfg, 1.0, false);
+        }
         if let Some(forced) = hand.iter().find(|c| c.ability.forced_selection) {
             return can_use_consumable(card, gs, cfg, 1.0, forced.edition.is_none());
         }

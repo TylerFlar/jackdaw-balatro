@@ -959,10 +959,19 @@ impl Card {
     }
 
     /// `card:is_suit(suit, nil, true)` for each flush suit, as hand-evaluation bits.
+    ///
+    /// [`Card::is_suit`]'s branches with `flush_calc` set, taken once for all four suits.
     pub fn flush_suits(&self, smeared: bool) -> u8 {
+        let Some(base) = self.base.as_ref() else {
+            return 0;
+        };
+        if self.is_stone() {
+            return 0;
+        }
+        let wild = !self.debuff && self.name() == "Wild Card";
         Suit::ALL
             .into_iter()
-            .filter(|&s| self.is_suit(s, false, true, smeared) == Some(true))
+            .filter(|&s| wild || (smeared && base.suit.is_red() == s.is_red()) || base.suit == s)
             .fold(0, |acc, s| acc | s.flush_bit())
     }
 
@@ -1170,5 +1179,34 @@ mod tests {
             .map(|c| c.key)
             .collect();
         assert_eq!(stone, ["m_stone"], "Card::is_stone compares the center");
+    }
+
+    #[test]
+    fn flush_suits_is_is_suit_for_each_suit() {
+        let mut centers = vec![None, Some(centers::C_BASE)];
+        centers.extend(
+            ["m_wild", "m_stone", "m_glass", "j_joker"]
+                .into_iter()
+                .map(|k| Some(center_by_key(k).unwrap())),
+        );
+        for center in centers {
+            for front in ["S_A", "H_K", "C_2", "D_T"] {
+                for debuff in [false, true] {
+                    for smeared in [false, true] {
+                        let mut c = playing(front, 1);
+                        match center {
+                            Some(id) => c.center = id,
+                            None => c.base = None,
+                        }
+                        c.debuff = debuff;
+                        let expected = Suit::ALL
+                            .into_iter()
+                            .filter(|&s| c.is_suit(s, false, true, smeared) == Some(true))
+                            .fold(0, |acc, s| acc | s.flush_bit());
+                        assert_eq!(c.flush_suits(smeared), expected, "{center:?} {front}");
+                    }
+                }
+            }
+        }
     }
 }
