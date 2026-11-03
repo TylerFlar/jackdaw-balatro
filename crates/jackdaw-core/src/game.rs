@@ -337,12 +337,11 @@ impl Game {
         cards
     }
 
-    /// The playing cards in the areas (the deck, hand, discard pile and play), area by area:
-    /// `G.playing_cards` but Marble's pending stones, for passes whose order doesn't matter.
+    /// The playing cards in the areas (the deck, hand, discard pile and play), in no particular
+    /// order: `G.playing_cards` but Marble's pending stones, for passes whose order doesn't
+    /// matter.
     pub fn playing_cards(&self) -> impl Iterator<Item = &crate::card::Card> {
-        AreaId::PLAYING
-            .into_iter()
-            .flat_map(|a| self.gs.areas.get(a).iter())
+        self.gs.areas.unordered(&AreaId::PLAYING)
     }
 }
 

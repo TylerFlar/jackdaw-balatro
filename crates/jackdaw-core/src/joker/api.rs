@@ -190,7 +190,11 @@ impl Game {
 
     /// `#G.playing_cards`.
     pub fn playing_card_count(&self) -> usize {
-        self.playing_cards().count() + self.gs.sim.pending_deck_bottom.len()
+        crate::area::AreaId::PLAYING
+            .iter()
+            .map(|&a| self.gs.areas.get(a).len())
+            .sum::<usize>()
+            + self.gs.sim.pending_deck_bottom.len()
     }
 
     /// Cards of `G.playing_cards` matching `f`.

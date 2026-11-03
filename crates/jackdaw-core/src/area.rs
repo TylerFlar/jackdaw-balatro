@@ -594,6 +594,17 @@ impl Areas {
         Some(self.get(AreaId::ALL[k]))
     }
 
+    /// The cards of the areas `which`, in no particular order (the arena's): for passes whose
+    /// order doesn't matter. One sweep over the arena, however the cards are spread.
+    pub fn unordered(&self, which: &[AreaId]) -> impl Iterator<Item = &Card> {
+        let mask = which.iter().fold(0u16, |m, &a| m | 1 << a as u16);
+        self.cards
+            .iter()
+            .zip(&self.home)
+            .filter(move |&(_, &h)| h != FREE && mask & (1 << h) != 0)
+            .map(|(c, _)| c)
+    }
+
     /// Every card in an area, in no particular order (the arena's), to change in place: for
     /// changes that don't depend on the order.
     pub fn for_each_card_mut(&mut self, mut f: impl FnMut(AreaId, &mut Card)) {

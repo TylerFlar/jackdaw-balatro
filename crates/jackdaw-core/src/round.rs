@@ -238,7 +238,7 @@ impl Game {
             &mut spill
         };
         let mut n = 0;
-        for c in playing_cards(&self.gs.areas) {
+        for c in self.playing_cards() {
             if !c.is_stone() {
                 let id = c.sort_id as usize;
                 bits[id / 64] |= 1 << (id % 64);
@@ -264,8 +264,9 @@ impl Game {
             r -= ones;
         }
         Some(
-            playing_cards(&self.gs.areas)
-                .find(|c| c.sort_id == pick)
+            self.gs
+                .areas
+                .card(pick)
                 .and_then(|c| c.base)
                 .expect("playing card"),
         )
@@ -396,11 +397,4 @@ impl Game {
             .filter(|c| c.get_id() == Some(9))
             .count() as f64
     }
-}
-
-/// The cards of the playing areas, area by area.
-fn playing_cards(areas: &crate::state::Areas) -> impl Iterator<Item = &crate::card::Card> {
-    AreaId::PLAYING
-        .into_iter()
-        .flat_map(move |a| areas.get(a).iter())
 }
