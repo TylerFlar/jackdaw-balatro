@@ -1,5 +1,5 @@
 //! The Gym environments for Python: one env (`GymEnv`, behind `BalatroGymnasiumEnv`) and a batch
-//! stepped on worker threads with the GIL released (`VectorEnv`, behind `BalatroVectorEnv`).
+//! stepped on a thread pool with the GIL released (`VectorEnv`, behind `BalatroVectorEnv`).
 //! Both run `jackdaw_env::env::GymEnv`, so a vector env of one steps exactly as the Gym env.
 
 use jackdaw_core::run::RunSpec;
@@ -458,7 +458,7 @@ fn disjoint(spans: &[std::ops::Range<usize>]) -> PyResult<()> {
 }
 
 /// A caller's buffer of `len` items as a mutable slice, for Rust to write in place: the vector
-/// env's worker threads, or `GymEnv`'s `reset_into` and `step_into` on the calling thread.
+/// env's threads, or `GymEnv`'s `reset_into` and `step_into` on the calling thread.
 ///
 /// The buffer must be writable and C-contiguous with exactly `len` items (`PyBuffer<T>` has
 /// checked their format, size and alignment against `T`), and must not overlap any other buffer
@@ -486,9 +486,9 @@ fn writable<'a, T: Element>(
     Ok(unsafe { std::slice::from_raw_parts_mut(buf.buf_ptr().cast::<T>(), len) })
 }
 
-/// Envs stepped together on worker threads, the GIL released (`BalatroVectorEnv`'s engine).
+/// Envs stepped together on a thread pool, the GIL released (`BalatroVectorEnv`'s engine).
 ///
-/// The worker threads write straight into caller-owned buffers: observations (``num_envs x
+/// The pool's threads write straight into caller-owned buffers: observations (``num_envs x
 /// 614`` float32) and action masks (``num_envs x 500`` bytes); a step also writes the per-env
 /// results as a record (see `write_record`).
 #[pyclass(name = "VectorEnv", module = "jackdaw._core")]
@@ -544,7 +544,8 @@ fn write_record(out: &[EnvOut], record: &mut [u8]) -> (Vec<usize>, bool, bool) {
 #[pymethods]
 impl VectorEnv {
     /// One env per reset tuple ``(back, stake, seed, challenge, rng_seed)``, on ``threads``
-    /// worker threads (0: one per core); ``max_free_moves`` as for ``GymEnv``.
+    /// threads, the calling thread included (0: ``RAYON_NUM_THREADS`` when it is set, else one
+    /// per core); ``max_free_moves`` as for ``GymEnv``.
     #[new]
     #[pyo3(signature = (
         resets, max_steps, end_on_win, reward, weights=None, threads=0, max_free_moves=None
