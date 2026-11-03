@@ -5,6 +5,7 @@ action table, built-in rewards and how episodes start.
 
 from __future__ import annotations
 
+import math
 import random
 from collections.abc import Iterator, Sequence
 from typing import Any, overload
@@ -48,15 +49,37 @@ def gym_obs(data: bytearray | memoryview) -> dict[str, np.ndarray]:
     return {key: np.ndarray(shape, _F32, data, off) for key, shape, off in _LAYOUT}
 
 
+# (key, shape, first and past-the-end column) of each array in a row of flattened observations.
+_COLUMNS: list[tuple[str, tuple[int, ...], int, int]] = [
+    (key, shape, off // 4, off // 4 + math.prod(shape)) for key, shape, off in _LAYOUT
+]
+
+
+# A reset's or step's output from jackdaw._core.GymEnv: the flattened observation, then the
+# action mask (MAX_ACTIONS bytes), as one structured item with a field per array.  numpy makes
+# the arrays faster from its fields than from the buffer at each offset.
+_PACKED = np.dtype(
+    [(key, _F32, shape) for key, shape, _ in _LAYOUT] + [("action_mask", np.bool_, (MAX_ACTIONS,))]
+)
+_OBS_KEYS: tuple[str, ...] = tuple(key for key, _, _ in _LAYOUT)
+if _PACKED.itemsize != OBS_LEN * 4 + MAX_ACTIONS or [
+    _PACKED.fields[key][1]  # type: ignore[index]
+    for key in _OBS_KEYS
+] != [off for _, _, off in _LAYOUT]:
+    raise ImportError("the packed observation's dtype differs from its layout")
+
+
+def gym_obs_and_mask(data: bytearray) -> tuple[dict[str, np.ndarray], np.ndarray]:
+    """The Gym observation dict and the action mask viewing a reset's or step's output, taken
+    with ``mask=True`` (without it, ``_core.GymEnv`` returns the observation alone)."""
+    item = np.ndarray((), _PACKED, data)
+    return {key: item[key] for key in _OBS_KEYS}, item["action_mask"]
+
+
 def batched_gym_obs(flat: np.ndarray) -> dict[str, np.ndarray]:
     """The batched observation dict viewing ``flat`` (``num_envs x OBS_LEN`` float32)."""
     n = flat.shape[0]
-    out: dict[str, np.ndarray] = {}
-    for key, shape, off in _LAYOUT:
-        start = off // 4
-        size = int(np.prod(shape))
-        out[key] = flat[:, start : start + size].reshape((n, *shape))
-    return out
+    return {key: flat[:, a:b].reshape((n, *shape)) for key, shape, a, b in _COLUMNS}
 
 
 def factored_from_parts(parts: tuple[int, int | None, list[int] | None]) -> FactoredAction:

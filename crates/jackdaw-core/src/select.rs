@@ -10,6 +10,19 @@ use crate::game::Game;
 use crate::hand_eval::PAIRS_ORDER;
 use crate::state::BlindSlot;
 
+/// The bosses (`G.P_BLINDS` entries with a `boss` table), sorted by key.
+fn bosses_by_key() -> &'static [BlindId] {
+    static BOSSES: std::sync::OnceLock<Vec<BlindId>> = std::sync::OnceLock::new();
+    BOSSES.get_or_init(|| {
+        let mut ids: Vec<BlindId> = (0..jackdaw_data::BLINDS.len())
+            .filter(|&i| jackdaw_data::BLINDS[i].boss.is_some())
+            .map(|i| BlindId(i as u8))
+            .collect();
+        ids.sort_unstable_by_key(|id| jackdaw_data::BLINDS[usize::from(id.0)].key);
+        ids
+    })
+}
+
 impl Game {
     /// `Game:update_blind_select` (game.lua:3248-3298): once per arrival, an event that queues
     /// the screen's construction.
@@ -149,35 +162,41 @@ impl Game {
         let ante = self.gs.round_resets.ante;
         let a = ante.max(1.0);
         let win = self.gs.win_ante;
-        let mut eligible: Vec<(&'static str, BlindId, f64)> =
-            Vec::with_capacity(jackdaw_data::BLINDS.len());
-        for (i, b) in jackdaw_data::BLINDS.iter().enumerate() {
-            let Some(boss) = &b.boss else { continue };
+        let sets = &self.gs.sets;
+        // `pseudorandom_element` over a table keyed by boss key: the bosses in key order.
+        let mut eligible = [(BlindId(0), 0.0); jackdaw_data::BLINDS.len()];
+        let mut n = 0;
+        let mut min_use: f64 = 100.0;
+        for &id in bosses_by_key() {
+            let b = &jackdaw_data::BLINDS[usize::from(id.0)];
+            let boss = b.boss.as_ref().expect("a boss");
             let ok = if boss.showdown {
                 crate::lua::modulo(ante, win) == 0.0 && ante >= 2.0
             } else {
                 f64::from(boss.min) <= a && (crate::lua::modulo(a, win) != 0.0 || ante < 2.0)
             };
-            if ok && !self.gs.sets.banned_keys.contains(b.key) {
-                let id = BlindId(i as u8);
-                let used = self
-                    .gs
-                    .sets
+            if ok && !sets.banned_keys.contains(b.key) {
+                let used = sets
                     .bosses_used
                     .get(id)
                     .unwrap_or_else(|| panic!("bosses_used has no {}", b.key));
-                eligible.push((b.key, id, used));
+                if used <= min_use {
+                    min_use = used;
+                }
+                eligible[n] = (id, used);
+                n += 1;
             }
         }
-        let min_use = eligible
-            .iter()
-            .map(|&(_, _, u)| u)
-            .fold(100.0, |m: f64, u| if u <= m { u } else { m });
-        eligible.retain(|&(_, _, u)| u <= min_use);
-        // `pseudorandom_element` over a table keyed by boss key: sorted by key.
-        eligible.sort_unstable_by_key(|&(k, _, _)| k);
+        // The least used, still in key order.
+        let mut m = 0;
+        for i in 0..n {
+            if eligible[i].1 <= min_use {
+                eligible[m] = eligible[i];
+                m += 1;
+            }
+        }
         let seed = self.gs.rng.seed("boss");
-        let (_, id, used) = eligible[crate::rng::element_index(eligible.len(), seed)];
+        let (id, used) = eligible[..m][crate::rng::element_index(m, seed)];
         self.gs.sets.bosses_used.set(id, used + 1.0);
         id
     }
@@ -215,5 +234,113 @@ impl Game {
                 return TagId(i as u8);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::run::RunSpec;
+
+    /// The `get_new_boss` this replaced: the eligible bosses collected in blind order, the
+    /// least used kept, sorted by key.
+    fn get_new_boss_sorted(g: &mut Game) -> BlindId {
+        let ante = g.gs.round_resets.ante;
+        let a = ante.max(1.0);
+        let win = g.gs.win_ante;
+        let mut eligible: Vec<(&'static str, BlindId, f64)> = Vec::new();
+        for (i, b) in jackdaw_data::BLINDS.iter().enumerate() {
+            let Some(boss) = &b.boss else { continue };
+            let ok = if boss.showdown {
+                crate::lua::modulo(ante, win) == 0.0 && ante >= 2.0
+            } else {
+                f64::from(boss.min) <= a && (crate::lua::modulo(a, win) != 0.0 || ante < 2.0)
+            };
+            if ok && !g.gs.sets.banned_keys.contains(b.key) {
+                let id = BlindId(i as u8);
+                let used = g.gs.sets.bosses_used.get(id).expect("a count");
+                eligible.push((b.key, id, used));
+            }
+        }
+        let min_use = eligible
+            .iter()
+            .map(|&(_, _, u)| u)
+            .fold(100.0, |m: f64, u| if u <= m { u } else { m });
+        eligible.retain(|&(_, _, u)| u <= min_use);
+        eligible.sort_unstable_by_key(|&(k, _, _)| k);
+        let seed = g.gs.rng.seed("boss");
+        let (_, id, used) = eligible[crate::rng::element_index(eligible.len(), seed)];
+        g.gs.sets.bosses_used.set(id, used + 1.0);
+        id
+    }
+
+    /// The same boss, the same draw and the same counts as the sorting version, over antes,
+    /// win antes, use counts and bans.
+    #[test]
+    fn get_new_boss_matches_the_sorted_pick() {
+        let base = Game::new_run(&RunSpec {
+            back: jackdaw_data::centers::B_RED,
+            stake: 1,
+            seed: "BOSSPICK".to_owned(),
+            challenge: None,
+        })
+        .unwrap();
+        let bosses: Vec<BlindId> = base.gs.sets.bosses_used.iter().map(|(b, _)| b).collect();
+        // A small deterministic generator for the states.
+        let mut x: u64 = 0x9E37_79B9_7F4A_7C15;
+        let mut next = move || {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x
+        };
+        let mut g = base.clone();
+        let mut fresh = 0;
+        for case in 0..20_000 {
+            if case % 50 == 0 {
+                g = base.clone();
+                g.gs.rng = crate::rng::Rng::new(&format!("BOSS{case}"));
+                g.gs.win_ante = [8.0, 8.0, 4.0, 6.0, 1.0][(next() % 5) as usize];
+                g.gs.sets.banned_keys.clear();
+                if next() % 3 == 0 {
+                    for _ in 0..(next() % 6) {
+                        let b = bosses[(next() % bosses.len() as u64) as usize];
+                        let key = jackdaw_data::BLINDS[usize::from(b.0)].key;
+                        g.gs.sets.banned_keys.insert(key.to_owned());
+                    }
+                }
+                if next() % 4 == 0 {
+                    for &b in &bosses {
+                        g.gs.sets.bosses_used.set(b, (next() % 3) as f64);
+                    }
+                }
+            }
+            g.gs.round_resets.ante = [
+                -1.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 12.0, 16.0, 39.0,
+            ][(next() % 12) as usize];
+            let ante = g.gs.round_resets.ante;
+            let win = g.gs.win_ante;
+            // Skip states with no eligible boss (both versions panic there).
+            let any = bosses.iter().any(|&b| {
+                let bl = &jackdaw_data::BLINDS[usize::from(b.0)];
+                let boss = bl.boss.as_ref().unwrap();
+                let ok = if boss.showdown {
+                    crate::lua::modulo(ante, win) == 0.0 && ante >= 2.0
+                } else {
+                    f64::from(boss.min) <= ante.max(1.0)
+                        && (crate::lua::modulo(ante.max(1.0), win) != 0.0 || ante < 2.0)
+                };
+                ok && !g.gs.sets.banned_keys.contains(bl.key)
+            });
+            if !any {
+                continue;
+            }
+            let mut old = g.clone();
+            let picked = g.get_new_boss();
+            assert_eq!(picked, get_new_boss_sorted(&mut old), "case {case}");
+            assert_eq!(g.gs, old.gs, "case {case}");
+            fresh += 1;
+        }
+        assert!(fresh > 15_000);
     }
 }

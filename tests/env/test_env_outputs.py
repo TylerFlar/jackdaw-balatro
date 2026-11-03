@@ -1,0 +1,252 @@
+"""What the Gym envs hand back, pinned exactly: values, dtypes, shapes, layout and which arrays a
+later step may overwrite.
+
+Each scenario plays a seeded random policy and folds everything a reset or step returns
+(every observation array, reward, flag, mask and info entry, with its dtype, shape,
+contiguity and writability) into a digest frozen from the envs' outputs before their
+Python-side bookkeeping was reworked for speed. ``BalatroGymnasiumEnv(copy=False)`` must
+return the same values as the default, and every array an env hands out as its own must stay
+as it was through later steps.
+"""
+
+from __future__ import annotations
+
+import hashlib
+from typing import Any
+
+import numpy as np
+import pytest
+from gymnasium.vector import AutoresetMode
+
+from jackdaw import _core
+from jackdaw.env import BalatroGymnasiumEnv, BalatroVectorEnv, DirectAdapter, Transition
+from tests.env.generic import GenericAdapter
+
+
+def _feed(h: Any, value: Any) -> None:
+    """Fold ``value`` into ``h``: arrays with their dtype, shape and layout flags; dicts in
+    key order; everything else by its type and repr."""
+    if isinstance(value, np.ndarray):
+        h.update(
+            f"array {value.dtype.str} {value.shape} "
+            f"{value.flags.c_contiguous} {value.flags.writeable}|".encode()
+        )
+        if value.dtype == object:
+            for item in value.ravel():
+                _feed(h, item)
+        else:
+            h.update(value.tobytes())
+    elif isinstance(value, dict):
+        h.update(f"dict {len(value)}|".encode())
+        for k, v in value.items():
+            h.update(f"{k!r}=".encode())
+            _feed(h, v)
+    elif isinstance(value, tuple | list):
+        h.update(f"{type(value).__name__} {len(value)}|".encode())
+        for v in value:
+            _feed(h, v)
+    else:
+        h.update(f"{type(value).__name__} {value!r}|".encode())
+
+
+def _digest(value: Any) -> str:
+    h = hashlib.sha256()
+    _feed(h, value)
+    return h.hexdigest()[:16]
+
+
+def _owned(result: tuple[Any, ...], copy: bool) -> tuple[Any, ...]:
+    """The parts of a reset/step result the caller owns: all of it with ``copy``, else all but
+    the observation and the action mask (views of buffers the next step overwrites)."""
+    if copy:
+        return result
+    obs, *rest, info = result
+    return (*rest, {k: v for k, v in info.items() if k != "action_mask"})
+
+
+def _pick(rng: np.random.Generator, mask: np.ndarray) -> int:
+    legal = np.flatnonzero(mask)
+    return int(rng.choice(legal)) if legal.size else 0
+
+
+class _Recorder:
+    """The digests of a run's results, and what the caller owns of each with its digest then."""
+
+    def __init__(self, copy: bool) -> None:
+        self.copy = copy
+        self.digests: list[str] = []
+        self.owned: list[tuple[str, Any]] = []
+
+    def record(self, result: tuple[Any, ...]) -> None:
+        self.digests.append(_digest(result))
+        owned = _owned(result, self.copy)
+        self.owned.append((_digest(owned), owned))
+
+    def check_owned(self) -> None:
+        """Every array handed out as the caller's is as it was: later steps left it alone."""
+        for pos, (digest, owned) in enumerate(self.owned):
+            assert _digest(owned) == digest, f"result {pos} changed after it was returned"
+
+    @property
+    def digest(self) -> str:
+        return hashlib.sha256("".join(self.digests).encode()).hexdigest()[:16]
+
+
+def _gym_run(
+    copy: bool, steps: int = 600, adapter: type = DirectAdapter, **kwargs: Any
+) -> _Recorder:
+    env = BalatroGymnasiumEnv(adapter, seed_prefix="OUT", max_steps=60, copy=copy, **kwargs)
+    rng = np.random.default_rng(5)
+    run = _Recorder(copy)
+
+    result: tuple[Any, ...] = env.reset(seed=41)
+    run.record(result)
+    for _ in range(steps):
+        result = env.step(_pick(rng, result[-1]["action_mask"]))
+        run.record(result)
+        if result[2] or result[3]:
+            result = env.reset()
+            run.record(result)
+    return run
+
+
+def _vector_run(copy: bool, mode: AutoresetMode, steps: int = 150) -> _Recorder:
+    vec = BalatroVectorEnv(
+        5,
+        seed_prefix="OUT",
+        max_steps=40,
+        reward_shaping=True,
+        num_threads=2,
+        copy=copy,
+        autoreset_mode=mode,
+    )
+    rng = np.random.default_rng(9)
+    run = _Recorder(copy)
+
+    result: tuple[Any, ...] = vec.reset(seed=300)
+    run.record(result)
+    for pos in range(steps):
+        # An env whose episode just ended (NEXT_STEP) has no legal action: it resets.
+        actions = [_pick(rng, m) for m in result[-1]["action_mask"]]
+        result = vec.step(actions)
+        run.record(result)
+        if pos == steps // 2:
+            mask = [True, False, True, False, False]
+            result = vec.reset(seed=[7, None, None, None, None], options={"reset_mask": mask})
+            run.record(result)
+    return run
+
+
+#: The runs' digests, frozen before the Python-side bookkeeping was reworked.
+_GYM = "fa73e209deeecac9"
+#: (``copy=False`` hands out the same values: views of buffers the next step overwrites.)
+_VECTOR = {
+    AutoresetMode.NEXT_STEP: "77002dd2640540f9",
+    AutoresetMode.SAME_STEP: "c257fdfba478b4ed",
+}
+
+
+@pytest.mark.parametrize("copy", [True, False], ids=["copy", "views"])
+def test_gym_env_outputs_are_unchanged(copy: bool) -> None:
+    run = _gym_run(copy)
+    assert run.digest == _GYM
+    run.check_owned()
+
+
+def _python_reward(t: Transition) -> float:
+    return float(t.curr.ante) - 0.25 * t.curr.hands_left
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [{"reward_fn": _python_reward}, {"adapter": GenericAdapter, "steps": 200}],
+    ids=["python_reward", "generic"],
+)
+def test_gym_env_views_hold_the_same_values(kwargs: dict[str, Any]) -> None:
+    """``copy=False`` on the other paths: a reward computed in Python, a generic adapter."""
+    copies = _gym_run(True, **kwargs)
+    views = _gym_run(False, **kwargs)
+    assert views.digests == copies.digests
+    copies.check_owned()
+    views.check_owned()
+
+
+@pytest.mark.parametrize("copy", [True, False], ids=["copy", "views"])
+@pytest.mark.parametrize(
+    "mode", [AutoresetMode.NEXT_STEP, AutoresetMode.SAME_STEP], ids=["next_step", "same_step"]
+)
+def test_vector_env_outputs_are_unchanged(copy: bool, mode: AutoresetMode) -> None:
+    run = _vector_run(copy, mode)
+    assert run.digest == _VECTOR[mode]
+    run.check_owned()
+
+
+def _table_mask(env: BalatroGymnasiumEnv) -> np.ndarray:
+    """The action mask from the live action table (the engine's, on the Rust path)."""
+    mask = np.zeros(500, dtype=bool)
+    mask[: len(env._action_table)] = True
+    return mask
+
+
+@pytest.mark.parametrize("copy", [True, False], ids=["copy", "views"])
+@pytest.mark.parametrize("adapter", [DirectAdapter, GenericAdapter], ids=["direct", "generic"])
+def test_action_masks_follow_the_table(adapter: type, copy: bool) -> None:
+    """``action_masks()`` is the live table's mask before the first reset, after a reset, mid
+    episode and after an episode end (no actions), and matches ``info["action_mask"]``."""
+    env = BalatroGymnasiumEnv(adapter, seed_prefix="MASKS", max_steps=25, copy=copy)
+    rng = np.random.default_rng(3)
+    _same_mask(env.action_masks(), _table_mask(env))
+    _, info = env.reset(seed=8)
+    ends = 0
+    for _ in range(120):
+        mask = env.action_masks()
+        _same_mask(mask, _table_mask(env))
+        _same_mask(mask, info["action_mask"])
+        _, _, terminated, truncated, info = env.step(_pick(rng, mask))
+        if terminated or truncated:
+            assert not env.action_masks().any()
+            _same_mask(env.action_masks(), _table_mask(env))
+            _, info = env.reset()
+            ends += 1
+    assert ends >= 3
+
+
+def _same_mask(a: np.ndarray, b: np.ndarray) -> None:
+    assert (a.dtype, a.shape, a.flags.c_contiguous) == (b.dtype, b.shape, b.flags.c_contiguous)
+    assert a.tobytes() == b.tobytes()
+
+
+def test_core_gym_env_returns_the_observation_alone() -> None:
+    """``_core.GymEnv``'s ``reset`` and ``step`` hand back the observation alone (614 float32),
+    which Jackdaw Arena sends to its agents as it is; ``mask=True`` appends the action mask (500
+    bytes, the first ``n_actions`` set) to the same observation."""
+    obs_len = _core.GYM_OBS_LEN * 4
+    run = ("b_red", 1, "CONTRACT", None, 7)
+    plain = _core.GymEnv(*run, 200, True, "sparse", None, 10)
+    packed = _core.GymEnv(*run, 200, True, "sparse", None, 10)
+
+    def check(obs: bytearray, data: bytearray, n: int) -> None:
+        assert isinstance(obs, bytearray) and len(obs) == obs_len
+        assert len(data) == obs_len + _core.MAX_ACTIONS
+        assert data[:obs_len] == obs
+        mask = np.frombuffer(data, dtype=np.uint8, offset=obs_len)
+        assert mask[:n].all() and not mask[n:].any()
+
+    obs, n = plain.reset(*run)
+    data, _ = packed.reset(*run, mask=True)
+    check(obs, data, n)
+    rng = np.random.default_rng(5)
+    ends = 0
+    for _ in range(150):
+        a = int(rng.integers(n))
+        step = plain.step(a, True)
+        step_packed = packed.step(a, True, mask=True)
+        assert len(step) == 8 and step[1:] == step_packed[1:]
+        n = step[4]
+        check(step[0], step_packed[0], n)
+        if step[2] or step[3]:
+            obs, n = plain.reset(*run)
+            data, _ = packed.reset(*run, mask=True)
+            check(obs, data, n)
+            ends += 1
+    assert ends >= 2

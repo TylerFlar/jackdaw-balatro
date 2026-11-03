@@ -129,7 +129,7 @@ fn choose(rng: &mut Rng, game: &Game) -> Option<Action> {
 }
 
 fn selection(rng: &mut Rng, game: &Game) -> Vec<usize> {
-    let hand = &game.gs.areas.hand;
+    let hand = game.gs.areas.hand();
     let mut picked: Vec<usize> = hand
         .iter()
         .position(|c| c.ability.forced_selection)
@@ -239,7 +239,7 @@ fn recorded_plays_account_for_their_score_and_change_nothing() {
                 let selected: Vec<u32> = match &action {
                     Action::PlayHand(cards) => cards
                         .iter()
-                        .map(|&i| game.gs.areas.hand[i].sort_id)
+                        .map(|&i| game.gs.areas.hand()[i].sort_id)
                         .collect(),
                     _ => Vec::new(),
                 };

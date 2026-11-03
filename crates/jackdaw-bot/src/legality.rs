@@ -66,7 +66,7 @@ fn num(i: usize) -> Value {
 /// cardarea.lua:577-590): position `k` gets the card that was at `perm[k]`.
 pub fn sort_permutation(game: &Game, mode: HandSort) -> Vec<usize> {
     let suit = mode == HandSort::SuitDesc;
-    let hand = &game.gs.areas.hand;
+    let hand = game.gs.areas.hand();
     let mut perm: Vec<usize> = (0..hand.len()).collect();
     perm.sort_by(|&a, &b| {
         hand[b]
@@ -89,8 +89,8 @@ fn swap_permutation(n: usize, i: usize, j: usize) -> Vec<usize> {
 /// The BalatroBot request that performs `action` (method and params), or `None` for a sim-only
 /// action.
 pub fn translate(game: &Game, action: &Action) -> Option<(&'static str, Table)> {
-    let hand_n = game.gs.areas.hand.len();
-    let joker_n = game.gs.areas.jokers.len();
+    let hand_n = game.gs.areas.hand().len();
+    let joker_n = game.gs.areas.jokers().len();
     let selection = |cards: &Vec<usize>| -> Vec<usize> {
         if !cards.is_empty() {
             return cards.clone();
@@ -99,7 +99,7 @@ pub fn translate(game: &Game, action: &Action) -> Option<(&'static str, Table)> 
         let forced = game
             .gs
             .areas
-            .hand
+            .hand()
             .iter()
             .position(|c| c.ability.forced_selection);
         vec![forced.unwrap_or(0)]
@@ -249,7 +249,7 @@ mod tests {
         assert_eq!(&perm[..3], &[1.0, 0.0, 2.0]);
         // The hand is dealt sorted by rank: the rank sort is the identity.
         let sorted = sort_permutation(&g, HandSort::Desc);
-        assert_eq!(sorted, (0..g.gs.areas.hand.len()).collect::<Vec<_>>());
+        assert_eq!(sorted, (0..g.gs.areas.hand().len()).collect::<Vec<_>>());
     }
 
     #[test]

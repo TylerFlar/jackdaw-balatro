@@ -57,41 +57,94 @@ impl Xoshiro256 {
     }
 
     /// A uniform integer in `[0, bound)` (Lemire's multiply-and-reject), `bound >= 1`.
+    ///
+    /// The rejection threshold `2^64 mod bound` is below `bound`, so a draw whose low word is
+    /// at least `bound` is accepted without computing it: the division runs only on the rare
+    /// draws that could be rejected, and the accepted values are the same as always dividing.
+    #[inline]
     pub fn below(&mut self, bound: u64) -> u64 {
-        let threshold = bound.wrapping_neg() % bound;
-        loop {
-            let m = u128::from(self.next_u64()) * u128::from(bound);
-            if (m as u64) >= threshold {
-                return (m >> 64) as u64;
+        let mut m = u128::from(self.next_u64()) * u128::from(bound);
+        if (m as u64) < bound {
+            let threshold = bound.wrapping_neg() % bound;
+            while (m as u64) < threshold {
+                m = u128::from(self.next_u64()) * u128::from(bound);
+            }
+        }
+        (m >> 64) as u64
+    }
+}
+
+/// Floyd's draws for a uniform `k`-subset of `0..n` (`k <= n`), left in `picked` as a bitset of
+/// the kept indices (one bit per index, none past `n`). It draws `min(k, n - k)` times: it picks
+/// the kept indices, or the dropped ones when fewer are dropped, then flips the bits.
+fn subsample_bits(n: usize, k: usize, rng: &mut Xoshiro256, picked: &mut Vec<u64>) {
+    let m = k.min(n - k);
+    picked.clear();
+    picked.resize(n.div_ceil(64), 0);
+    for j in n - m..n {
+        let t = rng.below(j as u64 + 1) as usize;
+        let slot = if picked[t / 64] & (1 << (t % 64)) != 0 {
+            j
+        } else {
+            t
+        };
+        picked[slot / 64] |= 1 << (slot % 64);
+    }
+    if m != k {
+        for (w, bits) in picked.iter_mut().enumerate() {
+            *bits = !*bits;
+            let base = w * 64;
+            if base + 64 > n {
+                *bits &= (1u64 << (n - base)) - 1;
             }
         }
     }
 }
 
+/// The set bits of `words`, lowest first, as indices.
+fn set_bits(words: &[u64]) -> impl Iterator<Item = usize> + '_ {
+    words.iter().enumerate().flat_map(|(w, &word)| {
+        let mut bits = word;
+        std::iter::from_fn(move || {
+            (bits != 0).then(|| {
+                let i = w * 64 + bits.trailing_zeros() as usize;
+                bits &= bits - 1;
+                i
+            })
+        })
+    })
+}
+
+/// The index of the `r`-th set bit (from 0) of `words`; it must exist.
+fn nth_set_bit(words: &[u64], mut r: usize) -> usize {
+    for (w, &word) in words.iter().enumerate() {
+        let ones = word.count_ones() as usize;
+        if r < ones {
+            let mut bits = word;
+            for _ in 0..r {
+                bits &= bits - 1;
+            }
+            return w * 64 + bits.trailing_zeros() as usize;
+        }
+        r -= ones;
+    }
+    unreachable!("fewer set bits than asked for")
+}
+
 /// `k` distinct indices of `0..n`, ascending, uniformly at random (`k <= n`), into `out`. Floyd's
 /// algorithm draws `min(k, n - k)` times: it picks the kept indices, or the dropped ones when
-/// fewer are dropped. `picked` is scratch space.
+/// fewer are dropped. `picked` is scratch space (a bitset, one bit per index).
 pub fn subsample_indices(
     n: usize,
     k: usize,
     rng: &mut Xoshiro256,
-    picked: &mut Vec<bool>,
+    picked: &mut Vec<u64>,
     out: &mut Vec<usize>,
 ) {
-    let m = k.min(n - k);
-    picked.clear();
-    picked.resize(n, false);
-    for j in n - m..n {
-        let t = rng.below(j as u64 + 1) as usize;
-        if picked[t] {
-            picked[j] = true;
-        } else {
-            picked[t] = true;
-        }
-    }
+    subsample_bits(n, k, rng, picked);
     out.clear();
-    let keep_picked = m == k;
-    out.extend((0..n).filter(|&i| picked[i] == keep_picked));
+    out.reserve(k);
+    out.extend(set_bits(picked));
 }
 
 /// The card selections of one enumeration: which cards, how many, which card each must hold.
@@ -104,58 +157,73 @@ struct ComboKey {
     required: Option<usize>,
 }
 
+/// One cache slot: its key (`None` for a hand too large to key, 128 cards or more, which no
+/// lookup matches), its selections, and the last enumeration that used it.
+#[derive(Clone, Debug, Default)]
+struct ComboSlot {
+    key: Option<ComboKey>,
+    selections: Vec<Selection>,
+    used: u64,
+}
+
 /// Selections already enumerated (a table asks for the same ones for PlayHand and Discard, and
-/// the hand rarely changes size between steps).
+/// the hand rarely changes size between steps). The action table refers to its slots, so a slot
+/// the current enumeration used is never replaced: the cache grows instead. A slot's selections
+/// depend only on its key, so which slot is replaced never changes a table.
 #[derive(Clone, Debug, Default)]
 struct ComboCache {
-    entries: Vec<(ComboKey, Vec<Selection>)>,
+    slots: Vec<ComboSlot>,
     next: usize,
-    /// Selections for a hand too large to key (128 cards or more), never cached.
-    spare: Vec<Selection>,
+    /// The current enumeration (slots it used carry this stamp).
+    generation: u64,
 }
 
 const COMBO_CACHE_SIZE: usize = 8;
 
 impl ComboCache {
-    /// The selections of `lower..=upper` of `legal` (by size, then lexicographically) that hold
-    /// `required`, enumerated once per key.
-    fn get(
+    /// The slot holding the selections of `lower..=upper` of `legal` (by size, then
+    /// lexicographically) that hold `required`, enumerated once per key.
+    fn slot(
         &mut self,
         legal: &[usize],
         lower: usize,
         upper: usize,
         required: Option<usize>,
-    ) -> &[Selection] {
-        let bits = legal
+    ) -> usize {
+        let key = legal
             .iter()
-            .try_fold(0u128, |acc, &i| (i < 128).then(|| acc | (1u128 << i)));
-        let Some(bits) = bits else {
-            self.spare.clear();
-            combinations_into(legal, lower, upper, required, &mut self.spare);
-            return &self.spare;
-        };
-        let key = ComboKey {
-            legal: bits,
-            lower,
-            upper,
-            required,
-        };
-        if let Some(i) = self.entries.iter().position(|(k, _)| *k == key) {
-            return &self.entries[i].1;
+            .try_fold(0u128, |acc, &i| (i < 128).then(|| acc | (1u128 << i)))
+            .map(|bits| ComboKey {
+                legal: bits,
+                lower,
+                upper,
+                required,
+            });
+        if key.is_some()
+            && let Some(i) = self.slots.iter().position(|s| s.key == key)
+        {
+            self.slots[i].used = self.generation;
+            return i;
         }
-        let slot = if self.entries.len() < COMBO_CACHE_SIZE {
-            self.entries.push((key, Vec::new()));
-            self.entries.len() - 1
-        } else {
-            let slot = self.next;
-            self.next = (self.next + 1) % COMBO_CACHE_SIZE;
-            self.entries[slot].0 = key;
-            slot
+        let free = (0..self.slots.len())
+            .map(|j| (self.next + j) % self.slots.len())
+            .find(|&i| self.slots[i].used != self.generation);
+        let slot = match free {
+            Some(i) if self.slots.len() >= COMBO_CACHE_SIZE => {
+                self.next = (i + 1) % self.slots.len();
+                i
+            }
+            _ => {
+                self.slots.push(ComboSlot::default());
+                self.slots.len() - 1
+            }
         };
-        let out = &mut self.entries[slot].1;
-        out.clear();
-        combinations_into(legal, lower, upper, required, out);
-        out
+        let s = &mut self.slots[slot];
+        s.key = key;
+        s.used = self.generation;
+        s.selections.clear();
+        combinations_into(legal, lower, upper, required, &mut s.selections);
+        slot
     }
 }
 
@@ -197,14 +265,34 @@ fn combinations_into(
     }
 }
 
-/// The flat action table and its scratch buffers, reused across enumerations.
+/// A run of the table's actions.
+#[derive(Clone, Copy, Debug)]
+enum Group {
+    One(FactoredAction),
+    /// Card actions of one type (and entity): every selection of a cache slot, or (`words`, a
+    /// range of the table's bit arena) the subsample whose indices are its set bits.
+    Cards {
+        action_type: ActionType,
+        entity_target: Option<u32>,
+        slot: usize,
+        words: Option<(usize, usize)>,
+    },
+}
+
+/// The flat action table and its scratch buffers, reused across enumerations. Card actions are
+/// kept as references to the cached selections (and subsample bitsets) and built when read: a
+/// step reads one action of the hundreds a table holds.
 #[derive(Clone, Debug, Default)]
 pub struct ActionTable {
-    actions: Vec<FactoredAction>,
+    /// Each group with the table index of its first action.
+    groups: Vec<(usize, Group)>,
+    len: usize,
+    bits: Vec<u64>,
     legal_cards: Vec<usize>,
     combos: ComboCache,
-    picked: Vec<bool>,
+    picked: Vec<u64>,
     chosen: Vec<usize>,
+    spill: Vec<FactoredAction>,
 }
 
 impl ActionTable {
@@ -212,25 +300,84 @@ impl ActionTable {
         ActionTable::default()
     }
 
-    pub fn actions(&self) -> &[FactoredAction] {
-        &self.actions
+    /// The actions, in table order.
+    pub fn actions(&self) -> Vec<FactoredAction> {
+        let mut out = Vec::with_capacity(self.len);
+        for (_, g) in &self.groups {
+            match *g {
+                Group::One(a) => out.push(a),
+                Group::Cards {
+                    action_type,
+                    entity_target,
+                    slot,
+                    words,
+                } => {
+                    let sels = &self.combos.slots[slot].selections;
+                    let make = |sel: Selection| FactoredAction {
+                        action_type,
+                        entity_target,
+                        card_target: Some(sel),
+                    };
+                    match words {
+                        None => out.extend(sels.iter().map(|&s| make(s))),
+                        Some((a, b)) => {
+                            out.extend(set_bits(&self.bits[a..b]).map(|i| make(sels[i])));
+                        }
+                    }
+                }
+            }
+        }
+        out
     }
 
     pub fn len(&self) -> usize {
-        self.actions.len()
+        self.len
     }
 
     pub fn is_empty(&self) -> bool {
-        self.actions.is_empty()
+        self.len == 0
     }
 
-    pub fn get(&self, i: usize) -> Option<&FactoredAction> {
-        self.actions.get(i)
+    /// Action `i` of the table.
+    pub fn get(&self, i: usize) -> Option<FactoredAction> {
+        if i >= self.len {
+            return None;
+        }
+        let g = self.groups.partition_point(|&(start, _)| start <= i) - 1;
+        let (start, group) = self.groups[g];
+        Some(match group {
+            Group::One(a) => a,
+            Group::Cards {
+                action_type,
+                entity_target,
+                slot,
+                words,
+            } => {
+                let sels = &self.combos.slots[slot].selections;
+                let k = match words {
+                    None => i - start,
+                    Some((a, b)) => nth_set_bit(&self.bits[a..b], i - start),
+                };
+                FactoredAction {
+                    action_type,
+                    entity_target,
+                    card_target: Some(sels[k]),
+                }
+            }
+        })
     }
 
     /// Empty the table (an episode ended).
     pub fn clear(&mut self) {
-        self.actions.clear();
+        self.groups.clear();
+        self.len = 0;
+    }
+
+    fn push(&mut self, group: Group, count: usize) {
+        if count > 0 {
+            self.groups.push((self.len, group));
+            self.len += count;
+        }
     }
 
     /// `_enumerate_actions(mask, info)` for `game`: the legal actions of the mask, the
@@ -246,8 +393,8 @@ impl ActionTable {
             mask.forced_card,
             |t, e| {
                 let source = match t {
-                    ActionType::UseConsumable => &areas.consumables,
-                    _ => &areas.pack_cards,
+                    ActionType::UseConsumable => areas.consumables(),
+                    _ => areas.pack_cards(),
                 };
                 source.get(e).map(consumable_target_info)
             },
@@ -269,7 +416,9 @@ impl ActionTable {
         target_info: impl Fn(ActionType, usize) -> Option<(usize, usize, bool)>,
         rng: &mut Xoshiro256,
     ) {
-        self.actions.clear();
+        self.clear();
+        self.bits.clear();
+        self.combos.generation += 1;
         self.legal_cards.clear();
         self.legal_cards.extend(
             card_mask
@@ -286,12 +435,12 @@ impl ActionTable {
                 continue;
             }
             match t.targets() {
-                Targets::None => self.actions.push(FactoredAction::new(t)),
+                Targets::None => self.push(Group::One(FactoredAction::new(t)), 1),
                 Targets::Entity => {
                     if let Some(em) = entity(t) {
                         for (e, &ok) in em.iter().enumerate() {
                             if ok {
-                                self.actions.push(FactoredAction::with_entity(t, e));
+                                self.push(Group::One(FactoredAction::with_entity(t, e)), 1);
                             }
                         }
                     }
@@ -308,7 +457,7 @@ impl ActionTable {
                                     self.card_actions(t, Some(e), lo, hi, None, rng);
                                 }
                                 Some((_, _, false)) => {
-                                    self.actions.push(FactoredAction::with_entity(t, e));
+                                    self.push(Group::One(FactoredAction::with_entity(t, e)), 1);
                                 }
                                 None => {}
                             }
@@ -317,18 +466,21 @@ impl ActionTable {
                 }
             }
         }
-        if self.actions.len() > MAX_ACTIONS {
+        if self.len > MAX_ACTIONS {
+            // Rare: build the actions, keep a subsample, and hold those one by one.
+            self.spill = self.actions();
             subsample_indices(
-                self.actions.len(),
+                self.spill.len(),
                 MAX_ACTIONS,
                 rng,
                 &mut self.picked,
                 &mut self.chosen,
             );
-            for (dst, &src) in self.chosen.iter().enumerate() {
-                self.actions[dst] = self.actions[src];
+            self.clear();
+            for k in 0..self.chosen.len() {
+                let a = self.spill[self.chosen[k]];
+                self.push(Group::One(a), 1);
             }
-            self.actions.truncate(MAX_ACTIONS);
         }
     }
 
@@ -347,25 +499,28 @@ impl ActionTable {
         let n = self.legal_cards.len();
         let upper = n.min(max_select);
         let lower = min_select.min(upper);
-        let ActionTable {
-            actions,
-            legal_cards,
-            combos,
-            picked,
-            chosen,
-        } = self;
-        let combos = combos.get(legal_cards, lower, upper, required);
+        let slot = self.combos.slot(&self.legal_cards, lower, upper, required);
+        let count = self.combos.slots[slot].selections.len();
         let entity_target = entity.map(|e| e as u32);
-        let make = |sel: Selection| FactoredAction {
-            action_type: t,
-            entity_target,
-            card_target: Some(sel),
-        };
-        if combos.len() <= CARD_COMBO_BUDGET {
-            actions.extend(combos.iter().map(|&s| make(s)));
+        if count <= CARD_COMBO_BUDGET {
+            let group = Group::Cards {
+                action_type: t,
+                entity_target,
+                slot,
+                words: None,
+            };
+            self.push(group, count);
         } else {
-            subsample_indices(combos.len(), CARD_COMBO_BUDGET, rng, picked, chosen);
-            actions.extend(chosen.iter().map(|&i| make(combos[i])));
+            subsample_bits(count, CARD_COMBO_BUDGET, rng, &mut self.picked);
+            let a = self.bits.len();
+            self.bits.extend_from_slice(&self.picked);
+            let group = Group::Cards {
+                action_type: t,
+                entity_target,
+                slot,
+                words: Some((a, self.bits.len())),
+            };
+            self.push(group, CARD_COMBO_BUDGET);
         }
     }
 }
@@ -391,6 +546,89 @@ mod tests {
             assert_eq!(out.len(), k);
             assert!(out.windows(2).all(|w| w[0] < w[1]));
             assert!(out.iter().all(|&i| i < n));
+        }
+    }
+
+    /// Enumerate with every type allowed, `cards` legal hand cards and `entities` entities per
+    /// entity type, each entity-and-card type taking `lo..=hi` cards.
+    fn table_of(cards: usize, entities: usize, (lo, hi): (usize, usize), seed: u64) -> ActionTable {
+        let mut table = ActionTable::new();
+        let mut rng = Xoshiro256::seed_from_u64(seed);
+        let em = vec![true; entities];
+        table.enumerate_with(
+            &[true; crate::action::NUM_ACTION_TYPES],
+            &vec![true; cards],
+            |_| Some(&em[..]),
+            (1, 5),
+            None,
+            |_, _| Some((lo, hi, true)),
+            &mut rng,
+        );
+        table
+    }
+
+    #[test]
+    fn get_reads_the_built_actions() {
+        // Whole groups, subsampled groups (more than CARD_COMBO_BUDGET selections), a table cut
+        // to MAX_ACTIONS, and enough entity-and-card groups to outgrow the selection cache.
+        for (cards, entities, targets) in [
+            (3, 1, (1, 1)),
+            (8, 2, (1, 2)),
+            (10, 5, (1, 3)),
+            (12, 0, (1, 1)),
+        ] {
+            for seed in 0..4 {
+                let table = table_of(cards, entities, targets, seed);
+                let actions = table.actions();
+                assert_eq!(actions.len(), table.len());
+                assert!(table.len() <= MAX_ACTIONS);
+                for (i, a) in actions.iter().enumerate() {
+                    assert_eq!(table.get(i), Some(*a), "{cards} cards, action {i}");
+                }
+                assert_eq!(table.get(table.len()), None);
+            }
+        }
+    }
+
+    #[test]
+    fn many_card_groups_keep_their_selections() {
+        // Ten entities with ten different selection sizes, plus PlayHand and Discard: more
+        // distinct selection sets in one table than the cache has slots. Each group must still
+        // read its own selections.
+        let range = |e: usize| (1 + e % 2, (1 + e % 2).max(1 + e % 5));
+        let mut table = ActionTable::new();
+        let mut rng = Xoshiro256::seed_from_u64(5);
+        let em = [true; 10];
+        let mut types = [false; crate::action::NUM_ACTION_TYPES];
+        types[ActionType::PlayHand.index()] = true;
+        types[ActionType::UseConsumable.index()] = true;
+        table.enumerate_with(
+            &types,
+            &[true; 6],
+            |_| Some(&em[..]),
+            (1, 5),
+            None,
+            |_, e| {
+                let (lo, hi) = range(e);
+                Some((lo, hi, true))
+            },
+            &mut rng,
+        );
+        let actions = table.actions();
+        let mut entities = std::collections::BTreeSet::new();
+        for a in &actions {
+            let sel = a.card_target.expect("card actions only");
+            let (lo, hi) = match a.entity_target {
+                Some(e) => range(e as usize),
+                None => (1, 5),
+            };
+            assert!((lo..=hi).contains(&sel.len()), "{a:?}");
+            assert!(sel.as_slice().windows(2).all(|w| w[0] < w[1]));
+            entities.insert(a.entity_target);
+        }
+        assert_eq!(entities.len(), 11);
+        for (i, a) in actions.iter().enumerate() {
+            assert_eq!(table.get(i), Some(*a));
         }
     }
 

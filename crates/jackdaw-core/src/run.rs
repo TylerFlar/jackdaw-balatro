@@ -592,75 +592,48 @@ impl Game {
     /// the deck's rules keep, sorted, made by `card_from_control`.
     fn build_deck(&mut self, ch: Option<&'static Value>) {
         let de = ch.and_then(|c| field(c, "deck"));
-        let mut protos: Vec<Proto> = Vec::with_capacity(P_CARDS.len());
         let custom = de.and_then(|d| field(d, "cards"));
-        if let Some(Value::List(cards)) = custom {
-            for c in cards.iter() {
-                let s = string(field(c, "s")).expect("a deck card's suit");
-                let r = string(field(c, "r")).expect("a deck card's rank");
-                protos.push(Proto {
-                    front: jackdaw_data::card_by_parts(s, r).expect("a front"),
-                    s,
-                    r,
-                    e: string(field(c, "e")),
-                    d: string(field(c, "d")),
-                    g: string(field(c, "g")),
-                });
-            }
-        } else {
-            let has = |v: Option<&Value>, x: &str| match v {
-                Some(Value::Table(t)) => {
-                    t.iter().any(|(k, b)| *k == x && b.as_bool() != Some(false))
-                }
-                Some(Value::List(items)) => items.iter().any(|i| i.as_str() == Some(x)),
-                _ => false,
-            };
-            let erratic = self.gs.starting_params.erratic_suits_and_ranks;
-            let no_faces = self.gs.starting_params.no_faces;
-            for i in 0..P_CARDS.len() {
-                let mut front = i;
-                if erratic {
-                    let seed = self.gs.rng.seed("erratic");
-                    front = crate::rng::element_index(P_CARDS.len(), seed);
-                }
-                let key = P_CARDS[front].key;
-                let front = jackdaw_data::CardId(front as u8);
-                let (s, r) = (&key[0..1], &key[2..3]);
-                let mut keep = true;
-                let (mut e, mut d, mut g) = (None, None, None);
-                if let Some(de) = de {
-                    if field(de, "yes_ranks").is_some() && !has(field(de, "yes_ranks"), r) {
-                        keep = false;
-                    }
-                    if has(field(de, "no_ranks"), r) {
-                        keep = false;
-                    }
-                    if field(de, "yes_suits").is_some() && !has(field(de, "yes_suits"), s) {
-                        keep = false;
-                    }
-                    if has(field(de, "no_suits"), s) {
-                        keep = false;
-                    }
-                    e = string(field(de, "enhancement"));
-                    d = string(field(de, "edition"));
-                    g = string(field(de, "gold_seal"));
-                }
-                if no_faces && matches!(r, "K" | "Q" | "J") {
-                    keep = false;
-                }
-                if keep {
-                    protos.push(Proto {
-                        front,
-                        s,
-                        r,
-                        e,
-                        d,
-                        g,
-                    });
-                }
+        let erratic = self.gs.starting_params.erratic_suits_and_ranks;
+        let no_faces = self.gs.starting_params.no_faces;
+        let cost = self.cost_context(AreaId::Deck);
+        let hands_played = self.gs.hands_played;
+        // Without erratic draws or a challenge's card list the sorted cards depend only on the
+        // deck's rules and the cost values: they are made once, then copied for each run.
+        if !matches!(custom, Some(Value::List(_))) && !erratic && use_deck_templates() {
+            let slot = deck_template_slot(ch, no_faces);
+            let t = DECK_TEMPLATES[slot]
+                .get_or_init(|| DeckTemplate::build(de, no_faces, &cost, hands_played));
+            if t.made_with(&cost, hands_played) {
+                self.deal_deck_template(t);
+                return;
             }
         }
-        protos.sort_by(Proto::cmp);
+        let protos = if let Some(Value::List(cards)) = custom {
+            let mut protos: Vec<Proto> = cards
+                .iter()
+                .map(|c| {
+                    let s = string(field(c, "s")).expect("a deck card's suit");
+                    let r = string(field(c, "r")).expect("a deck card's rank");
+                    Proto {
+                        front: jackdaw_data::card_by_parts(s, r).expect("a front"),
+                        s,
+                        r,
+                        e: string(field(c, "e")),
+                        d: string(field(c, "d")),
+                        g: string(field(c, "g")),
+                    }
+                })
+                .collect();
+            protos.sort_by(Proto::cmp);
+            protos
+        } else {
+            let rng = if erratic {
+                Some(&mut self.gs.rng)
+            } else {
+                None
+            };
+            deck_protos(de, no_faces, rng)
+        };
         // The cards are made in sort order (sort ids `first..`), each emplaced in front of the
         // deck, and `start_run` then shuffles the deck (`G.deck:shuffle()`, game.lua:2375):
         // pseudoshuffle sorts by sort id, then swaps. Making a deck card draws nothing and no
@@ -670,30 +643,41 @@ impl Game {
         crate::rng::shuffle(&mut order, self.gs.rng.seed("shuffle"));
         let first = self.gs.sim.next_sort_id;
         self.gs.sim.next_sort_id += n as u32;
-        // Nothing a deck card's creation does changes the costs the next one sees. A new card's
-        // ability and costs come from its center, so cards of one center start as one template.
-        let cost = self.cost_context(AreaId::Deck);
-        let hands_played = self.gs.hands_played;
         let mut templates: Vec<Card> = Vec::new();
-        let deck: Vec<Card> = order
-            .iter()
-            .map(|&k| {
-                let p = &protos[k];
-                let center =
-                    p.e.map(|e| jackdaw_data::center_by_key(e).expect("an enhancement"))
-                        .unwrap_or(centers::C_BASE);
-                let template = match templates.iter().find(|t| t.center == center) {
-                    Some(t) => *t,
-                    None => {
-                        let t = Card::new(0, center, None, hands_played, &cost);
-                        templates.push(t);
-                        t
-                    }
-                };
-                card_from_control(p, template, first + k as u32, &cost)
-            })
-            .collect();
-        // set_ability's `used_jokers` marks, once per center (no deck card is a To Do List).
+        // Each card is copied once, from its template into its slot, and finished there.
+        let mut deck: Vec<Card> = Vec::with_capacity(n);
+        for &k in &order {
+            deck.push(make_deck_card(
+                &protos[k],
+                first + k as u32,
+                &cost,
+                hands_played,
+                &mut templates,
+            ));
+        }
+        self.finish_deck(deck);
+    }
+
+    /// [`Game::build_deck`] from a [`DeckTemplate`]: the same shuffle of the sorted cards, the
+    /// same sort ids.
+    fn deal_deck_template(&mut self, t: &DeckTemplate) {
+        let n = t.cards.len();
+        let mut order: Vec<usize> = (0..n).collect();
+        crate::rng::shuffle(&mut order, self.gs.rng.seed("shuffle"));
+        let first = self.gs.sim.next_sort_id;
+        self.gs.sim.next_sort_id += n as u32;
+        let mut deck: Vec<Card> = Vec::with_capacity(n);
+        for &k in &order {
+            let mut card = t.cards[k];
+            card.sort_id = first + k as u32;
+            deck.push(card);
+        }
+        self.finish_deck(deck);
+    }
+
+    /// The new deck in place: set_ability's `used_jokers` marks, once per center (no deck card
+    /// is a To Do List), and the starting deck size.
+    fn finish_deck(&mut self, deck: Vec<Card>) {
         let mut marked = crate::state::CenterBits::default();
         for c in &deck {
             if !marked.contains(c.center) {
@@ -702,31 +686,187 @@ impl Game {
             }
         }
         debug_assert!(
-            self.gs.areas.deck.is_empty(),
+            self.gs.areas.deck().is_empty(),
             "a new run's deck starts empty"
         );
-        self.gs.areas.deck = deck;
+        self.gs.areas.set(AreaId::Deck, deck);
         self.gs.starting_deck_size = self.playing_card_count() as f64;
     }
 }
 
+/// The deck's prototypes from `P_CARDS` (game.lua:2311-2355), sorted: every front the deck's
+/// rules keep, or with `erratic` (its RNG), a front drawn from `'erratic'` for each one.
+fn deck_protos(
+    de: Option<&'static Value>,
+    no_faces: bool,
+    mut erratic: Option<&mut Rng>,
+) -> Vec<Proto> {
+    let has = |v: Option<&Value>, x: &str| match v {
+        Some(Value::Table(t)) => t.iter().any(|(k, b)| *k == x && b.as_bool() != Some(false)),
+        Some(Value::List(items)) => items.iter().any(|i| i.as_str() == Some(x)),
+        _ => false,
+    };
+    let mut protos: Vec<Proto> = Vec::with_capacity(P_CARDS.len());
+    for i in 0..P_CARDS.len() {
+        let mut front = i;
+        if let Some(rng) = erratic.as_deref_mut() {
+            let seed = rng.seed("erratic");
+            front = crate::rng::element_index(P_CARDS.len(), seed);
+        }
+        let key = P_CARDS[front].key;
+        let front = jackdaw_data::CardId(front as u8);
+        let (s, r) = (&key[0..1], &key[2..3]);
+        let mut keep = true;
+        let (mut e, mut d, mut g) = (None, None, None);
+        if let Some(de) = de {
+            if field(de, "yes_ranks").is_some() && !has(field(de, "yes_ranks"), r) {
+                keep = false;
+            }
+            if has(field(de, "no_ranks"), r) {
+                keep = false;
+            }
+            if field(de, "yes_suits").is_some() && !has(field(de, "yes_suits"), s) {
+                keep = false;
+            }
+            if has(field(de, "no_suits"), s) {
+                keep = false;
+            }
+            e = string(field(de, "enhancement"));
+            d = string(field(de, "edition"));
+            g = string(field(de, "gold_seal"));
+        }
+        if no_faces && matches!(r, "K" | "Q" | "J") {
+            keep = false;
+        }
+        if keep {
+            protos.push(Proto {
+                front,
+                s,
+                r,
+                e,
+                d,
+                g,
+            });
+        }
+    }
+    protos.sort_by(Proto::cmp);
+    protos
+}
+
+/// The deck card of prototype `p` with sort id `sort_id`. Nothing a deck card's creation does
+/// changes the costs the next one sees, and a new card's ability and costs come from its center,
+/// so cards of one center start as one template, kept in `templates`.
+fn make_deck_card(
+    p: &Proto,
+    sort_id: u32,
+    cost: &CostContext,
+    hands_played: f64,
+    templates: &mut Vec<Card>,
+) -> Card {
+    let center =
+        p.e.map(|e| jackdaw_data::center_by_key(e).expect("an enhancement"))
+            .unwrap_or(centers::C_BASE);
+    let i = match templates.iter().position(|t| t.center == center) {
+        Some(i) => i,
+        None => {
+            templates.push(Card::new(0, center, None, hands_played, cost));
+            templates.len() - 1
+        }
+    };
+    let mut card = templates[i];
+    card_from_control(p, &mut card, sort_id, cost);
+    card
+}
+
+/// A starting deck without erratic draws or a challenge's card list, made once: its cards in
+/// sort order, each as [`make_deck_card`] makes it but for the sort id, which no part of the
+/// card's making reads. The cards depend on the deck's rules (the challenge's `deck` and the
+/// back's `remove_faces`), the cost values and `hands_played`; the last two are kept, and a run
+/// whose values differ makes its deck itself.
+struct DeckTemplate {
+    cost: CostContext,
+    hands_played: f64,
+    cards: Vec<Card>,
+}
+
+impl DeckTemplate {
+    fn build(
+        de: Option<&'static Value>,
+        no_faces: bool,
+        cost: &CostContext,
+        hands_played: f64,
+    ) -> DeckTemplate {
+        let mut templates = Vec::new();
+        let cards = deck_protos(de, no_faces, None)
+            .iter()
+            .map(|p| make_deck_card(p, 0, cost, hands_played, &mut templates))
+            .collect();
+        DeckTemplate {
+            cost: *cost,
+            hands_played,
+            cards,
+        }
+    }
+
+    /// Whether the cards were made with these values (bit for bit).
+    fn made_with(&self, cost: &CostContext, hands_played: f64) -> bool {
+        let a = &self.cost;
+        a.inflation.to_bits() == cost.inflation.to_bits()
+            && a.discount_percent.to_bits() == cost.discount_percent.to_bits()
+            && a.booster_ante_scaling == cost.booster_ante_scaling
+            && a.ante.to_bits() == cost.ante.to_bits()
+            && a.astronomer == cost.astronomer
+            && a.in_shop == cost.in_shop
+            && self.hands_played.to_bits() == hands_played.to_bits()
+    }
+}
+
+/// The deck templates: one per challenge (or none) and `remove_faces`.
+static DECK_TEMPLATES: [std::sync::OnceLock<DeckTemplate>;
+    2 * (jackdaw_data::CHALLENGES.len() + 1)] =
+    [const { std::sync::OnceLock::new() }; 2 * (jackdaw_data::CHALLENGES.len() + 1)];
+
+/// The [`DECK_TEMPLATES`] slot of a run with challenge data `ch` (or none).
+fn deck_template_slot(ch: Option<&'static Value>, no_faces: bool) -> usize {
+    let challenge = match ch {
+        None => 0,
+        Some(ch) => {
+            1 + jackdaw_data::CHALLENGES
+                .iter()
+                .position(|c| std::ptr::eq(&c.data, ch))
+                .expect("a G.CHALLENGES entry")
+        }
+    };
+    2 * challenge + usize::from(no_faces)
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Tests turn the deck templates off to compare against the decks made each run.
+    static NO_DECK_TEMPLATES: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn use_deck_templates() -> bool {
+    #[cfg(test)]
+    if NO_DECK_TEMPLATES.with(std::cell::Cell::get) {
+        return false;
+    }
+    true
+}
+
 /// `card_from_control(control)` (misc_functions.lua:1625-1633) for the card with sort id
-/// `sort_id`, face down in the deck, from `template`: `Card(...)` for its center with no front
-/// (`Card:init`'s `set_base` touches neither the ability nor the costs). The caller marks its
-/// center used.
-fn card_from_control(p: &Proto, template: Card, sort_id: u32, cost: &CostContext) -> Card {
-    {
-        let mut card = template;
-        card.sort_id = sort_id;
-        card.base = Some(crate::card::set_base(None, p.front, true));
-        card.facing = crate::card::Facing::Back;
-        if let Some(d) = p.d {
-            card.set_edition(Some(EditionKind::from_name(d).expect("an edition")), cost);
-        }
-        if let Some(gs) = p.g {
-            card.set_seal(Some(Seal::from_name(gs).expect("a seal")), cost);
-        }
-        card
+/// `sort_id`, face down in the deck, finishing `card` in place: a copy of the template
+/// `Card(...)` for its center with no front (`Card:init`'s `set_base` touches neither the ability
+/// nor the costs). The caller marks its center used.
+fn card_from_control(p: &Proto, card: &mut Card, sort_id: u32, cost: &CostContext) {
+    card.sort_id = sort_id;
+    card.base = Some(crate::card::set_base(None, p.front, true));
+    card.facing = crate::card::Facing::Back;
+    if let Some(d) = p.d {
+        card.set_edition(Some(EditionKind::from_name(d).expect("an edition")), cost);
+    }
+    if let Some(gs) = p.g {
+        card.set_seal(Some(Seal::from_name(gs).expect("a seal")), cost);
     }
 }
 
@@ -813,5 +953,87 @@ impl Game {
         let new = crate::card::set_base(Some(&base), front, false);
         self.card_mut(id).base = Some(new);
         self.debuff_card(id, false);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn run(spec: &RunSpec, templates: bool) -> Game {
+        NO_DECK_TEMPLATES.with(|c| c.set(!templates));
+        let g = Game::new_run(spec);
+        NO_DECK_TEMPLATES.with(|c| c.set(false));
+        g.unwrap()
+    }
+
+    fn same_run(spec: &RunSpec) {
+        let made = run(spec, false);
+        let copied = run(spec, true);
+        assert_eq!(made.gs, copied.gs, "{spec:?}");
+        assert_eq!(made.snapshot(), copied.snapshot(), "{spec:?}");
+    }
+
+    /// A deck copied from its template is the deck made for the run, for every back, stake
+    /// and challenge.
+    #[test]
+    fn deck_templates_make_the_same_runs() {
+        let backs: Vec<CenterId> = (0..jackdaw_data::CENTERS.len())
+            .map(|i| CenterId(i as u16))
+            .filter(|c| c.get().set == CenterSet::Back)
+            .collect();
+        assert!(backs.len() > 10);
+        for &back in &backs {
+            for stake in 1..=8 {
+                for seed in ["TEMPLATE", "1A2B3C4D", "ZZZZZZZZ"] {
+                    same_run(&RunSpec {
+                        back,
+                        stake,
+                        seed: seed.to_owned(),
+                        challenge: None,
+                    });
+                }
+            }
+        }
+        for ch in &jackdaw_data::CHALLENGES {
+            for seed in ["TEMPLATE", "1A2B3C4D"] {
+                same_run(&RunSpec {
+                    back: centers::B_RED,
+                    stake: 1,
+                    seed: seed.to_owned(),
+                    challenge: Some(ch.id),
+                });
+            }
+        }
+        // The templates were used: the plain decks and Abandoned Deck's.
+        assert!(
+            DECK_TEMPLATES[deck_template_slot(None, false)]
+                .get()
+                .is_some()
+        );
+        assert!(
+            DECK_TEMPLATES[deck_template_slot(None, true)]
+                .get()
+                .is_some()
+        );
+        let erratic = run(
+            &RunSpec {
+                back: centers::B_ERRATIC,
+                stake: 1,
+                seed: "TEMPLATE".to_owned(),
+                challenge: None,
+            },
+            true,
+        );
+        let red = run(
+            &RunSpec {
+                back: centers::B_RED,
+                stake: 1,
+                seed: "TEMPLATE".to_owned(),
+                challenge: None,
+            },
+            true,
+        );
+        assert_ne!(erratic.gs.areas.deck(), red.gs.areas.deck());
     }
 }

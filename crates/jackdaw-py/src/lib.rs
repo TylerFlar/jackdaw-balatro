@@ -164,11 +164,11 @@ impl Game {
         let was_forced = |id: u32| {
             old.gs
                 .areas
-                .hand
+                .hand()
                 .iter()
                 .any(|c| c.sort_id == id && c.ability.forced_selection)
         };
-        let hand = &fresh.gs.areas.hand;
+        let hand = fresh.gs.areas.hand();
         let mut highlighted: Vec<u32> = old
             .rt
             .highlighted
@@ -206,15 +206,17 @@ impl Game {
     /// with Splash. ``None`` for no cards, too many, or a position past the hand.
     fn scoring_cards(&self, positions: Vec<usize>) -> Option<(String, Vec<usize>)> {
         use jackdaw_core::hand_eval::{MAX_CARDS, get_poker_hand_info};
-        let hand = &self.inner.gs.areas.hand;
+        let hand = self.inner.gs.areas.hand();
         let mut pos = positions;
         pos.sort_unstable();
         pos.dedup();
         if pos.is_empty() || pos.len() > MAX_CARDS || pos.iter().any(|&p| p >= hand.len()) {
             return None;
         }
-        let cards: Vec<jackdaw_core::card::Card> = pos.iter().map(|&p| hand[p]).collect();
-        let info = get_poker_hand_info(&self.inner.eval_cards(&cards), self.inner.eval_flags());
+        let info = get_poker_hand_info(
+            &self.inner.eval_cards(pos.iter().map(|&p| hand.at(p))),
+            self.inner.eval_flags(),
+        );
         let text = info.hand?;
         let mut scoring: Vec<usize> = info
             .scoring
@@ -225,9 +227,9 @@ impl Game {
         if self.inner.has_joker("Splash") {
             scoring.clone_from(&pos);
         } else {
-            for (k, c) in cards.iter().enumerate() {
-                if c.is_stone() && !scoring.contains(&pos[k]) {
-                    scoring.push(pos[k]);
+            for &p in &pos {
+                if hand.at(p).is_stone() && !scoring.contains(&p) {
+                    scoring.push(p);
                 }
             }
         }
@@ -358,9 +360,9 @@ impl Game {
         let state = gym::state_to_py(&jackdaw_env::reward::StateSummary::of(&self.inner));
         let areas = &self.inner.gs.areas;
         let splits = (
-            areas.shop_jokers.len(),
-            areas.shop_vouchers.len(),
-            areas.shop_booster.len(),
+            areas.shop_jokers().len(),
+            areas.shop_vouchers().len(),
+            areas.shop_booster().len(),
         );
         Ok((obs.0, obs.1, mask, state, splits))
     }

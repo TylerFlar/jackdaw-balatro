@@ -59,7 +59,7 @@ impl Game {
                 self.joker_swaps(&mut out);
             }
             LuaState::SelectingHand => {
-                let n = self.gs.areas.hand.len();
+                let n = self.gs.areas.hand().len();
                 let cr = &self.gs.current_round;
                 if n > 0 && cr.hands_left > 0.0 {
                     out.push(Action::PlayHand(Vec::new()));
@@ -91,7 +91,7 @@ impl Game {
             | LuaState::BuffoonPack => {
                 let remaining = self.gs.pack.as_ref().map_or(0.0, |p| p.choices_remaining);
                 if remaining > 0.0 {
-                    for (i, card) in self.gs.areas.pack_cards.iter().enumerate() {
+                    for (i, card) in self.gs.areas.pack_cards().iter().enumerate() {
                         let targets = if card.center().consumeable {
                             match self.consumable_use(card.sort_id, true) {
                                 Some(t) => t,
@@ -127,7 +127,7 @@ impl Game {
     /// sorts it by position every frame, cardarea.lua:436-465): while choosing a hand, and in an
     /// Arcana or Spectral pack once its hand is dealt.
     fn hand_swaps(&self, out: &mut Vec<Action>) {
-        let n = self.gs.areas.hand.len();
+        let n = self.gs.areas.hand().len();
         if n > 1 {
             out.extend((1..n).map(Action::SwapHandLeft));
             out.extend((0..n - 1).map(Action::SwapHandRight));
@@ -140,7 +140,7 @@ impl Game {
         let negative = card
             .edition
             .is_some_and(|e| e.kind == EditionKind::Negative);
-        negative || (self.gs.areas.jokers.len() as f64) < self.gs.joker_slots
+        negative || (self.gs.areas.jokers().len() as f64) < self.gs.joker_slots
     }
 
     fn spend_ok(&self, cost: f64) -> bool {
@@ -148,7 +148,7 @@ impl Game {
     }
 
     fn shop_actions(&self, out: &mut Vec<Action>) {
-        let shop = &self.gs.areas.shop_jokers;
+        let shop = self.gs.areas.shop_jokers();
         for (i, card) in shop.iter().enumerate() {
             if !self.spend_ok(card.cost) {
                 continue;
@@ -171,12 +171,12 @@ impl Game {
         self.sell_actions(out);
         self.usable_consumables(out);
         let spendable = self.gs.dollars - self.gs.bankrupt_at;
-        for (i, v) in self.gs.areas.shop_vouchers.iter().enumerate() {
+        for (i, v) in self.gs.areas.shop_vouchers().iter().enumerate() {
             if v.cost <= spendable {
                 out.push(Action::RedeemVoucher(i));
             }
         }
-        for (i, b) in self.gs.areas.shop_booster.iter().enumerate() {
+        for (i, b) in self.gs.areas.shop_booster().iter().enumerate() {
             if self.spend_ok(b.cost) {
                 out.push(Action::OpenBooster(i));
             }
@@ -190,7 +190,7 @@ impl Game {
     }
 
     fn sell_actions(&self, out: &mut Vec<Action>) {
-        for (i, j) in self.gs.areas.jokers.iter().enumerate() {
+        for (i, j) in self.gs.areas.jokers().iter().enumerate() {
             if !j.ability.eternal {
                 out.push(Action::SellCard {
                     area: AreaId::Jokers,
@@ -198,7 +198,7 @@ impl Game {
                 });
             }
         }
-        for i in 0..self.gs.areas.consumables.len() {
+        for i in 0..self.gs.areas.consumables().len() {
             out.push(Action::SellCard {
                 area: AreaId::Consumables,
                 index: i,
@@ -210,7 +210,7 @@ impl Game {
     /// its cards can be dragged (cardarea.lua:214-227) and a drag reorders them at every decision
     /// point (cardarea.lua:509-529); a pinned joker sorts back to the front (cardarea.lua:528).
     fn joker_swaps(&self, out: &mut Vec<Action>) {
-        let jokers = &self.gs.areas.jokers;
+        let jokers = self.gs.areas.jokers();
         let free = |i: usize, o: usize| !jokers[i].pinned && !jokers[o].pinned;
         for i in 1..jokers.len() {
             if free(i, i - 1) {
@@ -225,7 +225,7 @@ impl Game {
     }
 
     fn usable_consumables(&self, out: &mut Vec<Action>) {
-        for (i, c) in self.gs.areas.consumables.iter().enumerate() {
+        for (i, c) in self.gs.areas.consumables().iter().enumerate() {
             if let Some(targets) = self.consumable_use(c.sort_id, true) {
                 out.push(Action::UseConsumable { index: i, targets });
             }
@@ -264,13 +264,34 @@ impl Game {
         self.can_skip_booster()
     }
 
+    /// `consumable_use(id, check_use).is_some()`, without building the selections it tries
+    /// (for one that takes up to 16 cards).
+    pub fn consumable_usable(&self, id: u32, check_use: bool) -> bool {
+        const FIRST: [usize; 16] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+        let Some(size) = self.selection_size(id) else {
+            return self.usable_with(id, &[], check_use);
+        };
+        let n = self.gs.areas.hand().len();
+        if n < size {
+            return false;
+        }
+        if size > FIRST.len() {
+            return self.consumable_use(id, check_use).is_some();
+        }
+        let first = &FIRST[..size];
+        self.usable_with(id, first, check_use)
+            || combinations(n, size)
+                .into_iter()
+                .any(|sel| sel != first && self.usable_with(id, &sel, check_use))
+    }
+
     /// `Some(targets)` when the consumable (by sort id) can be used now: `Some(None)` for one
     /// that takes no selection, `Some(Some(selection))` with its default selection.
     pub fn consumable_use(&self, id: u32, check_use: bool) -> Option<Option<Vec<usize>>> {
         let Some(size) = self.selection_size(id) else {
             return self.usable_with(id, &[], check_use).then_some(None);
         };
-        let n = self.gs.areas.hand.len();
+        let n = self.gs.areas.hand().len();
         if n < size {
             return None;
         }

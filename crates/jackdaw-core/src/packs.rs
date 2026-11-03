@@ -278,9 +278,9 @@ impl Game {
         let dealt_or_none = matches!(
             self.rt.state,
             LuaState::PlanetPack | LuaState::StandardPack | LuaState::BuffoonPack
-        ) || !self.gs.areas.hand.is_empty()
+        ) || !self.gs.areas.hand().is_empty()
             || self.hand_limit() <= 0.0;
-        !self.gs.areas.pack_cards.is_empty() && dealt_or_none
+        !self.gs.areas.pack_cards().is_empty() && dealt_or_none
     }
 
     /// `G.FUNCS.skip_booster`: the jokers see the skip, then the pack closes.
@@ -302,7 +302,7 @@ impl Game {
     /// `end_consumeable`'s second event (button_callbacks.lua:2589-2632).
     pub(crate) fn pack_hand_to_deck(&mut self) {
         // `G.FUNCS.draw_from_hand_to_deck()` (state_events.lua:1121-1126).
-        for _ in 0..self.gs.areas.hand.len() {
+        for _ in 0..self.gs.areas.hand().len() {
             self.queue(Event::DrawCard {
                 from: AreaId::Hand,
                 to: AreaId::Deck,

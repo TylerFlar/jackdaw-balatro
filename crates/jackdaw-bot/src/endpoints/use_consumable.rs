@@ -39,7 +39,7 @@ fn run(ctx: &mut Ctx) -> Result<Json, BotError> {
     let game = ctx.game();
     let index = ctx.num("consumable").expect("required");
     // Step 1: the consumable's index.
-    let n = game.gs.areas.consumables.len();
+    let n = game.gs.areas.consumables().len();
     if index < 0.0 || index >= n as f64 {
         return Err(BotError::bad_request(format!(
             "Consumable index out of range: {}",
@@ -47,7 +47,7 @@ fn run(ctx: &mut Ctx) -> Result<Json, BotError> {
         )));
     }
     let i = index as usize;
-    let card = &game.gs.areas.consumables[i];
+    let card = game.gs.areas.consumables().at(i);
     let id = card.sort_id;
     let name = card.name();
     let center = card.center();

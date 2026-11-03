@@ -235,7 +235,7 @@ impl Game {
             let card = match tag.get().name {
                 "Rare Tag" => {
                     let mut rares: Vec<&str> = Vec::new();
-                    for c in &self.gs.areas.jokers {
+                    for c in self.gs.areas.jokers() {
                         if c.center().rarity == Some(3) && !rares.contains(&c.center.key()) {
                             rares.push(c.center.key());
                         }
@@ -357,7 +357,7 @@ fn edition_code(e: EditionKind) -> f64 {
 fn top_up(g: &mut Game, _: u32, n: f64) {
     let mut i = 0.0;
     while i < n {
-        if (g.gs.areas.jokers.len() as f64) < g.gs.joker_slots {
+        if (g.gs.areas.jokers().len() as f64) < g.gs.joker_slots {
             let card =
                 g.create_card(CardSpec::new(PoolType::Joker, AreaId::Jokers, "top").rarity(0.0));
             let id = card.sort_id;
@@ -423,9 +423,9 @@ fn voucher_tag(g: &mut Game, _: u32, _: f64) {
 fn coupon(g: &mut Game, _: u32, _: f64) {
     for area in [AreaId::ShopJokers, AreaId::ShopBooster] {
         let cost = g.cost_context(area);
-        for c in g.gs.areas.get_mut(area) {
+        g.gs.areas.get_mut(area).for_each(|c| {
             c.ability.couponed = true;
             c.set_cost(&cost);
-        }
+        });
     }
 }

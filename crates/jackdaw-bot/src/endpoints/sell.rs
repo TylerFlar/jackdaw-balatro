@@ -41,13 +41,13 @@ fn run(ctx: &mut Ctx) -> Result<Json, BotError> {
     let gs = &ctx.game().gs;
     let (area, index, kind) = match joker {
         Some(i) => {
-            if gs.areas.jokers.is_empty() {
+            if gs.areas.jokers().is_empty() {
                 return Err(BotError::not_allowed("No jokers available to sell"));
             }
             (AreaId::Jokers, i, "joker")
         }
         None => {
-            if gs.areas.consumables.is_empty() {
+            if gs.areas.consumables().is_empty() {
                 return Err(BotError::not_allowed("No consumables available to sell"));
             }
             (

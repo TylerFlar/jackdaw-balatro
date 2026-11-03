@@ -131,7 +131,7 @@ impl Game {
             }
         }
         if delta > 0.0 {
-            let n = self.gs.shop_joker_max - self.gs.areas.shop_jokers.len() as f64;
+            let n = self.gs.shop_joker_max - self.gs.areas.shop_jokers().len() as f64;
             let mut i = 1.0;
             while i <= n {
                 let card = self.create_card_for_shop(AreaId::ShopJokers);

@@ -10,7 +10,10 @@ publish.workspace = true
 [dependencies]
 jackdaw-core.workspace = true
 jackdaw-data.workspace = true
-rayon.workspace = true
+
+[dev-dependencies]
+# examples/rollout.rs allocates with mimalloc, as the Python extension does.
+mimalloc = { version = "0.1.52", default-features = false }
 
 [lints]
 workspace = true
