@@ -468,6 +468,32 @@ impl Game {
         flipped
     }
 
+    /// [`Game::stay_flipped`]'s answer when it is the same for every card and rolls nothing:
+    /// `None` under The Wheel, The Mark or the `flipped_cards` challenge rule.
+    pub(crate) fn uniform_stay_flipped(&self, to: AreaId) -> Option<bool> {
+        if to != AreaId::Hand {
+            return Some(false);
+        }
+        if self
+            .gs
+            .modifiers
+            .get("flipped_cards")
+            .and_then(|v| v.as_num())
+            .is_some()
+        {
+            return None;
+        }
+        match self.active_boss() {
+            "The Wheel" | "The Mark" => None,
+            "The House" => Some(
+                self.gs.current_round.hands_played == 0.0
+                    && self.gs.current_round.discards_used == 0.0,
+            ),
+            "The Fish" => Some(self.gs.blind.as_ref().is_some_and(|b| b.prepped)),
+            _ => Some(false),
+        }
+    }
+
     /// `Blind:disable()` (blind.lua:356-415).
     pub(crate) fn blind_disable(&mut self) {
         self.blind_mut().disabled = true;

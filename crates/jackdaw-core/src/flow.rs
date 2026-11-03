@@ -256,9 +256,10 @@ impl Game {
     ///   them all, and the deck limit it keeps ends the same whether the deck grows or shrinks
     ///   a card at a time or all at once).
     ///
-    /// A draw into the hand (from the next card) still moves its cards one by one, each with
-    /// its `stay_flipped` roll in turn; the others move at once
-    /// ([`crate::area::Areas::draw_cards`]), as none of them rolls.
+    /// A draw into the hand (from the next card) moves its cards one by one, each with its
+    /// `stay_flipped` roll in turn, when that rolls or looks at the card
+    /// ([`Game::uniform_stay_flipped`]); the others move at once
+    /// ([`crate::area::Areas::draw_cards`]).
     fn batch_draws(&self, from: AreaId, to: AreaId, explicit: bool, sort: bool) -> bool {
         (to != AreaId::Hand || !explicit)
             && AreaId::PLAYING.contains(&from)
@@ -297,7 +298,17 @@ impl Game {
             }
         }
         if to == AreaId::Hand {
-            // `draw_card_from`: the hand always has room.
+            // `draw_card_from`: the hand always has room. When no card's facing depends on the
+            // card or a roll, the cards move at once.
+            if let Some(flipped) = self.uniform_stay_flipped(to) {
+                self.gs
+                    .areas
+                    .draw_cards_flipped(from, to, Draw::Next(count), flipped);
+                if sort {
+                    self.sort_after_draw();
+                }
+                return;
+            }
             for _ in 0..count {
                 let Some(d) = self.gs.areas.detach(from, None) else {
                     break;

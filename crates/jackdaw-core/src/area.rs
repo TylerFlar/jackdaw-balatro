@@ -903,6 +903,18 @@ impl Areas {
     /// [`Areas::emplace`] puts it (none stays flipped) and the result is that of moving them one
     /// at a time. Only slots move. Returns the sort ids moved, in the order they moved.
     pub fn draw_cards(&mut self, from: AreaId, to: AreaId, draw: Draw<'_>) -> Ids {
+        self.draw_cards_flipped(from, to, draw, false)
+    }
+
+    /// [`Areas::draw_cards`] where every card lands as [`Areas::emplace`] puts it with
+    /// `stay_flipped`.
+    pub fn draw_cards_flipped(
+        &mut self,
+        from: AreaId,
+        to: AreaId,
+        draw: Draw<'_>,
+        stay_flipped: bool,
+    ) -> Ids {
         debug_assert_ne!(from, to);
         let mut src = std::mem::take(&mut self.lists[from as usize]);
         let n = src.len();
@@ -950,7 +962,7 @@ impl Areas {
             moved.push(c.sort_id);
             if to.face_down() {
                 c.facing = Facing::Back;
-            } else if c.facing == Facing::Back {
+            } else if c.facing == Facing::Back && !stay_flipped {
                 c.facing = Facing::Front;
             }
             self.home[slot as usize] = to as u8;
@@ -1304,10 +1316,11 @@ mod tests {
                     }
                     6 if a != b => {
                         let n = below(6) as usize;
-                        let moved = areas.draw_cards(a, b, Draw::Next(n));
+                        let flip = below(2) == 0;
+                        let moved = areas.draw_cards_flipped(a, b, Draw::Next(n), flip);
                         for _ in 0..moved.len() {
                             let c = model.remove_card(a, None).expect("moved");
-                            model.emplace(b, c, false, false);
+                            model.emplace(b, c, false, flip);
                         }
                         // `draw_cards` aligns the target even when nothing moved.
                         model.align(b);
