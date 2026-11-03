@@ -1,7 +1,7 @@
 //! `Card` methods that act on the game: debuffs, deck membership (passive joker effects) and
 //! removal (card.lua), plus `find_joker` (misc_functions.lua:903).
 
-use jackdaw_data::CenterSet;
+use jackdaw_data::{CenterId, CenterSet};
 
 use crate::area::AreaId;
 use crate::event::Event;
@@ -25,6 +25,16 @@ impl Game {
             .into_iter()
             .flat_map(|a| self.gs.areas.get(a).iter())
             .any(|c| c.name() == name && !c.debuff)
+    }
+
+    /// [`Game::has_joker`] for the name of center `id`: a non-debuffed card of a center named
+    /// like `id` is held.
+    pub fn has_joker_center(&self, id: CenterId) -> bool {
+        let named = jackdaw_data::same_name_centers(id);
+        [AreaId::Jokers, AreaId::Consumables]
+            .into_iter()
+            .flat_map(|a| self.gs.areas.get(a).iter())
+            .any(|c| !c.debuff && named.contains(&c.center))
     }
 
     /// `Card:set_debuff(should_debuff)` (card.lua:526-538). A spent perishable stays debuffed;
@@ -408,5 +418,65 @@ impl Game {
             .temp_reroll_cost
             .unwrap_or(self.gs.round_resets.reroll_cost);
         self.gs.current_round.reroll_cost = base + self.gs.current_round.reroll_cost_increase;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use jackdaw_data::{CenterId, CenterSet, centers};
+
+    use crate::debug::{AddKey, AddSpec};
+    use crate::game::Game;
+    use crate::run::RunSpec;
+
+    /// The centers the engine asks for by id carry the names Lua asks for.
+    #[test]
+    fn has_joker_centers_have_their_names() {
+        for (id, name) in [
+            (centers::J_SPLASH, "Splash"),
+            (centers::J_PAREIDOLIA, "Pareidolia"),
+            (centers::J_SMEARED, "Smeared Joker"),
+            (centers::J_RING_MASTER, "Showman"),
+            (centers::J_ASTRONOMER, "Astronomer"),
+            (centers::J_FOUR_FINGERS, "Four Fingers"),
+            (centers::J_SHORTCUT, "Shortcut"),
+        ] {
+            assert_eq!(id.get().name, name);
+        }
+    }
+
+    /// `has_joker_center(id)` is `has_joker(name of id)` with any one joker held.
+    #[test]
+    fn has_joker_center_matches_has_joker() {
+        let base = Game::new_run(&RunSpec {
+            back: centers::B_RED,
+            stake: 1,
+            seed: "HASJOKER".to_owned(),
+            challenge: None,
+        })
+        .unwrap();
+        let ids: Vec<CenterId> = (0..jackdaw_data::CENTERS.len())
+            .map(|i| CenterId(i as u16))
+            .filter(|c| matches!(c.get().set, CenterSet::Joker))
+            .collect();
+        let mut held = 0;
+        for &joker in &ids {
+            let mut g = base.clone();
+            if g.debug_add(&AddSpec::new(AddKey::Joker(joker))).is_err() {
+                continue;
+            }
+            held += 1;
+            for &id in &ids {
+                assert_eq!(
+                    g.has_joker_center(id),
+                    g.has_joker(id.get().name),
+                    "{} held, {} asked",
+                    joker.key(),
+                    id.key()
+                );
+            }
+            assert!(g.has_joker_center(joker));
+        }
+        assert!(held > 100);
     }
 }

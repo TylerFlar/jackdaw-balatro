@@ -214,8 +214,8 @@ impl Game {
                 _ => None,
             },
             nominal: get("nominal").and_then(Value::as_num),
-            pareidolia: self.has_joker("Pareidolia"),
-            smeared: self.has_joker("Smeared Joker"),
+            pareidolia: self.has_joker_center(jackdaw_data::centers::J_PAREIDOLIA),
+            smeared: self.has_joker_center(jackdaw_data::centers::J_SMEARED),
         }
     }
 
@@ -441,7 +441,7 @@ impl Game {
     pub(crate) fn stay_flipped(&mut self, to: AreaId, card: &crate::area::Detached) -> bool {
         let mut flipped = false;
         if to == AreaId::Hand {
-            let pareidolia = self.has_joker("Pareidolia");
+            let pareidolia = self.has_joker_center(jackdaw_data::centers::J_PAREIDOLIA);
             match self.active_boss() {
                 "The Wheel" => {
                     let roll = self.gs.rng.random("wheel");

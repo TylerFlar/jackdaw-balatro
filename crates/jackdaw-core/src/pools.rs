@@ -134,6 +134,32 @@ impl<'a> CardSpec<'a> {
     }
 }
 
+/// A center's `requires` and `enhancement_gate` keys as centers (`None`: a key with no center),
+/// looked up once.
+struct CenterLinks {
+    requires: Box<[Option<CenterId>]>,
+    /// `Some` exactly when the center has an `enhancement_gate`.
+    enhancement_gate: Option<Option<CenterId>>,
+}
+
+fn center_links(id: CenterId) -> &'static CenterLinks {
+    static LINKS: std::sync::OnceLock<Vec<CenterLinks>> = std::sync::OnceLock::new();
+    let links = LINKS.get_or_init(|| {
+        jackdaw_data::CENTERS
+            .iter()
+            .map(|c| CenterLinks {
+                requires: c
+                    .requires
+                    .iter()
+                    .map(|r| jackdaw_data::center_by_key(r))
+                    .collect(),
+                enhancement_gate: c.enhancement_gate.map(jackdaw_data::center_by_key),
+            })
+            .collect()
+    });
+    &links[usize::from(id.0)]
+}
+
 impl Game {
     /// `get_current_pool(_type, _rarity, _legendary, _append)` (common_events.lua:1963-2053) and
     /// the draw from it, `pseudorandom_element(_pool, pseudoseed(_pool_key))` with its
@@ -174,7 +200,7 @@ impl Game {
             (ty.starting_pool(), Key::new(ty.name()).s(append).n(ante))
         };
         let pool_key = key.map_or(pool_key, Key::new);
-        let showman = self.has_joker("Showman");
+        let showman = self.has_joker_center(jackdaw_data::centers::J_RING_MASTER);
         let n = start.len();
         let first = start[crate::rng::element_index(n, self.gs.rng.seed(&pool_key))];
         if self.in_pool(ty, first, showman) {
@@ -208,10 +234,10 @@ impl Game {
         } else if !(sets.used_jokers.contains(id) && !showman) {
             if v.set == CenterSet::Voucher {
                 if !sets.used_vouchers.contains(id) {
-                    let requires_met = v.requires.iter().all(|r| {
-                        jackdaw_data::center_by_key(r)
-                            .is_some_and(|c| sets.used_vouchers.contains(c))
-                    });
+                    let requires_met = center_links(id)
+                        .requires
+                        .iter()
+                        .all(|r| r.is_some_and(|c| sets.used_vouchers.contains(c)));
                     let in_shop = self.gs.areas.shop_vouchers().iter().any(|c| c.center == id);
                     add = requires_met && !in_shop;
                 }
@@ -222,8 +248,7 @@ impl Game {
                     .and_then(|x| x.as_str())
                     .and_then(crate::hand_eval::HandType::from_name);
                 add = !softlock || hand.is_some_and(|h| self.gs.hand(h).played > 0.0);
-            } else if let Some(gate) = v.enhancement_gate {
-                let gate = jackdaw_data::center_by_key(gate);
+            } else if let Some(gate) = center_links(id).enhancement_gate {
                 add = self.playing_cards().any(|c| Some(c.center) == gate);
             } else {
                 add = true;
@@ -267,7 +292,7 @@ impl Game {
             discount_percent: self.gs.discount_percent,
             booster_ante_scaling: self.gs.modifier("booster_ante_scaling").is_some(),
             ante: self.gs.round_resets.ante,
-            astronomer: self.has_joker("Astronomer"),
+            astronomer: self.has_joker_center(jackdaw_data::centers::J_ASTRONOMER),
             in_shop: matches!(area, AreaId::ShopJokers | AreaId::ShopBooster),
         }
     }
@@ -393,7 +418,7 @@ impl Game {
         } = spec;
         let ante = self.gs.round_resets.ante;
         if forced.is_none() && soulable && !self.gs.sets.banned_keys.contains("c_soul") {
-            let showman = self.has_joker("Showman");
+            let showman = self.has_joker_center(jackdaw_data::centers::J_RING_MASTER);
             if matches!(
                 ty,
                 PoolType::Tarot | PoolType::Spectral | PoolType::TarotPlanet

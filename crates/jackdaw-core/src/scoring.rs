@@ -123,14 +123,14 @@ impl Game {
     /// The joker flags hand evaluation reads (non-debuffed Four Fingers, Shortcut).
     pub fn eval_flags(&self) -> EvalFlags {
         EvalFlags {
-            four_fingers: self.has_joker("Four Fingers"),
-            shortcut: self.has_joker("Shortcut"),
+            four_fingers: self.has_joker_center(jackdaw_data::centers::J_FOUR_FINGERS),
+            shortcut: self.has_joker_center(jackdaw_data::centers::J_SHORTCUT),
         }
     }
 
     /// The evaluation view of cards (`get_id`, flush suits with Smeared Joker, `get_nominal`).
     pub fn eval_cards<'a>(&self, cards: impl IntoIterator<Item = &'a Card>) -> EvalCards {
-        let smeared = self.has_joker("Smeared Joker");
+        let smeared = self.has_joker_center(jackdaw_data::centers::J_SMEARED);
         cards
             .into_iter()
             .map(|c| EvalCard {
@@ -245,7 +245,7 @@ impl Game {
         for &i in info.scoring.as_slice() {
             scoring.push(full_hand[i as usize]);
         }
-        if self.has_joker("Splash") {
+        if self.has_joker_center(jackdaw_data::centers::J_SPLASH) {
             scoring = full_hand.clone();
         } else {
             for c in self.gs.areas.play() {

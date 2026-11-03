@@ -486,7 +486,7 @@ fn glass_grow(g: &mut Game, id: u32, glasses: f64) {
 /// card destroyed; XMult in the main step.
 fn caino(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
     let faces = |g: &Game, cards: &[u32]| {
-        let pareidolia = g.has_joker("Pareidolia");
+        let pareidolia = g.has_joker_center(jackdaw_data::centers::J_PAREIDOLIA);
         cards
             .iter()
             .filter(|&&c| {
@@ -562,7 +562,7 @@ fn faceless_joker(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
     if ctx.kind != Kind::Discard || ctx.other_card != ctx.full_hand.last().copied() {
         return None;
     }
-    let pareidolia = g.has_joker("Pareidolia");
+    let pareidolia = g.has_joker_center(jackdaw_data::centers::J_PAREIDOLIA);
     let faces = ctx
         .full_hand
         .iter()
@@ -626,7 +626,7 @@ fn castle(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
     match ctx.kind {
         Kind::Discard if ctx.blueprint == 0 => {
             let suit = g.gs.current_round.castle_card;
-            let smeared = g.has_joker("Smeared Joker");
+            let smeared = g.has_joker_center(jackdaw_data::centers::J_SMEARED);
             let other = g.card(ctx.other_card?);
             if other.debuff || other.is_suit(suit, false, false, smeared) != Some(true) {
                 return None;

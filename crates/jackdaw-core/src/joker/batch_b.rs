@@ -210,7 +210,7 @@ fn blackboard(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
     if ctx.kind != Kind::JokerMain {
         return None;
     }
-    let smeared = g.has_joker("Smeared Joker");
+    let smeared = g.has_joker_center(jackdaw_data::centers::J_SMEARED);
     let all_black = g.gs.areas.hand().iter().all(|c| {
         c.is_suit(Suit::Clubs, false, true, smeared) == Some(true)
             || c.is_suit(Suit::Spades, false, true, smeared) == Some(true)
@@ -226,7 +226,7 @@ fn flower_pot(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
         return None;
     }
     const ORDER: [Suit; 4] = [Suit::Hearts, Suit::Diamonds, Suit::Spades, Suit::Clubs];
-    let smeared = g.has_joker("Smeared Joker");
+    let smeared = g.has_joker_center(jackdaw_data::centers::J_SMEARED);
     let mut found = [false; 4];
     for wild_pass in [false, true] {
         for &c in ctx.scoring_hand {
@@ -253,7 +253,7 @@ fn seeing_double(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
     if ctx.kind != Kind::JokerMain {
         return None;
     }
-    let smeared = g.has_joker("Smeared Joker");
+    let smeared = g.has_joker_center(jackdaw_data::centers::J_SMEARED);
     // Hearts, Diamonds, Spades, Clubs.
     let mut n = [0u32; 4];
     let order = [Suit::Hearts, Suit::Diamonds, Suit::Spades, Suit::Clubs];
@@ -340,7 +340,7 @@ fn vagabond(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
 fn ride_the_bus(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
     match ctx.kind {
         Kind::Before if ctx.blueprint == 0 => {
-            let pareidolia = g.has_joker("Pareidolia");
+            let pareidolia = g.has_joker_center(jackdaw_data::centers::J_PAREIDOLIA);
             let faces = ctx
                 .scoring_hand
                 .iter()
@@ -530,7 +530,7 @@ fn midas_mask(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
     }
     let mut faces = 0;
     for &c in ctx.scoring_hand {
-        let pareidolia = g.has_joker("Pareidolia");
+        let pareidolia = g.has_joker_center(jackdaw_data::centers::J_PAREIDOLIA);
         if g.card(c).is_face(false, pareidolia) {
             faces += 1;
             g.set_card_ability(c, centers::M_GOLD);

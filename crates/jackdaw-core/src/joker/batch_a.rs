@@ -34,7 +34,7 @@ fn suit_mult(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
     }
     let suit = Suit::from_name(g.extra_str(id, "suit")).expect("Suit Mult suit");
     let other = ctx.other_card?;
-    let smeared = g.has_joker("Smeared Joker");
+    let smeared = g.has_joker_center(jackdaw_data::centers::J_SMEARED);
     if g.card(other).is_suit(suit, false, false, smeared) == Some(true) {
         return Some(mult(g.extra_num(id, "s_mult"), id));
     }
