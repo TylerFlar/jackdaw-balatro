@@ -611,8 +611,8 @@ pub fn card_from(v: &Value, path: &str) -> Result<Card> {
     })
 }
 
-fn cards_json(cards: &[Card]) -> Value {
-    Value::Array(cards.iter().map(card_json).collect())
+fn cards_json<'a>(cards: impl IntoIterator<Item = &'a Card>) -> Value {
+    Value::Array(cards.into_iter().map(card_json).collect())
 }
 
 fn cards_from(v: &[Value], path: &str) -> Result<Vec<Card>> {
@@ -688,6 +688,31 @@ fn hands_json(gs: &GameState) -> Value {
     )
 }
 
+/// The sort ids of an imported snapshot's cards: the list each was seen in, and the largest.
+#[derive(Default)]
+struct SortIds {
+    seen: HashMap<u32, usize>,
+    paths: Vec<String>,
+    max: Option<u32>,
+}
+
+impl SortIds {
+    /// Add the sort ids of `cards` (the list at `path`), failing on one already seen.
+    fn add(&mut self, cards: &[Card], path: &str) -> Result<()> {
+        self.paths.push(path.to_owned());
+        for c in cards {
+            if let Some(first) = self.seen.insert(c.sort_id, self.paths.len() - 1) {
+                return err(format!(
+                    "{path}: two cards with sort id {} (the other in {})",
+                    c.sort_id, self.paths[first]
+                ));
+            }
+            self.max = self.max.max(Some(c.sort_id));
+        }
+        Ok(())
+    }
+}
+
 /// The snapshot's `areas` section.
 fn areas_json(gs: &GameState) -> Value {
     Value::Object(
@@ -718,7 +743,7 @@ fn pack_json(gs: &GameState) -> Value {
             .dealt
             .iter()
             .copied()
-            .filter(|&id| gs.areas.hand.iter().any(|c| c.sort_id == id))
+            .filter(|&id| gs.areas.hand().iter().any(|c| c.sort_id == id))
             .collect();
         held.sort_unstable();
         json!({
@@ -1218,15 +1243,19 @@ pub fn import(v: &Value) -> Result<GameState> {
 
     let mut ao = Obj::new(o.field("areas")?, "$.areas")?;
     let mut areas = Areas::default();
+    // Each card's sort id must be its own (the areas index the cards by it), and below
+    // `next_sort_id`, which the run hands to its next new card.
+    let mut sort_ids = SortIds::default();
     for a in AreaId::ALL {
         let p = format!("$.areas.{}", a.name());
         let mut cards = cards_from(ao.arr(a.name())?, &p)?;
+        sort_ids.add(&cards, &p)?;
         if a.face_down() {
             for c in &mut cards {
                 c.facing = Facing::Back;
             }
         }
-        *areas.get_mut(a) = cards;
+        areas.set(a, cards);
     }
     ao.done()?;
 
@@ -1303,6 +1332,15 @@ pub fn import(v: &Value) -> Result<GameState> {
             .collect::<Result<_>>()?,
     };
     s.done()?;
+    sort_ids.add(&sim.pending_deck_bottom, "$.sim.pending_deck_bottom")?;
+    if let Some(max) = sort_ids.max
+        && sim.next_sort_id <= max
+    {
+        return err(format!(
+            "$.sim.next_sort_id: {} is not above the largest sort id, {max}",
+            sim.next_sort_id
+        ));
+    }
 
     let gs = GameState {
         phase: ph,
@@ -1411,5 +1449,67 @@ mod tests {
         assert_eq!(num(-0.0), json!(0));
         assert_eq!(num(3.0), json!(3));
         assert_eq!(num(0.25), json!(0.25));
+    }
+
+    /// A new run's snapshot, with a card moved from the deck to the hand.
+    fn run_snapshot() -> Value {
+        let spec = crate::run::RunSpec {
+            back: crate::card::center_by_key("b_red").unwrap(),
+            stake: 1,
+            seed: "SORTIDS".to_owned(),
+            challenge: None,
+        };
+        let mut v = crate::game::Game::new_run(&spec).unwrap().snapshot();
+        let card = v["areas"]["deck"].as_array_mut().unwrap().pop().unwrap();
+        v["areas"]["hand"].as_array_mut().unwrap().push(card);
+        v
+    }
+
+    fn sort_id(v: &Value, area: &str, i: usize) -> Value {
+        v["areas"][area][i]["sort_id"].clone()
+    }
+
+    #[test]
+    fn a_run_imports() {
+        let v = run_snapshot();
+        assert_eq!(export(&import(&v).unwrap()), v);
+    }
+
+    #[test]
+    fn sort_ids_must_differ() {
+        // In one area.
+        let mut v = run_snapshot();
+        v["areas"]["deck"][1]["sort_id"] = sort_id(&v, "deck", 0);
+        let e = import(&v).unwrap_err().0;
+        assert!(e.starts_with("$.areas.deck: two cards with sort id"), "{e}");
+        // Across areas.
+        let mut v = run_snapshot();
+        v["areas"]["hand"][0]["sort_id"] = sort_id(&v, "deck", 3);
+        let e = import(&v).unwrap_err().0;
+        assert!(e.contains("(the other in $.areas.deck)"), "{e}");
+        // With a pending stone card.
+        let mut v = run_snapshot();
+        let mut card = v["areas"]["hand"][0].clone();
+        card["sort_id"] = sort_id(&v, "deck", 5);
+        v["sim"]["pending_deck_bottom"] = json!([card]);
+        let e = import(&v).unwrap_err().0;
+        assert!(e.starts_with("$.sim.pending_deck_bottom: two cards"), "{e}");
+    }
+
+    #[test]
+    fn next_sort_id_must_be_above_every_sort_id() {
+        let mut v = run_snapshot();
+        let max = AreaId::ALL
+            .iter()
+            .flat_map(|a| v["areas"][a.name()].as_array().unwrap())
+            .map(|c| c["sort_id"].as_u64().unwrap())
+            .max()
+            .unwrap();
+        assert!(v["sim"]["next_sort_id"].as_u64().unwrap() > max);
+        v["sim"]["next_sort_id"] = json!(max + 1);
+        assert!(import(&v).is_ok());
+        v["sim"]["next_sort_id"] = json!(max);
+        let e = import(&v).unwrap_err().0;
+        assert!(e.starts_with("$.sim.next_sort_id:"), "{e}");
     }
 }

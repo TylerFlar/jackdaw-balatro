@@ -191,7 +191,7 @@ fn burglar_event(g: &mut Game, id: u32, _: f64) {
 /// two slots and creates that many Common jokers (`'rif'`) in an event.
 fn riff_raff(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
     if ctx.kind == Kind::SettingBlind && !g.source_sliced(id, ctx) && g.joker_room() {
-        let held = g.gs.areas.jokers.len() as f64 + g.rt.joker_buffer;
+        let held = g.gs.areas.jokers().len() as f64 + g.rt.joker_buffer;
         let n = 2.0f64.min(g.gs.joker_slots - held);
         g.rt.joker_buffer += n;
         g.queue(Event::Call(riff_raff_event, id, n));
@@ -486,7 +486,7 @@ fn glass_grow(g: &mut Game, id: u32, glasses: f64) {
 /// card destroyed; XMult in the main step.
 fn caino(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
     let faces = |g: &Game, cards: &[u32]| {
-        let pareidolia = g.has_joker("Pareidolia");
+        let pareidolia = g.has_joker_center(jackdaw_data::centers::J_PAREIDOLIA);
         cards
             .iter()
             .filter(|&&c| {
@@ -547,12 +547,9 @@ fn burnt_joker(g: &mut Game, _: u32, ctx: &mut Ctx) -> Option<Effect> {
     if ctx.kind != Kind::PreDiscard || ctx.hook || g.gs.current_round.discards_used > 0.0 {
         return None;
     }
-    let cards: Vec<_> = ctx
-        .full_hand
-        .iter()
-        .filter_map(|&c| g.gs.areas.card(c).cloned())
-        .collect();
-    let info = get_poker_hand_info(&g.eval_cards(&cards), g.eval_flags());
+    let areas = &g.gs.areas;
+    let cards = g.eval_cards(ctx.full_hand.iter().filter_map(|&c| areas.card(c)));
+    let info = get_poker_hand_info(&cards, g.eval_flags());
     if let Some(hand) = info.hand {
         g.level_up_hand(hand, 1.0);
     }
@@ -565,7 +562,7 @@ fn faceless_joker(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
     if ctx.kind != Kind::Discard || ctx.other_card != ctx.full_hand.last().copied() {
         return None;
     }
-    let pareidolia = g.has_joker("Pareidolia");
+    let pareidolia = g.has_joker_center(jackdaw_data::centers::J_PAREIDOLIA);
     let faces = ctx
         .full_hand
         .iter()
@@ -629,7 +626,7 @@ fn castle(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
     match ctx.kind {
         Kind::Discard if ctx.blueprint == 0 => {
             let suit = g.gs.current_round.castle_card;
-            let smeared = g.has_joker("Smeared Joker");
+            let smeared = g.has_joker_center(jackdaw_data::centers::J_SMEARED);
             let other = g.card(ctx.other_card?);
             if other.debuff || other.is_suit(suit, false, false, smeared) != Some(true) {
                 return None;
@@ -737,10 +734,10 @@ fn gift_card(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
     let extra = g.extra(id);
     for area in [AreaId::Jokers, AreaId::Consumables] {
         let cost = g.cost_context(area);
-        for c in g.gs.areas.get_mut(area) {
+        g.gs.areas.get_mut(area).for_each(|c| {
             c.ability.extra_value += extra;
             c.set_cost(&cost);
-        }
+        });
     }
     Some(message())
 }

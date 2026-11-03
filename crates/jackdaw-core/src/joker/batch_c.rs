@@ -75,14 +75,20 @@ fn other_card(ctx: &Ctx, kind: Kind, area: AreaId) -> Option<u32> {
 
 /// `card:is_face()`: Pareidolia makes every card a face; a debuffed card is never one.
 fn is_face(g: &Game, card: u32) -> bool {
-    g.card(card).is_face(false, g.has_joker("Pareidolia"))
+    g.card(card).is_face(
+        false,
+        g.has_joker_center(jackdaw_data::centers::J_PAREIDOLIA),
+    )
 }
 
 /// `card:is_suit(suit)`, with Smeared Joker. A debuffed card returns nil, which is falsy.
 fn is_suit(g: &Game, card: u32, suit: Suit) -> bool {
-    g.card(card)
-        .is_suit(suit, false, false, g.has_joker("Smeared Joker"))
-        == Some(true)
+    g.card(card).is_suit(
+        suit,
+        false,
+        false,
+        g.has_joker_center(jackdaw_data::centers::J_SMEARED),
+    ) == Some(true)
 }
 
 /// `{dollars = x, card = self}`, after adding `x` to `G.GAME.dollar_buffer` and queueing the
@@ -382,7 +388,7 @@ fn raised_fist(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
     let other = other_card(ctx, Kind::Individual, AreaId::Hand)?;
     let (mut temp_mult, mut temp_id) = (15.0, 15);
     let mut raised = None;
-    for c in &g.gs.areas.hand {
+    for c in g.gs.areas.hand() {
         let Some(base) = c.base else { continue };
         if temp_id >= base.id() && !c.is_stone() {
             temp_mult = base.nominal();

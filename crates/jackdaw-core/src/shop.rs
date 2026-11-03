@@ -76,7 +76,7 @@ impl Game {
         }
         // The new shop's `G.shop_vouchers` holds one card (UI_definitions.lua:646-651).
         self.rt.areas.voucher_limit = 1.0;
-        let n = self.gs.shop_joker_max - self.gs.areas.shop_jokers.len() as f64;
+        let n = self.gs.shop_joker_max - self.gs.areas.shop_jokers().len() as f64;
         let mut i = 1.0;
         while i <= n {
             let card = self.create_card_for_shop(AreaId::ShopJokers);
@@ -213,7 +213,7 @@ impl Game {
         for id in self.gs.areas.ids(AreaId::ShopJokers).into_iter().rev() {
             self.remove_card(id);
         }
-        let n = self.gs.shop_joker_max - self.gs.areas.shop_jokers.len() as f64;
+        let n = self.gs.shop_joker_max - self.gs.areas.shop_jokers().len() as f64;
         let mut i = 1.0;
         while i <= n {
             let card = self.create_card_for_shop(AreaId::ShopJokers);
@@ -244,9 +244,9 @@ impl Game {
             set,
             CenterSet::Voucher | CenterSet::Enhanced | CenterSet::Default
         ) || (set == CenterSet::Joker
-            && (self.gs.areas.jokers.len() as f64) < self.gs.joker_slots + extra)
+            && (self.gs.areas.jokers().len() as f64) < self.gs.joker_slots + extra)
             || (card.center().consumeable
-                && (self.gs.areas.consumables.len() as f64) < self.gs.consumable_slots + extra)
+                && (self.gs.areas.consumables().len() as f64) < self.gs.consumable_slots + extra)
     }
 
     /// `buy_from_shop`'s event (button_callbacks.lua:2414-2477): the card joins the run, then

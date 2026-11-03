@@ -211,7 +211,7 @@ impl GymEnv {
 
     /// Take the table's action `index`.
     pub fn step(&mut self, index: usize) -> Result<StepResult, StepError> {
-        let action = *self.table.get(index).ok_or(StepError::BadIndex(index))?;
+        let action = self.table.get(index).ok_or(StepError::BadIndex(index))?;
         let engine_action = to_engine(&action, &self.game).map_err(|e| StepError::Convert(e.0))?;
         // No rollback copy: an illegal action changes nothing, and a NotPorted refusal ends the
         // episode.
@@ -236,7 +236,7 @@ impl GymEnv {
             Ok(r) => Ok((r, None)),
             Err(StepError::BadIndex(i)) => Err(StepError::BadIndex(i)),
             Err(StepError::Convert(m) | StepError::Illegal(m)) => {
-                let action = *self.table.get(index).expect("checked index");
+                let action = self.table.get(index).expect("checked index");
                 Ok((self.cut(action), Some(m)))
             }
         }
@@ -289,21 +289,7 @@ impl GymEnv {
     /// The Gym observation of the current state, flattened ([`GYM_OBS_LEN`] values): the global
     /// context, each entity array's first rows padded with zeros, the entity counts.
     pub fn write_obs(&mut self, out: &mut [f32]) {
-        let obs = self.encoder.encode(&self.game.gs);
-        let (global, mut rest) = out.split_at_mut(D_GLOBAL);
-        global.copy_from_slice(obs.global());
-        let rows = obs.rows();
-        let mut counts = [0f32; 5];
-        for k in 0..5 {
-            let width = ENTITY_WIDTHS[k];
-            let (slot, tail) = rest.split_at_mut(MAX_COUNTS[k] * width);
-            let n = rows[k].min(MAX_COUNTS[k]);
-            slot[..n * width].copy_from_slice(&obs.entity(k)[..n * width]);
-            slot[n * width..].fill(0.0);
-            counts[k] = n as f32;
-            rest = tail;
-        }
-        rest.copy_from_slice(&counts);
+        self.encoder.encode_padded(&self.game.gs, MAX_COUNTS, out);
     }
 
     /// The Gym action mask: the table's actions are the first legal slots.

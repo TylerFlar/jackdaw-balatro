@@ -191,7 +191,7 @@ impl Game {
         // Cerulean Bell's forced card stays highlighted (CardArea:update, cardarea.lua:255-259).
         let highlighted = gs
             .areas
-            .hand
+            .hand()
             .iter()
             .filter(|c| c.ability.forced_selection)
             .map(|c| c.sort_id)
@@ -213,7 +213,7 @@ impl Game {
             + gs.sim.pending_deck_bottom.len();
         let areas = AreaMemo {
             deck_limit: playing as f64,
-            voucher_limit: (gs.areas.shop_vouchers.len() as f64).max(1.0),
+            voucher_limit: (gs.areas.shop_vouchers().len() as f64).max(1.0),
             stale_shop: None,
             no_buy_button: Vec::new(),
         };
@@ -239,11 +239,11 @@ impl Game {
         // Card:update's perma_debuff line (card.lua:4158), for a snapshot that was edited:
         // the engine itself never leaves such a card undebuffed (`update_cards`).
         for a in AreaId::PLAYING {
-            for c in game.gs.areas.get_mut(a) {
+            game.gs.areas.get_mut(a).for_each(|c| {
                 if c.ability.perma_debuff {
                     c.debuff = true;
                 }
-            }
+            });
         }
         game.update_cards();
         game
@@ -337,12 +337,11 @@ impl Game {
         cards
     }
 
-    /// The playing cards in the areas (the deck, hand, discard pile and play), area by area:
-    /// `G.playing_cards` but Marble's pending stones, for passes whose order doesn't matter.
+    /// The playing cards in the areas (the deck, hand, discard pile and play), in no particular
+    /// order: `G.playing_cards` but Marble's pending stones, for passes whose order doesn't
+    /// matter.
     pub fn playing_cards(&self) -> impl Iterator<Item = &crate::card::Card> {
-        AreaId::PLAYING
-            .into_iter()
-            .flat_map(|a| self.gs.areas.get(a).iter())
+        self.gs.areas.unordered(&AreaId::PLAYING)
     }
 }
 

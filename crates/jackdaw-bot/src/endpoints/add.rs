@@ -104,7 +104,7 @@ fn run(ctx: &mut Ctx) -> Result<Json, BotError> {
     if card_type == CardType::Pack {
         // `G.shop_booster` always exists in SHOP ("Shop booster area not available" can't
         // happen); its `card_limit` is 2.
-        if ctx.game().gs.areas.shop_booster.len() >= 2 {
+        if ctx.game().gs.areas.shop_booster().len() >= 2 {
             return Err(BotError::not_allowed(
                 "Cannot add pack, shop booster slots are full",
             ));

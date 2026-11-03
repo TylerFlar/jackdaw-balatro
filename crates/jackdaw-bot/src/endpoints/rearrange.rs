@@ -56,7 +56,7 @@ fn run(ctx: &mut Ctx) -> Result<Json, BotError> {
                 "Can only rearrange hand during hand selection",
             ));
         }
-        if state == Some(GState::SmodsBoosterOpened) && ctx.game().gs.areas.hand.is_empty() {
+        if state == Some(GState::SmodsBoosterOpened) && ctx.game().gs.areas.hand().is_empty() {
             return Err(BotError::not_allowed(
                 "No cards to rearrange. You can only rearrange hand in Arcana and Spectral packs.",
             ));

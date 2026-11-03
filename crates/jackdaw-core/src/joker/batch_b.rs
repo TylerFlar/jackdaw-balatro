@@ -90,7 +90,7 @@ fn half(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
 /// the same `x_mult` while a slot is empty (card.lua:3966-3972); it can only run when the
 /// shared rule did not, so it never fires with a fresh `x_mult`.
 fn stencil(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
-    let empty = g.gs.joker_slots - g.gs.areas.jokers.len() as f64;
+    let empty = g.gs.joker_slots - g.gs.areas.jokers().len() as f64;
     (ctx.kind == Kind::JokerMain && empty > 0.0).then(|| xmult_mod(g.card(id).ability.x_mult))
 }
 
@@ -138,7 +138,7 @@ fn supernova(g: &mut Game, _id: u32, ctx: &mut Ctx) -> Option<Effect> {
 
 /// Blue Joker: +Chips per card left in the deck (card.lua:3887-3893).
 fn blue_joker(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
-    let deck = g.gs.areas.deck.len() as f64;
+    let deck = g.gs.areas.deck().len() as f64;
     (ctx.kind == Kind::JokerMain && deck > 0.0).then(|| chip_mod(g.extra(id) * deck))
 }
 
@@ -210,8 +210,8 @@ fn blackboard(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
     if ctx.kind != Kind::JokerMain {
         return None;
     }
-    let smeared = g.has_joker("Smeared Joker");
-    let all_black = g.gs.areas.hand.iter().all(|c| {
+    let smeared = g.has_joker_center(jackdaw_data::centers::J_SMEARED);
+    let all_black = g.gs.areas.hand().iter().all(|c| {
         c.is_suit(Suit::Clubs, false, true, smeared) == Some(true)
             || c.is_suit(Suit::Spades, false, true, smeared) == Some(true)
     });
@@ -226,7 +226,7 @@ fn flower_pot(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
         return None;
     }
     const ORDER: [Suit; 4] = [Suit::Hearts, Suit::Diamonds, Suit::Spades, Suit::Clubs];
-    let smeared = g.has_joker("Smeared Joker");
+    let smeared = g.has_joker_center(jackdaw_data::centers::J_SMEARED);
     let mut found = [false; 4];
     for wild_pass in [false, true] {
         for &c in ctx.scoring_hand {
@@ -253,7 +253,7 @@ fn seeing_double(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
     if ctx.kind != Kind::JokerMain {
         return None;
     }
-    let smeared = g.has_joker("Smeared Joker");
+    let smeared = g.has_joker_center(jackdaw_data::centers::J_SMEARED);
     // Hearts, Diamonds, Spades, Clubs.
     let mut n = [0u32; 4];
     let order = [Suit::Hearts, Suit::Diamonds, Suit::Spades, Suit::Clubs];
@@ -340,7 +340,7 @@ fn vagabond(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
 fn ride_the_bus(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
     match ctx.kind {
         Kind::Before if ctx.blueprint == 0 => {
-            let pareidolia = g.has_joker("Pareidolia");
+            let pareidolia = g.has_joker_center(jackdaw_data::centers::J_PAREIDOLIA);
             let faces = ctx
                 .scoring_hand
                 .iter()
@@ -530,7 +530,7 @@ fn midas_mask(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
     }
     let mut faces = 0;
     for &c in ctx.scoring_hand {
-        let pareidolia = g.has_joker("Pareidolia");
+        let pareidolia = g.has_joker_center(jackdaw_data::centers::J_PAREIDOLIA);
         if g.card(c).is_face(false, pareidolia) {
             faces += 1;
             g.set_card_ability(c, centers::M_GOLD);

@@ -294,7 +294,7 @@ impl GymEnv {
         self.inner
             .table()
             .get(index)
-            .map(factored_to_py)
+            .map(|a| factored_to_py(&a))
             .ok_or_else(|| PyIndexError::new_err(format!("no action {index}")))
     }
 

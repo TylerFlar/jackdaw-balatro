@@ -21,6 +21,20 @@ struct DebuffRule {
     smeared: bool,
 }
 
+impl DebuffRule {
+    /// `Blind:debuff_card` debuffs no playing card: each gets `set_debuff(false)`
+    /// ([`Game::debuff_card_at`]'s branches for a card outside the jokers).
+    fn debuffs_no_playing_card(&self) -> bool {
+        self.disabled
+            || (self.suit.is_none()
+                && !self.face
+                && self.name != "The Pillar"
+                && self.value.is_none()
+                && self.nominal.is_none()
+                && self.name != "Verdant Leaf")
+    }
+}
+
 /// The empty blind between rounds (`set_blind(nil)`).
 fn empty_blind() -> BlindState {
     BlindState {
@@ -118,11 +132,11 @@ impl Game {
                     self.queue(Event::EaseHandsPlayed(-sub));
                 }
                 "The Manacle" => self.change_size(AreaId::Hand, -1.0),
-                "Amber Acorn" if !self.gs.areas.jokers.is_empty() => {
-                    for c in &mut self.gs.areas.jokers {
+                "Amber Acorn" if !self.gs.areas.jokers().is_empty() => {
+                    self.gs.areas.jokers_mut().for_each(|c| {
                         c.flip();
-                    }
-                    if self.gs.areas.jokers.len() > 1 {
+                    });
+                    if self.gs.areas.jokers().len() > 1 {
                         self.queue(Event::AmberAcorn);
                     }
                 }
@@ -166,12 +180,12 @@ impl Game {
     /// debuffed when they land.
     pub(crate) fn debuff_playing_cards(&mut self) {
         let rule = self.debuff_rule();
-        // Without a live blind every card gets `set_debuff(false)`, which changes only a card
+        // Without a live blind, or under one with no rule for playing cards (the Small and Big
+        // blinds, most bosses), every card gets `set_debuff(false)`, which changes only a card
         // that is debuffed, debuffed for good, or a spent perishable.
-        if rule.disabled
-            && AreaId::PLAYING
-                .into_iter()
-                .flat_map(|a| self.gs.areas.get(a).iter())
+        if rule.debuffs_no_playing_card()
+            && self
+                .playing_cards()
                 .all(|c| !c.debuff && !c.ability.perma_debuff && !c.ability.perishable)
         {
             return;
@@ -200,8 +214,8 @@ impl Game {
                 _ => None,
             },
             nominal: get("nominal").and_then(Value::as_num),
-            pareidolia: self.has_joker("Pareidolia"),
-            smeared: self.has_joker("Smeared Joker"),
+            pareidolia: self.has_joker_center(jackdaw_data::centers::J_PAREIDOLIA),
+            smeared: self.has_joker_center(jackdaw_data::centers::J_SMEARED),
         }
     }
 
@@ -328,7 +342,7 @@ impl Game {
                 self.blind_mut().triggered = true;
             }
             "Crimson Heart" => {
-                if !self.gs.areas.jokers.is_empty() {
+                if !self.gs.areas.jokers().is_empty() {
                     self.blind_mut().triggered = true;
                     self.blind_mut().prepped = true;
                 }
@@ -347,7 +361,7 @@ impl Game {
         let mut cards: Vec<u32> = self.gs.areas.ids(AreaId::Hand).to_vec();
         let mut any = false;
         for i in 0..2 {
-            if i < self.gs.areas.hand.len() {
+            if i < self.gs.areas.hand().len() {
                 cards.sort_unstable();
                 let seed = self.gs.rng.seed("hook");
                 let k = crate::rng::element_index(cards.len(), seed);
@@ -379,10 +393,10 @@ impl Game {
                 let any_forced = self
                     .gs
                     .areas
-                    .hand
+                    .hand()
                     .iter()
                     .any(|c| c.ability.forced_selection);
-                if !any_forced && !self.gs.areas.hand.is_empty() {
+                if !any_forced && !self.gs.areas.hand().is_empty() {
                     self.unhighlight_all_hand();
                     let mut ids = self.gs.areas.ids(AreaId::Hand);
                     ids.sort_unstable();
@@ -396,7 +410,7 @@ impl Game {
             }
             "Crimson Heart"
                 if self.gs.blind.as_ref().is_some_and(|b| b.prepped)
-                    && !self.gs.areas.jokers.is_empty() =>
+                    && !self.gs.areas.jokers().is_empty() =>
             {
                 let all = self.gs.areas.ids(AreaId::Jokers);
                 let single = all.len() < 2;
@@ -424,10 +438,10 @@ impl Game {
 
     /// `Blind:stay_flipped(area, card)` (blind.lua:605-622), then the `flipped_cards` challenge
     /// rule (common_events.lua:403-407).
-    pub(crate) fn stay_flipped(&mut self, to: AreaId, card: &crate::card::Card) -> bool {
+    pub(crate) fn stay_flipped(&mut self, to: AreaId, card: &crate::area::Detached) -> bool {
         let mut flipped = false;
         if to == AreaId::Hand {
-            let pareidolia = self.has_joker("Pareidolia");
+            let pareidolia = self.has_joker_center(jackdaw_data::centers::J_PAREIDOLIA);
             match self.active_boss() {
                 "The Wheel" => {
                     let roll = self.gs.rng.random("wheel");
@@ -437,7 +451,7 @@ impl Game {
                     flipped = self.gs.current_round.hands_played == 0.0
                         && self.gs.current_round.discards_used == 0.0;
                 }
-                "The Mark" => flipped = card.is_face(true, pareidolia),
+                "The Mark" => flipped = self.gs.areas.detached(card).is_face(true, pareidolia),
                 "The Fish" => flipped = self.gs.blind.as_ref().is_some_and(|b| b.prepped),
                 _ => {}
             }
@@ -454,25 +468,51 @@ impl Game {
         flipped
     }
 
+    /// [`Game::stay_flipped`]'s answer when it is the same for every card and rolls nothing:
+    /// `None` under The Wheel, The Mark or the `flipped_cards` challenge rule.
+    pub(crate) fn uniform_stay_flipped(&self, to: AreaId) -> Option<bool> {
+        if to != AreaId::Hand {
+            return Some(false);
+        }
+        if self
+            .gs
+            .modifiers
+            .get("flipped_cards")
+            .and_then(|v| v.as_num())
+            .is_some()
+        {
+            return None;
+        }
+        match self.active_boss() {
+            "The Wheel" | "The Mark" => None,
+            "The House" => Some(
+                self.gs.current_round.hands_played == 0.0
+                    && self.gs.current_round.discards_used == 0.0,
+            ),
+            "The Fish" => Some(self.gs.blind.as_ref().is_some_and(|b| b.prepped)),
+            _ => Some(false),
+        }
+    }
+
     /// `Blind:disable()` (blind.lua:356-415).
     pub(crate) fn blind_disable(&mut self) {
         self.blind_mut().disabled = true;
-        for c in &mut self.gs.areas.jokers {
+        self.gs.areas.jokers_mut().for_each(|c| {
             if c.facing == crate::card::Facing::Back {
                 c.flip();
             }
-        }
+        });
         match self.blind_name() {
             "The Water" => {
                 let sub = self.blind_mut().discards_sub.unwrap_or(0.0);
                 self.queue(Event::EaseDiscard(sub));
             }
             "The Wheel" | "The House" | "The Mark" | "The Fish" => {
-                for c in &mut self.gs.areas.hand {
+                self.gs.areas.hand_mut().for_each(|c| {
                     if c.facing == crate::card::Facing::Back {
                         c.flip();
                     }
-                }
+                });
             }
             "The Needle" => {
                 let sub = self.blind_mut().hands_sub.unwrap_or(0.0);
@@ -503,11 +543,11 @@ impl Game {
     /// `Blind:defeat()` (blind.lua:276-344).
     pub(crate) fn blind_defeat(&mut self) {
         self.queue(Event::BlindReset);
-        for c in &mut self.gs.areas.jokers {
+        self.gs.areas.jokers_mut().for_each(|c| {
             if c.facing == crate::card::Facing::Back {
                 c.flip();
             }
-        }
+        });
         if self.blind_name() == "The Manacle" && !self.blind_mut().disabled {
             self.change_size(AreaId::Hand, 1.0);
         }

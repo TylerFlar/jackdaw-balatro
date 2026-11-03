@@ -103,7 +103,7 @@ fn run(ctx: &mut Ctx) -> Result<Json, BotError> {
     }
     let set_name = crate::view::card_set_name(card);
     if set_name == "JOKER" {
-        let (count, limit) = (gs.areas.jokers.len() as f64, gs.joker_slots);
+        let (count, limit) = (gs.areas.jokers().len() as f64, gs.joker_slots);
         if count >= limit {
             return Err(BotError::bad_request(format!(
                 "Cannot purchase joker card, joker slots are full. Current: {}, Limit: {}",
@@ -113,7 +113,7 @@ fn run(ctx: &mut Ctx) -> Result<Json, BotError> {
         }
     }
     if matches!(set_name, "PLANET" | "SPECTRAL" | "TAROT") {
-        let (count, limit) = (gs.areas.consumables.len() as f64, gs.consumable_slots);
+        let (count, limit) = (gs.areas.consumables().len() as f64, gs.consumable_slots);
         if count >= limit {
             return Err(BotError::bad_request(format!(
                 "Cannot purchase consumable card, consumable slots are full. Current: {}, Limit: {}",

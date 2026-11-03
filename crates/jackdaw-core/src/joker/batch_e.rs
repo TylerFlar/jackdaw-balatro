@@ -132,7 +132,7 @@ fn invisible_joker(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
                 return None;
             }
             let mut others: Vec<u32> = g.joker_ids().into_iter().filter(|&j| j != id).collect();
-            if others.is_empty() || (g.gs.areas.jokers.len() as f64) > g.gs.joker_slots {
+            if others.is_empty() || (g.gs.areas.jokers().len() as f64) > g.gs.joker_slots {
                 return None;
             }
             // `pseudorandom_element` sorts cards by sort id.
@@ -221,7 +221,7 @@ fn red_card(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
 /// Negative (card.lua:2412-2426). No Blueprint guard (G16): every copy queues its own event,
 /// and a later event can copy an earlier event's card.
 fn perkeo(g: &mut Game, _id: u32, ctx: &mut Ctx) -> Option<Effect> {
-    if ctx.kind == Kind::EndingShop && !g.gs.areas.consumables.is_empty() {
+    if ctx.kind == Kind::EndingShop && !g.gs.areas.consumables().is_empty() {
         g.queue(Event::Call(perkeo_copy, 0, 0.0));
     }
     None

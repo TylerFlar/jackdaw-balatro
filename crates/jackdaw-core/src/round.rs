@@ -60,9 +60,9 @@ impl Game {
             if let Some(ante) = self.modifier_num("set_eternal_ante")
                 && self.gs.round_resets.ante == ante
             {
-                for c in &mut self.gs.areas.jokers {
+                self.gs.areas.jokers_mut().for_each(|c| {
                     c.set_eternal(true);
-                }
+                });
             }
             if let Some(ante) = self.modifier_num("set_joker_slots_ante")
                 && self.gs.round_resets.ante == ante
@@ -138,7 +138,7 @@ impl Game {
             ret.card = Some(id);
         }
         if c.seal == Some(crate::card::Seal::Blue)
-            && (self.gs.areas.consumables.len() as f64) + self.rt.consumeable_buffer
+            && (self.gs.areas.consumables().len() as f64) + self.rt.consumeable_buffer
                 < self.gs.consumable_slots
         {
             self.rt.consumeable_buffer += 1.0;
@@ -199,9 +199,9 @@ impl Game {
                     .round_resets
                     .set_blind_state(BlindSlot::Boss, "Defeated");
                 for a in AreaId::PLAYING {
-                    for c in self.gs.areas.get_mut(a) {
+                    self.gs.areas.get_mut(a).for_each(|c| {
                         c.ability.played_this_ante = false;
-                    }
+                    });
                 }
             }
         }
@@ -216,10 +216,10 @@ impl Game {
         self.reset_ancient_card();
         self.reset_castle_card();
         for a in AreaId::PLAYING {
-            for c in self.gs.areas.get_mut(a) {
+            self.gs.areas.get_mut(a).for_each(|c| {
                 c.ability.discarded = false;
                 c.ability.forced_selection = false;
-            }
+            });
         }
     }
 
@@ -238,7 +238,7 @@ impl Game {
             &mut spill
         };
         let mut n = 0;
-        for c in playing_cards(&self.gs.areas) {
+        for c in self.playing_cards() {
             if !c.is_stone() {
                 let id = c.sort_id as usize;
                 bits[id / 64] |= 1 << (id % 64);
@@ -264,8 +264,9 @@ impl Game {
             r -= ones;
         }
         Some(
-            playing_cards(&self.gs.areas)
-                .find(|c| c.sort_id == pick)
+            self.gs
+                .areas
+                .card(pick)
                 .and_then(|c| c.base)
                 .expect("playing card"),
         )
@@ -396,11 +397,4 @@ impl Game {
             .filter(|c| c.get_id() == Some(9))
             .count() as f64
     }
-}
-
-/// The cards of the playing areas, area by area.
-fn playing_cards(areas: &crate::state::Areas) -> impl Iterator<Item = &crate::card::Card> {
-    AreaId::PLAYING
-        .into_iter()
-        .flat_map(move |a| areas.get(a).iter())
 }

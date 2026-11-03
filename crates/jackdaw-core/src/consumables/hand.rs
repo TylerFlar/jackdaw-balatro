@@ -65,7 +65,7 @@ impl Game {
     /// Sigil and Ouija (card.lua:1222-1262): one suit or rank drawn now, then every card of the
     /// hand rebuilt in its own event. Ouija also takes a hand size.
     pub(super) fn use_sigil_ouija(&mut self, id: u32) {
-        let n = self.gs.areas.hand.len();
+        let n = self.gs.areas.hand().len();
         if self.card(id).name() == "Sigil" {
             let seed = self.gs.rng.seed("sigil");
             let suit = crate::rng::element_index(SUITS.len(), seed);
@@ -223,14 +223,14 @@ pub(super) fn cryptid(g: &mut Game, id: u32, _: f64) {
 
 /// Sigil: `G.hand.cards[i]` takes the drawn suit, keeping its rank (card.lua:1232-1244).
 fn sigil_card(g: &mut Game, i: u32, suit: f64) {
-    let card = g.gs.areas.hand[i as usize].sort_id;
+    let card = g.gs.areas.hand()[i as usize].sort_id;
     let base = g.card(card).base.expect("a playing card");
     g.set_card_base(card, Base::front_for(SUITS[suit as usize], base.value));
 }
 
 /// Ouija: `G.hand.cards[i]` takes the drawn rank, keeping its suit (card.lua:1246-1256).
 fn ouija_card(g: &mut Game, i: u32, rank: f64) {
-    let card = g.gs.areas.hand[i as usize].sort_id;
+    let card = g.gs.areas.hand()[i as usize].sort_id;
     let base = g.card(card).base.expect("a playing card");
     g.set_card_base(card, Base::front_for(base.suit, Rank::ALL[rank as usize]));
 }
