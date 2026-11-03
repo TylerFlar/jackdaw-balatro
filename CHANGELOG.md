@@ -5,6 +5,13 @@ while it is 0.x, a minor release (0.2 → 0.3) can break things, and a patch rel
 
 ## Unreleased
 
+### Fixed
+
+- `BalatroVectorEnv`'s idle threads sleep after polling for 100 µs, as documented: a thread
+  that had taken part in a step polled for twice as long first.
+- `BalatroVectorEnv(num_threads=0)` honours `RAYON_NUM_THREADS` again, as it did up to 0.2.2
+  (on a rayon pool); unset, it is one thread per core.
+
 ## [0.2.3] - 2026-11-03
 
 The engine plays the same runs as 0.2.2, with the same observations, masks and actions: every
