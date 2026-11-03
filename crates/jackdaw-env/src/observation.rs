@@ -1257,6 +1257,23 @@ mod tests {
     }
 
     #[test]
+    fn analysis_matches_the_reference_on_rollout_states() {
+        let mut fast = Analyzer::default();
+        for gs in rollout_states(3000) {
+            let flags = Flags::from_jokers(gs.areas.jokers());
+            for cards in [gs.areas.hand(), gs.areas.pack_cards(), gs.areas.deck()] {
+                let mut slow = analysis::reference::RefAnalyzer::default();
+                assert_eq!(fast.analyze(cards, flags), slow.analyze(cards, flags));
+                assert_eq!(fast.scoring, slow.scoring);
+                assert_eq!(
+                    analysis::analyze_draws(cards),
+                    analysis::reference::analyze_draws(cards)
+                );
+            }
+        }
+    }
+
+    #[test]
     fn python_numerics() {
         assert_eq!(py_floordiv(23.0, 5.0), 4.0);
         assert_eq!(py_floordiv(-1.0, 5.0), -1.0);
