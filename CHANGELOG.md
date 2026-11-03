@@ -5,6 +5,11 @@ while it is 0.x, a minor release (0.2 → 0.3) can break things, and a patch rel
 
 ## Unreleased
 
+## [0.2.3] - 2026-11-03
+
+The engine plays the same runs as 0.2.2, with the same observations, masks and actions: every
+ended Jackdaw Arena episode replays with it to its recorded final state. What's new is speed.
+
 ### Added
 
 - `BalatroGymnasiumEnv(copy=False)`: the observation's arrays and `info["action_mask"]` are views
