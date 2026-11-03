@@ -441,7 +441,8 @@ fn disjoint(spans: &[std::ops::Range<usize>]) -> PyResult<()> {
     Ok(())
 }
 
-/// A caller's buffer of `len` items as a mutable slice, for the worker threads to write.
+/// A caller's buffer of `len` items as a mutable slice, for Rust to write in place: the vector
+/// env's worker threads, or `GymEnv`'s `reset_into` and `step_into` on the calling thread.
 ///
 /// The buffer must be writable and C-contiguous with exactly `len` items (`PyBuffer<T>` has
 /// checked their format, size and alignment against `T`), and must not overlap any other buffer
@@ -461,8 +462,11 @@ fn writable<'a, T: Element>(
     // exactly `len` initialised, aligned items of `T`, any bit pattern of which is valid. No
     // other Rust reference to it exists while the slice lives: the slice borrows `buf` mutably,
     // and the callers check that the buffers they make into slices are disjoint. The memory is
-    // a numpy array the vector env owns; Python code could only reach it from another thread
-    // while the GIL is released, the same contract numpy's own GIL-free loops have.
+    // the caller's (the wrappers pass numpy arrays they own: `BalatroVectorEnv`'s, or
+    // `BalatroGymnasiumEnv`'s with copy=False). `GymEnv`'s `*_into` write it with the GIL held,
+    // so no Python code runs meanwhile; the vector env writes it with the GIL released, when
+    // Python code could only reach it from another thread, the same contract numpy's own
+    // GIL-free loops have.
     Ok(unsafe { std::slice::from_raw_parts_mut(buf.buf_ptr().cast::<T>(), len) })
 }
 
