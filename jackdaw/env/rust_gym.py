@@ -5,6 +5,7 @@ action table, built-in rewards and how episodes start.
 
 from __future__ import annotations
 
+import math
 import random
 from collections.abc import Iterator, Sequence
 from typing import Any, overload
@@ -48,15 +49,16 @@ def gym_obs(data: bytearray | memoryview) -> dict[str, np.ndarray]:
     return {key: np.ndarray(shape, _F32, data, off) for key, shape, off in _LAYOUT}
 
 
+# (key, shape, first and past-the-end column) of each array in a row of flattened observations.
+_COLUMNS: list[tuple[str, tuple[int, ...], int, int]] = [
+    (key, shape, off // 4, off // 4 + math.prod(shape)) for key, shape, off in _LAYOUT
+]
+
+
 def batched_gym_obs(flat: np.ndarray) -> dict[str, np.ndarray]:
     """The batched observation dict viewing ``flat`` (``num_envs x OBS_LEN`` float32)."""
     n = flat.shape[0]
-    out: dict[str, np.ndarray] = {}
-    for key, shape, off in _LAYOUT:
-        start = off // 4
-        size = int(np.prod(shape))
-        out[key] = flat[:, start : start + size].reshape((n, *shape))
-    return out
+    return {key: flat[:, a:b].reshape((n, *shape)) for key, shape, a, b in _COLUMNS}
 
 
 def factored_from_parts(parts: tuple[int, int | None, list[int] | None]) -> FactoredAction:
