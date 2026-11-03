@@ -45,6 +45,7 @@ from jackdaw.env.game_interface import DirectAdapter, GameAdapter, game_state_fr
 from jackdaw.env.game_spec import FactoredAction, GameActionMask, GameObservation
 from jackdaw.env.rewards import RewardFn, ShapedReward, Transition, sparse_reward
 from jackdaw.env.rust_gym import (
+    OBS_LEN,
     EpisodeStarts,
     RustActionTable,
     factored_from_parts,
@@ -203,6 +204,13 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         refuses, with the reason in ``info["balatro/refused"]``; ``"raise"`` raises
         its ``IllegalActionError``.  (A refusal means the masks and the engine
         disagree: an env bug.)
+    copy:
+        True (default): every :meth:`reset` and :meth:`step` returns fresh arrays.
+        False: the observation's arrays and ``info["action_mask"]`` are views of
+        buffers the env owns, which the next ``reset`` or ``step`` overwrites in
+        place (the same values, without allocating them each step).  Copy what you
+        keep across steps (a rollout buffer that stores the arrays themselves, a
+        previous observation); :meth:`action_masks` still returns a fresh array.
 
     With :class:`~jackdaw.env.game_interface.DirectAdapter` a step the engine can't
     take yet ends the episode as truncated, with the reason in
@@ -226,6 +234,7 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         end_on_win: bool = True,
         max_free_moves: int | None = DEFAULT_MAX_FREE_MOVES,
         on_refusal: str = "truncate",
+        copy: bool = True,
     ) -> None:
         super().__init__()
         if reward_fn is not None and reward_shaping:
@@ -236,6 +245,7 @@ class BalatroGymnasiumEnv(gymnasium.Env):
             raise ValueError("max_free_moves must be None or at least 0")
         self.max_free_moves = max_free_moves
         self.on_refusal = on_refusal
+        self.copy = copy
         if reward_fn is None:
             reward_fn = ShapedReward() if reward_shaping else sparse_reward
         self.reward_fn: RewardFn = reward_fn
@@ -301,6 +311,11 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         self._rng = Xoshiro256(secrets.randbits(64))
         self._episode_max_ante: int = 1
         self._episode_blinds_beaten: int = 0
+        # With copy=False: the buffers every reset and step writes, and the views handed out.
+        self._obs_buffer = np.zeros(OBS_LEN, dtype=np.float32)
+        self._mask_buffer = np.zeros(MAX_ACTIONS, dtype=np.bool_)
+        self._mask_bytes = self._mask_buffer.view(np.uint8)
+        self._obs_views = gym_obs(self._obs_buffer)
 
     # ------------------------------------------------------------------
     # Gymnasium API
@@ -331,7 +346,7 @@ class BalatroGymnasiumEnv(gymnasium.Env):
             reward_reset()
         self._action_table = self._enumerate_actions(game_mask, info)
         obs = self._build_obs(game_obs)
-        return obs, {"action_mask": self.action_masks()}
+        return self._output(obs), {"action_mask": self._output_mask()}
 
     def step(self, action: int) -> tuple[dict[str, np.ndarray], float, bool, bool, dict[str, Any]]:
         if self._core is not None:
@@ -354,8 +369,8 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         else:
             self._action_table = []
 
-        obs = self._build_obs(game_obs)
-        step_info: dict[str, Any] = {"action_mask": self.action_masks()}
+        obs = self._output(self._build_obs(game_obs))
+        step_info: dict[str, Any] = {"action_mask": self._output_mask()}
         if terminated or truncated:
             step_info["balatro/ante_reached"] = self._episode_max_ante
             step_info["balatro/rounds_beaten"] = self._episode_blinds_beaten
@@ -385,20 +400,35 @@ class BalatroGymnasiumEnv(gymnasium.Env):
     def _rust_reset(self, seed: int | None) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
         back, stake, run_seed = self._starts.next(None if seed is None else str(seed))
         rng_seed = None if seed is None else sampler_seed(seed)
-        data, _ = self._core.reset(back, stake, run_seed, None, rng_seed)
+        if self.copy:
+            data, _ = self._core.reset(back, stake, run_seed, None, rng_seed)
+        else:
+            self._core.reset_into(
+                back, stake, run_seed, None, rng_seed, self._obs_buffer, self._mask_bytes
+            )
         self._episode_max_ante = 1
         self._episode_blinds_beaten = 0
         reward_reset = getattr(self.reward_fn, "reset", None)
         if callable(reward_reset):
             reward_reset()
-        return gym_obs(data), {"action_mask": self.action_masks()}
+        if self.copy:
+            return gym_obs(data), {"action_mask": self.action_masks()}
+        return self._obs_views, {"action_mask": self._mask_buffer}
 
     def _rust_step(
         self, action: int
     ) -> tuple[dict[str, np.ndarray], float, bool, bool, dict[str, Any]]:
-        data, reward, terminated, truncated, _, episode, not_ported, refused = self._core.step(
-            int(action), self.on_refusal == "truncate"
-        )
+        cut = self.on_refusal == "truncate"
+        if self.copy:
+            data, reward, terminated, truncated, _, episode, not_ported, refused = self._core.step(
+                int(action), cut
+            )
+            obs, mask = gym_obs(data), self.action_masks()
+        else:
+            reward, terminated, truncated, _, episode, not_ported, refused = self._core.step_into(
+                int(action), cut, self._obs_buffer, self._mask_bytes
+            )
+            obs, mask = self._obs_views, self._mask_buffer
         if self._python_reward:
             prev, curr, fa = self._core.last_transition()
             transition = Transition(
@@ -410,7 +440,7 @@ class BalatroGymnasiumEnv(gymnasium.Env):
                 game=Game(self._core.game()),
             )
             reward = self._compute_reward(transition)
-        info: dict[str, Any] = {"action_mask": self.action_masks()}
+        info: dict[str, Any] = {"action_mask": mask}
         if terminated or truncated:
             ante, rounds, won = episode
             self._episode_max_ante = ante
@@ -422,7 +452,7 @@ class BalatroGymnasiumEnv(gymnasium.Env):
                 info["balatro/not_ported"] = not_ported
             if refused is not None:
                 info["balatro/refused"] = refused
-        return gym_obs(data), reward, terminated, truncated, info
+        return obs, reward, terminated, truncated, info
 
     # ------------------------------------------------------------------
     # Internals
@@ -432,6 +462,22 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         """Reward for one step.  Delegates to :attr:`reward_fn`; prefer
         passing a ``reward_fn`` over overriding this."""
         return float(self.reward_fn(transition))
+
+    def _output(self, obs: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+        """The observation as handed out: *obs*, or (``copy=False``) the buffers' views
+        holding its values."""
+        if self.copy:
+            return obs
+        for key, value in obs.items():
+            self._obs_views[key][...] = value
+        return self._obs_views
+
+    def _output_mask(self) -> np.ndarray:
+        """The action mask as handed out: a fresh array, or (``copy=False``) the buffer."""
+        if self.copy:
+            return self.action_masks()
+        self._mask_buffer[...] = self.action_masks()
+        return self._mask_buffer
 
     def _build_obs(self, game_obs: GameObservation) -> dict[str, np.ndarray]:
         obs: dict[str, np.ndarray] = {

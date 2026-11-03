@@ -313,6 +313,8 @@ obs, reward, terminated, truncated, info = env.step(action)
 
 `BalatroGymnasiumEnv` takes `max_free_moves` and `on_refusal` like `BalatroEnvironment`.
 
+With `copy=False` it hands out the same values without allocating them each step: the observation's arrays and `info["action_mask"]` are views of buffers the env owns, which the next `reset` or `step` overwrites in place. Copy whatever you keep across steps (a previous observation, a rollout buffer that stores the arrays themselves); `action_masks()` still returns a fresh array. On the Rust engine this saves about a third of the wrapper's per-step time.
+
 ### With MaskablePPO
 
 Jackdaw doesn't depend on any RL library. Install [sb3-contrib](https://sb3-contrib.readthedocs.io/) in your own project, then:

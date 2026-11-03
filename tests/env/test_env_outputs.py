@@ -4,8 +4,9 @@ later step may overwrite.
 Each scenario plays a seeded random policy and folds everything a reset or step returns
 (every observation array, reward, flag, mask and info entry, with its dtype, shape,
 contiguity and writability) into a digest frozen from the envs' outputs before their
-Python-side bookkeeping was reworked for speed. Every array an env hands out as its own must
-stay as it was through later steps.
+Python-side bookkeeping was reworked for speed. ``BalatroGymnasiumEnv(copy=False)`` must
+return the same values as the default, and every array an env hands out as its own must stay
+as it was through later steps.
 """
 
 from __future__ import annotations
@@ -17,7 +18,8 @@ import numpy as np
 import pytest
 from gymnasium.vector import AutoresetMode
 
-from jackdaw.env import BalatroGymnasiumEnv, BalatroVectorEnv, DirectAdapter
+from jackdaw.env import BalatroGymnasiumEnv, BalatroVectorEnv, DirectAdapter, Transition
+from tests.env.generic import GenericAdapter
 
 
 def _feed(h: Any, value: Any) -> None:
@@ -89,8 +91,10 @@ class _Recorder:
         return hashlib.sha256("".join(self.digests).encode()).hexdigest()[:16]
 
 
-def _gym_run(copy: bool, steps: int = 600, **kwargs: Any) -> _Recorder:
-    env = BalatroGymnasiumEnv(DirectAdapter, seed_prefix="OUT", max_steps=60, **kwargs)
+def _gym_run(
+    copy: bool, steps: int = 600, adapter: type = DirectAdapter, **kwargs: Any
+) -> _Recorder:
+    env = BalatroGymnasiumEnv(adapter, seed_prefix="OUT", max_steps=60, copy=copy, **kwargs)
     rng = np.random.default_rng(5)
     run = _Recorder(copy)
 
@@ -141,10 +145,29 @@ _VECTOR = {
 }
 
 
-def test_gym_env_outputs_are_unchanged() -> None:
-    run = _gym_run(copy=True)
+@pytest.mark.parametrize("copy", [True, False], ids=["copy", "views"])
+def test_gym_env_outputs_are_unchanged(copy: bool) -> None:
+    run = _gym_run(copy)
     assert run.digest == _GYM
     run.check_owned()
+
+
+def _python_reward(t: Transition) -> float:
+    return float(t.curr.ante) - 0.25 * t.curr.hands_left
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [{"reward_fn": _python_reward}, {"adapter": GenericAdapter, "steps": 200}],
+    ids=["python_reward", "generic"],
+)
+def test_gym_env_views_hold_the_same_values(kwargs: dict[str, Any]) -> None:
+    """``copy=False`` on the other paths: a reward computed in Python, a generic adapter."""
+    copies = _gym_run(True, **kwargs)
+    views = _gym_run(False, **kwargs)
+    assert views.digests == copies.digests
+    copies.check_owned()
+    views.check_owned()
 
 
 @pytest.mark.parametrize("copy", [True, False], ids=["copy", "views"])

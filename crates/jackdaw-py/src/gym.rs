@@ -164,11 +164,70 @@ type StepParts<'py> = (
     Option<String>,
 );
 
+/// A Gym step's results but the observation: `(reward, terminated, truncated, n_actions,
+/// episode, not_ported, refused)`, as in `StepParts`.
+type StepInfo = (
+    f64,
+    bool,
+    bool,
+    usize,
+    Option<(Num, u64, bool)>,
+    Option<String>,
+    Option<String>,
+);
+
 /// One Gym environment on the Rust engine (`BalatroGymnasiumEnv`'s engine).
 #[pyclass(name = "GymEnv", module = "jackdaw._core")]
 pub struct GymEnv {
     inner: CoreGymEnv,
     last: Option<StepResult>,
+}
+
+/// A caller's observation (`GYM_OBS_LEN` float32) and action mask (`MAX_ACTIONS` bytes) buffers.
+fn obs_and_mask<'a>(
+    obs: &'a mut PyBuffer<f32>,
+    mask: &'a mut PyBuffer<u8>,
+) -> PyResult<(&'a mut [f32], &'a mut [u8])> {
+    disjoint(&[span(obs), span(mask)])?;
+    Ok((
+        writable(obs, GYM_OBS_LEN, "obs")?,
+        writable(mask, MAX_ACTIONS, "mask")?,
+    ))
+}
+
+impl GymEnv {
+    /// Take action `index` (see `step`), keeping the step for `last_transition`.
+    fn take_step(&mut self, index: usize, cut_refused: bool) -> PyResult<StepInfo> {
+        let to_py = |e: StepError| match e {
+            StepError::BadIndex(_) => PyIndexError::new_err(e.to_string()),
+            StepError::Convert(m) => PyValueError::new_err(m),
+            StepError::Illegal(m) => IllegalActionError::new_err(m),
+        };
+        let (r, refused) = if cut_refused {
+            self.inner.step_or_cut(index).map_err(to_py)?
+        } else {
+            (self.inner.step(index).map_err(to_py)?, None)
+        };
+        let ended = r.terminated() || r.truncated();
+        let episode = ended.then(|| {
+            (
+                num(self.inner.max_ante),
+                self.inner.blinds_beaten,
+                self.inner.episode_won,
+            )
+        });
+        let info = (
+            r.reward,
+            r.terminated(),
+            r.truncated(),
+            self.inner.table().len(),
+            episode,
+            r.not_ported.clone().filter(|_| refused.is_none()),
+            refused,
+        );
+        self.last = Some(r);
+        Ok(info)
+    }
 }
 
 #[pymethods]
@@ -230,36 +289,59 @@ impl GymEnv {
         index: usize,
         cut_refused: bool,
     ) -> PyResult<StepParts<'py>> {
-        let to_py = |e: StepError| match e {
-            StepError::BadIndex(_) => PyIndexError::new_err(e.to_string()),
-            StepError::Convert(m) => PyValueError::new_err(m),
-            StepError::Illegal(m) => IllegalActionError::new_err(m),
-        };
-        let (r, refused) = if cut_refused {
-            self.inner.step_or_cut(index).map_err(to_py)?
-        } else {
-            (self.inner.step(index).map_err(to_py)?, None)
-        };
-        let ended = r.terminated() || r.truncated();
-        let episode = ended.then(|| {
-            (
-                num(self.inner.max_ante),
-                self.inner.blinds_beaten,
-                self.inner.episode_won,
-            )
-        });
-        let out = (
+        let (reward, terminated, truncated, n_actions, episode, not_ported, refused) =
+            self.take_step(index, cut_refused)?;
+        Ok((
             obs_bytes(py, &mut self.inner)?,
-            r.reward,
-            r.terminated(),
-            r.truncated(),
-            self.inner.table().len(),
+            reward,
+            terminated,
+            truncated,
+            n_actions,
             episode,
-            r.not_ported.clone().filter(|_| refused.is_none()),
+            not_ported,
             refused,
-        );
-        self.last = Some(r);
-        Ok(out)
+        ))
+    }
+
+    /// ``reset``, writing the observation and the action mask into the caller's buffers:
+    /// ``obs`` (614 float32) and ``mask`` (500 bytes, the first ``n_actions`` set). Returns
+    /// the number of actions.
+    #[pyo3(signature = (back, stake, seed, challenge, rng_seed, obs, mask))]
+    #[allow(clippy::too_many_arguments)]
+    fn reset_into(
+        &mut self,
+        back: &str,
+        stake: u8,
+        seed: &str,
+        challenge: Option<&str>,
+        rng_seed: Option<u64>,
+        mut obs: PyBuffer<f32>,
+        mut mask: PyBuffer<u8>,
+    ) -> PyResult<usize> {
+        let (obs, mask) = obs_and_mask(&mut obs, &mut mask)?;
+        let spec = run_spec(back, stake, seed, challenge)?;
+        self.inner.reset(&spec, rng_seed).map_err(value_error)?;
+        self.last = None;
+        self.inner.write_obs(obs);
+        self.inner.write_action_mask(mask);
+        Ok(self.inner.table().len())
+    }
+
+    /// ``step``, writing the observation and the action mask into the caller's buffers as
+    /// ``reset_into`` does. Returns the step's results but the observation: ``(reward,
+    /// terminated, truncated, n_actions, episode, not_ported, refused)``.
+    fn step_into(
+        &mut self,
+        index: usize,
+        cut_refused: bool,
+        mut obs: PyBuffer<f32>,
+        mut mask: PyBuffer<u8>,
+    ) -> PyResult<StepInfo> {
+        let (obs, mask) = obs_and_mask(&mut obs, &mut mask)?;
+        let info = self.take_step(index, cut_refused)?;
+        self.inner.write_obs(obs);
+        self.inner.write_action_mask(mask);
+        Ok(info)
     }
 
     /// The last step as a reward sees it: ``(prev, curr, action)``, the states as

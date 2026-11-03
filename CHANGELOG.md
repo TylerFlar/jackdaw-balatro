@@ -5,6 +5,13 @@ while it is 0.x, a minor release (0.2 → 0.3) can break things, and a patch rel
 
 ## Unreleased
 
+### Added
+
+- `BalatroGymnasiumEnv(copy=False)`: the observation's arrays and `info["action_mask"]` are views
+  of buffers the env owns, overwritten in place by the next `reset` or `step`, as with
+  `BalatroVectorEnv(copy=False)`. The same values, without allocating them each step. The
+  default (`copy=True`) is unchanged.
+
 ### Changed
 
 - The engine and the environments run faster: the Rust env steps about 1.8 times as fast,
@@ -12,6 +19,8 @@ while it is 0.x, a minor release (0.2 → 0.3) can break things, and a patch rel
   the same run, with the same observations, masks and action tables.
 - Importing a snapshot fails when two of its cards share a sort id, or when its
   `next_sort_id` isn't above every card's.
+- `BalatroVectorEnv` spends less time in Python per step (its per-env results come from Rust in
+  their final dtypes). What it returns is unchanged.
 
 ## [0.2.2] - 2026-10-25
 
