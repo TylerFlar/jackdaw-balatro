@@ -4,9 +4,10 @@
 
 Plays random legal actions through the installed ``jackdaw`` package, the way a training
 loop drives it: ``BalatroGymnasiumEnv`` (sparse and shaped rewards) and ``BalatroVectorEnv``
-(several threads, both autoreset modes). Run against an instrumented wheel, it records how
-the extension's PyO3 layer and the vector env's threads are used; the Rust ``rollout``
-example covers the engine itself. Nothing here checks results: it only has to run the code.
+(several threads, both autoreset modes), with and without ``copy=False``. Run against an
+instrumented wheel, it records how the extension's PyO3 layer and the vector env's threads
+are used; the Rust ``rollout`` example covers the engine itself. Nothing here checks
+results: it only has to run the code.
 """
 
 from __future__ import annotations
@@ -20,8 +21,10 @@ from gymnasium.vector import AutoresetMode
 from jackdaw.env import BalatroGymnasiumEnv, BalatroVectorEnv, DirectAdapter
 
 
-def gym_env(steps: int, reward_shaping: bool, seed: int) -> None:
-    env = BalatroGymnasiumEnv(adapter_factory=DirectAdapter, reward_shaping=reward_shaping)
+def gym_env(steps: int, reward_shaping: bool, seed: int, copy: bool = True) -> None:
+    env = BalatroGymnasiumEnv(
+        adapter_factory=DirectAdapter, reward_shaping=reward_shaping, copy=copy
+    )
     rng = np.random.default_rng(seed)
     _, info = env.reset(seed=seed)
     mask = info["action_mask"]
@@ -33,8 +36,10 @@ def gym_env(steps: int, reward_shaping: bool, seed: int) -> None:
         mask = info["action_mask"]
 
 
-def vector_env(steps: int, num_envs: int, threads: int, mode: AutoresetMode, seed: int) -> None:
-    envs = BalatroVectorEnv(num_envs, num_threads=threads, autoreset_mode=mode)
+def vector_env(
+    steps: int, num_envs: int, threads: int, mode: AutoresetMode, seed: int, copy: bool = True
+) -> None:
+    envs = BalatroVectorEnv(num_envs, num_threads=threads, autoreset_mode=mode, copy=copy)
     rng = np.random.default_rng(seed)
     _, info = envs.reset(seed=seed)
     for _ in range(steps):
@@ -51,8 +56,10 @@ def main() -> None:
     start = time.perf_counter()
     gym_env(args.steps, reward_shaping=False, seed=1)
     gym_env(args.steps // 2, reward_shaping=True, seed=2)
+    gym_env(args.steps // 2, reward_shaping=False, seed=5, copy=False)
     vector_env(args.steps // 16, 16, 4, AutoresetMode.NEXT_STEP, seed=3)
     vector_env(args.steps // 32, 16, 2, AutoresetMode.SAME_STEP, seed=4)
+    vector_env(args.steps // 32, 16, 4, AutoresetMode.NEXT_STEP, seed=6, copy=False)
     print(f"pgo_workload: done in {time.perf_counter() - start:.1f} s")
 
 
