@@ -142,6 +142,19 @@ them, and `uv run pytest -m benchmark` the environments' steps per second. For a
 (`perf`, `samply`, VTune), `cargo build --profile profiling` builds release code with full
 debug info.
 
+The release wheels are built with profile-guided optimisation (PGO), which makes an env step
+roughly 10% faster. `scripts/pgo.sh build` does the same here (it needs uv and rustup): it
+builds an instrumented wheel, runs the training workload (the `rollout` example of
+`jackdaw-env` with its random and `--deep` policies, and `scripts/pgo_workload.py` over
+`BalatroGymnasiumEnv` and `BalatroVectorEnv`), merges the profile with `llvm-profdata` (from
+the toolchain's `llvm-tools` component) and builds the optimised wheel into `dist/`
+(`uv pip install dist/*.whl` installs it). Its builds go to `target/pgo/`, apart from the usual
+ones. In the Wheels workflow maturin-action builds both wheels and `scripts/pgo.sh train` runs
+in between; wheels for a target the runner can't execute (Linux aarch64, macOS x86_64) are
+built without PGO. PGO changes only code layout and inlining, never results
+(`rollout --verify` prints the same hash), and adds no `target-cpu` flags, so the wheels stay
+portable.
+
 ## Versions
 
 `pyproject.toml` and `Cargo.toml`'s `[workspace.package]` both hold the version, and

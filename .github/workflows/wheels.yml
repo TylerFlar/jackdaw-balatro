@@ -40,7 +40,13 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        target: [x86_64, aarch64]
+        include:
+          - target: x86_64
+            pgo: true
+          # Cross-compiled in maturin-action's container on the x86_64 runner: an aarch64
+          # wheel can't run there to train a profile, so it builds without PGO.
+          - target: aarch64
+            pgo: false
     steps:
       - uses: actions/checkout@v7
 
@@ -48,13 +54,42 @@ jobs:
         with:
           python-version: "3.12"
 
+      # Profile-guided optimisation (scripts/pgo.sh, docs/development.md): an instrumented
+      # wheel built in the same manylinux container as the release wheel, the training
+      # workload on the runner, then the release build with the merged profile. The profile
+      # matches functions by symbol name, which the toolchain, target and crate features fix:
+      # the workload's rollout example is built for the same target with the same 1.98.1.
+      # No sccache on PGO builds: it doesn't hash the profile's contents.
+      - uses: dtolnay/rust-toolchain@master
+        if: matrix.pgo
+        with:
+          toolchain: "1.98.1"
+          components: llvm-tools
+
+      - name: Build an instrumented wheel (PGO)
+        if: matrix.pgo
+        uses: PyO3/maturin-action@v1
+        env:
+          RUSTFLAGS: -Cprofile-generate=${{ github.workspace }}/target/pgo/default
+        with:
+          target: ${{ matrix.target }}
+          manylinux: "2_28"
+          args: --release --out target/pgo/instrumented
+          sccache: false
+
+      - name: Train the profile (PGO)
+        if: matrix.pgo
+        run: scripts/pgo.sh train target/pgo/instrumented target/pgo/jackdaw.profdata
+
       - name: Build wheels
         uses: PyO3/maturin-action@v1
+        env:
+          RUSTFLAGS: ${{ matrix.pgo && format('-Cprofile-use={0}/target/pgo/jackdaw.profdata', github.workspace) || '' }}
         with:
           target: ${{ matrix.target }}
           manylinux: "2_28"
           args: --release --out dist
-          sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
+          sccache: ${{ !matrix.pgo && !startsWith(github.ref, 'refs/tags/') }}
 
       - uses: actions/upload-artifact@v7
         with:
@@ -62,12 +97,17 @@ jobs:
           path: dist
 
   macos:
-    # x86_64 is cross-compiled on the arm64 runner.
     needs: version
     runs-on: macos-latest
     strategy:
       matrix:
-        target: [x86_64, aarch64]
+        include:
+          - target: aarch64
+            pgo: true
+          # Cross-compiled on the arm64 runner: the wheel can't run there to train a profile,
+          # so it builds without PGO.
+          - target: x86_64
+            pgo: false
     steps:
       - uses: actions/checkout@v7
 
@@ -75,12 +115,35 @@ jobs:
         with:
           python-version: "3.12"
 
+      # PGO as in the linux job; maturin-action builds on the runner itself here.
+      - uses: dtolnay/rust-toolchain@master
+        if: matrix.pgo
+        with:
+          toolchain: "1.98.1"
+          components: llvm-tools
+
+      - name: Build an instrumented wheel (PGO)
+        if: matrix.pgo
+        uses: PyO3/maturin-action@v1
+        env:
+          RUSTFLAGS: -Cprofile-generate=${{ github.workspace }}/target/pgo/default
+        with:
+          target: ${{ matrix.target }}
+          args: --release --out target/pgo/instrumented
+          sccache: false
+
+      - name: Train the profile (PGO)
+        if: matrix.pgo
+        run: scripts/pgo.sh train target/pgo/instrumented target/pgo/jackdaw.profdata
+
       - name: Build wheels
         uses: PyO3/maturin-action@v1
+        env:
+          RUSTFLAGS: ${{ matrix.pgo && format('-Cprofile-use={0}/target/pgo/jackdaw.profdata', github.workspace) || '' }}
         with:
           target: ${{ matrix.target }}
           args: --release --out dist
-          sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
+          sccache: ${{ !matrix.pgo && !startsWith(github.ref, 'refs/tags/') }}
 
       - uses: actions/upload-artifact@v7
         with:
@@ -99,8 +162,29 @@ jobs:
           python-version: "3.12"
           architecture: x64
 
+      # PGO as in the linux job; maturin-action builds on the runner itself here.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.98.1"
+          components: llvm-tools
+
+      - name: Build an instrumented wheel (PGO)
+        uses: PyO3/maturin-action@v1
+        env:
+          RUSTFLAGS: -Cprofile-generate=${{ github.workspace }}/target/pgo/default
+        with:
+          target: x64
+          args: --release --out target/pgo/instrumented
+          sccache: false
+
+      - name: Train the profile (PGO)
+        shell: bash
+        run: scripts/pgo.sh train target/pgo/instrumented target/pgo/jackdaw.profdata
+
       - name: Build wheels
         uses: PyO3/maturin-action@v1
+        env:
+          RUSTFLAGS: -Cprofile-use=${{ github.workspace }}/target/pgo/jackdaw.profdata
         with:
           target: x64
           args: --release --out dist
