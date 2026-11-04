@@ -2,7 +2,7 @@
 
 ``num_envs`` copies of :class:`~jackdaw.env.gymnasium_wrapper.BalatroGymnasiumEnv`
 (on the Rust engine) run in ``jackdaw._core.VectorEnv``: one ``step`` steps
-them all on worker threads with the GIL released, writing observations,
+them all on its threads with the GIL released, writing observations,
 action masks and per-env results into numpy arrays this object owns.
 
 Sub-env ``i`` behaves exactly as ``BalatroGymnasiumEnv(DirectAdapter,
@@ -109,11 +109,14 @@ class BalatroVectorEnv(VectorEnv):
     reward_shaping, reward_fn:
         As for the Gym env, limited to the built-in rewards.
     num_threads:
-        Threads that step the sub-envs, the calling thread included (0: one per core).
-        Between steps the others poll for the next one for 100 microseconds, giving their
-        core up to any thread that wants it after the first 20, then sleep.  A step doesn't
-        wait for a thread that is descheduled or asleep, so more threads than free cores
-        (other processes, a policy on the same cores) cost little.
+        Threads that step the sub-envs, the calling thread included (0:
+        ``RAYON_NUM_THREADS`` when it is set, else one per core).  Between steps the others
+        poll for the next one for 100 microseconds, giving their core up to any thread that
+        wants it after the first 20, then sleep.  A step doesn't wait for a thread that is
+        asleep, or descheduled before it starts on the step: the running threads take its
+        share.  So more threads than free cores (other processes, a policy on the same
+        cores) cost little, though a thread descheduled in the middle of an env holds the
+        step until it runs again.
     copy:
         Return copies of the observation arrays (default), or views of the buffers the
         next step overwrites.

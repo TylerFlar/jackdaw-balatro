@@ -151,7 +151,8 @@ the toolchain's `llvm-tools` component) and builds the optimised wheel into `dis
 (`uv pip install dist/*.whl` installs it). Its builds go to `target/pgo/`, apart from the usual
 ones. In the Wheels workflow maturin-action builds both wheels and `scripts/pgo.sh train` runs
 in between; wheels for a target the runner can't execute (Linux aarch64, macOS x86_64) are
-built without PGO. PGO changes only code layout and inlining, never results
+built without PGO. The workload's dependencies (numpy, gymnasium) are `uv.lock`'s, checked
+against its hashes, since the release build runs next on the same runner. PGO changes only code layout and inlining, never results
 (`rollout --verify` prints the same hash), and adds no `target-cpu` flags, so the wheels stay
 portable.
 
