@@ -460,6 +460,56 @@ impl Game {
         Ok(())
     }
 
+    /// The roll-bound mode: ``None`` in play, ``"low"`` or ``"high"`` on an analysis board.
+    /// Under a bound every chance roll (Lucky and Glass Cards, the chance jokers, The Wheel)
+    /// and Misprint's roll is its least (``"low"``) or most (``"high"``) lucky value and draws
+    /// nothing from the RNG; card and pack choices still do. A clone carries it; the snapshot
+    /// leaves it out.
+    #[getter]
+    fn roll_bound(&self) -> Option<&'static str> {
+        use jackdaw_core::rng::RollBound;
+        self.inner.roll_bound().map(|b| match b {
+            RollBound::Low => "low",
+            RollBound::High => "high",
+        })
+    }
+
+    #[setter]
+    fn set_roll_bound(&mut self, bound: Option<&str>) -> PyResult<()> {
+        use jackdaw_core::rng::RollBound;
+        let bound = match bound {
+            None => None,
+            Some("low") => Some(RollBound::Low),
+            Some("high") => Some(RollBound::High),
+            Some(other) => {
+                return Err(value_error(format!(
+                    "roll_bound {other:?}, expected None, \"low\" or \"high\""
+                )));
+            }
+        };
+        self.inner.set_roll_bound(bound);
+        Ok(())
+    }
+
+    /// ``G.GAME.blind.disabled``, written directly (no ``Blind:disable`` effects).
+    fn debug_set_blind_disabled(&mut self, disabled: bool) -> PyResult<()> {
+        self.inner
+            .debug_set_blind_disabled(disabled)
+            .map_err(step_error)
+    }
+
+    /// Clear Cerulean Bell's forced selection on the hand cards and drop them from the
+    /// highlights, as ``replace_state`` of the edited snapshot does.
+    fn debug_clear_forced_selection(&mut self) {
+        self.inner.debug_clear_forced_selection();
+    }
+
+    /// Make the hand the cards ``sort_ids`` (from the hand or the deck), in order; the cards
+    /// left over go to the deck's end (SELECTING_HAND only).
+    fn debug_set_hand(&mut self, sort_ids: Vec<u32>) -> PyResult<()> {
+        self.inner.debug_set_hand(&sort_ids).map_err(step_error)
+    }
+
     /// ``set {shop: true}``: a new shop, as on arrival (SHOP only).
     fn debug_restock_shop(&mut self) -> PyResult<()> {
         self.inner.debug_restock_shop().map_err(step_error)

@@ -176,6 +176,40 @@ class Game:
         """``set {shop: true}``: a new shop as on arrival (SHOP only). Debug only."""
         self._g.debug_restock_shop()
 
+    @property
+    def roll_bound(self) -> str | None:
+        """The roll-bound mode for analysis: ``None`` in play, ``"low"`` or ``"high"``. Under a
+        bound every chance roll (Lucky and Glass Cards, Space Joker, 8 Ball, Bloodstone and the
+        other chance jokers, The Wheel) and Misprint's roll takes its least (``"low"``) or most
+        (``"high"``) lucky value and draws nothing from the RNG; card, pack and edition choices
+        still draw. A :meth:`clone` carries the mode; :meth:`to_dict` and :meth:`state_hash`
+        leave it out. See :meth:`preview_play`."""
+        return self._g.roll_bound
+
+    @roll_bound.setter
+    def roll_bound(self, bound: str | None) -> None:
+        self._g.roll_bound = bound
+
+    def debug_set_blind_disabled(self, disabled: bool = True) -> None:
+        """Write the blind's ``disabled`` flag directly: none of ``Blind:disable``'s effects
+        run. An analysis edit (as :meth:`replace_state` of a snapshot with
+        ``blind.disabled`` changed). Debug only."""
+        self._g.debug_set_blind_disabled(bool(disabled))
+
+    def debug_clear_forced_selection(self) -> None:
+        """Clear Cerulean Bell's forced selection on the hand cards and drop those cards from
+        the highlights, as :meth:`replace_state` of a snapshot with the flags cleared does.
+        Debug only."""
+        self._g.debug_clear_forced_selection()
+
+    def debug_set_hand(self, sort_ids: Any) -> None:
+        """Make the hand the cards with these sort ids, in order, taken from the hand or the
+        deck (SELECTING_HAND only). The deck keeps its other cards in order, followed by the
+        hand cards not taken, so its length is unchanged. A card that enters the hand from the
+        deck is face up, one that enters the deck face down. The same board as
+        :meth:`replace_state` of the edited snapshot. Debug only."""
+        self._g.debug_set_hand([int(i) for i in sort_ids])
+
     def clone(self) -> Game:
         """An independent copy of the run."""
         return Game(self._g.clone())
@@ -331,11 +365,18 @@ class Game:
             return str(exc)
         return None
 
-    def preview_play(self, cards: Any) -> Score:
+    def preview_play(self, cards: Any, rolls: str | None = None) -> Score:
         """What playing these hand cards (indices) would score now: the real play on a copy,
         with hand evaluation, jokers, enhancements, editions, seals, the boss and the RNG. The
-        run is unchanged. Raises :class:`IllegalActionError` for a selection the rules refuse."""
+        run is unchanged. Raises :class:`IllegalActionError` for a selection the rules refuse.
+
+        ``rolls="low"`` or ``"high"`` scores the play with every chance roll at its least or
+        most lucky value (:attr:`roll_bound`): the lowest and highest score the play can give.
+        ``None`` (the default) keeps the copy's own rolls, which are the ones the real play
+        makes."""
         trial = Game(self._g.clone())
+        if rolls is not None:
+            trial.roll_bound = rolls
         trial.step(_actions.PlayHand(card_indices=tuple(cards)))
         score = trial.last_score
         assert score is not None, "a play records its score"
