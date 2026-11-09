@@ -5,6 +5,12 @@ while it is 0.x, a minor release (0.2 → 0.3) can break things, and a patch rel
 
 ## Unreleased
 
+## [0.2.4] - 2026-11-09
+
+The engine plays the same runs as 0.2.3, with the same observations, masks and actions: every
+ended episode Jackdaw Arena publishes replays with it to its recorded final state. What's new is
+for analysis: the range of a play that rolls, and setters for what-if boards.
+
 ### Added
 
 - `Game.preview_play(cards, rolls="low" | "high")`: the play scored with every chance check
