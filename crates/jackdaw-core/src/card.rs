@@ -876,6 +876,10 @@ impl Card {
     /// `Card:set_edition(edition)` (card.lua:387-462), then `set_cost()`. Returns true when a
     /// Negative edition lands on a card already added to the deck: its area's card limit grows
     /// by one, which the caller applies.
+    ///
+    /// A debuffed joker is out of the deck, so Ectoplasm on one adds no slot, yet selling the
+    /// joker after its debuff lifts takes one. That is the game's own bug, kept on purpose
+    /// (`tests/parity/test_audit_debuffed_jokers.py`).
     pub fn set_edition(&mut self, kind: Option<EditionKind>, cost: &CostContext) -> bool {
         let had_edition = self.edition.is_some();
         self.edition = kind.map(Edition::new);
