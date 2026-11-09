@@ -111,14 +111,18 @@ the next. `rolls="low"` scores it with every chance check failing unless it is c
 the board it leaves: under "high" a Glass Card also shatters and Gros Michel goes extinct.
 A chance roll here is a check `roll < G.GAME.probabilities.normal / odds` (Lucky Cards' mult and
 money, Glass Cards, Space Joker, 8 Ball, Business Card, Bloodstone, Reserved Parking,
-Hallucination, Gros Michel, Cavendish, The Wheel), plus Misprint's mult (its minimum or maximum).
+Hallucination, Gros Michel, Cavendish, The Wheel of Fortune, The Wheel's face-down draws), plus
+Misprint's mult (its minimum or maximum).
 "Low" fires an effect only when it is certain (Oops! All 6s can make it so); "high" fires every
 possible one. These rolls draw nothing from the RNG; the rolls that choose a card, a pack or an
-edition (8 Ball's Tarot, The Soul) still draw as in play.
+edition (8 Ball's Tarot, The Soul) still draw as in play. The Wheel of Fortune picks its joker
+and its edition from the stream its chance roll shares, so under a bound they aren't the ones
+the real use would pick.
 
 The mode behind it is `Game.roll_bound` (`None`, `"low"` or `"high"`). It is not part of the
-game: `clone()` carries it, while `to_dict()`, `state_hash()` and `replace_state` leave it out.
-With it unset, every roll is the game's own.
+game: `clone()` carries it and `replace_state` keeps it, while `to_dict()` and `state_hash()`
+leave it out (a run from `from_dict` starts without one). With it unset, every roll is the
+game's own.
 
 ### Analysis boards
 
@@ -204,7 +208,8 @@ The additions go through the same operations as BalatroBot's debug commands `add
 - `state_hash()` is the SHA-256 digest of the canonical snapshot. Equal states have equal hashes.
 - `replace_state(snapshot)` loads an edited snapshot into the run at the same decision point,
   keeping what a snapshot doesn't carry (the card-area settings BalatroBot's view reports, the
-  hand's highlights). The live lockstep uses it to copy live values into its shadow run.
+  hand's highlights, and the modes `record_scoring` and `roll_bound`). The live lockstep uses
+  it to copy live values into its shadow run.
 
 ## BalatroBot
 

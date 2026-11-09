@@ -104,7 +104,8 @@ class Game:
         """Replace the run's state with ``snapshot`` (an edited :meth:`to_dict`) at the same
         decision point. Unlike :meth:`from_dict`, the runtime no snapshot carries stays: the
         card-area settings BalatroBot's view reports (the deck's limit, a removed shop's
-        areas) and the hand's highlights (Cerulean Bell's forced card follows the snapshot).
+        areas), the hand's highlights (Cerulean Bell's forced card follows the snapshot), and
+        the run's modes (:attr:`record_scoring`, :attr:`roll_bound`).
         The live lockstep reconciles its shadow run this way (``jackdaw.bridge.live``)."""
         self._g.replace_state(json.dumps(_to_json(snapshot)))
 
@@ -180,10 +181,11 @@ class Game:
     def roll_bound(self) -> str | None:
         """The roll-bound mode for analysis: ``None`` in play, ``"low"`` or ``"high"``. Under a
         bound every chance roll (Lucky and Glass Cards, Space Joker, 8 Ball, Bloodstone and the
-        other chance jokers, The Wheel) and Misprint's roll takes its least (``"low"``) or most
-        (``"high"``) lucky value and draws nothing from the RNG; card, pack and edition choices
-        still draw. A :meth:`clone` carries the mode; :meth:`to_dict` and :meth:`state_hash`
-        leave it out. See :meth:`preview_play`."""
+        other chance jokers, The Wheel, The Wheel of Fortune) and Misprint's roll takes its
+        least (``"low"``) or most (``"high"``) lucky value and draws nothing from the RNG; card,
+        pack and edition choices still draw. A :meth:`clone` carries the mode and
+        :meth:`replace_state` keeps it; :meth:`to_dict` and :meth:`state_hash` leave it out, so
+        :meth:`from_dict` starts without one. See :meth:`preview_play`."""
         return self._g.roll_bound
 
     @roll_bound.setter
@@ -205,9 +207,10 @@ class Game:
     def debug_set_hand(self, sort_ids: Any) -> None:
         """Make the hand the cards with these sort ids, in order, taken from the hand or the
         deck (SELECTING_HAND only). The deck keeps its other cards in order, followed by the
-        hand cards not taken, so its length is unchanged. A card that enters the hand from the
-        deck is face up, one that enters the deck face down. The same board as
-        :meth:`replace_state` of the edited snapshot. Debug only."""
+        hand cards not taken, so its length changes only when the new hand's size differs
+        from the old. A card that enters the hand from the deck is face up, one that enters
+        the deck face down. The same board as :meth:`replace_state` of the edited snapshot.
+        Debug only."""
         self._g.debug_set_hand([int(i) for i in sort_ids])
 
     def clone(self) -> Game:

@@ -9,10 +9,11 @@ while it is 0.x, a minor release (0.2 → 0.3) can break things, and a patch rel
 
 - `Game.preview_play(cards, rolls="low" | "high")`: the play scored with every chance check
   failing unless certain, or every one succeeding (Lucky and Glass Cards, Misprint at its minimum
-  or maximum, Space Joker, 8 Ball, Bloodstone and the other chance jokers, The Wheel), so the
-  lowest and highest score a play can give. Behind it,
-  `Game.roll_bound`: a mode a clone carries, outside the snapshot and `state_hash`; with it unset
-  the engine rolls exactly as before. Card, pack and edition choices still draw from the RNG.
+  or maximum, Space Joker, 8 Ball, Bloodstone and the other chance jokers), so the lowest and
+  highest score a play can give. Behind it, `Game.roll_bound`: a mode a clone carries and
+  `replace_state` keeps, outside the snapshot and `state_hash`. It also bounds The Wheel of
+  Fortune and The Wheel's face-down draws; card, pack and edition choices still draw from the
+  RNG. With it unset the engine rolls exactly as before.
 - Analysis setters next to `debug_set`, each the board `replace_state` gives for the matching
   edited snapshot, without the snapshot's round trip: `Game.debug_set_hand(sort_ids)` (a hand
   from the hand and the deck), `Game.debug_set_blind_disabled(disabled)` and
