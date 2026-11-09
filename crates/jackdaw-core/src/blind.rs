@@ -444,7 +444,7 @@ impl Game {
             let pareidolia = self.has_joker_center(jackdaw_data::centers::J_PAREIDOLIA);
             match self.active_boss() {
                 "The Wheel" => {
-                    let roll = self.gs.rng.random("wheel");
+                    let roll = self.gs.rng.chance("wheel");
                     flipped = roll < self.gs.probabilities_normal / 7.0;
                 }
                 "The House" => {

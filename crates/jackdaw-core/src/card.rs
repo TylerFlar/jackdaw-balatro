@@ -1001,7 +1001,7 @@ impl Card {
             return 0.0;
         }
         if self.effect() == Some("Lucky Card") {
-            if rng.random("lucky_mult") < probabilities_normal / 5.0 {
+            if rng.chance("lucky_mult") < probabilities_normal / 5.0 {
                 self.lucky_trigger = true;
                 return self.ability.mult;
             }
@@ -1054,7 +1054,7 @@ impl Card {
         }
         if self.ability.p_dollars > 0.0 {
             if self.effect() == Some("Lucky Card") {
-                if rng.random("lucky_money") < probabilities_normal / 15.0 {
+                if rng.chance("lucky_money") < probabilities_normal / 15.0 {
                     self.lucky_trigger = true;
                     ret += self.ability.p_dollars;
                 }

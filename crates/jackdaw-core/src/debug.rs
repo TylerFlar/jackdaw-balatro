@@ -23,9 +23,10 @@ use serde_json::Value;
 
 use crate::action::Action;
 use crate::area::AreaId;
-use crate::card::{EditionKind, Seal};
+use crate::card::{EditionKind, Facing, Seal};
 use crate::game::{Game, LuaState, StepError};
-use crate::state::BlindSlot;
+use crate::rng::RollBound;
+use crate::state::{BlindSlot, Phase};
 
 /// What `add` creates.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -254,6 +255,138 @@ impl Game {
         }
     }
 
+    /// The roll-bound mode of the run's RNG ([`RollBound`]): `None` in play.
+    pub fn roll_bound(&self) -> Option<RollBound> {
+        self.gs.rng.bound()
+    }
+
+    /// Set or clear the roll-bound mode: with `Some(bound)`, every chance roll
+    /// (`roll < G.GAME.probabilities.normal / odds`: Lucky and Glass Cards, the chance jokers,
+    /// The Wheel) and Misprint's roll is its extreme, and their streams don't advance. Card,
+    /// pack and edition choices still draw from their streams. For the bounds of a play on a
+    /// [`Game::clone`]: a clone carries the mode; the snapshot and `state_hash` leave it out.
+    pub fn set_roll_bound(&mut self, bound: Option<RollBound>) {
+        self.gs.rng.set_bound(bound);
+    }
+
+    /// `G.GAME.blind.disabled`, written directly: none of `Blind:disable`'s effects run (no
+    /// debuff is lifted, no hand size or discard is given back). For an analysis board, as
+    /// [`Game::debug_set`] is. Fails when no blind is in play.
+    pub fn debug_set_blind_disabled(&mut self, disabled: bool) -> Result<(), StepError> {
+        let Some(blind) = self.gs.blind.as_mut() else {
+            return Err(StepError::Illegal("no blind is in play".into()));
+        };
+        blind.disabled = disabled;
+        Ok(())
+    }
+
+    /// Clear Cerulean Bell's `forced_selection` on every hand card, and drop the cards that
+    /// were forced from the highlights (the other highlights stay), as `replace_state` of a
+    /// snapshot with the flags cleared does. For an analysis board.
+    pub fn debug_clear_forced_selection(&mut self) {
+        let was_forced: Vec<u32> = self
+            .gs
+            .areas
+            .hand()
+            .iter()
+            .filter(|c| c.ability.forced_selection)
+            .map(|c| c.sort_id)
+            .collect();
+        self.gs
+            .areas
+            .hand_mut()
+            .for_each(|c| c.ability.forced_selection = false);
+        self.refresh_highlights(&was_forced);
+    }
+
+    /// Make the hand the cards `sort_ids`, in that order, taken from the hand or the deck
+    /// (SELECTING_HAND only). The deck becomes its cards not taken, in order, then the hand
+    /// cards not taken, in hand order: the playing cards stay the same (and the deck's length,
+    /// when as many cards are given as the hand holds).
+    /// A deck card that enters the hand turns face up and a hand card that enters the deck
+    /// face down, as an edited snapshot loads; nothing else about a card changes. The
+    /// highlights follow as in `replace_state`, then the snapshot load's card passes run
+    /// (`perma_debuff`, `Card:update`). For an analysis board (a hand to score from the
+    /// cards a draw could give). On an error the game is unchanged.
+    pub fn debug_set_hand(&mut self, sort_ids: &[u32]) -> Result<(), StepError> {
+        if self.gs.phase != Phase::SelectingHand {
+            return Err(StepError::Illegal(format!(
+                "the hand is set only in selecting_hand, not {}",
+                self.gs.phase.name()
+            )));
+        }
+        let hand = self.gs.areas.hand().to_vec();
+        let deck = self.gs.areas.deck().to_vec();
+        let mut new_hand = Vec::with_capacity(sort_ids.len());
+        for (i, &id) in sort_ids.iter().enumerate() {
+            if sort_ids[..i].contains(&id) {
+                return Err(StepError::Illegal(format!("card {id} is given twice")));
+            }
+            let card = if let Some(c) = hand.iter().find(|c| c.sort_id == id) {
+                *c
+            } else if let Some(c) = deck.iter().find(|c| c.sort_id == id) {
+                let mut c = *c;
+                c.facing = Facing::Front;
+                c
+            } else {
+                return Err(StepError::Illegal(format!(
+                    "card {id} is not in the hand or the deck"
+                )));
+            };
+            new_hand.push(card);
+        }
+        let taken = |c: &&crate::card::Card| sort_ids.contains(&c.sort_id);
+        let mut new_deck: Vec<_> = deck.iter().filter(|c| !taken(c)).copied().collect();
+        new_deck.extend(hand.iter().filter(|c| !taken(c)).map(|c| {
+            let mut c = *c;
+            c.facing = Facing::Back;
+            c
+        }));
+        let was_forced: Vec<u32> = hand
+            .iter()
+            .filter(|c| c.ability.forced_selection)
+            .map(|c| c.sort_id)
+            .collect();
+        // Empty the deck first: a card is in one area at a time.
+        self.gs.areas.clear(AreaId::Deck);
+        self.gs.areas.set(AreaId::Hand, new_hand);
+        self.gs.areas.set(AreaId::Deck, new_deck);
+        self.refresh_highlights(&was_forced);
+        for a in AreaId::PLAYING {
+            self.gs.areas.get_mut(a).for_each(|c| {
+                if c.ability.perma_debuff {
+                    c.debuff = true;
+                }
+            });
+        }
+        self.update_cards();
+        Ok(())
+    }
+
+    /// The hand's highlights after an analysis edit, as `replace_state` recomputes them: a
+    /// highlighted card stays if it is still in the hand, unless it was forced (Cerulean
+    /// Bell's card, `was_forced`) and no longer is; every forced hand card is highlighted.
+    fn refresh_highlights(&mut self, was_forced: &[u32]) {
+        let hand = self.gs.areas.hand();
+        let mut highlighted: Vec<u32> = self
+            .rt
+            .highlighted
+            .iter()
+            .copied()
+            .filter(|&id| {
+                hand.iter()
+                    .find(|c| c.sort_id == id)
+                    .is_some_and(|c| c.ability.forced_selection || !was_forced.contains(&id))
+            })
+            .collect();
+        for c in hand {
+            if c.ability.forced_selection && !highlighted.contains(&c.sort_id) {
+                highlighted.push(c.sort_id);
+            }
+        }
+        self.rt.highlighted = highlighted;
+    }
+
     /// `set {shop: true}` (set.lua:170-189): `G.shop:remove()` takes the shop's cards (their
     /// `used_jokers` marks go with them), `current_round.used_packs` is cleared, and
     /// `G:update_shop()` builds a new shop as on arrival: new jokers, the ante's voucher if it
@@ -463,5 +596,142 @@ mod tests {
     fn restock_needs_the_shop() {
         let mut g = run("ADD_TEST3");
         assert!(g.debug_restock_shop().is_err());
+    }
+
+    fn in_round(seed: &str) -> Game {
+        let mut g = run(seed);
+        g.step(&Action::SelectBlind).unwrap();
+        g
+    }
+
+    fn ids(g: &Game, a: AreaId) -> Vec<u32> {
+        g.gs.areas.get(a).iter().map(|c| c.sort_id).collect()
+    }
+
+    /// The same edit on the snapshot: what `replace_state` of the edited `to_dict` loads.
+    fn reloaded(g: &Game, edit: impl FnOnce(&mut Value)) -> Game {
+        let mut v = g.snapshot();
+        edit(&mut v);
+        Game::from_snapshot(&v).unwrap()
+    }
+
+    #[test]
+    fn set_hand_is_the_snapshot_edit() {
+        let mut g = in_round("SET_HAND1");
+        let hand = ids(&g, AreaId::Hand);
+        let deck = ids(&g, AreaId::Deck);
+        g.rt.highlighted = vec![hand[1], hand[0]];
+        let want = [hand[1], deck[0], hand[3], deck[5]];
+        let mut b = g.clone();
+        b.debug_set_hand(&want).unwrap();
+        let r = reloaded(&g, |v| {
+            let cards = |v: &Value, a: &str| v["areas"][a].as_array().unwrap().clone();
+            let (h, d) = (cards(v, "hand"), cards(v, "deck"));
+            let id = |c: &Value| c["sort_id"].as_u64().unwrap() as u32;
+            let pool: Vec<Value> = h.iter().chain(&d).cloned().collect();
+            let new_hand: Vec<Value> = want
+                .iter()
+                .map(|&w| pool.iter().find(|c| id(c) == w).unwrap().clone())
+                .collect();
+            let new_deck: Vec<Value> = d
+                .iter()
+                .chain(&h)
+                .filter(|c| !want.contains(&id(c)))
+                .cloned()
+                .collect();
+            v["areas"]["hand"] = Value::Array(new_hand);
+            v["areas"]["deck"] = Value::Array(new_deck);
+        });
+        assert_eq!(ids(&b, AreaId::Hand), want);
+        assert_eq!(b.snapshot(), r.snapshot());
+        assert_eq!(ids(&b, AreaId::Deck), ids(&r, AreaId::Deck));
+        let facing = |g: &Game, a: AreaId| -> Vec<Facing> {
+            g.gs.areas.get(a).iter().map(|c| c.facing).collect()
+        };
+        assert_eq!(facing(&b, AreaId::Hand), facing(&r, AreaId::Hand));
+        assert_eq!(facing(&b, AreaId::Deck), facing(&r, AreaId::Deck));
+        assert!(facing(&b, AreaId::Hand).iter().all(|&f| f == Facing::Front));
+        assert!(facing(&b, AreaId::Deck).iter().all(|&f| f == Facing::Back));
+        assert_eq!(
+            b.gs.areas.deck().len() + b.gs.areas.hand().len(),
+            deck.len() + hand.len(),
+            "no card made or lost"
+        );
+        // hand[0] left the hand, so it left the highlights; hand[1] stayed.
+        assert_eq!(b.rt.highlighted, vec![hand[1]]);
+        // Every play scores the same on both boards.
+        for n in 1..=4usize {
+            let cards: Vec<usize> = (0..n).collect();
+            let (mut x, mut y) = (b.clone(), r.clone());
+            x.step(&Action::PlayHand(cards.clone())).unwrap();
+            y.step(&Action::PlayHand(cards)).unwrap();
+            assert_eq!(x.snapshot(), y.snapshot());
+        }
+    }
+
+    #[test]
+    fn set_hand_refuses_and_leaves_the_game() {
+        let mut g = in_round("SET_HAND2");
+        let hand = ids(&g, AreaId::Hand);
+        let before = g.snapshot();
+        assert!(
+            g.debug_set_hand(&[hand[0], hand[0]]).is_err(),
+            "repeated card"
+        );
+        assert!(
+            g.debug_set_hand(&[hand[0], 99_999]).is_err(),
+            "unknown card"
+        );
+        assert_eq!(g.snapshot(), before);
+        let mut idle = run("SET_HAND3");
+        let before = idle.snapshot();
+        assert!(idle.debug_set_hand(&[]).is_err(), "not in selecting_hand");
+        assert_eq!(idle.snapshot(), before);
+    }
+
+    #[test]
+    fn blind_disabled_is_the_snapshot_edit() {
+        let g = in_round("BLIND_OFF1");
+        let mut b = g.clone();
+        b.debug_set_blind_disabled(true).unwrap();
+        let r = reloaded(&g, |v| v["blind"]["disabled"] = Value::Bool(true));
+        assert_eq!(b.snapshot(), r.snapshot());
+        assert!(b.gs.blind.as_ref().unwrap().disabled);
+        let mut none = g.clone();
+        none.gs.blind = None;
+        assert!(none.debug_set_blind_disabled(true).is_err());
+    }
+
+    #[test]
+    fn clear_forced_selection_is_the_snapshot_edit() {
+        let mut g = in_round("BELL1");
+        let hand = ids(&g, AreaId::Hand);
+        g.gs.areas.hand_mut()[2].ability.forced_selection = true;
+        g.rt.highlighted = vec![hand[2], hand[4]];
+        let mut b = g.clone();
+        b.debug_clear_forced_selection();
+        let r = reloaded(&g, |v| {
+            v["areas"]["hand"][2]["ability"]["forced_selection"] = Value::Null
+        });
+        assert_eq!(b.snapshot(), r.snapshot());
+        assert!(
+            b.gs.areas
+                .hand()
+                .iter()
+                .all(|c| !c.ability.forced_selection)
+        );
+        // The forced card leaves the highlights; the other highlight stays (replace_state's rule).
+        assert_eq!(b.rt.highlighted, vec![hand[4]]);
+    }
+
+    #[test]
+    fn roll_bound_lives_on_the_rng_and_out_of_the_snapshot() {
+        let g = in_round("BOUND_GAME1");
+        let mut b = g.clone();
+        b.set_roll_bound(Some(RollBound::Low));
+        assert_eq!(b.roll_bound(), Some(RollBound::Low));
+        assert_eq!(b.clone().roll_bound(), Some(RollBound::Low));
+        assert_eq!(b.snapshot(), g.snapshot());
+        assert_eq!(g.roll_bound(), None);
     }
 }

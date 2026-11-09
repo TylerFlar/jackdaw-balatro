@@ -5,6 +5,19 @@ while it is 0.x, a minor release (0.2 → 0.3) can break things, and a patch rel
 
 ## Unreleased
 
+### Added
+
+- `Game.preview_play(cards, rolls="low" | "high")`: the play scored with every chance check
+  failing unless certain, or every one succeeding (Lucky and Glass Cards, Misprint at its minimum
+  or maximum, Space Joker, 8 Ball, Bloodstone and the other chance jokers, The Wheel), so the
+  lowest and highest score a play can give. Behind it,
+  `Game.roll_bound`: a mode a clone carries, outside the snapshot and `state_hash`; with it unset
+  the engine rolls exactly as before. Card, pack and edition choices still draw from the RNG.
+- Analysis setters next to `debug_set`, each the board `replace_state` gives for the matching
+  edited snapshot, without the snapshot's round trip: `Game.debug_set_hand(sort_ids)` (a hand
+  from the hand and the deck), `Game.debug_set_blind_disabled(disabled)` and
+  `Game.debug_clear_forced_selection()` (Cerulean Bell) ([docs/api.md](docs/api.md)).
+
 ### Fixed
 
 - `BalatroVectorEnv`'s idle threads sleep after polling for 100 µs, as documented: a thread
