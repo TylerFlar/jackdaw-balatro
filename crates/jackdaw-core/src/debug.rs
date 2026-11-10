@@ -316,10 +316,11 @@ impl Game {
     /// (`perma_debuff`, `Card:update`). For an analysis board (a hand to score from the
     /// cards a draw could give). On an error the game is unchanged.
     ///
-    /// One value outside the snapshot can differ from `replace_state`: the deck's limit in
-    /// BalatroBot's view. The card pass here (`update_cards`) raises it to a deck now over it
-    /// (a shorter hand, on a run that gained playing cards this round); `replace_state` keeps
-    /// the run's value until a step runs that pass.
+    /// Two things outside the snapshot can differ from `replace_state`. The deck's limit in
+    /// BalatroBot's view: the card pass here (`update_cards`) raises it to a deck now over it
+    /// (a shorter hand, on a run that gained playing cards this round), where `replace_state`
+    /// keeps the run's value until a step runs that pass. And the recorded play
+    /// ([`Game::last_play`]), which stays here and which `replace_state` clears.
     pub fn debug_set_hand(&mut self, sort_ids: &[u32]) -> Result<(), StepError> {
         if self.gs.phase != Phase::SelectingHand {
             return Err(StepError::Illegal(format!(

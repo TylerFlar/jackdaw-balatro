@@ -63,7 +63,7 @@ def _with_jokers(seed: str, *jokers: str) -> Game:
     for key in jokers:
         b.joker(key)
     g = b.card("H_K").card("H_8").build()
-    # The debug add polls an edition (the live game doesn't); these seeds poll none.
+    # The debug add polls an edition for a joker given none; these seeds poll none.
     assert all(j.edition is None for j in g.jokers), [j.edition for j in g.jokers]
     return g
 
@@ -263,12 +263,15 @@ def test_the_wheel_of_fortune_follows_the_bound() -> None:
         .build()
     )
     assert g.jokers[0].edition is None
+
+    def stream(t: Game) -> float | None:
+        return t.to_dict()["rng"]["streams"].get("wheel_of_fortune")
+
     use = UseConsumable(card_index=0)
     low, high = _at(g, "low", use), _at(g, "high", use)
     assert low.jokers[0].edition is None and high.jokers[0].edition is not None
-    assert "wheel_of_fortune" not in low.to_dict()["rng"]["streams"]
-    assert "wheel_of_fortune" in high.to_dict()["rng"]["streams"]
-    # Two Oops! All 6s make it certain: it hits under "low" as well.
+    assert stream(low) is None and stream(high) is not None
+    # Two Oops! All 6s make it certain: it hits under "low" as well, and in play.
     sure = (
         GameBuilder("b_red", seed="ANLY0017")
         .select_blind()
@@ -278,7 +281,12 @@ def test_the_wheel_of_fortune_follows_the_bound() -> None:
         .build()
     )
     assert all(j.edition is None for j in sure.jokers)
-    assert sum(j.edition is not None for j in _at(sure, "low", use).jokers) == 1
+    sure_low, sure_real = _at(sure, "low", use), _at(sure, None, use)
+    assert sum(j.edition is not None for j in sure_low.jokers) == 1
+    assert sum(j.edition is not None for j in sure_real.jokers) == 1
+    # A bound hit draws the joker and the edition and nothing else, so both leave the stream
+    # (one seed, one key) in one state; the real use draws its chance roll first.
+    assert stream(high) == stream(sure_low) != stream(sure_real)
 
 
 # ---------------------------------------- analysis setters

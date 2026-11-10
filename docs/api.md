@@ -116,8 +116,8 @@ Misprint's mult (its minimum or maximum).
 "Low" fires an effect only when it is certain (Oops! All 6s can make it so); "high" fires every
 possible one. These rolls draw nothing from the RNG; the rolls that choose a card, a pack or an
 edition (8 Ball's Tarot, The Soul) still draw as in play. The Wheel of Fortune picks its joker
-and its edition from the stream its chance roll shares, so under a bound they aren't the ones
-the real use would pick.
+and its edition from the stream its chance roll shares, so under a bound they can differ from
+the ones the real use would pick.
 
 The mode behind it is `Game.roll_bound` (`None`, `"low"` or `"high"`). It is not part of the
 game: `clone()` carries it and `replace_state` keeps it, while `to_dict()` and `state_hash()`

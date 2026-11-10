@@ -466,8 +466,8 @@ impl Game {
     /// The roll-bound mode: ``None`` in play, ``"low"`` or ``"high"`` on an analysis board.
     /// Under a bound every chance roll (Lucky and Glass Cards, the chance jokers, The Wheel,
     /// The Wheel of Fortune) and Misprint's roll is its least (``"low"``) or most (``"high"``)
-    /// lucky value and draws nothing from the RNG; card and pack choices still do. A clone
-    /// carries it and ``replace_state`` keeps it; the snapshot leaves it out.
+    /// lucky value and draws nothing from the RNG; card, pack and edition choices still do. A
+    /// clone carries it and ``replace_state`` keeps it; the snapshot leaves it out.
     #[getter]
     fn roll_bound(&self) -> Option<&'static str> {
         use jackdaw_core::rng::RollBound;
