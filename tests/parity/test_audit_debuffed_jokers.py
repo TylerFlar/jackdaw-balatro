@@ -33,7 +33,7 @@ def _debuff_joker(game: Game, index: int, **stickers: Any) -> None:
 
 
 def _plain_jokers(game: Game) -> None:
-    # The debug add polls an edition (the live game doesn't); these seeds poll none.
+    # The debug add polls an edition for a joker given none; these seeds poll none.
     assert all(j.edition is None for j in game.jokers), [j.edition for j in game.jokers]
 
 

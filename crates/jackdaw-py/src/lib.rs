@@ -148,11 +148,12 @@ impl Game {
     /// Replace the run's state with a canonical snapshot (JSON text) at the same decision point,
     /// keeping the runtime a snapshot doesn't carry: the card-area memo BalatroBot's view reads
     /// (the deck's limit, the shop's voucher slots, a removed shop's areas) and the hand's
-    /// highlights, except that Cerulean Bell's forced cards follow the snapshot. The live
-    /// lockstep (`jackdaw.bridge.live`) copies values the live game reports into its shadow run
-    /// this way; `from_snapshot` would restart that memo (as `load` does).
+    /// highlights, except that Cerulean Bell's forced cards follow the snapshot. The run's modes
+    /// stay too: whether it records scoring, and its roll bound. The live lockstep
+    /// (`jackdaw.bridge.live`) copies values the live game reports into its shadow run this
+    /// way; `from_snapshot` would restart that memo (as `load` does).
     fn replace_state(&mut self, text: &str) -> PyResult<()> {
-        let fresh = game_from_snapshot(text)?;
+        let mut fresh = game_from_snapshot(text)?;
         let old = &self.inner;
         if fresh.gs.phase != old.gs.phase {
             return Err(value_error(format!(
@@ -191,6 +192,8 @@ impl Game {
             enabled: old.trace.enabled,
             play: None,
         };
+        // The roll bound is the run's mode, not the snapshot's (which carries none).
+        fresh.set_roll_bound(old.roll_bound());
         // `from_state` already ran a frame of `Card:update` on the new cards.
         self.inner = jackdaw_core::game::Game {
             gs: fresh.gs,
@@ -461,10 +464,10 @@ impl Game {
     }
 
     /// The roll-bound mode: ``None`` in play, ``"low"`` or ``"high"`` on an analysis board.
-    /// Under a bound every chance roll (Lucky and Glass Cards, the chance jokers, The Wheel)
-    /// and Misprint's roll is its least (``"low"``) or most (``"high"``) lucky value and draws
-    /// nothing from the RNG; card and pack choices still do. A clone carries it; the snapshot
-    /// leaves it out.
+    /// Under a bound every chance roll (Lucky and Glass Cards, the chance jokers, The Wheel,
+    /// The Wheel of Fortune) and Misprint's roll is its least (``"low"``) or most (``"high"``)
+    /// lucky value and draws nothing from the RNG; card, pack and edition choices still do. A
+    /// clone carries it and ``replace_state`` keeps it; the snapshot leaves it out.
     #[getter]
     fn roll_bound(&self) -> Option<&'static str> {
         use jackdaw_core::rng::RollBound;

@@ -8,7 +8,14 @@ import copy
 import pytest
 
 from jackdaw.core import Game, GameBuilder, IllegalActionError
-from jackdaw.engine.actions import PlayHand, SelectBlind
+from jackdaw.engine.actions import (
+    CashOut,
+    Discard,
+    OpenBooster,
+    PlayHand,
+    SelectBlind,
+    UseConsumable,
+)
 
 
 def _round(seed: str) -> Game:
@@ -40,6 +47,25 @@ def _replaced(g: Game, edit) -> Game:
     b = g.clone()
     b.replace_state(d)
     return b
+
+
+def _at(g: Game, bound: str | None, action) -> Game:
+    """A copy of the run after ``action``, taken under ``bound``."""
+    t = g.clone()
+    t.roll_bound = bound
+    t.step(action)
+    return t
+
+
+def _with_jokers(seed: str, *jokers: str) -> Game:
+    """A round with these jokers, and a King and an 8 of Hearts as the hand's last two cards."""
+    b = GameBuilder("b_red", seed=seed).select_blind()
+    for key in jokers:
+        b.joker(key)
+    g = b.card("H_K").card("H_8").build()
+    # The debug add polls an edition for a joker given none; these seeds poll none.
+    assert all(j.edition is None for j in g.jokers), [j.edition for j in g.jokers]
+    return g
 
 
 # ---------------------------------------- roll bounds
@@ -93,13 +119,174 @@ def test_roll_bound_is_runtime_only() -> None:
     b.roll_bound = "high"
     assert b.roll_bound == "high" and b.clone().roll_bound == "high"
     assert b.state_hash() == g.state_hash() and b.to_dict() == g.to_dict()
-    b.replace_state(b.to_dict())
-    assert b.roll_bound is None  # a snapshot carries no bound
+    # A snapshot carries no bound: a run made from one starts without it.
+    assert Game.from_dict(b.to_dict()).roll_bound is None
     with pytest.raises(ValueError):
         b.roll_bound = "middle"
+    assert b.roll_bound == "high"
     # Unbound, a play is the game's own play.
     for cards in [(0,), (0, 1, 2)]:
         assert g.preview_play(cards) == g.preview_play(cards, rolls=None)
+
+
+def test_replace_state_keeps_the_roll_bound() -> None:
+    """The bound is the run's mode, as record_scoring is: a board edited through its snapshot
+    still rolls at the bound, like one edited with a setter."""
+    g = (
+        GameBuilder("b_red", seed="ANLY0010")
+        .boss("bl_hook")
+        .select_blind()
+        .card("H_A", enhancement="m_lucky")
+        .build()
+    )
+    lucky = (len(g.hand) - 1,)
+    a, b = g.clone(), g.clone()
+    a.roll_bound = b.roll_bound = "high"
+    a.debug_set_blind_disabled(True)
+    d = copy.deepcopy(b.to_dict())
+    d["blind"]["disabled"] = True
+    b.replace_state(d)
+    assert b.roll_bound == "high"
+    _same_board(a, b)
+    # The Lucky Card pays out on both, as preview_play(rolls="high") says.
+    high = b.preview_play(lucky, rolls="high")
+    assert high != b.preview_play(lucky, rolls="low")
+    assert _outcome(a, lucky)[0] == _outcome(b, lucky)[0] == b.preview_play(lucky) == high
+
+
+# ---------------------------------------- every chance roll follows the bound
+@pytest.mark.parametrize(
+    ("joker", "card", "read", "low", "high"),
+    [
+        # 1 in 4 to level up the hand played.
+        ("j_space", -2, lambda t: t.hand_levels["High Card"].level, 1, 2),
+        # 1 in 2 for X1.5 mult on a scored Heart.
+        ("j_bloodstone", -2, lambda t: t.last_score.mult, 1, 1.5),
+        # 1 in 2 for $2 on a scored face card.
+        ("j_business", -2, lambda t: t.last_score.dollars, 0, 2),
+        # 1 in 4 for a Tarot on a scored 8.
+        ("j_8_ball", -1, lambda t: len(t.consumables), 0, 1),
+    ],
+    ids=["space", "bloodstone", "business", "8_ball"],
+)
+def test_a_chance_joker_follows_the_bound(joker, card, read, low, high) -> None:
+    g = _with_jokers("ANLY0011", joker)
+    play = PlayHand(card_indices=(len(g.hand) + card,))
+    assert (read(_at(g, "low", play)), read(_at(g, "high", play))) == (low, high)
+
+
+def test_reserved_parking_follows_the_bound() -> None:
+    """1 in 2 for $1 from each face card held in hand."""
+    g = _with_jokers("ANLY0011", "j_reserved_parking")
+    eight = len(g.hand) - 1
+    faces = sum(c.rank in ("Jack", "Queen", "King") for c in g.hand[:eight])
+    assert faces >= 1  # the King of Hearts, at least
+    low, high = (g.preview_play((eight,), rolls=r) for r in ("low", "high"))
+    assert (low.dollars, high.dollars) == (0, faces)
+
+
+def test_low_fires_a_chance_that_cannot_fail() -> None:
+    """Oops! All 6s doubles Bloodstone's 1 in 2: certain, so it fires under "low" too."""
+    g = _with_jokers("ANLY0012", "j_bloodstone", "j_oops")
+    king = (len(g.hand) - 2,)
+    assert g.preview_play(king, rolls="low").mult == 1.5
+    assert g.preview_play(king, rolls="high").mult == 1.5
+
+
+@pytest.mark.parametrize("joker", ["j_gros_michel", "j_cavendish"])
+def test_an_end_of_round_chance_follows_the_bound(joker) -> None:
+    """Gros Michel (1 in 6) and Cavendish (1 in 1000) go extinct at the end of the round under
+    "high" and stay under "low": the bounds are the play's score, not the board it leaves."""
+    g = GameBuilder("b_red", seed="ANLY0013").select_blind().joker(joker).chips(10**9).build()
+    assert g.jokers[0].edition is None
+    play = PlayHand(card_indices=(0,))
+    low, high = _at(g, "low", play), _at(g, "high", play)
+    assert low.phase == high.phase == "round_eval"
+    assert [j.key for j in low.jokers] == [joker] and not high.jokers
+    assert low.last_score == high.last_score
+
+
+def test_hallucination_follows_the_bound() -> None:
+    """1 in 2 for a Tarot when a booster pack is opened."""
+    g = (
+        GameBuilder("b_red", seed="ANLY0014")
+        .select_blind()
+        .joker("j_hallucination")
+        .chips(10**9)
+        .step(PlayHand(card_indices=(0,)), CashOut())
+        .build()
+    )
+    assert g.jokers[0].edition is None and not g.consumables
+    opened = OpenBooster(card_index=0)
+    low, high = _at(g, "low", opened), _at(g, "high", opened)
+    assert low.phase == high.phase == "pack_opening"
+    assert (len(low.consumables), len(high.consumables)) == (0, 1)
+
+
+def test_a_glass_card_shatters_under_high() -> None:
+    """A harmful chance fires under "high" too: the Glass Card scores the same, then shatters
+    (1 in 4); under "low" it goes to the discard pile."""
+    g = (
+        GameBuilder("b_red", seed="ANLY0015")
+        .select_blind()
+        .card("H_A", enhancement="m_glass")
+        .build()
+    )
+    glass = g.hand[-1].sort_id
+    play = PlayHand(card_indices=(len(g.hand) - 1,))
+    low, high = _at(g, "low", play), _at(g, "high", play)
+    assert low.last_score == high.last_score
+    assert glass in [c.sort_id for c in low.discard_pile]
+    left = [c.sort_id for area in (high.hand, high.deck, high.discard_pile) for c in area]
+    assert glass not in left
+
+
+def test_the_wheel_flips_every_drawn_card_or_none() -> None:
+    """The Wheel: 1 in 7 for each card drawn to be face down."""
+    g = GameBuilder("b_red", seed="ANLY0016").boss("bl_wheel").select_blind().build()
+    held = {c.sort_id for c in g.hand}
+    for bound, face_down in (("low", False), ("high", True)):
+        t = _at(g, bound, Discard(card_indices=(0, 1, 2)))
+        drawn = [c for c in t.hand if c.sort_id not in held]
+        assert len(drawn) == 3 and all(c.face_down == face_down for c in drawn), bound
+
+
+def test_the_wheel_of_fortune_follows_the_bound() -> None:
+    """The Wheel of Fortune's 1 in 4 is a chance check too. Its joker and its edition come
+    from the same stream as that roll ('wheel_of_fortune'): a miss under "low" draws nothing,
+    and a hit under "high" draws only the two choices."""
+    g = (
+        GameBuilder("b_red", seed="ANLY0017")
+        .select_blind()
+        .joker("j_joker")
+        .consumable("c_wheel_of_fortune")
+        .build()
+    )
+    assert g.jokers[0].edition is None
+
+    def stream(t: Game) -> float | None:
+        return t.to_dict()["rng"]["streams"].get("wheel_of_fortune")
+
+    use = UseConsumable(card_index=0)
+    low, high = _at(g, "low", use), _at(g, "high", use)
+    assert low.jokers[0].edition is None and high.jokers[0].edition is not None
+    assert stream(low) is None and stream(high) is not None
+    # Two Oops! All 6s make it certain: it hits under "low" as well, and in play.
+    sure = (
+        GameBuilder("b_red", seed="ANLY0017")
+        .select_blind()
+        .joker("j_oops")
+        .joker("j_oops")
+        .consumable("c_wheel_of_fortune")
+        .build()
+    )
+    assert all(j.edition is None for j in sure.jokers)
+    sure_low, sure_real = _at(sure, "low", use), _at(sure, None, use)
+    assert sum(j.edition is not None for j in sure_low.jokers) == 1
+    assert sum(j.edition is not None for j in sure_real.jokers) == 1
+    # A bound hit draws the joker and the edition and nothing else, so both leave the stream
+    # (one seed, one key) in one state; the real use draws its chance roll first.
+    assert stream(high) == stream(sure_low) != stream(sure_real)
 
 
 # ---------------------------------------- analysis setters

@@ -17,6 +17,11 @@
 //!
 //! Stickers are forced, as `force_stickers` does in the live game: eternal and perishable
 //! together, on any joker, even ones vanilla never makes eternal (`docs/balatrobot.md`).
+//!
+//! The analysis operations are jackdaw's own, with no BalatroBot endpoint behind them: the
+//! roll-bound mode ([`Game::set_roll_bound`]) and the setters [`Game::debug_set_hand`],
+//! [`Game::debug_set_blind_disabled`] and [`Game::debug_clear_forced_selection`]. Each setter
+//! gives the state that loading the edited snapshot gives, which this module's tests check.
 
 use jackdaw_data::{BlindId, CardId, CenterId, CenterSet, centers};
 use serde_json::Value;
@@ -262,9 +267,11 @@ impl Game {
 
     /// Set or clear the roll-bound mode: with `Some(bound)`, every chance roll
     /// (`roll < G.GAME.probabilities.normal / odds`: Lucky and Glass Cards, the chance jokers,
-    /// The Wheel) and Misprint's roll is its extreme, and their streams don't advance. Card,
-    /// pack and edition choices still draw from their streams. For the bounds of a play on a
-    /// [`Game::clone`]: a clone carries the mode; the snapshot and `state_hash` leave it out.
+    /// The Wheel, The Wheel of Fortune) and Misprint's roll is its extreme, and their streams
+    /// don't advance. Card, pack and edition choices still draw from their streams (The Wheel
+    /// of Fortune's from the stream its chance roll shares, so not the ones the real use would
+    /// draw). For the bounds of a play on a [`Game::clone`]: a clone carries the mode; the
+    /// snapshot and `state_hash` leave it out.
     pub fn set_roll_bound(&mut self, bound: Option<RollBound>) {
         self.gs.rng.set_bound(bound);
     }
@@ -308,6 +315,12 @@ impl Game {
     /// highlights follow as in `replace_state`, then the snapshot load's card passes run
     /// (`perma_debuff`, `Card:update`). For an analysis board (a hand to score from the
     /// cards a draw could give). On an error the game is unchanged.
+    ///
+    /// Two things outside the snapshot can differ from `replace_state`. The deck's limit in
+    /// BalatroBot's view: the card pass here (`update_cards`) raises it to a deck now over it
+    /// (a shorter hand, on a run that gained playing cards this round), where `replace_state`
+    /// keeps the run's value until a step runs that pass. And the recorded play
+    /// ([`Game::last_play`]), which stays here and which `replace_state` clears.
     pub fn debug_set_hand(&mut self, sort_ids: &[u32]) -> Result<(), StepError> {
         if self.gs.phase != Phase::SelectingHand {
             return Err(StepError::Illegal(format!(
