@@ -12,8 +12,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from jackdaw.core import Game
-from jackdaw.engine.actions import PlayHand, SelectBlind, UseConsumable
+from jackdaw.core import Game, GameBuilder
+from jackdaw.engine.actions import (
+    CashOut,
+    NextRound,
+    PlayHand,
+    SelectBlind,
+    SellCard,
+    UseConsumable,
+)
 
 
 def _debuff_joker(game: Game, index: int, **stickers: Any) -> None:
@@ -26,7 +33,7 @@ def _debuff_joker(game: Game, index: int, **stickers: Any) -> None:
 
 
 def _plain_jokers(game: Game) -> None:
-    # The debug add polls an edition (the live game doesn't); these seeds poll none.
+    # The debug add polls an edition for a joker given none; these seeds poll none.
     assert all(j.edition is None for j in game.jokers), [j.edition for j in game.jokers]
 
 
@@ -75,3 +82,132 @@ def test_a_debuffed_chaos_gives_no_free_reroll() -> None:
         game.step(SelectBlind())
         assert game.jokers[0].debuff == perished
         assert game.to_dict()["current_round"]["free_rerolls"] == rerolls, perished
+
+
+def _slots(game: Game) -> float:
+    return game.to_dict()["game"]["joker_slots"]
+
+
+def _only_joker(game: Game) -> dict[str, Any]:
+    (joker,) = game.to_dict()["areas"]["jokers"]
+    return joker
+
+
+def test_ectoplasm_on_a_debuffed_joker_costs_a_slot_once_sold() -> None:
+    """The game's own slot bug, kept on purpose: Ectoplasm's Negative on a debuffed joker adds
+    no slot, and selling the joker later takes one away.
+
+    A debuffed joker is out of the deck (set_debuff -> remove_from_deck(true), card.lua:535),
+    and set_edition adds the Negative slot only to a card added to the deck (card.lua:405-415).
+    Crimson Heart's defeat lifts the debuff (blind.lua:336 -> 211-212 -> 651); add_to_deck(true)
+    adds no slot for a Negative coming back from a debuff (card.lua:630-633). Selling it runs
+    remove_from_deck(), which takes the slot (card.lua:687-697 from Card:remove, 4727-4733):
+    one slot fewer than before Ectoplasm. https://balatrowiki.org/w/Ectoplasm (Strategy)."""
+    game = (
+        GameBuilder("b_red", 1, "AUDIT_ECTO_SLOT")
+        .boss("bl_final_heart")
+        .select_blind()
+        .joker("j_joker")
+        .consumable("c_ectoplasm")
+        .build()
+    )
+    _plain_jokers(game)
+    slots = _slots(game)
+    # Crimson Heart debuffs the only joker after the hand (blind.lua:588-600).
+    game.step(PlayHand(card_indices=(0,)))
+    joker = _only_joker(game)
+    assert joker["debuff"] and not joker["added_to_deck"]
+
+    game.step(UseConsumable(card_index=0))
+    joker = _only_joker(game)
+    assert game.jokers[0].edition == "negative" and joker["debuff"]
+    assert not joker["ability"].get("queue_negative_removal")
+    assert _slots(game) == slots
+
+    game.debug_set(chips=10**9)
+    game.step(PlayHand(card_indices=(0,)))
+    assert game.phase == "round_eval"
+    joker = _only_joker(game)
+    assert not joker["debuff"] and joker["added_to_deck"]
+    assert not joker["ability"].get("queue_negative_removal")
+    assert _slots(game) == slots
+
+    game.step(CashOut())
+    game.step(SellCard(area="jokers", card_index=0))
+    assert not game.jokers
+    assert _slots(game) == slots - 1
+
+
+def test_ectoplasm_on_a_perished_joker_adds_no_slot() -> None:
+    """A perished joker stays debuffed (card.lua:527-533), so Ectoplasm's Negative adds no slot
+    (card.lua:405-415). Sold while still debuffed, it takes none back: remove_from_deck returns
+    for a card out of the deck (card.lua:646), and the removal was never queued (card.lua:687-689
+    queues it only for a joker already Negative when debuffed; Card:remove, 4733-4738)."""
+    game = (
+        GameBuilder("b_red", 1, "AUDIT_ECTO_PERISHED")
+        .select_blind()
+        .joker("j_joker", perishable=1)
+        .chips(10**9)
+        .build()
+    )
+    _plain_jokers(game)
+    slots = _slots(game)
+    game.step(PlayHand(card_indices=(0,)))
+    game.step(CashOut())
+    joker = _only_joker(game)
+    assert joker["debuff"] and not joker["added_to_deck"]
+
+    game.debug_add("c_ectoplasm")
+    game.step(UseConsumable(card_index=0))
+    joker = _only_joker(game)
+    assert game.jokers[0].edition == "negative" and joker["debuff"]
+    assert _slots(game) == slots
+
+    game.step(SellCard(area="jokers", card_index=0))
+    assert not game.jokers
+    assert _slots(game) == slots
+
+
+def test_ectoplasm_then_perishing_costs_a_slot_once_sold() -> None:
+    """The same loss through a Perishable joker: Ectoplasm lands while Crimson Heart debuffs it
+    (no slot, card.lua:405-415), the boss's defeat lifts the debuff (card.lua:630-633 adds
+    none), and when the joker perishes a round later, remove_from_deck(true) queues the removal
+    of the Negative slot (card.lua:527-533, 687-689). Selling it takes that slot (Card:remove,
+    card.lua:4733-4738): one fewer than before Ectoplasm."""
+    game = (
+        GameBuilder("b_red", 1, "AUDIT_ECTO_PERISH_LATER")
+        .boss("bl_final_heart")
+        .select_blind()
+        .joker("j_joker", perishable=2)
+        .consumable("c_ectoplasm")
+        .build()
+    )
+    _plain_jokers(game)
+    slots = _slots(game)
+    game.step(PlayHand(card_indices=(0,)))
+    game.step(UseConsumable(card_index=0))
+    assert game.jokers[0].edition == "negative" and _only_joker(game)["debuff"]
+    assert _slots(game) == slots
+
+    game.debug_set(chips=10**9)
+    game.step(PlayHand(card_indices=(0,)))
+    joker = _only_joker(game)
+    assert not joker["debuff"] and joker["added_to_deck"]
+    assert joker["stickers"]["perish_tally"] == 1
+    assert _slots(game) == slots
+
+    game.step(CashOut())
+    game.step(NextRound())
+    game.step(SelectBlind())
+    game.debug_set(chips=10**9)
+    game.step(PlayHand(card_indices=(0,)))
+    joker = _only_joker(game)
+    assert joker["debuff"] and not joker["added_to_deck"]
+    assert joker["stickers"]["perish_tally"] == 0
+    assert joker["ability"].get("queue_negative_removal")
+    assert _slots(game) == slots
+
+    game.step(CashOut())
+    game.step(SellCard(area="jokers", card_index=0))
+    assert not game.jokers
+    assert _slots(game) == slots - 1

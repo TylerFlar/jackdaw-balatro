@@ -599,7 +599,7 @@ impl Game {
                     (c.name() == "Glass Card" && !c.debuff).then(|| c.ability.extra.num())
                 });
                 if let Some(extra) = glass {
-                    let roll = self.gs.rng.random("glass");
+                    let roll = self.gs.rng.chance("glass");
                     if roll < self.gs.probabilities_normal / extra.unwrap_or(4.0) {
                         hit = true;
                     }

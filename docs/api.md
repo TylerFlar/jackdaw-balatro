@@ -97,6 +97,48 @@ seal, the boss and the RNG. The run itself is unchanged. `clone()` is cheap enou
 search. `scoring_cards(positions)` gives the hand those cards make and which of them would score
 (`("Pair", [1, 3])`), without playing them.
 
+### The range of a play that rolls
+
+```python
+low = game.preview_play((0, 1, 2), rolls="low")    # every chance check fails unless certain
+high = game.preview_play((0, 1, 2), rolls="high")  # every chance check succeeds
+```
+
+A play with a Lucky Card, a Glass Card or a chance joker can score differently from one roll to
+the next. `rolls="low"` scores it with every chance check failing unless it is certain, and
+`rolls="high"` with every chance check succeeding, so
+`low.total <= preview_play(cards).total <= high.total`. The modes bound the play's score, not
+the board it leaves: under "high" a Glass Card also shatters and Gros Michel goes extinct.
+A chance roll here is a check `roll < G.GAME.probabilities.normal / odds` (Lucky Cards' mult and
+money, Glass Cards, Space Joker, 8 Ball, Business Card, Bloodstone, Reserved Parking,
+Hallucination, Gros Michel, Cavendish, The Wheel of Fortune, The Wheel's face-down draws), plus
+Misprint's mult (its minimum or maximum).
+"Low" fires an effect only when it is certain (Oops! All 6s can make it so); "high" fires every
+possible one. These rolls draw nothing from the RNG; the rolls that choose a card, a pack or an
+edition (8 Ball's Tarot, The Soul) still draw as in play. The Wheel of Fortune picks its joker
+and its edition from the stream its chance roll shares, so under a bound they can differ from
+the ones the real use would pick.
+
+The mode behind it is `Game.roll_bound` (`None`, `"low"` or `"high"`). It is not part of the
+game: `clone()` carries it and `replace_state` keeps it, while `to_dict()` and `state_hash()`
+leave it out (a run from `from_dict` starts without one). With it unset, every roll is the
+game's own.
+
+### Analysis boards
+
+To score plays from a state the player has not reached (another hand, The Hook switched off),
+edit a clone:
+
+| Setter | The edit | Same board as `replace_state` of |
+|---|---|---|
+| `debug_set_hand(sort_ids)` | the hand becomes these cards, in order, from the hand or the deck; the deck keeps its other cards in order, then the hand cards not taken (so the deck's length changes only when the new hand's size differs from the old). In SELECTING_HAND only. | the snapshot with `areas.hand` and `areas.deck` so edited |
+| `debug_set_blind_disabled(True)` | `blind.disabled`, written directly (no `Blind:disable` effects) | `blind.disabled` set |
+| `debug_clear_forced_selection()` | Cerulean Bell's forced card is no longer forced or highlighted | `forced_selection` cleared on the hand cards |
+
+Each gives the same `state_hash`, the same highlights and the same result for every play as
+`replace_state` of the edited `to_dict()`, without the snapshot's round trip. Like `debug_set`,
+they write state no player action reaches: use them on a copy.
+
 ## How a hand scored
 
 ```python
@@ -166,7 +208,8 @@ The additions go through the same operations as BalatroBot's debug commands `add
 - `state_hash()` is the SHA-256 digest of the canonical snapshot. Equal states have equal hashes.
 - `replace_state(snapshot)` loads an edited snapshot into the run at the same decision point,
   keeping what a snapshot doesn't carry (the card-area settings BalatroBot's view reports, the
-  hand's highlights). The live lockstep uses it to copy live values into its shadow run.
+  hand's highlights, and the modes `record_scoring` and `roll_bound`). The live lockstep uses
+  it to copy live values into its shadow run.
 
 ## BalatroBot
 

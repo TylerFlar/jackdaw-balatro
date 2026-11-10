@@ -148,11 +148,12 @@ impl Game {
     /// Replace the run's state with a canonical snapshot (JSON text) at the same decision point,
     /// keeping the runtime a snapshot doesn't carry: the card-area memo BalatroBot's view reads
     /// (the deck's limit, the shop's voucher slots, a removed shop's areas) and the hand's
-    /// highlights, except that Cerulean Bell's forced cards follow the snapshot. The live
-    /// lockstep (`jackdaw.bridge.live`) copies values the live game reports into its shadow run
-    /// this way; `from_snapshot` would restart that memo (as `load` does).
+    /// highlights, except that Cerulean Bell's forced cards follow the snapshot. The run's modes
+    /// stay too: whether it records scoring, and its roll bound. The live lockstep
+    /// (`jackdaw.bridge.live`) copies values the live game reports into its shadow run this
+    /// way; `from_snapshot` would restart that memo (as `load` does).
     fn replace_state(&mut self, text: &str) -> PyResult<()> {
-        let fresh = game_from_snapshot(text)?;
+        let mut fresh = game_from_snapshot(text)?;
         let old = &self.inner;
         if fresh.gs.phase != old.gs.phase {
             return Err(value_error(format!(
@@ -191,6 +192,8 @@ impl Game {
             enabled: old.trace.enabled,
             play: None,
         };
+        // The roll bound is the run's mode, not the snapshot's (which carries none).
+        fresh.set_roll_bound(old.roll_bound());
         // `from_state` already ran a frame of `Card:update` on the new cards.
         self.inner = jackdaw_core::game::Game {
             gs: fresh.gs,
@@ -458,6 +461,56 @@ impl Game {
         };
         self.inner.debug_set(field);
         Ok(())
+    }
+
+    /// The roll-bound mode: ``None`` in play, ``"low"`` or ``"high"`` on an analysis board.
+    /// Under a bound every chance roll (Lucky and Glass Cards, the chance jokers, The Wheel,
+    /// The Wheel of Fortune) and Misprint's roll is its least (``"low"``) or most (``"high"``)
+    /// lucky value and draws nothing from the RNG; card, pack and edition choices still do. A
+    /// clone carries it and ``replace_state`` keeps it; the snapshot leaves it out.
+    #[getter]
+    fn roll_bound(&self) -> Option<&'static str> {
+        use jackdaw_core::rng::RollBound;
+        self.inner.roll_bound().map(|b| match b {
+            RollBound::Low => "low",
+            RollBound::High => "high",
+        })
+    }
+
+    #[setter]
+    fn set_roll_bound(&mut self, bound: Option<&str>) -> PyResult<()> {
+        use jackdaw_core::rng::RollBound;
+        let bound = match bound {
+            None => None,
+            Some("low") => Some(RollBound::Low),
+            Some("high") => Some(RollBound::High),
+            Some(other) => {
+                return Err(value_error(format!(
+                    "roll_bound {other:?}, expected None, \"low\" or \"high\""
+                )));
+            }
+        };
+        self.inner.set_roll_bound(bound);
+        Ok(())
+    }
+
+    /// ``G.GAME.blind.disabled``, written directly (no ``Blind:disable`` effects).
+    fn debug_set_blind_disabled(&mut self, disabled: bool) -> PyResult<()> {
+        self.inner
+            .debug_set_blind_disabled(disabled)
+            .map_err(step_error)
+    }
+
+    /// Clear Cerulean Bell's forced selection on the hand cards and drop them from the
+    /// highlights, as ``replace_state`` of the edited snapshot does.
+    fn debug_clear_forced_selection(&mut self) {
+        self.inner.debug_clear_forced_selection();
+    }
+
+    /// Make the hand the cards ``sort_ids`` (from the hand or the deck), in order; the cards
+    /// left over go to the deck's end (SELECTING_HAND only).
+    fn debug_set_hand(&mut self, sort_ids: Vec<u32>) -> PyResult<()> {
+        self.inner.debug_set_hand(&sort_ids).map_err(step_error)
     }
 
     /// ``set {shop: true}``: a new shop, as on arrival (SHOP only).

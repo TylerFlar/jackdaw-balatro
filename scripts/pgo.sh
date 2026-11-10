@@ -18,8 +18,10 @@
 # optimised build gives the same results (`rollout --verify` prints the same hash). No
 # target-cpu flags, so the wheel runs on any CPU of its target.
 #
-# Needs rustup (it adds the llvm-tools component for llvm-profdata), Python 3.12+ and network
-# access for the workload's dependencies (gymnasium, numpy). `uv` is used when present.
+# Needs rustup (it adds the llvm-tools component for llvm-profdata), uv, Python 3.12+ and
+# network access for the workload's dependencies: uv.lock's numpy and gymnasium, checked
+# against the lock's hashes, since in the Wheels workflow the release build runs next on the
+# same machine.
 # Environment: PYTHON (default python3, else python) for the training venv;
 # PGO_ROLLOUT_STEPS (default 400000) per rollout policy; PGO_PY_STEPS (default 100000).
 set -euo pipefail
@@ -82,19 +84,16 @@ train() {
     local profraw
     profraw="$(native_path "$work/profraw")"
 
-    # The Python workload, against the instrumented wheel in a throwaway venv.
-    local py
-    if command -v uv > /dev/null 2>&1; then
-        uv venv --quiet --python "$(python_cmd)" "$work/venv"
-        py="$work/venv/bin/python"
-        [ -x "$py" ] || py="$work/venv/Scripts/python.exe"
-        uv pip install --quiet --python "$py" "${wheels[0]}"
-    else
-        "$(python_cmd)" -m venv "$work/venv"
-        py="$work/venv/bin/python"
-        [ -x "$py" ] || py="$work/venv/Scripts/python.exe"
-        "$py" -m pip install --quiet "${wheels[0]}"
-    fi
+    # The Python workload, against the instrumented wheel in a throwaway venv, with its
+    # dependencies at uv.lock's versions and hashes.
+    command -v uv > /dev/null 2>&1 || die "train needs uv (https://docs.astral.sh/uv/)"
+    uv venv --quiet --python "$(python_cmd)" "$work/venv"
+    local py="$work/venv/bin/python"
+    [ -x "$py" ] || py="$work/venv/Scripts/python.exe"
+    uv export --quiet --frozen --no-default-groups --no-emit-project \
+        --format requirements-txt --output-file "$work/requirements.txt"
+    uv pip install --quiet --python "$py" --require-hashes -r "$work/requirements.txt"
+    uv pip install --quiet --python "$py" --no-deps "${wheels[0]}"
     LLVM_PROFILE_FILE="$profraw/wheel-%p-%m.profraw" \
         "$py" -I scripts/pgo_workload.py --steps "${PGO_PY_STEPS:-100000}"
 

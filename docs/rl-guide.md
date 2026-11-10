@@ -414,7 +414,7 @@ These are tracked the same way whatever reward function is in use, and are usefu
 
 ## Vector Environment
 
-`BalatroVectorEnv` is a `gymnasium.vector.VectorEnv` of `num_envs` Gym environments stepped together in Rust: one `step` runs them all on worker threads with the GIL released and writes the observations and action masks straight into numpy arrays. On a 16-core machine it runs about 1.1 million steps per second on 8 threads (256 envs), against about 180,000 for one `BalatroGymnasiumEnv`.
+`BalatroVectorEnv` is a `gymnasium.vector.VectorEnv` of `num_envs` Gym environments stepped together in Rust: one `step` runs them all on its threads with the GIL released and writes the observations and action masks straight into numpy arrays. On a 16-core machine it runs about 1.1 million steps per second on 8 threads (256 envs), against about 180,000 for one `BalatroGymnasiumEnv`.
 
 ```python
 import numpy as np
@@ -437,7 +437,7 @@ for _ in range(1000):
 - The episode-end metrics come as arrays with gymnasium's `_key` masks: `info["balatro/won"]` and `info["_balatro/won"]`, and so on.
 - `max_free_moves` and `on_refusal` work as in the other envs; a refusal shows in the episode-end metrics as `info["balatro/refused"]`, a bool per env.
 - `copy=False` returns views of buffers the next step overwrites, skipping a copy per step.
-- **Threads.** `num_threads` counts the calling thread; the default, 0, is one per core. Between steps the other threads poll for the next step for 100 µs, giving their core up to any thread that wants it after the first 20 µs, and then sleep, so a loop that steps again soon pays no wakeup and an idle env costs no CPU. A step doesn't wait for a thread that is descheduled or asleep: the running threads take its share. So more threads than free cores (other processes, or a policy's forward pass on the same cores) cost little, though with the policy on the CPU, giving each its own cores (`num_threads` here, `torch.set_num_threads` there) keeps them from competing.
+- **Threads.** `num_threads` counts the calling thread; the default, 0, is `RAYON_NUM_THREADS` when it is set, else one per core. Between steps the other threads poll for the next step for 100 µs, giving their core up to any thread that wants it after the first 20 µs, and then sleep, so a loop that steps again soon pays no wakeup and an idle env costs no CPU. A step doesn't wait for a thread that is asleep, or descheduled before it starts on the step: the running threads take its share. So more threads than free cores (other processes, or a policy's forward pass on the same cores) cost little (a thread descheduled in the middle of an env does hold the step until it runs again), though with the policy on the CPU, giving each its own cores (`num_threads` here, `torch.set_num_threads` there) keeps them from competing.
 
 ## Saving a Policy: the Action Version
 

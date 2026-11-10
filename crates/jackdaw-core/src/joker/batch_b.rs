@@ -113,7 +113,7 @@ fn misprint(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
         return None;
     }
     let (min, max) = (g.extra_num(id, "min"), g.extra_num(id, "max"));
-    let roll = g.gs.rng.random_range("misprint", min as i64, max as i64);
+    let roll = g.gs.rng.chance_range("misprint", min as i64, max as i64);
     Some(mult_mod(roll as f64))
 }
 

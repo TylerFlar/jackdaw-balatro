@@ -144,7 +144,7 @@ impl Game {
     /// `pseudorandom(key) < G.GAME.probabilities.normal / odds`.
     pub fn roll(&mut self, key: &str, odds: f64) -> bool {
         let p = self.probability();
-        self.gs.rng.random(key) < p / odds
+        self.gs.rng.chance(key) < p / odds
     }
 
     /// `ease_dollars(x)`: queued.

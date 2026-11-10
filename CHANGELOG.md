@@ -5,6 +5,33 @@ while it is 0.x, a minor release (0.2 → 0.3) can break things, and a patch rel
 
 ## Unreleased
 
+## [0.2.4] - 2026-11-09
+
+The engine plays the same runs as 0.2.3, with the same observations, masks and actions: every
+ended episode Jackdaw Arena publishes replays with it to its recorded final state. What's new is
+for analysis: the range of a play that rolls, and setters for what-if boards.
+
+### Added
+
+- `Game.preview_play(cards, rolls="low" | "high")`: the play scored with every chance check
+  failing unless certain, or every one succeeding (Lucky and Glass Cards, Misprint at its minimum
+  or maximum, Space Joker, 8 Ball, Bloodstone and the other chance jokers), so the lowest and
+  highest score a play can give. Behind it, `Game.roll_bound`: a mode a clone carries and
+  `replace_state` keeps, outside the snapshot and `state_hash`. It also bounds The Wheel of
+  Fortune and The Wheel's face-down draws; card, pack and edition choices still draw from the
+  RNG. With it unset the engine rolls exactly as before.
+- Analysis setters next to `debug_set`, each the board `replace_state` gives for the matching
+  edited snapshot, without the snapshot's round trip: `Game.debug_set_hand(sort_ids)` (a hand
+  from the hand and the deck), `Game.debug_set_blind_disabled(disabled)` and
+  `Game.debug_clear_forced_selection()` (Cerulean Bell) ([docs/api.md](docs/api.md)).
+
+### Fixed
+
+- `BalatroVectorEnv`'s idle threads sleep after polling for 100 µs, as documented: a thread
+  that had taken part in a step polled for twice as long first.
+- `BalatroVectorEnv(num_threads=0)` honours `RAYON_NUM_THREADS` again, as it did up to 0.2.2
+  (on a rayon pool); unset, it is one thread per core.
+
 ## [0.2.3] - 2026-11-03
 
 The engine plays the same runs as 0.2.2, with the same observations, masks and actions: every

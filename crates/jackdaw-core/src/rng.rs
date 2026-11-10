@@ -477,6 +477,24 @@ type StreamMap = HashMap<StreamKey, f64, BuildHasherDefault<FxHasher>>;
 /// Key lengths the seed-half cache covers (the game's keys are shorter).
 const TAILS: usize = 32;
 
+/// The largest roll TW223 makes (`1 - 2^-52`): under [`RollBound::Low`] every chance check
+/// `roll < G.GAME.probabilities.normal / odds` fails unless it is certain.
+pub const LOW_ROLL: f64 = 1.0 - f64::EPSILON;
+
+/// An analysis mode for [`Rng::chance`] and [`Rng::chance_range`]: the extreme roll instead of
+/// a drawn one, for the bounds of a play that rolls (Lucky Cards, Glass Cards, Misprint, Space
+/// Joker, 8 Ball...). Not part of the game: no player action sets it, and the snapshot and
+/// [`PartialEq`] leave it out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RollBound {
+    /// Every chance check fails unless certain: a chance roll is [`LOW_ROLL`], a range roll
+    /// its minimum.
+    Low,
+    /// Every chance check succeeds, harmful ones included (a Glass Card shatters): a chance
+    /// roll is `0.0`, a range roll its maximum.
+    High,
+}
+
 /// `G.GAME.pseudorandom`: the run seed and one state per named stream.
 #[derive(Debug)]
 pub struct Rng {
@@ -491,6 +509,8 @@ pub struct Rng {
     /// Hashes of streams not started yet, worked out ahead ([`Rng::prime`]); empty between
     /// steps.
     primed: Vec<(StreamKey, f64)>,
+    /// The roll-bound mode, if set ([`RollBound`]). Not part of the state.
+    bound: Option<RollBound>,
 }
 
 impl Clone for Rng {
@@ -502,6 +522,7 @@ impl Clone for Rng {
             tails: self.tails,
             tails_known: self.tails_known,
             primed: self.primed.clone(),
+            bound: self.bound,
         }
     }
 
@@ -513,6 +534,7 @@ impl Clone for Rng {
         self.tails = source.tails;
         self.tails_known = source.tails_known;
         self.primed.clone_from(&source.primed);
+        self.bound = source.bound;
     }
 }
 
@@ -535,6 +557,7 @@ impl Rng {
             tails: [0.0; TAILS],
             tails_known: 0,
             primed: Vec::new(),
+            bound: None,
         }
     }
 
@@ -550,6 +573,7 @@ impl Rng {
             tails: [0.0; TAILS],
             tails_known: 0,
             primed: Vec::new(),
+            bound: None,
         }
     }
 
@@ -607,6 +631,7 @@ impl Rng {
             tails: [0.0; TAILS],
             tails_known: 0,
             primed: Vec::new(),
+            bound: None,
         };
         rng.prime_with(keys, true);
         rng
@@ -704,6 +729,37 @@ impl Rng {
     pub fn random_range<K: AsRef<[u8]> + ?Sized>(&mut self, key: &K, min: i64, max: i64) -> i64 {
         Tw223::seeded(self.seed(key)).random_range(min, max)
     }
+
+    /// The roll-bound mode ([`RollBound`]), `None` in play.
+    pub fn bound(&self) -> Option<RollBound> {
+        self.bound
+    }
+
+    /// Set or clear the roll-bound mode ([`RollBound`]).
+    pub fn set_bound(&mut self, bound: Option<RollBound>) {
+        self.bound = bound;
+    }
+
+    /// [`Rng::random`] for a chance check, `roll < G.GAME.probabilities.normal / odds`. Under a
+    /// [`RollBound`] it is the extreme roll ([`LOW_ROLL`] or `0.0`) and stream `key` is not
+    /// touched. Rolls that choose a card, a pack or an edition use [`Rng::random`].
+    pub fn chance<K: AsRef<[u8]> + ?Sized>(&mut self, key: &K) -> f64 {
+        match self.bound {
+            None => self.random(key),
+            Some(RollBound::Low) => LOW_ROLL,
+            Some(RollBound::High) => 0.0,
+        }
+    }
+
+    /// [`Rng::random_range`] for a value roll (Misprint). Under a [`RollBound`] it is `min`
+    /// (low) or `max` (high) and stream `key` is not touched.
+    pub fn chance_range<K: AsRef<[u8]> + ?Sized>(&mut self, key: &K, min: i64, max: i64) -> i64 {
+        match self.bound {
+            None => self.random_range(key, min, max),
+            Some(RollBound::Low) => min,
+            Some(RollBound::High) => max,
+        }
+    }
 }
 
 /// `pseudoseed(key, predict_seed)`: the stateless preview the game uses to look ahead.
@@ -759,6 +815,74 @@ pub fn random_string(length: usize, seed: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn low_roll_is_the_largest_tw223_roll() {
+        // TW223's random() is a double in [1, 2) with a 52-bit mantissa, minus one: its
+        // largest value is (2^52 - 1) / 2^52.
+        assert_eq!(LOW_ROLL.to_bits(), 0x3FEF_FFFF_FFFF_FFFE);
+        assert_eq!(LOW_ROLL, 1.0 - 2f64.powi(-52));
+    }
+
+    #[test]
+    fn unbound_chance_is_random() {
+        let mut a = Rng::new("BOUND1");
+        let mut b = a.clone();
+        for _ in 0..20 {
+            assert_eq!(
+                a.chance("lucky_mult").to_bits(),
+                b.random("lucky_mult").to_bits()
+            );
+            assert_eq!(
+                a.chance_range("misprint", 0, 23),
+                b.random_range("misprint", 0, 23)
+            );
+        }
+        assert!(a == b);
+    }
+
+    #[test]
+    fn bound_rolls_are_the_extremes_and_touch_no_stream() {
+        let mut rng = Rng::new("BOUND2");
+        rng.random("lucky_mult");
+        let before = rng.clone();
+        rng.set_bound(Some(RollBound::Low));
+        assert_eq!(rng.chance("lucky_mult").to_bits(), LOW_ROLL.to_bits());
+        assert_eq!(rng.chance("glass").to_bits(), LOW_ROLL.to_bits());
+        assert_eq!(rng.chance_range("misprint", 0, 23), 0);
+        rng.set_bound(Some(RollBound::High));
+        assert_eq!(rng.chance("lucky_mult").to_bits(), 0.0f64.to_bits());
+        assert_eq!(rng.chance_range("misprint", 0, 23), 23);
+        assert!(rng == before, "no stream advanced or started");
+        assert_eq!(rng.stream("glass"), None);
+        assert_eq!(rng.stream_count(), before.stream_count());
+        // The other rolls keep drawing from their streams.
+        let mut plain = before.clone();
+        assert_eq!(
+            rng.random("soul_Tarot1").to_bits(),
+            plain.random("soul_Tarot1").to_bits()
+        );
+        assert_eq!(rng.seed("front1").to_bits(), plain.seed("front1").to_bits());
+        rng.set_bound(None);
+        assert_eq!(
+            rng.chance("lucky_mult").to_bits(),
+            plain.random("lucky_mult").to_bits()
+        );
+    }
+
+    #[test]
+    fn bound_is_carried_by_clone_and_left_out_of_eq() {
+        let mut rng = Rng::new("BOUND3");
+        rng.set_bound(Some(RollBound::High));
+        assert_eq!(rng.clone().bound(), Some(RollBound::High));
+        let mut into = Rng::new("OTHER");
+        into.clone_from(&rng);
+        assert_eq!(into.bound(), Some(RollBound::High));
+        assert!(
+            rng == Rng::new("BOUND3"),
+            "the bound is not part of the state"
+        );
+    }
 
     #[test]
     fn warmup_tables_match_ten_steps() {
