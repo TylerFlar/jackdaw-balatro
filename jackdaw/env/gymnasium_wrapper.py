@@ -105,18 +105,22 @@ def _selection_sizes(n_cards: int, min_select: Any, max_select: Any) -> tuple[in
 
 
 def _card_combos(
-    legal_cards: tuple[int, ...], first: int, stop: int, required: int | None = None
+    legal_cards: tuple[int, ...],
+    first: int,
+    stop: int,
+    required: int | None = None,
+    below: int = 0,
 ) -> list[tuple[int, ...]]:
     """Enumerate all card-index combinations with sizes in ``range(first, stop)``.
 
     With *required* (Cerulean Bell's forced card), only the combinations
-    that include it.
+    that include it or have fewer than *below* cards.
     """
     result: list[tuple[int, ...]] = []
     for k in range(first, stop):
         result.extend(combinations(legal_cards, k))
     if required is not None:
-        result = [combo for combo in result if required in combo]
+        result = [combo for combo in result if len(combo) < below or required in combo]
     return result
 
 
@@ -136,10 +140,11 @@ def _cached_card_actions(
     first: int,
     stop: int,
     required: int | None,
+    below: int,
 ) -> tuple[FactoredAction, ...]:
     return tuple(
         FactoredAction(action_type=action_type, entity_target=entity_target, card_target=combo)
-        for combo in _card_combos(legal_cards, first, stop, required)
+        for combo in _card_combos(legal_cards, first, stop, required, below)
     )
 
 
@@ -151,21 +156,25 @@ def _card_actions(
     max_select: Any,
     rng: Xoshiro256,
     required: int | None = None,
+    below: int = 0,
 ) -> Sequence[FactoredAction]:
     """Card-selecting actions for one action type/entity, subsampled to budget.
 
-    *required* restricts them to the selections that include that card.
+    *required* restricts them to the selections that include that card or
+    have fewer than *below* cards.
     """
     n = len(legal_cards)
     first, stop = _selection_sizes(n, min_select, max_select)
     if sum(math.comb(n, k) for k in range(max(first, 0), stop)) <= _CACHE_MAX_COMBOS:
         actions = _cached_card_actions(
-            action_type, entity_target, legal_cards, first, stop, required
+            action_type, entity_target, legal_cards, first, stop, required, below
         )
         return _subsample(actions, CARD_COMBO_BUDGET, rng)
     # Large selection spaces: sample the combinations first, then build only
     # the sampled actions (same draw: the population size is identical).
-    combos = _subsample(_card_combos(legal_cards, first, stop, required), CARD_COMBO_BUDGET, rng)
+    combos = _subsample(
+        _card_combos(legal_cards, first, stop, required, below), CARD_COMBO_BUDGET, rng
+    )
     return [
         FactoredAction(action_type=action_type, entity_target=entity_target, card_target=combo)
         for combo in combos
@@ -556,9 +565,19 @@ class BalatroGymnasiumEnv(gymnasium.Env):
                         if needs:
                             if legal_cards is None:
                                 legal_cards = tuple(np.nonzero(mask.card_mask)[0].tolist())
+                            # The use highlights Cerulean Bell's card first, then the
+                            # selection: one card more when it leaves the card out (#49).
+                            below = min(max_cards, mask.max_card_select)
                             actions.extend(
                                 _card_actions(
-                                    t, e_idx, legal_cards, min_cards, max_cards, self._rng
+                                    t,
+                                    e_idx,
+                                    legal_cards,
+                                    min_cards,
+                                    max_cards,
+                                    self._rng,
+                                    mask.forced_card,
+                                    below,
                                 )
                             )
                         else:

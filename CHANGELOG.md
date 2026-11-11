@@ -5,6 +5,16 @@ while it is 0.x, a minor release (0.2 → 0.3) can break things, and a patch rel
 
 ## Unreleased
 
+### Fixed
+
+- Against The Cerulean Bell, the Gym action table (`BalatroGymnasiumEnv`, `BalatroVectorEnv`,
+  `Game.action_table`) no longer offers a Tarot or Spectral used on cards with a selection the
+  engine refuses (#49). Using one highlights the forced card as well as the selection, so a
+  selection without the forced card holds one card more: The Tower on another card, Strength
+  on two others or Death on two others raised `IllegalActionError`. Such a selection is offered
+  only while it leaves room for the forced card (Strength on one other card still is). The
+  table is unchanged under any other boss.
+
 ## [0.2.4] - 2026-11-09
 
 The engine plays the same runs as 0.2.3, with the same observations, masks and actions: every
