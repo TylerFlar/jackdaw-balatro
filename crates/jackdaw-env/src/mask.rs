@@ -60,7 +60,7 @@ pub struct ActionMask {
     pub min_card_select: usize,
     pub max_card_select: usize,
     /// Hand index of Cerulean Bell's forced card, which every PlayHand and Discard selection must
-    /// include.
+    /// include. A consumable's use highlights it too, before the cards the action selects.
     pub forced_card: Option<usize>,
 }
 

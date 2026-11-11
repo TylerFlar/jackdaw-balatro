@@ -99,7 +99,14 @@ class RandomAgent:
                     if len(legal_cards) >= min_cards:
                         n = min(len(legal_cards), max_cards)
                         count = _random.randint(min_cards, n)
-                        selected = sorted(_random.sample(list(legal_cards), count))
+                        forced = action_mask.forced_card
+                        if forced is None:
+                            selected = sorted(_random.sample(list(legal_cards), count))
+                        else:
+                            # Cerulean Bell: the use highlights the forced card as well,
+                            # so it is one of the cards (#49)
+                            others = [c for c in legal_cards if c != forced]
+                            selected = sorted([forced, *_random.sample(others, count - 1)])
                         card_target = tuple(int(i) for i in selected)
 
         return FactoredAction(

@@ -142,7 +142,8 @@ class ActionMask:
     forced_card:
         Hand index of Cerulean Bell's forced card, which every PlayHand
         and Discard selection must include (vanilla keeps it highlighted),
-        or ``None``.
+        or ``None``.  A consumable used on cards highlights it as well as
+        its ``card_target``: see :func:`get_consumable_target_info`.
     """
 
     type_mask: np.ndarray
@@ -173,7 +174,12 @@ def get_consumable_target_info(game: Game, area: str, index: int) -> tuple[int, 
     """``(min_cards, max_cards, needs_targets)`` for the consumable at ``index`` of ``area``
     (``"consumables"`` or ``"pack_cards"``): how many hand cards a policy picks as its
     ``card_target``.  If ``needs_targets`` is False, ``card_target`` should be ``None``.
-    Raises ``ValueError`` past the end of the area."""
+    Raises ``ValueError`` past the end of the area.
+
+    Against The Cerulean Bell a use highlights the forced card
+    (:attr:`ActionMask.forced_card`) as well as the ``card_target``, and the bounds are the
+    highlight's: a ``card_target`` without the forced card holds at most ``max_cards - 1``
+    cards."""
     from jackdaw.env.rust_env import consumable_target_info
 
     return consumable_target_info(game, area, index)

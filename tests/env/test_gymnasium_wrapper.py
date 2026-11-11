@@ -15,6 +15,7 @@ from gymnasium import spaces
 
 from jackdaw.core import Game, IllegalActionError
 from jackdaw.engine.actions import CashOut, GamePhase, OpenBooster, PlayHand, SelectBlind
+from jackdaw.engine.data import load
 from jackdaw.env.action_space import (
     ActionType,
     FactoredAction,
@@ -349,6 +350,62 @@ class TestCeruleanBellConsumables:
             }
             offered = {fa.card_target for fa in uses if fa.entity_target == e}
             assert offered == accepted, card.key
+
+    @pytest.mark.parametrize("route", ["rust", "python"])
+    @pytest.mark.parametrize("hand_size", [1, 3, 8])
+    def test_every_card_targeted_consumable(self, route: str, hand_size: int) -> None:
+        """Each Tarot and Spectral used on cards (a center with ``max_highlighted``), alone
+        in the tray on a Bell hand: the table offers the selections the engine takes, and no
+        others. The table's rule counts cards, as ``can_use_consumeable_with`` does for these
+        (consumables.rs:278-287); a center the engine judges another way would fail here."""
+        keys = sorted(
+            key
+            for key, center in load("centers").items()
+            if center.get("set") in ("Tarot", "Spectral")
+            and isinstance(center.get("config"), dict)
+            and center["config"].get("max_highlighted")
+        )
+        # One, two and three cards at most; Death takes exactly two; a Spectral.
+        assert {"c_tower", "c_strength", "c_sun", "c_death", "c_cryptid"} <= set(keys)
+
+        base = Game.new("b_red", 1, "BELL49")
+        base.apply_setup({"op": "force_boss", "key": "bl_final_bell"})
+        base.step(SelectBlind())
+        ids = [card.sort_id for card in base.hand]
+        forced_id = ids[get_action_mask(base).forced_card]
+        # The forced card and the first cards of the rest, in the hand's order.
+        keep = {forced_id, *[i for i in ids if i != forced_id][: hand_size - 1]}
+        base.debug_set_hand([i for i in ids if i in keep])
+        n = len(base.hand)
+        assert n == hand_size and get_action_mask(base).forced_card is not None
+
+        env = BalatroGymnasiumEnv(adapter_factory=GenericAdapter)
+        for key in keys:
+            game = base.clone()
+            game.debug_add(key)
+            lo, hi, needs = get_consumable_target_info(game, "consumables", 0)
+            assert needs, key
+            accepted = {
+                sel
+                for k in range(lo, min(hi, n) + 1)
+                for sel in combinations(range(n), k)
+                if self._steps(
+                    game,
+                    FactoredAction(
+                        action_type=ActionType.UseConsumable, entity_target=0, card_target=sel
+                    ),
+                )
+            }
+            if route == "rust":
+                table = self._table(game, route)
+            else:
+                _rebuild_table(env, game)
+                table = env._action_table
+            offered = [fa.card_target for fa in table if fa.action_type == ActionType.UseConsumable]
+            assert len(offered) == len(set(offered)), key
+            assert set(offered) == accepted, key
+            # Usable whenever the hand holds its minimum: the forced card is among those.
+            assert bool(accepted) == (n >= lo), key
 
 
 # ------------------------------------------------------------------
