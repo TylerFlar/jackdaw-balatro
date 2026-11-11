@@ -147,6 +147,12 @@ pub fn subsample_indices(
     out.extend(set_bits(picked));
 }
 
+/// Cerulean Bell's forced card for one enumeration, `(card, below)`: a selection without the
+/// card is kept only when it holds fewer than `below` cards. PlayHand and Discard pass `0` (every
+/// selection holds the card); a consumable passes its highlight limit, since its use highlights
+/// the forced card as well as the selection.
+type Forced = Option<(usize, usize)>;
+
 /// The card selections of one enumeration: which cards, how many, which card each must hold.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct ComboKey {
@@ -154,7 +160,7 @@ struct ComboKey {
     legal: u128,
     lower: usize,
     upper: usize,
-    required: Option<usize>,
+    forced: Forced,
 }
 
 /// One cache slot: its key (`None` for a hand too large to key, 128 cards or more, which no
@@ -182,14 +188,8 @@ const COMBO_CACHE_SIZE: usize = 8;
 
 impl ComboCache {
     /// The slot holding the selections of `lower..=upper` of `legal` (by size, then
-    /// lexicographically) that hold `required`, enumerated once per key.
-    fn slot(
-        &mut self,
-        legal: &[usize],
-        lower: usize,
-        upper: usize,
-        required: Option<usize>,
-    ) -> usize {
+    /// lexicographically) that `forced` keeps, enumerated once per key.
+    fn slot(&mut self, legal: &[usize], lower: usize, upper: usize, forced: Forced) -> usize {
         let key = legal
             .iter()
             .try_fold(0u128, |acc, &i| (i < 128).then(|| acc | (1u128 << i)))
@@ -197,7 +197,7 @@ impl ComboCache {
                 legal: bits,
                 lower,
                 upper,
-                required,
+                forced,
             });
         if key.is_some()
             && let Some(i) = self.slots.iter().position(|s| s.key == key)
@@ -222,18 +222,18 @@ impl ComboCache {
         s.key = key;
         s.used = self.generation;
         s.selections.clear();
-        combinations_into(legal, lower, upper, required, &mut s.selections);
+        combinations_into(legal, lower, upper, forced, &mut s.selections);
         slot
     }
 }
 
-/// The `lower..=upper`-card selections of `legal`, by size then lexicographically, those holding
-/// `required` only, appended to `out`.
+/// The `lower..=upper`-card selections of `legal`, by size then lexicographically, those
+/// `forced` keeps only, appended to `out`.
 fn combinations_into(
     legal: &[usize],
     lower: usize,
     upper: usize,
-    required: Option<usize>,
+    forced: Forced,
     out: &mut Vec<Selection>,
 ) {
     let n = legal.len();
@@ -247,7 +247,7 @@ fn combinations_into(
             for &p in &idx[..k] {
                 sel.push(legal[p]);
             }
-            if required.is_none_or(|r| sel.as_slice().contains(&(r as u8))) {
+            if forced.is_none_or(|(r, below)| k < below || sel.as_slice().contains(&(r as u8))) {
                 out.push(sel);
             }
             let mut i = k;
@@ -445,7 +445,10 @@ impl ActionTable {
                         }
                     }
                 }
-                Targets::Cards => self.card_actions(t, None, min_select, max_select, forced, rng),
+                Targets::Cards => {
+                    let forced = forced.map(|r| (r, 0));
+                    self.card_actions(t, None, min_select, max_select, forced, rng);
+                }
                 Targets::EntityCards => {
                     if let Some(em) = entity(t) {
                         for (e, &ok) in em.iter().enumerate() {
@@ -454,7 +457,11 @@ impl ActionTable {
                             }
                             match target_info(t, e) {
                                 Some((lo, hi, true)) => {
-                                    self.card_actions(t, Some(e), lo, hi, None, rng);
+                                    // The use highlights the forced card first, then the
+                                    // selection: one card more when it leaves the card out
+                                    // (`consumable_highlight`, #49).
+                                    let forced = forced.map(|r| (r, hi.min(max_select)));
+                                    self.card_actions(t, Some(e), lo, hi, forced, rng);
                                 }
                                 Some((_, _, false)) => {
                                     self.push(Group::One(FactoredAction::with_entity(t, e)), 1);
@@ -485,21 +492,21 @@ impl ActionTable {
     }
 
     /// `_card_actions`: the selections of `min_select..=max_select` legal cards (capped at the
-    /// number of legal cards), by size then lexicographically, those containing `required`
-    /// only, subsampled to [`CARD_COMBO_BUDGET`].
+    /// number of legal cards), by size then lexicographically, those `forced` keeps only,
+    /// subsampled to [`CARD_COMBO_BUDGET`].
     fn card_actions(
         &mut self,
         t: ActionType,
         entity: Option<usize>,
         min_select: usize,
         max_select: usize,
-        required: Option<usize>,
+        forced: Forced,
         rng: &mut Xoshiro256,
     ) {
         let n = self.legal_cards.len();
         let upper = n.min(max_select);
         let lower = min_select.min(upper);
-        let slot = self.combos.slot(&self.legal_cards, lower, upper, required);
+        let slot = self.combos.slot(&self.legal_cards, lower, upper, forced);
         let count = self.combos.slots[slot].selections.len();
         let entity_target = entity.map(|e| e as u32);
         if count <= CARD_COMBO_BUDGET {
@@ -630,6 +637,50 @@ mod tests {
         for (i, a) in actions.iter().enumerate() {
             assert_eq!(table.get(i), Some(*a));
         }
+    }
+
+    #[test]
+    fn a_forced_card_joins_a_consumable_highlight() {
+        // Cerulean Bell's card (hand index 2 of 6) is highlighted first when a consumable is
+        // used, then the selection: a selection without it holds one card more, and the
+        // highlight takes at most `max_highlighted` cards (#49). Plays and discards must hold it.
+        let mut types = [false; crate::action::NUM_ACTION_TYPES];
+        types[ActionType::PlayHand.index()] = true;
+        types[ActionType::UseConsumable.index()] = true;
+        let targets = [(1, 1), (1, 2), (2, 2)];
+        let mut table = ActionTable::new();
+        let mut rng = Xoshiro256::seed_from_u64(9);
+        table.enumerate_with(
+            &types,
+            &[true; 6],
+            |_| Some(&[true; 3][..]),
+            (1, 5),
+            Some(2),
+            |_, e| Some((targets[e].0, targets[e].1, true)),
+            &mut rng,
+        );
+        let actions = table.actions();
+        let sels = |t: ActionType, e: Option<u32>| -> Vec<Vec<u8>> {
+            actions
+                .iter()
+                .filter(|a| a.action_type == t && a.entity_target == e)
+                .map(|a| a.card_target.unwrap().as_slice().to_vec())
+                .collect()
+        };
+        // The Tower (1, 1): the forced card only.
+        assert_eq!(sels(ActionType::UseConsumable, Some(0)), [vec![2]]);
+        // Strength (1, 2): any one card, or the forced card and one other.
+        let strength = sels(ActionType::UseConsumable, Some(1));
+        let mut want: Vec<Vec<u8>> = (0..6).map(|i| vec![i]).collect();
+        want.extend([vec![0, 2], vec![1, 2], vec![2, 3], vec![2, 4], vec![2, 5]]);
+        assert_eq!(strength, want);
+        // Death (2, 2): the forced card and one other.
+        let death = sels(ActionType::UseConsumable, Some(2));
+        assert_eq!(death, [[0, 2], [1, 2], [2, 3], [2, 4], [2, 5]]);
+        // PlayHand: every selection holds the forced card, as before.
+        let plays = sels(ActionType::PlayHand, None);
+        assert_eq!(plays.len(), 1 + 5 + 10 + 10 + 5);
+        assert!(plays.iter().all(|s| s.contains(&2)));
     }
 
     #[test]

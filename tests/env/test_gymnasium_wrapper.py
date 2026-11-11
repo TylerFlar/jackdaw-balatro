@@ -7,13 +7,21 @@ editing the run use :class:`tests.env.generic.GenericAdapter`, whose steps go th
 
 from __future__ import annotations
 
+from itertools import combinations
+
 import numpy as np
 import pytest
 from gymnasium import spaces
 
-from jackdaw.core import Game
+from jackdaw.core import Game, IllegalActionError
 from jackdaw.engine.actions import CashOut, GamePhase, OpenBooster, PlayHand, SelectBlind
-from jackdaw.env.action_space import ActionType, get_action_mask
+from jackdaw.env.action_space import (
+    ActionType,
+    FactoredAction,
+    factored_to_engine_action,
+    get_action_mask,
+    get_consumable_target_info,
+)
 from jackdaw.env.balatro_env import _action_mask_to_game
 from jackdaw.env.game_interface import DirectAdapter
 from jackdaw.env.gymnasium_wrapper import MAX_ACTIONS, BalatroGymnasiumEnv
@@ -253,6 +261,94 @@ class TestCeruleanBell:
             mask = info["action_mask"]
         assert game.phase != GamePhase.SELECTING_HAND
         assert selections > 1
+
+
+class TestCeruleanBellConsumables:
+    """A consumable used under the Bell highlights the forced card first, then its targets
+    (action.rs ``consumable_highlight``), so a target set without the forced card holds one
+    card more. The table used to offer sets the engine then refuses (#49)."""
+
+    _KEYS = ("c_tower", "c_strength", "c_death", "c_aura", "c_mars")
+
+    @classmethod
+    def _bell_game(cls) -> tuple[Game, int]:
+        game = Game.new("b_red", 1, "BELL49")
+        game.apply_setup({"op": "force_boss", "key": "bl_final_bell"})
+        game.step(SelectBlind())
+        for key in cls._KEYS:
+            game.debug_add(key)
+        forced = get_action_mask(game).forced_card
+        assert forced is not None
+        return game, forced
+
+    @staticmethod
+    def _table(game: Game, route: str) -> list[FactoredAction]:
+        if route == "rust":
+            actions, _ = game._g.action_table([1, 2, 3, 4])
+            return [
+                FactoredAction(
+                    action_type=t, entity_target=e, card_target=None if c is None else tuple(c)
+                )
+                for t, e, c in actions
+            ]
+        env = BalatroGymnasiumEnv(adapter_factory=GenericAdapter)
+        _rebuild_table(env, game)
+        return env._action_table
+
+    @staticmethod
+    def _steps(game: Game, fa: FactoredAction) -> bool:
+        trial = game.clone()
+        try:
+            trial.step(factored_to_engine_action(fa, trial))
+        except IllegalActionError:
+            return False
+        return True
+
+    @pytest.mark.parametrize("route", ["rust", "python"])
+    def test_every_offered_use_steps(self, route: str) -> None:
+        game, forced = self._bell_game()
+        uses = [fa for fa in self._table(game, route) if fa.action_type == ActionType.UseConsumable]
+        refused = [fa for fa in uses if not self._steps(game, fa)]
+        assert refused == []
+
+        by_key: dict[str, set[tuple[int, ...] | None]] = {k: set() for k in self._KEYS}
+        for fa in uses:
+            by_key[game.consumables[fa.entity_target].key].add(fa.card_target)
+        a, b = [i for i in range(len(game.hand)) if i != forced][:2]
+        pair = tuple(sorted((forced, a)))
+        # The Tower (1, 1): only the forced card.
+        assert by_key["c_tower"] == {(forced,)}
+        # Strength (1, 2): one card besides the forced one, the forced card alone or with one.
+        assert (a,) in by_key["c_strength"] and pair in by_key["c_strength"]
+        assert tuple(sorted((a, b))) not in by_key["c_strength"]
+        # Death (2, 2): the forced card and one other, never two others.
+        assert pair in by_key["c_death"]
+        assert all(forced in sel for sel in by_key["c_death"])
+        # Untargeted consumables stay.
+        assert by_key["c_mars"] == {None}
+
+    @pytest.mark.parametrize("route", ["rust", "python"])
+    def test_offered_targets_are_the_accepted_ones(self, route: str) -> None:
+        # No subsampling here, so the table holds every target set the engine accepts.
+        game, _ = self._bell_game()
+        uses = [fa for fa in self._table(game, route) if fa.action_type == ActionType.UseConsumable]
+        for e, card in enumerate(game.consumables):
+            lo, hi, needs = get_consumable_target_info(game, "consumables", e)
+            if not needs:
+                continue
+            accepted = {
+                sel
+                for k in range(lo, hi + 1)
+                for sel in combinations(range(len(game.hand)), k)
+                if self._steps(
+                    game,
+                    FactoredAction(
+                        action_type=ActionType.UseConsumable, entity_target=e, card_target=sel
+                    ),
+                )
+            }
+            offered = {fa.card_target for fa in uses if fa.entity_target == e}
+            assert offered == accepted, card.key
 
 
 # ------------------------------------------------------------------
