@@ -7,19 +7,18 @@ while it is 0.x, a minor release (0.2 → 0.3) can break things, and a patch rel
 
 ### Fixed
 
-- Against The Cerulean Bell, the Gym action table (`BalatroGymnasiumEnv`, `BalatroVectorEnv`)
-  no longer offers a Tarot or Spectral used on cards with a selection the engine refuses (#49).
-  Using one highlights the forced card as well as the selection, so a selection without the
-  forced card holds one card more: The Tower on another card, or Strength or Death on two
-  others, ended the episode as refused (`info["balatro/refused"]`), or raised
-  `IllegalActionError` with `on_refusal="raise"`. Such a selection is offered only while it
-  leaves room for the forced card (Strength on one other card still is). In that blind, with
-  such a card in the tray, the table's later entries sit at lower indices; everywhere else the
-  table is unchanged. `ACTION_VERSION` stays at 2: the masks and the action types are the same,
-  and no policy could use the entries that are gone
+- Against the Cerulean Bell, the Gym action table (`BalatroGymnasiumEnv`, `BalatroVectorEnv`)
+  offers a Tarot or Spectral used on cards only with selections that hold the forced card, as
+  it does plays and discards. A use highlights the forced card as well as the selection, so
+  The Tower on another card, or Strength or Death on two others, was one card too many: taking
+  it ended the episode as refused (`info["balatro/refused"]`), or raised `IllegalActionError`
+  with `on_refusal="raise"`. A selection with room for the forced card was the same use as the
+  one that names it, listed twice, and a `LiveAdapter` refused it. In that blind, while such a
+  consumable is held, the table is shorter and its later entries sit at lower indices;
+  everywhere else it is unchanged. `ACTION_VERSION` stays at 2
   ([docs/rl-guide.md](docs/rl-guide.md#saving-a-policy-the-action-version)).
-- `RandomAgent` picks the cards for a Tarot or Spectral with the forced card among them against
-  The Cerulean Bell. It could pick a selection the engine refuses.
+- `RandomAgent` includes the forced card when it picks the cards for a Tarot or Spectral
+  against the Cerulean Bell. It could pick a selection the engine refuses.
 
 ## [0.2.4] - 2026-11-09
 

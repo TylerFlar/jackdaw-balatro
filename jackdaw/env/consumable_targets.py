@@ -13,9 +13,9 @@ card without an edition (card.lua:1571-1574), and Sigil and Ouija work on the wh
 hand without a selection.  :func:`jackdaw.env.action_space.get_consumable_target_info`
 gives the Rust engine's ``(min, max, needs_targets)`` for a card of a run.
 
-These are the consumable's own rules, judged without the run.  Against The Cerulean
-Bell the engine highlights the forced card as well as the selection, and the bounds
-count it: a selection without the forced card may hold one card fewer.
+These are the consumable's own rules, judged without the run.  Against Cerulean Bell
+the engine highlights the forced card as well as the selection, and the bounds count
+the two together: include the forced card in the selection.
 :meth:`jackdaw.core.Game.check` asks the engine about one action in a run.
 """
 

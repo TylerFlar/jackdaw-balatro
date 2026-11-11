@@ -8,9 +8,9 @@
 /// and how the Gym action table is built. A policy is tied to the masks it was trained with, so
 /// this goes up whenever they change (and stays the same when only the engine's internals do).
 ///
-/// It also stays the same when a fix only takes out of the table actions the engine refuses:
-/// taking one ended the episode, so no policy could use them. 0.2.5 did that against The
-/// Cerulean Bell (#49).
+/// It also stays the same when the table only loses entries no policy needs: ones the engine
+/// refuses, and ones that are the same move as an entry that stays. 0.2.5 dropped both kinds
+/// against Cerulean Bell, where a consumable's card selections now hold the forced card (#49).
 ///
 /// - 1: jackdaw 0.1.
 /// - 2: jackdaw 0.2. Reordering follows the game's drag and drop (jokers in every decision
