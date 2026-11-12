@@ -14,7 +14,14 @@ import pytest
 from gymnasium import spaces
 
 from jackdaw.core import Game, IllegalActionError
-from jackdaw.engine.actions import CashOut, GamePhase, OpenBooster, PlayHand, SelectBlind
+from jackdaw.engine.actions import (
+    CashOut,
+    GamePhase,
+    OpenBooster,
+    PlayHand,
+    SelectBlind,
+    UseConsumable,
+)
 from jackdaw.engine.data import load
 from jackdaw.env.action_space import (
     ActionType,
@@ -275,12 +282,12 @@ class TestCeruleanBellConsumables:
 
     _KEYS = ("c_tower", "c_strength", "c_death", "c_aura", "c_mars")
 
-    @staticmethod
-    def _bell_game(keys: tuple[str, ...] = _KEYS) -> tuple[Game, int]:
+    @classmethod
+    def _bell_game(cls) -> tuple[Game, int]:
         game = Game.new("b_red", 1, "BELL49")
         game.apply_setup({"op": "force_boss", "key": "bl_final_bell"})
         game.step(SelectBlind())
-        for key in keys:
+        for key in cls._KEYS:
             game.debug_add(key)
         forced = get_action_mask(game).forced_card
         assert forced is not None
@@ -378,7 +385,8 @@ class TestCeruleanBellConsumables:
         assert by_key["c_strength"] == {(forced,)} | pairs
         # Death (2, 2): the forced card and one other.
         assert by_key["c_death"] == pairs
-        # Consumables that take no cards stay, without a selection.
+        # Aura and Mars are listed once, without a selection: Mars takes no card, and Aura
+        # the engine's own choice, which is the forced card.
         assert by_key["c_aura"] == {None} and by_key["c_mars"] == {None}
 
     @pytest.mark.parametrize("route", ["rust", "python"])
@@ -392,6 +400,21 @@ class TestCeruleanBellConsumables:
                 self._check_uses(game, table, e, forced)
                 checked += 1
         assert checked == 3
+
+    @pytest.mark.parametrize("route", ["rust", "python"])
+    def test_the_first_of_several_forced_cards(self, route: str) -> None:
+        """Cryptid's copies of the forced card are forced too. The engine highlights the
+        hand's first forced card only, which is the one the mask names, so that is the card
+        the table's selections hold."""
+        game, forced = self._bell_game()
+        game.debug_add("c_cryptid")
+        game.step(UseConsumable(card_index=len(self._KEYS), target_indices=(forced,)))
+        flagged = [i for i, c in enumerate(game.hand) if c.ability.get("forced_selection")]
+        first = get_action_mask(game).forced_card
+        assert len(flagged) == 3 and first == flagged[0]
+        table = self._table(game, route)
+        for e in range(3):  # The Tower, Strength and Death
+            self._check_uses(game, table, e, first)
 
     @pytest.mark.parametrize("route", ["rust", "python"])
     @pytest.mark.parametrize(("hand_size", "position"), [(1, 0), (3, 2), (8, 0), (8, 5)])

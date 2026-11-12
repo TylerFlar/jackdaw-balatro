@@ -91,7 +91,7 @@ mask.max_card_select  # int — maximum cards to select
 mask.forced_card      # int | None — hand index every play/discard must include (Cerulean Bell)
 ```
 
-Always respect the masks. If `type_mask[i]` is False, don't emit action type `i`. Against the Cerulean Bell, a play or discard that leaves out `forced_card` is illegal, as in vanilla, where the forced card can't be deselected. A Tarot or Spectral used on cards highlights the forced card too, so it is always one of the cards the use works on and counts toward the consumable's maximum: The Tower (one card) can only be used on the forced card, and Strength (up to two) on the forced card and at most one other. Put `forced_card` in the `card_target` as well. The engine also takes a `card_target` that leaves it out while there is room for it, as the same use, but a live adapter refuses that, and the Gym table lists each use once, with the forced card.
+Always respect the masks. If `type_mask[i]` is False, don't emit action type `i`. Against the Cerulean Bell, a play or discard that leaves out `forced_card` is illegal, as in vanilla, where the forced card can't be deselected. A Tarot or Spectral used on cards highlights the forced card too, so it is always one of the cards the use works on and counts toward the consumable's maximum: The Tower (one card) can only be used on the forced card, and Strength (up to two) on the forced card and at most one other. Put `forced_card` in the `card_target` as well. The engine also takes a `card_target` that leaves it out while there is room for it, as the same use, but a live adapter vetoes that, and the Gym table lists each use once, with the forced card.
 
 ## Actions
 
@@ -137,7 +137,7 @@ action = FactoredAction(
 
 The swaps follow the game's drag and drop: the jokers can be reordered whenever the game waits for a move, the hand whenever it holds cards (while choosing a hand, and in an Arcana or Spectral pack, where the order decides which card Death copies and the order the cards go back into the deck). The sort buttons exist only while choosing a hand. Consumables can be dragged in the game too, but their order changes nothing, so there is no action for it. Under BALATROBOT legality (the live bot) the jokers can't be reordered at blind select or on the cash-out screen: BalatroBot's `rearrange` refuses there.
 
-`UseConsumable` and `PickPackCard` take a `card_target` when the consumable works on hand cards (The Magician, Death, Aura...). Bound it with `get_consumable_target_info(info["game"], "consumables", index)` (or `"pack_cards"`), which returns `(min_cards, max_cards, needs_targets)`. Leave `card_target` as `None` to get the engine's default selection: the lowest-index legal cards. Against the Cerulean Bell, include `forced_card` in it: the bounds count the forced card either way (see [Action Masks](#action-masks)).
+`UseConsumable` and `PickPackCard` take a `card_target` when the consumable works on hand cards (The Magician, Death, Aura...). Bound it with `get_consumable_target_info(info["game"], "consumables", index)` (or `"pack_cards"`), which returns `(min_cards, max_cards, needs_targets)`. Leave `card_target` as `None` to get the engine's default selection: the lowest-index legal cards. Against the Cerulean Bell, include `forced_card` in it: the bounds count the forced card either way (see [Action Masks](#action-masks)). The default selection doesn't always: see [Known Limitations](#known-limitations).
 
 ### Free moves
 
@@ -448,11 +448,12 @@ A trained policy only knows the masks it was trained with: when a new release ma
 | 1 | 0.1 | the first action space |
 | 2 | 0.2 | joker swaps at every decision point, as the game's drag and drop allows; the free-move cap |
 
-A release that only takes entries no policy needs out of the Gym table keeps the version. 0.2.5 did that against the Cerulean Bell: a Tarot or Spectral used on cards is listed only with selections that hold the forced card. The selections it dropped either left no room for the forced card, so that taking one ended the episode (or raised, with `on_refusal="raise"`), or were the same use as a selection that stays. In that blind, while such a consumable is held, the table is shorter and its later entries sit at lower indices.
+A release that only takes entries no policy needs out of the Gym table keeps the version. 0.2.5 did that against the Cerulean Bell: a Tarot or Spectral used on cards is listed only with selections that hold the forced card. The selections it dropped either left no room for the forced card, so that taking one ended the episode (or raised, with `on_refusal="raise"`), or were the same use as a selection that stays. In such a hand the table drops those selections, so the entries after them sit at lower indices, and an env's sampler may draw differently from then on: an env's tables are the same as 0.2.4's up to its first such hand.
 
 ## Known Limitations
 
 - **Two dead global features.** `global[26]` (the blind's key) and `global[29]` (the Four Fingers, Shortcut, Smeared Joker and Splash flags) are always 0, and a playing card's `is_scoring` feature is just "not debuffed". Encoder v1 keeps the original Python encoder's output bit for bit, quirks included. The jokers themselves are visible in the `joker` rows.
+- **The default selection against the Cerulean Bell.** A Tarot or Spectral used with `card_target=None` gets the lowest-index cards that work, which can leave the forced card out: Strength then takes hand card 0, and works on it and on the forced card. A live adapter vetoes that request (B02), so over one, pass a `card_target` that holds `forced_card`. The Gym table always does.
 - **Observation rows past the maximum counts.** The Gym observation holds at most 8 hand cards, 5 jokers, 2 consumables, 10 shop items and 5 pack cards. Rows past those are dropped (`entity_counts` is capped too), but the action table can still target them: a sixth joker (Negative), a ninth hand card (a bigger hand size), a third consumable. A policy then picks such an action without seeing its target. The factored `BalatroEnvironment` has no such limit.
 
 ## Live Validation Adapter

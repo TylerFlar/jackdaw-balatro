@@ -182,7 +182,7 @@ def get_consumable_target_info(game: Game, area: str, index: int) -> tuple[int, 
     Against Cerulean Bell a use highlights the forced card (:attr:`ActionMask.forced_card`)
     as well as the ``card_target``, and the bounds count the two together.  Include the
     forced card in the ``card_target``: the engine also takes one that leaves it out while
-    there is room for it (the same use), but a live adapter refuses that."""
+    there is room for it (the same use), but a live adapter vetoes that."""
     from jackdaw.env.rust_env import consumable_target_info
 
     return consumable_target_info(game, area, index)
