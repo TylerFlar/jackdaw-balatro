@@ -10,11 +10,11 @@ while it is 0.x, a minor release (0.2 → 0.3) can break things, and a patch rel
 - Against the Cerulean Bell, the default selection of a Tarot or Spectral used on cards holds
   the forced card: the targets `Game.legal_actions()` lists, and the ones a `UseConsumable`
   without a `card_target` gets. For a card that takes a range of cards (Strength, The Sun) it
-  was hand card 0, and the use worked on that card and on the forced card, which the engine
-  highlights in any case; a `LiveAdapter` vetoed that request (B02), so its legal list had no
-  use for such a card. The default is now the forced card alone. Cards that take an exact
-  count (The Tower, Death) already held it. Nothing changes without a forced card, or in the
-  Gym action table, which names its selections.
+  was hand card 0. Unless that was the forced card, the use worked on both cards, since the
+  engine highlights the forced card in any case, and a `LiveAdapter` vetoed the request (B02),
+  so its legal list had no use for such a card. The default is now the forced card alone.
+  Cards that take an exact count (The Tower, Death) already held it. Nothing changes without a
+  forced card, or in the Gym action table, which names its selections.
 
 ## [0.2.5] - 2026-11-11
 

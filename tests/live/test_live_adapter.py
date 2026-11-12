@@ -805,7 +805,7 @@ def test_the_mask_follows_balatrobot_legality() -> None:
     assert mask.type_mask[ActionType.PickPackCard]
 
 
-@pytest.mark.parametrize("seed", ["B02LIVE", "BELL49"])
+@pytest.mark.parametrize("seed", ["B02LIVE", "BELL49", "B02USE3"])
 def test_the_tables_uses_pass_the_bridge_under_cerulean_bell(seed: str) -> None:
     """Under Cerulean Bell BalatroBot's ``use`` drops the forced card, which the game keeps
     highlighted, so the bridge vetoes a use whose cards leave it out (B02). The Gym table's

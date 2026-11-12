@@ -363,7 +363,7 @@ mod tests {
         let mut g = Game::new_run(&RunSpec {
             back: jackdaw_data::center_by_key("b_red").unwrap(),
             stake: 1,
-            seed: "B02LIVE".into(),
+            seed: "B02USE3".into(),
             challenge: None,
         })
         .unwrap();
@@ -377,7 +377,7 @@ mod tests {
         let forced = (g.gs.areas.hand().iter())
             .position(|c| c.ability.forced_selection)
             .unwrap();
-        assert_ne!(forced, 0);
+        assert!(forced > 1, "the forced card is at {forced}");
         let uses = |g: &Game| -> Vec<(usize, Option<Vec<usize>>)> {
             (g.legal_actions().into_iter())
                 .filter_map(|a| match a {
@@ -390,12 +390,12 @@ mod tests {
         let want = vec![
             (0, one.clone()),
             (1, one.clone()),
-            (2, one.clone()),
+            (2, one),
             (3, Some(vec![0, forced])),
         ];
         assert_eq!(uses(&g), want);
 
-        // Strength on its default raises the forced card alone.
+        // Strength on its default, as the legal list gives it, raises the forced card alone.
         let ranks = |g: &Game| -> Vec<(u32, crate::card::Rank)> {
             let mut v: Vec<_> = (g.gs.areas.hand().iter())
                 .map(|c| (c.sort_id, c.base.unwrap().value))
@@ -405,11 +405,9 @@ mod tests {
         };
         let forced_id = g.gs.areas.hand()[forced].sort_id;
         let mut used = g.clone();
-        used.step(&Action::UseConsumable {
-            index: 0,
-            targets: one,
-        })
-        .unwrap();
+        let (index, targets) = uses(&g).swap_remove(0);
+        used.step(&Action::UseConsumable { index, targets })
+            .unwrap();
         let changed: Vec<u32> = (ranks(&g).iter().zip(&ranks(&used)))
             .filter(|(a, b)| a != b)
             .map(|(a, _)| a.0)

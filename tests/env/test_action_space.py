@@ -560,11 +560,12 @@ class TestUseConsumableDefaultTargets:
         """A use highlights the forced card whether the selection names it or not, so the
         default selection names it. Strength's and The Sun's was hand card 0: the use then
         worked on that card and on the forced card, and a live adapter vetoed it (B02)."""
-        game = Game.new("b_red", 1, "B02LIVE")
+        game = Game.new("b_red", 1, "B02USE3")
         game.apply_setup({"op": "force_boss", "key": "bl_final_bell"})
         game.step(SelectBlind())
         forced = get_action_mask(game).forced_card
-        assert forced not in (None, 0)
+        # Past hand index 1, so that Death's pair differs from the first two cards.
+        assert forced is not None and forced > 1
         for key in ("c_strength", "c_sun", "c_tower", "c_death", "c_aura"):
             game.debug_add(key)
         wanted = [(forced,), (forced,), (forced,), (0, forced), (forced,)]
