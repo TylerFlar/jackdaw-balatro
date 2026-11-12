@@ -149,7 +149,7 @@ list's marker for "any selection") is checked with one card, the forced one if a
 `use` highlights its targets the vanilla way: Cerulean Bell's forced card first, then the given
 cards, a repeat skipped. BalatroBot clears the highlight with `force` first, dropping the forced
 card; with the forced card among the targets the two agree, and the lockstep takes no other
-request ([B02](live#b02)).
+request ([B02](live#b02)). The legal list's uses name the forced card.
 
 ## The view
 
