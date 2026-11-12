@@ -163,6 +163,21 @@ def test_sampler_matches_rust() -> None:
         assert len(got) == k and got == sorted(set(got))
 
 
+def test_sampler_rejects_as_rust_does() -> None:
+    # From state [1, 2, 3, 4] the generator's second output is 0. Lemire's method rejects a
+    # draw whose low word is below 2^64 mod bound, which 0 is for every bound but a power of
+    # two, and draws again. The Python sampler never rejected (its threshold was always 0).
+    for n, k in ((218, 200), (650, 500), (10, 3), (500, 250)):
+        rng = Xoshiro256.from_state([1, 2, 3, 4])
+        got = subsample_indices(n, k, rng)
+        want, state = _core._subsample_indices(n, k, [1, 2, 3, 4])
+        assert got == want and rng.state == tuple(state), (n, k)
+    # Two draws take three outputs (11520, the rejected 0, 1509978240): the fourth is next.
+    rng = Xoshiro256.from_state([1, 2, 3, 4])
+    assert [rng.below(202), rng.below(202)] == [0, 0]
+    assert rng.next_u64() == 1215971899390074240
+
+
 def test_xoshiro_reference_outputs() -> None:
     # xoshiro256** from state [1, 2, 3, 4], as the reference C implementation computes it.
     rng = Xoshiro256.from_state([1, 2, 3, 4])

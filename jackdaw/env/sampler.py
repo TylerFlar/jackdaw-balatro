@@ -62,7 +62,9 @@ class Xoshiro256:
 
     def below(self, bound: int) -> int:
         """A uniform integer in ``[0, bound)`` (Lemire's multiply-and-reject)."""
-        threshold = (-bound) % bound
+        # 2^64 mod bound, Rust's `bound.wrapping_neg() % bound`: a draw whose low word is
+        # below it is rejected.  (`(-bound) % bound` is 0 for a Python int.)
+        threshold = ((1 << 64) - bound) % bound
         while True:
             m = self.next_u64() * bound
             if (m & _MASK64) >= threshold:

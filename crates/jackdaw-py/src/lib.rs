@@ -652,7 +652,7 @@ mod _core {
     const MAX_ACTIONS: usize = jackdaw_env::gym::MAX_ACTIONS;
 
     /// The action space's version (`jackdaw_env::ACTION_VERSION`): it changes when the masks
-    /// or the action tables do.
+    /// or the action tables do, unless a table only loses entries no policy needs.
     #[allow(non_upper_case_globals)]
     #[pymodule_export]
     const ACTION_VERSION: u32 = jackdaw_env::ACTION_VERSION;

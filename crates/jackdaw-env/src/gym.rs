@@ -404,7 +404,8 @@ impl ActionTable {
 
     /// The enumeration for any mask: `entity(t)` is `t`'s entity mask, `target_info(t, e)` the
     /// `(min, max, needs)` targeting of entity `e` of an entity-and-card type (`None` past the
-    /// end of its source).
+    /// end of its source). Every card selection holds `forced` (Cerulean Bell's card): a
+    /// play's and a discard's, and the cards a consumable is used on.
     #[allow(clippy::too_many_arguments)]
     pub fn enumerate_with<'m>(
         &mut self,
@@ -454,7 +455,12 @@ impl ActionTable {
                             }
                             match target_info(t, e) {
                                 Some((lo, hi, true)) => {
-                                    self.card_actions(t, Some(e), lo, hi, None, rng);
+                                    // A use highlights Cerulean Bell's card first, then the
+                                    // selection (`consumable_highlight`): a selection without
+                                    // the card is one card more than it names, and the same
+                                    // use as the selection that names it. Each use is listed
+                                    // once, with the card, as a play is (#49).
+                                    self.card_actions(t, Some(e), lo, hi, forced, rng);
                                 }
                                 Some((_, _, false)) => {
                                     self.push(Group::One(FactoredAction::with_entity(t, e)), 1);
@@ -630,6 +636,58 @@ mod tests {
         for (i, a) in actions.iter().enumerate() {
             assert_eq!(table.get(i), Some(*a));
         }
+    }
+
+    #[test]
+    fn every_selection_holds_the_forced_card() {
+        // Cerulean Bell's card (hand index 2 of 6) is highlighted first when a consumable is
+        // used, then the selection (`consumable_highlight`): The Tower on another card, or
+        // Strength or Death on two others, is one card too many for the engine (#49), and a
+        // selection with room for the card is the same use as the one that names it. So a
+        // consumable's selections hold the card, as a play's do.
+        let mut types = [false; crate::action::NUM_ACTION_TYPES];
+        types[ActionType::PlayHand.index()] = true;
+        types[ActionType::UseConsumable.index()] = true;
+        // The Tower, Strength, Death and The Sun: (min, max) cards.
+        let targets = [(1, 1), (1, 2), (2, 2), (1, 3)];
+        let mut table = ActionTable::new();
+        let mut rng = Xoshiro256::seed_from_u64(9);
+        table.enumerate_with(
+            &types,
+            &[true; 6],
+            |_| Some(&[true; 4][..]),
+            (1, 5),
+            Some(2),
+            |_, e| Some((targets[e].0, targets[e].1, true)),
+            &mut rng,
+        );
+        let actions = table.actions();
+        let sels = |t: ActionType, e: Option<u32>| -> Vec<Vec<u8>> {
+            actions
+                .iter()
+                .filter(|a| a.action_type == t && a.entity_target == e)
+                .map(|a| a.card_target.unwrap().as_slice().to_vec())
+                .collect()
+        };
+        let pairs = [[0, 2], [1, 2], [2, 3], [2, 4], [2, 5]];
+        // The Tower: the forced card.
+        assert_eq!(sels(ActionType::UseConsumable, Some(0)), [[2]]);
+        // Strength: the forced card, alone or with one other.
+        let mut want = vec![vec![2]];
+        want.extend(pairs.iter().map(|p| p.to_vec()));
+        assert_eq!(sels(ActionType::UseConsumable, Some(1)), want);
+        // Death: the forced card and one other.
+        assert_eq!(sels(ActionType::UseConsumable, Some(2)), pairs);
+        // The Sun: the forced card with up to two others.
+        let sun = sels(ActionType::UseConsumable, Some(3));
+        assert_eq!(sun.len(), 1 + 5 + 10);
+        assert!(sun.iter().all(|s| s.contains(&2)));
+        // PlayHand: the forced card with up to four others, as before.
+        let plays = sels(ActionType::PlayHand, None);
+        assert_eq!(plays.len(), 1 + 5 + 10 + 10 + 5);
+        assert!(plays.iter().all(|s| s.contains(&2)));
+        // Nothing was subsampled, so the sampler drew nothing.
+        assert_eq!(rng, Xoshiro256::seed_from_u64(9));
     }
 
     #[test]

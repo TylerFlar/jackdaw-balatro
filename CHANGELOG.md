@@ -5,6 +5,31 @@ while it is 0.x, a minor release (0.2 → 0.3) can break things, and a patch rel
 
 ## Unreleased
 
+## [0.2.5] - 2026-11-11
+
+The engine plays the same runs as 0.2.4, with the same observations: every ended episode
+Jackdaw Arena publishes replays with it to its recorded final state. What's new is a fix to the
+Gym action table against the Cerulean Bell. An env's tables are 0.2.4's up to its first hand
+in that blind with a Tarot or Spectral that takes cards.
+
+### Fixed
+
+- Against the Cerulean Bell, the Gym action table (`BalatroGymnasiumEnv`, `BalatroVectorEnv`)
+  offers a Tarot or Spectral used on cards only with selections that hold the forced card, as
+  it does plays and discards. A use highlights the forced card as well as the selection, so
+  The Tower on another card, or Strength or Death on two others, was one card too many: taking
+  it ended the episode as refused (`info["balatro/refused"]`), or raised `IllegalActionError`
+  with `on_refusal="raise"`. A selection with room for the forced card was the same use as the
+  one that names it, listed twice, and a `LiveAdapter` vetoed it (B02). In such a hand the table
+  drops those selections, so the entries after them sit at lower indices, and an env's sampler
+  may draw differently from then on. Up to an env's first such hand its tables are unchanged.
+  `ACTION_VERSION` stays at 2
+  ([docs/rl-guide.md](docs/rl-guide.md#saving-a-policy-the-action-version)).
+- The Python action table's sampler rejects a draw as the Rust one does. It never did, so the
+  two tables could keep different subsamples (about one draw in 10^17).
+- `RandomAgent` includes the forced card when it picks the cards for a Tarot or Spectral
+  against the Cerulean Bell. It could pick a selection the engine refuses.
+
 ## [0.2.4] - 2026-11-09
 
 The engine plays the same runs as 0.2.3, with the same observations, masks and actions: every

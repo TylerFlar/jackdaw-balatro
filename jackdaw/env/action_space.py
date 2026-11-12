@@ -107,7 +107,9 @@ FREE_ACTION_TYPES: frozenset[ActionType] = frozenset(
 #: The action space's version: what the action types mean, which ones a mask allows where, and
 #: how the Gym action table is built. A policy is tied to the masks it was trained with, so this
 #: goes up whenever they change. 2 (jackdaw 0.2): reordering follows the game's drag and drop,
-#: and the envs cap consecutive free moves.
+#: and the envs cap consecutive free moves. It stays the same when the table only loses entries
+#: no policy needs (ones the engine refuses, or the same move as an entry that stays), as in
+#: 0.2.5 against Cerulean Bell.
 ACTION_VERSION: int = _core.ACTION_VERSION
 
 #: The envs' default cap on free moves in a row (enough to put five jokers in any order).
@@ -142,7 +144,9 @@ class ActionMask:
     forced_card:
         Hand index of Cerulean Bell's forced card, which every PlayHand
         and Discard selection must include (vanilla keeps it highlighted),
-        or ``None``.
+        or ``None``.  A Tarot or Spectral used on cards highlights it too,
+        so its ``card_target`` should include it as well: see
+        :func:`get_consumable_target_info`.
     """
 
     type_mask: np.ndarray
@@ -173,7 +177,12 @@ def get_consumable_target_info(game: Game, area: str, index: int) -> tuple[int, 
     """``(min_cards, max_cards, needs_targets)`` for the consumable at ``index`` of ``area``
     (``"consumables"`` or ``"pack_cards"``): how many hand cards a policy picks as its
     ``card_target``.  If ``needs_targets`` is False, ``card_target`` should be ``None``.
-    Raises ``ValueError`` past the end of the area."""
+    Raises ``ValueError`` past the end of the area.
+
+    Against Cerulean Bell a use highlights the forced card (:attr:`ActionMask.forced_card`)
+    as well as the ``card_target``, and the bounds count the two together.  Include the
+    forced card in the ``card_target``: the engine also takes one that leaves it out while
+    there is room for it (the same use), but a live adapter vetoes that."""
     from jackdaw.env.rust_env import consumable_target_info
 
     return consumable_target_info(game, area, index)

@@ -38,6 +38,8 @@ uv run ruff check . && uv run ruff format --check .
   ([development.md](docs/development.md#frozen-fixtures)).
 - **Action-space changes** (a mask allows a move it didn't, a new action type) bump
   `ACTION_VERSION` in `crates/jackdaw-env/src/lib.rs`, since policies trained before no longer fit.
+  Taking entries out of the Gym table that the engine refuses, or that repeat a move the table
+  keeps, doesn't.
 - **Changes users see** get a line under "Unreleased" in [CHANGELOG.md](CHANGELOG.md).
 - Pull requests into `dev` can be squash-merged.
 

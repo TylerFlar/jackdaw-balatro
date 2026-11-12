@@ -556,9 +556,19 @@ class BalatroGymnasiumEnv(gymnasium.Env):
                         if needs:
                             if legal_cards is None:
                                 legal_cards = tuple(np.nonzero(mask.card_mask)[0].tolist())
+                            # A use highlights Cerulean Bell's card first, then the
+                            # selection: without the card it is one card more than it
+                            # names, and the same use as the selection that names it.
+                            # Each use is listed once, with the card, as a play is (#49).
                             actions.extend(
                                 _card_actions(
-                                    t, e_idx, legal_cards, min_cards, max_cards, self._rng
+                                    t,
+                                    e_idx,
+                                    legal_cards,
+                                    min_cards,
+                                    max_cards,
+                                    self._rng,
+                                    mask.forced_card,
                                 )
                             )
                         else:

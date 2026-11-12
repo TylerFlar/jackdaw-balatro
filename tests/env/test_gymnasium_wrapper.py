@@ -7,13 +7,29 @@ editing the run use :class:`tests.env.generic.GenericAdapter`, whose steps go th
 
 from __future__ import annotations
 
+from itertools import combinations
+
 import numpy as np
 import pytest
 from gymnasium import spaces
 
-from jackdaw.core import Game
-from jackdaw.engine.actions import CashOut, GamePhase, OpenBooster, PlayHand, SelectBlind
-from jackdaw.env.action_space import ActionType, get_action_mask
+from jackdaw.core import Game, IllegalActionError
+from jackdaw.engine.actions import (
+    CashOut,
+    GamePhase,
+    OpenBooster,
+    PlayHand,
+    SelectBlind,
+    UseConsumable,
+)
+from jackdaw.engine.data import load
+from jackdaw.env.action_space import (
+    ActionType,
+    FactoredAction,
+    factored_to_engine_action,
+    get_action_mask,
+    get_consumable_target_info,
+)
 from jackdaw.env.balatro_env import _action_mask_to_game
 from jackdaw.env.game_interface import DirectAdapter
 from jackdaw.env.gymnasium_wrapper import MAX_ACTIONS, BalatroGymnasiumEnv
@@ -253,6 +269,176 @@ class TestCeruleanBell:
             mask = info["action_mask"]
         assert game.phase != GamePhase.SELECTING_HAND
         assert selections > 1
+
+
+class TestCeruleanBellConsumables:
+    """A consumable used under the Bell highlights the forced card first, then its targets
+    (action.rs ``consumable_highlight``). A target set without the forced card is one card
+    more than it names: The Tower on another card, or Strength or Death on two others, is
+    too many for the engine, and the table used to offer them (#49). With room for the
+    forced card such a set is the same use as the set that names it, and over a live adapter
+    the bridge vetoes it (B02). So the table lists each use once: its target sets hold the
+    forced card, as every play and discard does (#31)."""
+
+    _KEYS = ("c_tower", "c_strength", "c_death", "c_aura", "c_mars")
+
+    @classmethod
+    def _bell_game(cls) -> tuple[Game, int]:
+        game = Game.new("b_red", 1, "BELL49")
+        game.apply_setup({"op": "force_boss", "key": "bl_final_bell"})
+        game.step(SelectBlind())
+        for key in cls._KEYS:
+            game.debug_add(key)
+        forced = get_action_mask(game).forced_card
+        assert forced is not None
+        return game, forced
+
+    @staticmethod
+    def _bell_hand(hand_size: int, position: int) -> Game:
+        """A Bell round whose hand is ``hand_size`` cards, the forced one at ``position``."""
+        game = Game.new("b_red", 1, "BELL49")
+        game.apply_setup({"op": "force_boss", "key": "bl_final_bell"})
+        game.step(SelectBlind())
+        ids = [card.sort_id for card in game.hand]
+        forced_id = ids.pop(get_action_mask(game).forced_card)
+        hand = ids[: hand_size - 1]
+        hand.insert(position, forced_id)
+        game.debug_set_hand(hand)
+        assert len(game.hand) == hand_size and get_action_mask(game).forced_card == position
+        return game
+
+    @staticmethod
+    def _table(game: Game, route: str) -> list[FactoredAction]:
+        if route == "rust":
+            actions, _ = game._g.action_table([1, 2, 3, 4])
+            return [
+                FactoredAction(
+                    action_type=t, entity_target=e, card_target=None if c is None else tuple(c)
+                )
+                for t, e, c in actions
+            ]
+        env = BalatroGymnasiumEnv(adapter_factory=GenericAdapter)
+        _rebuild_table(env, game)
+        return env._action_table
+
+    @staticmethod
+    def _after(game: Game, fa: FactoredAction) -> str | None:
+        """The state after ``fa`` (its hash), or None when the engine refuses it."""
+        trial = game.clone()
+        try:
+            trial.step(factored_to_engine_action(fa, trial))
+        except IllegalActionError:
+            return None
+        return trial.state_hash()
+
+    def _check_uses(self, game: Game, table: list[FactoredAction], e: int, forced: int) -> None:
+        """Consumable ``e``'s entries of ``table`` against the engine, over every selection
+        of up to its maximum of hand cards: the table lists the selections with the forced
+        card that the engine takes, each once, and a selection without it is refused or is
+        the use the table lists with the card."""
+        lo, hi, needs = get_consumable_target_info(game, "consumables", e)
+        key = game.consumables[e].key
+        assert needs, key
+        n = len(game.hand)
+        after = {
+            sel: self._after(
+                game,
+                FactoredAction(
+                    action_type=ActionType.UseConsumable, entity_target=e, card_target=sel
+                ),
+            )
+            for k in range(1, min(hi, n) + 1)
+            for sel in combinations(range(n), k)
+        }
+        offered = [
+            fa.card_target
+            for fa in table
+            if fa.action_type == ActionType.UseConsumable and fa.entity_target == e
+        ]
+        assert len(offered) == len(set(offered)), key
+        taken_with = {sel for sel, state in after.items() if forced in sel and state is not None}
+        assert set(offered) == taken_with, key
+        # With the card, the engine counts the cards named: at least the minimum.
+        assert taken_with == {sel for sel in after if forced in sel and len(sel) >= lo}, key
+        # Usable whenever the hand holds its minimum, since the forced card is one of those.
+        assert bool(offered) == (n >= lo), key
+        for sel, state in after.items():
+            if forced not in sel:
+                # One card more than it names: too many (refused), or the use naming the card.
+                assert state == after.get(tuple(sorted((*sel, forced)))), (key, sel)
+
+    @pytest.mark.parametrize("route", ["rust", "python"])
+    def test_uses_hold_the_forced_card(self, route: str) -> None:
+        game, forced = self._bell_game()
+        uses = [fa for fa in self._table(game, route) if fa.action_type == ActionType.UseConsumable]
+        assert [fa for fa in uses if self._after(game, fa) is None] == []
+
+        by_key: dict[str, set[tuple[int, ...] | None]] = {k: set() for k in self._KEYS}
+        for fa in uses:
+            by_key[game.consumables[fa.entity_target].key].add(fa.card_target)
+        others = [i for i in range(len(game.hand)) if i != forced]
+        pairs = {tuple(sorted((forced, i))) for i in others}
+        # The Tower (1, 1): the forced card.
+        assert by_key["c_tower"] == {(forced,)}
+        # Strength (1, 2): the forced card, alone or with one other. One other card alone
+        # is the same use as the pair, and two others are one card too many.
+        assert by_key["c_strength"] == {(forced,)} | pairs
+        # Death (2, 2): the forced card and one other.
+        assert by_key["c_death"] == pairs
+        # Aura and Mars are listed once, without a selection: Mars takes no card, and Aura
+        # the engine's own choice, which is the forced card.
+        assert by_key["c_aura"] == {None} and by_key["c_mars"] == {None}
+
+    @pytest.mark.parametrize("route", ["rust", "python"])
+    def test_uses_are_the_ones_the_engine_takes(self, route: str) -> None:
+        # No subsampling here, so the table holds every use.
+        game, forced = self._bell_game()
+        table = self._table(game, route)
+        checked = 0
+        for e in range(len(game.consumables)):
+            if get_consumable_target_info(game, "consumables", e)[2]:
+                self._check_uses(game, table, e, forced)
+                checked += 1
+        assert checked == 3
+
+    @pytest.mark.parametrize("route", ["rust", "python"])
+    def test_the_first_of_several_forced_cards(self, route: str) -> None:
+        """Cryptid's copies of the forced card are forced too. The engine highlights the
+        hand's first forced card only, which is the one the mask names, so that is the card
+        the table's selections hold."""
+        game, forced = self._bell_game()
+        game.debug_add("c_cryptid")
+        game.step(UseConsumable(card_index=len(self._KEYS), target_indices=(forced,)))
+        flagged = [i for i, c in enumerate(game.hand) if c.ability.get("forced_selection")]
+        first = get_action_mask(game).forced_card
+        assert len(flagged) == 3 and first == flagged[0]
+        table = self._table(game, route)
+        for e in range(3):  # The Tower, Strength and Death
+            self._check_uses(game, table, e, first)
+
+    @pytest.mark.parametrize("route", ["rust", "python"])
+    @pytest.mark.parametrize(("hand_size", "position"), [(1, 0), (3, 2), (8, 0), (8, 5)])
+    def test_every_card_targeted_consumable(
+        self, route: str, hand_size: int, position: int
+    ) -> None:
+        """Each Tarot and Spectral used on cards (a center with ``max_highlighted``), alone
+        among the consumables on a Bell hand, with the forced card first, last and in
+        between. The table's rule counts cards, as ``can_use_consumeable_with`` does for
+        these; a center the engine judges another way would fail here."""
+        keys = sorted(
+            key
+            for key, center in load("centers").items()
+            if center.get("set") in ("Tarot", "Spectral")
+            and isinstance(center.get("config"), dict)
+            and center["config"].get("max_highlighted")
+        )
+        # One, two and three cards at most; Death takes exactly two; a Spectral.
+        assert {"c_tower", "c_strength", "c_sun", "c_death", "c_cryptid"} <= set(keys)
+        base = self._bell_hand(hand_size, position)
+        for key in keys:
+            game = base.clone()
+            game.debug_add(key)
+            self._check_uses(game, self._table(game, route), 0, position)
 
 
 # ------------------------------------------------------------------
