@@ -167,3 +167,29 @@ class TestRandomAgent:
                 fa = agent.act({}, mask, {"game": game})
                 assert mask.forced_card in fa.card_target
                 assert 1 <= len(fa.card_target) <= 5
+
+    def test_uses_consumables_on_the_cerulean_bell_forced_card(self):
+        """A consumable used on cards highlights the Bell's forced card as well as the
+        selection, so the selection holds it: The Tower on any other card, or Strength or
+        Death on two others, is one card too many for the engine (#49)."""
+        game = Game.new(BACK, STAKE, SEED)
+        game.apply_setup({"op": "force_boss", "key": "bl_final_bell"})
+        game.step(SelectBlind())
+        sizes = {"c_tower": {1}, "c_strength": {1, 2}, "c_death": {2}, "c_sun": {1, 2, 3}}
+        for key in sizes:
+            game.debug_add(key)
+        mask = get_action_mask(game)
+        assert mask.forced_card is not None
+        mask.type_mask[:] = False
+        mask.type_mask[ActionType.UseConsumable] = True
+
+        agent = RandomAgent()
+        seen: dict[str, set[int]] = {key: set() for key in sizes}
+        for _ in range(400):
+            fa = agent.act({}, mask, {"game": game})
+            assert fa.action_type == ActionType.UseConsumable
+            assert mask.forced_card in fa.card_target
+            # The engine takes it: `step` used to raise IllegalActionError.
+            game.clone().step(factored_to_engine_action(fa, game))
+            seen[game.consumables[fa.entity_target].key].add(len(fa.card_target))
+        assert seen == sizes

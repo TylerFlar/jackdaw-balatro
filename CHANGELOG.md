@@ -7,13 +7,21 @@ while it is 0.x, a minor release (0.2 → 0.3) can break things, and a patch rel
 
 ### Fixed
 
-- Against The Cerulean Bell, the Gym action table (`BalatroGymnasiumEnv`, `BalatroVectorEnv`,
-  `Game.action_table`) no longer offers a Tarot or Spectral used on cards with a selection the
-  engine refuses (#49). Using one highlights the forced card as well as the selection, so a
-  selection without the forced card holds one card more: The Tower on another card, Strength
-  on two others or Death on two others raised `IllegalActionError`. Such a selection is offered
-  only while it leaves room for the forced card (Strength on one other card still is). The
-  table is unchanged under any other boss.
+- Against the Cerulean Bell, the Gym action table (`BalatroGymnasiumEnv`, `BalatroVectorEnv`)
+  offers a Tarot or Spectral used on cards only with selections that hold the forced card, as
+  it does plays and discards. A use highlights the forced card as well as the selection, so
+  The Tower on another card, or Strength or Death on two others, was one card too many: taking
+  it ended the episode as refused (`info["balatro/refused"]`), or raised `IllegalActionError`
+  with `on_refusal="raise"`. A selection with room for the forced card was the same use as the
+  one that names it, listed twice, and a `LiveAdapter` vetoed it (B02). In such a hand the table
+  drops those selections, so the entries after them sit at lower indices, and an env's sampler
+  may draw differently from then on. Up to an env's first such hand its tables are unchanged.
+  `ACTION_VERSION` stays at 2
+  ([docs/rl-guide.md](docs/rl-guide.md#saving-a-policy-the-action-version)).
+- The Python action table's sampler rejects a draw as the Rust one does. It never did, so the
+  two tables could keep different subsamples (about one draw in 10^17).
+- `RandomAgent` includes the forced card when it picks the cards for a Tarot or Spectral
+  against the Cerulean Bell. It could pick a selection the engine refuses.
 
 ## [0.2.4] - 2026-11-09
 

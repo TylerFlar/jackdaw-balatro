@@ -805,6 +805,49 @@ def test_the_mask_follows_balatrobot_legality() -> None:
     assert mask.type_mask[ActionType.PickPackCard]
 
 
+@pytest.mark.parametrize("seed", ["B02LIVE", "BELL49"])
+def test_the_tables_uses_pass_the_bridge_under_cerulean_bell(seed: str) -> None:
+    """Under Cerulean Bell BalatroBot's ``use`` drops the forced card, which the game keeps
+    highlighted, so the bridge vetoes a use whose cards leave it out (B02). The Gym table's
+    selections for a consumable hold the forced card (#49): each one passes the bridge's
+    veto, and one is played through the adapter."""
+    from jackdaw.env.action_space import ActionType, get_action_mask
+    from jackdaw.env.balatro_env import _action_mask_to_game
+    from jackdaw.env.gymnasium_wrapper import BalatroGymnasiumEnv
+
+    def cerulean(back: str, stake: int, seed: str, challenge: str | None) -> Game:
+        g = Game.new(back, stake, seed, challenge)
+        g.apply_setup({"op": "force_boss", "key": "bl_final_bell"})
+        return g
+
+    adapter = LiveAdapter(FakeLive(game=cerulean("b_red", 1, seed, None)), shadow_factory=cerulean)
+    adapter.attach()
+    adapter.step(SelectBlind())
+    adapter.request("add", {"key": "c_strength"})
+    game = adapter.game
+    mask = get_action_mask(game, legality=adapter.legality)
+    forced = mask.forced_card
+    assert forced is not None
+    others = [i for i in range(len(game.hand)) if i != forced]
+
+    env = BalatroGymnasiumEnv(adapter_factory=lambda: adapter)
+    table = env._enumerate_actions(_action_mask_to_game(mask), {"game": game})
+    uses = [fa.card_target for fa in table if fa.action_type == ActionType.UseConsumable]
+    # Strength: the forced card, alone or with one other.
+    assert uses == [(forced,), *sorted(tuple(sorted((forced, i))) for i in others)]
+    assert [adapter.veto_reason(UseConsumable(0, sel)) for sel in uses] == [None] * len(uses)
+    # One other card alone is the same use in the engine (the same state afterwards), and
+    # the one the bridge vetoes.
+    alone, named = game.clone(), game.clone()
+    alone.step(UseConsumable(0, (others[0],)))
+    named.step(UseConsumable(0, tuple(sorted((forced, others[0])))))
+    assert alone.state_hash() == named.state_hash()
+    assert (adapter.veto_reason(UseConsumable(0, (others[0],))) or "").startswith("B02")
+
+    adapter.step(UseConsumable(0, uses[1]))
+    assert not adapter.game.consumables
+
+
 # ---------------------------------------------------------------------------
 # Classified or not
 # ---------------------------------------------------------------------------

@@ -75,14 +75,7 @@ class RandomAgent:
             if len(legal_cards) > 0:
                 n = min(len(legal_cards), action_mask.max_card_select)
                 count = _random.randint(action_mask.min_card_select, n)
-                forced = action_mask.forced_card
-                if forced is None:
-                    selected = sorted(_random.sample(list(legal_cards), count))
-                else:
-                    # Cerulean Bell: the forced card is in every selection
-                    others = [c for c in legal_cards if c != forced]
-                    selected = sorted([forced, *_random.sample(others, count - 1)])
-                card_target = tuple(int(i) for i in selected)
+                card_target = _pick_cards(legal_cards, count, action_mask.forced_card)
 
         # Card target for a targeting Tarot/Spectral, used from the tray or
         # picked from a pack (anything else takes the engine default)
@@ -99,14 +92,25 @@ class RandomAgent:
                     if len(legal_cards) >= min_cards:
                         n = min(len(legal_cards), max_cards)
                         count = _random.randint(min_cards, n)
-                        selected = sorted(_random.sample(list(legal_cards), count))
-                        card_target = tuple(int(i) for i in selected)
+                        card_target = _pick_cards(legal_cards, count, action_mask.forced_card)
 
         return FactoredAction(
             action_type=at,
             card_target=card_target,
             entity_target=entity_target,
         )
+
+
+def _pick_cards(legal_cards: np.ndarray, count: int, forced: int | None) -> tuple[int, ...]:
+    """``count`` of the legal hand cards at random, in hand order.  Cerulean Bell's forced
+    card is one of them: a play or discard must hold it (#31), and a consumable's use
+    highlights it as well as the cards picked, so without it the use is one card more (#49)."""
+    if forced is None:
+        selected = _random.sample(list(legal_cards), count)
+    else:
+        others = [c for c in legal_cards if c != forced]
+        selected = [forced, *_random.sample(others, count - 1)]
+    return tuple(sorted(int(i) for i in selected))
 
 
 def _target_info(info: dict, area: str, index: int) -> tuple[int, int, bool] | None:
