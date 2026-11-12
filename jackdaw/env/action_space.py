@@ -192,7 +192,8 @@ def factored_to_engine_action(fa: FactoredAction, game: Game) -> Action:
     """The engine action a factored action stands for in a run's current state.
 
     A UseConsumable, PickPackCard or BuyAndUse without a ``card_target`` gets the
-    default selection the mask judged legal (the lowest-index legal cards).  Raises
+    default selection the mask judged legal (the lowest-index legal cards; against
+    Cerulean Bell, the forced card and the lowest-index others).  Raises
     ``ValueError`` when the action lacks a target its type needs.
     """
     from jackdaw.env.rust_env import factored_to_engine_action as convert
