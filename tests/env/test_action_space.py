@@ -556,6 +556,32 @@ class TestUseConsumableDefaultTargets:
         fa = FactoredAction(ActionType.UseConsumable, entity_target=0)
         assert factored_to_engine_action(fa, game) == UseConsumable(0, (1,))
 
+    def test_the_default_holds_the_cerulean_bell_forced_card(self):
+        """A use highlights the forced card whether the selection names it or not, so the
+        default selection names it. Strength's and The Sun's was hand card 0: the use then
+        worked on that card and on the forced card, and a live adapter vetoed it (B02)."""
+        game = Game.new("b_red", 1, "B02LIVE")
+        game.apply_setup({"op": "force_boss", "key": "bl_final_bell"})
+        game.step(SelectBlind())
+        forced = get_action_mask(game).forced_card
+        assert forced not in (None, 0)
+        for key in ("c_strength", "c_sun", "c_tower", "c_death", "c_aura"):
+            game.debug_add(key)
+        wanted = [(forced,), (forced,), (forced,), (0, forced), (forced,)]
+        for e, targets in enumerate(wanted):
+            fa = FactoredAction(ActionType.UseConsumable, entity_target=e)
+            assert factored_to_engine_action(fa, game) == UseConsumable(e, targets)
+        uses = [a for a in game.legal_actions() if isinstance(a, UseConsumable)]
+        assert uses == [UseConsumable(e, targets) for e, targets in enumerate(wanted)]
+
+        # Strength on its default raises the forced card alone.
+        ranks = {card.sort_id: card.rank for card in game.hand}
+        forced_id = game.hand[forced].sort_id
+        used = game.clone()
+        used.step(uses[0])
+        changed = [card.sort_id for card in used.hand if card.rank != ranks[card.sort_id]]
+        assert changed == [forced_id]
+
     def test_untargeted_consumable_stays_targetless(self):
         game = _selecting_hand()
         game.debug_add("c_pluto")

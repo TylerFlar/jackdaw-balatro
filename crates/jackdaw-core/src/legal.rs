@@ -3,7 +3,8 @@
 //! usable consumable with the default hand selection it would be used on.
 //!
 //! A consumable's default selection is the first `min_highlighted` cards of the hand, or else
-//! the first such combination it can be used on; Aura needs one editionless card.
+//! the first such combination it can be used on; Aura needs one editionless card. Under
+//! Cerulean Bell it holds the forced card, which a use highlights in any case.
 
 use jackdaw_data::CenterSet;
 
@@ -291,11 +292,25 @@ impl Game {
         let Some(size) = self.selection_size(id) else {
             return self.usable_with(id, &[], check_use).then_some(None);
         };
-        let n = self.gs.areas.hand().len();
+        let hand = self.gs.areas.hand();
+        let n = hand.len();
         if n < size {
             return None;
         }
-        let first: Vec<usize> = (0..size).collect();
+        // The first `size` cards. Under Cerulean Bell, the forced card and the first others
+        // instead: a use highlights the forced card whether the selection names it or not
+        // (`consumable_highlight`), so a selection without it works on one card more than it
+        // names (Strength on card 0 raised the forced card too), and BalatroBot's `use`
+        // drops the card, so the bridge takes no such request (docs/live.md, B02).
+        let first: Vec<usize> = match hand.iter().position(|c| c.ability.forced_selection) {
+            Some(forced) if size > 0 => {
+                let mut sel: Vec<usize> = (0..n).filter(|&i| i != forced).take(size - 1).collect();
+                sel.push(forced);
+                sel.sort_unstable();
+                sel
+            }
+            _ => (0..size).collect(),
+        };
         if self.usable_with(id, &first, check_use) {
             return Some(Some(first));
         }
@@ -337,6 +352,80 @@ mod tests {
         // The hand holds no cards here, so it has nothing to reorder.
         assert!(!legal.iter().any(|a| matches!(a, Action::SwapHandRight(_))));
         assert!(g.step(&Action::SwapHandRight(0)).is_err());
+    }
+
+    #[test]
+    fn a_default_selection_holds_the_forced_card() {
+        // Cerulean Bell's card is highlighted whether a use names it or not (action.rs
+        // `consumable_highlight`; cardarea.lua:252-256), so the default selection names it.
+        // Strength's and The Sun's was hand card 0: the use then worked on that card and on
+        // the forced card. The Tower's card and Death's pair already held it.
+        let mut g = Game::new_run(&RunSpec {
+            back: jackdaw_data::center_by_key("b_red").unwrap(),
+            stake: 1,
+            seed: "B02LIVE".into(),
+            challenge: None,
+        })
+        .unwrap();
+        g.apply_setup_op(&serde_json::json!({"op": "force_boss", "key": "bl_final_bell"}))
+            .unwrap();
+        g.step(&Action::SelectBlind).unwrap();
+        for key in ["c_strength", "c_sun", "c_tower", "c_death"] {
+            g.apply_setup_op(&serde_json::json!({"op": "add", "key": key}))
+                .unwrap();
+        }
+        let forced = (g.gs.areas.hand().iter())
+            .position(|c| c.ability.forced_selection)
+            .unwrap();
+        assert_ne!(forced, 0);
+        let uses = |g: &Game| -> Vec<(usize, Option<Vec<usize>>)> {
+            (g.legal_actions().into_iter())
+                .filter_map(|a| match a {
+                    Action::UseConsumable { index, targets } => Some((index, targets)),
+                    _ => None,
+                })
+                .collect()
+        };
+        let one = Some(vec![forced]);
+        let want = vec![
+            (0, one.clone()),
+            (1, one.clone()),
+            (2, one.clone()),
+            (3, Some(vec![0, forced])),
+        ];
+        assert_eq!(uses(&g), want);
+
+        // Strength on its default raises the forced card alone.
+        let ranks = |g: &Game| -> Vec<(u32, crate::card::Rank)> {
+            let mut v: Vec<_> = (g.gs.areas.hand().iter())
+                .map(|c| (c.sort_id, c.base.unwrap().value))
+                .collect();
+            v.sort_unstable_by_key(|&(id, _)| id);
+            v
+        };
+        let forced_id = g.gs.areas.hand()[forced].sort_id;
+        let mut used = g.clone();
+        used.step(&Action::UseConsumable {
+            index: 0,
+            targets: one,
+        })
+        .unwrap();
+        let changed: Vec<u32> = (ranks(&g).iter().zip(&ranks(&used)))
+            .filter(|(a, b)| a != b)
+            .map(|(a, _)| a.0)
+            .collect();
+        assert_eq!(changed, [forced_id]);
+
+        // Without a forced card the default is the first cards, as ever.
+        g.debug_clear_forced_selection();
+        let first = Some(vec![0]);
+        let want = vec![
+            (0, first.clone()),
+            (1, first.clone()),
+            (2, first),
+            (3, Some(vec![0, 1])),
+        ];
+        assert_eq!(uses(&g), want);
     }
 
     #[test]

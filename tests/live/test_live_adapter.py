@@ -810,8 +810,14 @@ def test_the_tables_uses_pass_the_bridge_under_cerulean_bell(seed: str) -> None:
     """Under Cerulean Bell BalatroBot's ``use`` drops the forced card, which the game keeps
     highlighted, so the bridge vetoes a use whose cards leave it out (B02). The Gym table's
     selections for a consumable hold the forced card (#49): each one passes the bridge's
-    veto, and one is played through the adapter."""
-    from jackdaw.env.action_space import ActionType, get_action_mask
+    veto, and one is played through the adapter. So does the legal list's use, and the
+    default selection of a use without a ``card_target``."""
+    from jackdaw.env.action_space import (
+        ActionType,
+        FactoredAction,
+        factored_to_engine_action,
+        get_action_mask,
+    )
     from jackdaw.env.balatro_env import _action_mask_to_game
     from jackdaw.env.gymnasium_wrapper import BalatroGymnasiumEnv
 
@@ -843,6 +849,13 @@ def test_the_tables_uses_pass_the_bridge_under_cerulean_bell(seed: str) -> None:
     named.step(UseConsumable(0, tuple(sorted((forced, others[0])))))
     assert alone.state_hash() == named.state_hash()
     assert (adapter.veto_reason(UseConsumable(0, (others[0],))) or "").startswith("B02")
+
+    # The legal list and the default selection name the forced card too.
+    assert UseConsumable(0, (forced,)) in adapter.get_legal_actions()
+    default = factored_to_engine_action(
+        FactoredAction(ActionType.UseConsumable, entity_target=0), game
+    )
+    assert default == UseConsumable(0, (forced,)) and adapter.veto_reason(default) is None
 
     adapter.step(UseConsumable(0, uses[1]))
     assert not adapter.game.consumables
