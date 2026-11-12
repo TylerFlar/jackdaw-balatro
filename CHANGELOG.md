@@ -5,6 +5,13 @@ while it is 0.x, a minor release (0.2 → 0.3) can break things, and a patch rel
 
 ## Unreleased
 
+## [0.2.5] - 2026-11-11
+
+The engine plays the same runs as 0.2.4, with the same observations: every ended episode
+Jackdaw Arena publishes replays with it to its recorded final state. What's new is a fix to the
+Gym action table against the Cerulean Bell. An env's tables are 0.2.4's up to its first hand
+in that blind with a Tarot or Spectral that takes cards.
+
 ### Fixed
 
 - Against the Cerulean Bell, the Gym action table (`BalatroGymnasiumEnv`, `BalatroVectorEnv`)
