@@ -5,6 +5,12 @@ while it is 0.x, a minor release (0.2 → 0.3) can break things, and a patch rel
 
 ## Unreleased
 
+## [0.2.6] - 2026-11-11
+
+The engine plays the same runs as 0.2.5, with the same observations, masks and action tables:
+every ended episode Jackdaw Arena publishes replays with it to its recorded final state. What's
+new is the default selection of a Tarot or Spectral against the Cerulean Bell.
+
 ### Fixed
 
 - Against the Cerulean Bell, the default selection of a Tarot or Spectral used on cards holds
