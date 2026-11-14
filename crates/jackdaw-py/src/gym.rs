@@ -73,12 +73,14 @@ fn config(
     reward_kind: &str,
     weights: Option<[f64; 8]>,
     max_free_moves: Option<u32>,
+    player_view: bool,
 ) -> PyResult<EnvConfig> {
     Ok(EnvConfig {
         max_steps,
         end_on_win,
         reward: reward(reward_kind, weights)?,
         max_free_moves,
+        player_view,
     })
 }
 
@@ -248,11 +250,12 @@ impl GymEnv {
     /// An env at the start of a run. ``reward`` is ``"sparse"``, ``"blind_progress"``,
     /// ``"shaped"`` (with ``weights``: step_cost, shop_step_cost, blind_beaten, boss_beaten,
     /// hands_left, score_progress, win, loss) or ``"none"``. After ``max_free_moves`` free moves
-    /// (swaps, sorts) in a row the table holds none until another action (``None``: no cap).
+    /// (swaps, sorts) in a row the table holds none until another action (``None``: no cap). With
+    /// ``player_view`` the observation is the player's view (``Game.observation()``).
     #[new]
     #[pyo3(signature = (
         back, stake, seed, challenge, rng_seed, max_steps, end_on_win, reward, weights=None,
-        max_free_moves=None
+        max_free_moves=None, *, player_view=false
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -266,9 +269,17 @@ impl GymEnv {
         reward: &str,
         weights: Option<[f64; 8]>,
         max_free_moves: Option<u32>,
+        player_view: bool,
     ) -> PyResult<Self> {
         let spec = run_spec(back, stake, seed, challenge)?;
-        let cfg = config(max_steps, end_on_win, reward, weights, max_free_moves)?;
+        let cfg = config(
+            max_steps,
+            end_on_win,
+            reward,
+            weights,
+            max_free_moves,
+            player_view,
+        )?;
         let inner = CoreGymEnv::new(&spec, cfg, rng_seed).map_err(value_error)?;
         Ok(GymEnv { inner, last: None })
     }
@@ -545,10 +556,11 @@ fn write_record(out: &[EnvOut], record: &mut [u8]) -> (Vec<usize>, bool, bool) {
 impl VectorEnv {
     /// One env per reset tuple ``(back, stake, seed, challenge, rng_seed)``, on ``threads``
     /// threads, the calling thread included (0: ``RAYON_NUM_THREADS`` when it is set, else one
-    /// per core); ``max_free_moves`` as for ``GymEnv``.
+    /// per core); ``max_free_moves`` and ``player_view`` as for ``GymEnv``.
     #[new]
     #[pyo3(signature = (
-        resets, max_steps, end_on_win, reward, weights=None, threads=0, max_free_moves=None
+        resets, max_steps, end_on_win, reward, weights=None, threads=0, max_free_moves=None,
+        *, player_view=false
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -560,12 +572,20 @@ impl VectorEnv {
         weights: Option<[f64; 8]>,
         threads: usize,
         max_free_moves: Option<u32>,
+        player_view: bool,
     ) -> PyResult<Self> {
         let specs = resets
             .iter()
             .map(reset_spec)
             .collect::<PyResult<Vec<_>>>()?;
-        let cfg = config(max_steps, end_on_win, reward, weights, max_free_moves)?;
+        let cfg = config(
+            max_steps,
+            end_on_win,
+            reward,
+            weights,
+            max_free_moves,
+            player_view,
+        )?;
         let inner = py
             .detach(|| CoreVectorEnv::new(&specs, cfg, threads))
             .map_err(value_error)?;

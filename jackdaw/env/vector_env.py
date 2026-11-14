@@ -130,6 +130,9 @@ class BalatroVectorEnv(VectorEnv):
         truncated, flagged in ``info["balatro/refused"]``.  ``"raise"``: the step raises
         ``IllegalActionError`` after it (the refused episodes were cut).  A sub-env the
         engine can't step yet is cut too, flagged in ``info["balatro/not_ported"]``.
+    player_view:
+        As for the Gym env: False (default) is observation encoder v1, True the player's
+        view (``docs/rl-guide.md``, "Player view").
 
     :attr:`action_version` is the action space's
     :data:`~jackdaw.env.action_space.ACTION_VERSION`.
@@ -156,6 +159,7 @@ class BalatroVectorEnv(VectorEnv):
         autoreset_mode: AutoresetMode = AutoresetMode.NEXT_STEP,
         max_free_moves: int | None = DEFAULT_MAX_FREE_MOVES,
         on_refusal: str = "truncate",
+        player_view: bool = False,
     ) -> None:
         if num_envs < 1:
             raise ValueError("num_envs must be at least 1")
@@ -170,6 +174,7 @@ class BalatroVectorEnv(VectorEnv):
         self.metadata = {**type(self).metadata, "autoreset_mode": autoreset_mode}
         self.max_free_moves = max_free_moves
         self.on_refusal = on_refusal
+        self.player_view = player_view
         if reward_fn is not None and reward_shaping:
             raise ValueError("Pass either reward_fn or reward_shaping=True, not both")
         if reward_fn is None:
@@ -193,7 +198,14 @@ class BalatroVectorEnv(VectorEnv):
             for _ in range(num_envs)
         ]
         self._core = _core.VectorEnv(
-            inits, max_steps, end_on_win, kind, weights, num_threads, max_free_moves
+            inits,
+            max_steps,
+            end_on_win,
+            kind,
+            weights,
+            num_threads,
+            max_free_moves,
+            player_view=player_view,
         )
         # Each step writes fresh observation and mask arrays (copy=True) or reuses these.
         self._obs = np.zeros((num_envs, OBS_LEN), dtype=np.float32)
