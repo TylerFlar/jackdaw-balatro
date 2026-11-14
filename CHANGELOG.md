@@ -5,6 +5,10 @@ while it is 0.x, a minor release (0.2 → 0.3) can break things, and a patch rel
 
 ## Unreleased
 
+### Added
+
+- `player_view=True` on the envs and encoders (`EnvConfig::player_view`, `Encoder::with_player_view` in Rust): an observation that leaves out card identities the player hasn't seen. It hides the cards discarded face down (`global[159:211]`), counts the draw outs over the cards the player can't see (`global[230:232]`), hides a Stone card's base rank and suit (its row, the draw features and the High Card pick) and zeroes the per-card play count (column 11). The default observation is unchanged ([rl-guide](docs/rl-guide.md#player-view)).
+
 ## [0.2.6] - 2026-11-11
 
 The engine plays the same runs as 0.2.5, with the same observations, masks and action tables:

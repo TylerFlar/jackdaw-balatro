@@ -117,7 +117,20 @@ pub(crate) struct Analyzer {
 impl Analyzer {
     /// `_compute_hand_analysis(_face_up(cards), jokers, ...)`: the hand types present among the
     /// face-up cards and the best one; marks the best hand's cards in [`Analyzer::scoring`].
+    #[cfg(test)]
     pub fn analyze(&mut self, cards: Cards<'_>, flags: Flags) -> HandAnalysis {
+        self.analyze_with(cards, flags, false)
+    }
+
+    /// [`Analyzer::analyze`]; with `hide_stone_bases` (the player's view) a Stone card's
+    /// nominal is 0 when High Card picks its highest card, so among Stones alone the first one
+    /// is marked, whatever their hidden bases. (Any other card still outranks a Stone.)
+    pub fn analyze_with(
+        &mut self,
+        cards: Cards<'_>,
+        flags: Flags,
+        hide_stone_bases: bool,
+    ) -> HandAnalysis {
         self.items.clear();
         let mut count = [0usize; 15];
         for (pos, c) in cards.iter().enumerate() {
@@ -221,7 +234,9 @@ impl Analyzer {
             HighCard => {
                 let nominal = |it: &Item| {
                     let c = &cards[it.pos];
-                    if c.base.is_some() {
+                    if hide_stone_bases && c.is_stone() {
+                        0.0
+                    } else if c.base.is_some() {
                         c.get_nominal(false)
                     } else {
                         0.0
@@ -282,8 +297,9 @@ fn get_straight(present: u16, need: usize, shortcut: bool) -> u16 {
     if straight { t } else { 0 }
 }
 
-/// `_analyze_draws(_face_up(cards))`: raw base suits and ranks, Stone cards included.
-pub(crate) fn analyze_draws(cards: Cards<'_>) -> Draws {
+/// `_analyze_draws(_face_up(cards))`: raw base suits and ranks, Stone cards included unless
+/// `skip_stones` (the player's view: a Stone shows no rank or suit).
+pub(crate) fn analyze_draws(cards: Cards<'_>, skip_stones: bool) -> Draws {
     let mut seen: [Suit; 4] = [Suit::Hearts; 4];
     let mut n_seen = 0;
     let mut counts = [0usize; 4];
@@ -292,6 +308,9 @@ pub(crate) fn analyze_draws(cards: Cards<'_>) -> Draws {
     for c in cards.iter().filter(|c| c.facing != Facing::Back) {
         any = true;
         let Some(b) = c.base else { continue };
+        if skip_stones && c.is_stone() {
+            continue;
+        }
         let s = b.suit as usize;
         if counts[s] == 0 {
             seen[n_seen] = b.suit;
@@ -765,7 +784,7 @@ mod tests {
             assert_eq!(fast.analyze(area, flags), want, "{cards:?} {flags:?}");
             assert_eq!(fast.scoring, slow.scoring, "{cards:?} {flags:?}");
             assert_eq!(
-                analyze_draws(area),
+                analyze_draws(area, false),
                 reference::analyze_draws(area),
                 "{cards:?}"
             );
@@ -827,7 +846,7 @@ mod tests {
     #[test]
     fn draws_find_runs_and_gaps() {
         let cards = hand(&["H_5", "S_6", "C_7", "D_K", "H_2"]);
-        let d = analyze_draws(Cards::from_slice(&cards));
+        let d = analyze_draws(Cards::from_slice(&cards), false);
         assert_eq!(d.best_flush_suit, Some(Suit::Hearts));
         assert_eq!(d.best_flush_count, 2);
         assert_eq!(d.straight_proximity, 3.0 / 5.0);
@@ -839,7 +858,7 @@ mod tests {
     #[test]
     fn ace_low_run_has_no_gap_below() {
         let cards = hand(&["H_A", "S_2", "C_3"]);
-        let d = analyze_draws(Cards::from_slice(&cards));
+        let d = analyze_draws(Cards::from_slice(&cards), false);
         assert_eq!(d.straight_gap_ranks, (1 << 4) | (1 << 5));
     }
 }
