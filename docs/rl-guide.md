@@ -80,14 +80,14 @@ This encoding works naturally with transformers, set encoders, or pointer networ
 
 ### Player view
 
-By default the observation reads some card fields a player can't see. Every env and encoder takes `player_view=True` (`BalatroGymnasiumEnv`, `BalatroVectorEnv`, `BalatroEnvironment`, `encode_observation`, `encode_snapshot`; `EnvConfig::player_view` and `Encoder::with_player_view` in Rust) for a variant that encodes only what the player has seen. With it, two states a player can't tell apart encode the same, with one exception: a consumable's `can_use` (column 3) stays exact, as the action masks do, so it can react to a face-down card's hidden fields. The layout and every other feature stay as they are:
+The observation encodes only what the player has seen: two states a player can't tell apart encode the same. There's one exception: a consumable's `can_use` (column 3) stays exact, as the action masks do, so it can react to a face-down card's hidden fields. Four features depend on what the player has seen:
 
 - **Discard pile `global[159:211]`.** The discard pile is face down, and the state doesn't record which cards went there without the player seeing them (dealt face down, then discarded). So in a round that can deal face down (The Wheel, The House, The Mark or The Fish, disabled or not, or a challenge with `flipped_cards`), the feature is 0 for the whole round. In other rounds it leaves out Stone cards.
 - **Draw outs `global[230:232]`.** These count over the cards the player can't see: the deck, the face-down hand cards and, in a round that can deal face down, the discard pile. Stone cards count in that pool but never as outs.
 - **Stone cards.** A Stone has no rank or suit in the game, so its row's rank, suit, rank chips and face flag (columns 0, 1, 2 and 8) are 0. Its base doesn't count towards the draw proximity `global[227:229]`, nor towards which card a High Card marks as the best hand (column 13: among Stones alone, the first one).
 - **Play count (column 11 of a hand or pack row)** is 0. The game shows no play count per card, and the count tells copies that look the same apart.
 
-The default (`player_view=False`) is encoder v1, unchanged. The player view changes what some features mean, so a policy trained on one may behave differently on the other: record the setting with a trained policy.
+Before 0.3.0 the player's view was an option (`player_view=True`, from 0.2.7), and the default observation read those card fields: it showed the cards discarded face down, counted the outs over the draw pile alone, and gave a Stone's base and each card's play count. A policy trained on that observation sees other values in those features now, so it may play differently: retrain it, or keep it with jackdaw 0.2.7.
 
 ## Action Masks
 

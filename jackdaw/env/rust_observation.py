@@ -67,10 +67,9 @@ def observation_from_buffer(data: bytearray | bytes, rows: tuple[int, ...]) -> O
     )
 
 
-def encode_game(game: Game, *, player_view: bool = True) -> Observation:
-    """The observation of a Rust-engine run's current state (``player_view``: the
-    player's view, :meth:`jackdaw.core.Game.observation_buffer`)."""
-    return observation_from_buffer(*game.observation_buffer(player_view=player_view))
+def encode_game(game: Game) -> Observation:
+    """The observation of a Rust-engine run's current state."""
+    return observation_from_buffer(*game.observation_buffer())
 
 
 def _to_json(obj: Any) -> Any:
@@ -84,11 +83,11 @@ def _to_json(obj: Any) -> Any:
     return obj
 
 
-def encode_snapshot(snapshot: dict[str, Any], *, player_view: bool = True) -> Observation:
+def encode_snapshot(snapshot: dict[str, Any]) -> Observation:
     """The observation of the state a canonical snapshot describes, encoded in Rust."""
-    return encode_snapshot_text(json.dumps(_to_json(snapshot)), player_view=player_view)
+    return encode_snapshot_text(json.dumps(_to_json(snapshot)))
 
 
-def encode_snapshot_text(text: str, *, player_view: bool = True) -> Observation:
+def encode_snapshot_text(text: str) -> Observation:
     """:func:`encode_snapshot` for a snapshot already in JSON text."""
-    return observation_from_buffer(*_core._encode_observation(text, player_view=player_view))
+    return observation_from_buffer(*_core._encode_observation(text))
