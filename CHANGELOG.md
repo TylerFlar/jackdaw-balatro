@@ -5,6 +5,17 @@ while it is 0.x, a minor release (0.2 → 0.3) can break things, and a patch rel
 
 ## Unreleased
 
+## [0.3.0] - 2026-11-15
+
+The engine plays the same runs as 0.2.7, with the same masks and action tables: every ended
+episode Jackdaw Arena publishes replays with it to its recorded final state. What changes is the
+observation: 0.2.7's opt-in player view is now the only one. That breaks code that passes
+`player_view=`, and gives a policy trained on the old default inputs it didn't train on.
+
+### Changed
+
+- **The observation is the player's view, and the only one.** 0.2.7 offered it as `player_view=True`; every env and encoder now gives it, and the setting is gone: `player_view=` on the envs, the encoders, `Game.observation_buffer` and the `_core` bindings, and `EnvConfig::player_view` and `Encoder::with_player_view`, `player_view` and `set_player_view` in Rust. Compared with 0.2.7's default, four features change, and only where the player can't see a card ([rl-guide](docs/rl-guide.md#player-view)). The discard histogram (`global[159:211]`) is blank in a round that can deal face down and leaves out Stones. The draw outs (`global[230:232]`) count over the cards the player can't see: the deck, the face-down hand cards and, in such a round, the discard pile. A Stone's base doesn't show in its row, the draw proximity or the High Card pick. The play count (column 11) is 0. The layout, the masks and the action tables don't change (`ACTION_VERSION` stays at 2). A policy trained on the old default may play differently: retrain it, or keep it with 0.2.7.
+
 ## [0.2.7] - 2026-11-14
 
 The engine plays the same runs as 0.2.6, with the same masks and action tables and, by default,

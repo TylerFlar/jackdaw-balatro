@@ -227,10 +227,10 @@ See [BalatroBot on the simulator](balatrobot).
 
 `observation_buffer()` returns the RL observation (encoder v1) as raw float32 data, and
 `jackdaw.env.encode_observation(game)` wraps it as an `Observation`; `jackdaw.env.get_action_mask(game)`
-gives the action mask. With `player_view=True` either gives the player's view, which leaves out
-the card identities the player hasn't seen ([Player view](rl-guide#player-view)). The
-environments in `jackdaw.env` (`BalatroEnvironment`, `BalatroGymnasiumEnv`, `BalatroVectorEnv`)
-build on these; see the [RL Project Guide](rl-guide).
+gives the action mask. The observation is the player's view: it leaves out the card identities
+the player hasn't seen ([Player view](rl-guide#player-view)). The environments in `jackdaw.env`
+(`BalatroEnvironment`, `BalatroGymnasiumEnv`, `BalatroVectorEnv`) build on these; see the
+[RL Project Guide](rl-guide).
 
 ## Where the source doesn't decide
 
