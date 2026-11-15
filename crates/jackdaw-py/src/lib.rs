@@ -255,11 +255,15 @@ impl Game {
     /// Returns ``(data, rows)``: ``data`` is a ``bytearray`` of native-endian float32 values,
     /// the global context followed by the hand, joker, consumable, shop and pack rows, and
     /// ``rows`` their row counts. ``jackdaw.env.rust_observation`` wraps it as an
-    /// ``Observation``.
+    /// ``Observation``. With ``player_view`` it encodes the player's view: no card identity the
+    /// player hasn't seen (``docs/rl-guide.md``, "Player view").
+    #[pyo3(signature = (*, player_view=false))]
     fn observation<'py>(
         &mut self,
         py: Python<'py>,
+        player_view: bool,
     ) -> PyResult<(Bound<'py, PyByteArray>, ObservationRows)> {
+        self.encoder.set_player_view(player_view);
         let obs = self.encoder.encode(&self.inner.gs);
         observation_to_py(py, obs)
     }
@@ -345,15 +349,17 @@ impl Game {
     /// the observation and mask as ``observation()`` and ``action_mask()`` give them, the
     /// ``GameState`` summary, and the shop's card, voucher and booster counts. With
     /// ``free_moves`` false the mask allows no free move (swaps, sorts): the env's cap on them
-    /// in a row is reached.
-    #[pyo3(signature = (legality="vanilla", free_moves=true))]
+    /// in a row is reached. ``player_view`` as for ``observation()``.
+    #[pyo3(signature = (legality="vanilla", free_moves=true, *, player_view=false))]
     fn env_view<'py>(
         &mut self,
         py: Python<'py>,
         legality: &str,
         free_moves: bool,
+        player_view: bool,
     ) -> PyResult<EnvView<'py>> {
         let legality = env::legality(legality)?;
+        self.encoder.set_player_view(player_view);
         let obs = observation_to_py(py, self.encoder.encode(&self.inner.gs))?;
         self.mask.compute(&self.inner, legality);
         if !free_moves {
@@ -375,8 +381,10 @@ impl Game {
     /// ``IllegalActionError`` or ``NotPortedError`` when the step is refused (the run is
     /// unchanged).
     #[pyo3(signature = (
-        action_type, entity_target=None, card_target=None, legality="vanilla", free_moves=true
+        action_type, entity_target=None, card_target=None, legality="vanilla", free_moves=true,
+        *, player_view=false
     ))]
+    #[allow(clippy::too_many_arguments)]
     fn env_step<'py>(
         &mut self,
         py: Python<'py>,
@@ -385,13 +393,14 @@ impl Game {
         card_target: Option<Vec<i64>>,
         legality: &str,
         free_moves: bool,
+        player_view: bool,
     ) -> PyResult<EnvView<'py>> {
         let fa = env::factored_from_py(action_type, entity_target, card_target)?;
         let action = jackdaw_env::action::to_engine(&fa, &self.inner).map_err(value_error)?;
         // No rollback copy: an illegal action changes nothing, and BalatroEnvironment ends the
         // episode on a NotPorted refusal.
         self.inner.step_in_place(&action).map_err(step_error)?;
-        self.env_view(py, legality, free_moves)
+        self.env_view(py, legality, free_moves, player_view)
     }
 
     /// The ``GameState`` summary of the run (``jackdaw.env.game_interface.GameState``).
@@ -716,18 +725,20 @@ mod _core {
     /// (``jackdaw.env.observation.encode_observation``).
     ///
     /// Returns ``(data, rows)`` as ``Game.observation()`` does. Raises ``ValueError`` when the
-    /// Rust state can't hold the snapshot.
+    /// Rust state can't hold the snapshot. ``player_view`` as for ``Game.observation()``.
     #[pyfunction]
+    #[pyo3(signature = (text, *, player_view=false))]
     fn _encode_observation<'py>(
         py: Python<'py>,
         text: &str,
+        player_view: bool,
     ) -> PyResult<(Bound<'py, pyo3::types::PyByteArray>, super::ObservationRows)> {
         use pyo3::exceptions::PyValueError;
         let value: serde_json::Value = serde_json::from_str(text)
             .map_err(|e| PyValueError::new_err(format!("snapshot: bad JSON: {e}")))?;
         let gs = jackdaw_core::snapshot::import(&value)
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
-        let mut encoder = jackdaw_env::observation::Encoder::new();
+        let mut encoder = jackdaw_env::observation::Encoder::with_player_view(player_view);
         super::observation_to_py(py, encoder.encode(&gs))
     }
 

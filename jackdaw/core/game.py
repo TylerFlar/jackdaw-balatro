@@ -226,12 +226,15 @@ class Game:
         """The SHA-256 hex digest of the canonical snapshot (``tests/parity/canon.py``)."""
         return self._g.state_hash()
 
-    def observation_buffer(self) -> tuple[bytearray, tuple[int, int, int, int, int]]:
+    def observation_buffer(
+        self, *, player_view: bool = False
+    ) -> tuple[bytearray, tuple[int, int, int, int, int]]:
         """The current state's observation (encoder v1) as raw data: native-endian float32
         values (global context, then hand, joker, consumable, shop and pack rows) and the row
         counts. :func:`jackdaw.env.rust_observation.encode_game` wraps it as an
-        ``Observation``."""
-        return self._g.observation()
+        ``Observation``. ``player_view`` encodes the player's view (no card identity the
+        player hasn't seen; ``docs/rl-guide.md``, "Player view")."""
+        return self._g.observation(player_view=player_view)
 
     @property
     def phase(self) -> GamePhase:
