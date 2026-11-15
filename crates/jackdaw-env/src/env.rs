@@ -59,7 +59,7 @@ impl Default for EnvConfig {
             end_on_win: true,
             reward: Reward::Sparse,
             max_free_moves: Some(DEFAULT_MAX_FREE_MOVES),
-            player_view: false,
+            player_view: true,
         }
     }
 }

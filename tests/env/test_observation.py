@@ -187,23 +187,13 @@ class TestFaceDownCards:
         assert vec[0] == pytest.approx(14.0 / 14.0)  # Ace
 
 
-_SUITS = ("Spades", "Hearts", "Clubs", "Diamonds")
-_RANKS = ("2", "3", "4", "5", "6", "7", "8", "9", "10", "Jack", "Queen", "King", "Ace")
-_KEY_RANK = {"10": "T", "Jack": "J", "Queen": "Q", "King": "K", "Ace": "A"}
+#: What the player can't see of a face-down card, as a snapshot records it.
+_HIDDEN = ("center", "front", "base", "edition", "seal")
 
 
-def _identities(game: Game) -> dict[str, tuple[str, dict[str, Any]]]:
-    """Every playing card identity's ``front`` and ``base``, made by BalatroBot's ``add``
-    in a copy of the run."""
-    out = {}
-    for suit in _SUITS:
-        for rank in _RANKS:
-            key = f"{suit[0]}_{_KEY_RANK.get(rank, rank)}"
-            scratch = game.clone()
-            scratch.debug_add(key)
-            card = scratch.to_dict()["areas"]["hand"][-1]
-            out[key] = (card["front"], card["base"])
-    return out
+def _exchange(a: dict[str, Any], b: dict[str, Any]) -> None:
+    for key in _HIDDEN:
+        a[key], b[key] = b[key], a[key]
 
 
 def _encodings(snap: dict[str, Any]) -> list[np.ndarray]:
@@ -222,30 +212,29 @@ class TestFaceDownHidesIdentity:
     (issue #25): two states a player cannot tell apart encode identically."""
 
     def test_hidden_hand_card_identity_not_observable(self):
-        game = _dealt("LEAK1")
-        identities = _identities(game)
-        base = game.to_dict()
+        """Which unseen card a face-down card is: exchanged with each undrawn card in turn,
+        enhancement, edition and seal included, it encodes the same, and so does its debuff.
+        The player knows which cards are unseen (the deck view counts a face-down card as
+        remaining), not which of them is the face-down one."""
+        snap = _dealt("LEAK1").to_dict()
+        deck = snap["areas"]["deck"]
+        # Undrawn cards with an enhancement (Stone and Wild change hand evaluation), an edition
+        # and a seal, for the face-down card to be.
+        for card, enh in zip(deck[:4], ("m_stone", "m_wild", "m_glass", "m_lucky"), strict=True):
+            card["center"] = enh
+        deck[4]["edition"] = {"polychrome": True, "x_mult": 1.5, "type": "polychrome"}
+        deck[5]["seal"] = "Red"
         for i in (0, 3, 7):
-            snap = base
-            _hand_card(snap, i)["facing"] = "back"
-            ref = _encodings(snap)
             card = _hand_card(snap, i)
-            saved = dict(card)
-            for key, (front, card_base) in identities.items():
-                card["front"], card["base"] = front, card_base
-                _same(ref, snap, f"card {i} as {key}")
-            card.update(saved)
-            # Enhancements (Stone, Wild change hand evaluation), editions,
-            # seals and debuff are hidden too.
-            for enh in ("m_stone", "m_wild", "m_glass", "m_lucky"):
-                card["center"] = enh
-                _same(ref, snap, f"card {i} {enh}")
-            card.update(saved)
-            card["edition"] = {"polychrome": True, "x_mult": 1.5, "type": "polychrome"}
-            card["seal"] = "Red"
-            card["debuff"] = True
-            _same(ref, snap, f"card {i} edition/seal/debuff")
-            card.update(saved)
+            card["facing"] = "back"
+            ref = _encodings(snap)
+            for j, other in enumerate(deck):
+                _exchange(card, other)
+                _same(ref, snap, f"card {i} <-> deck[{j}]")
+                _exchange(card, other)
+            card["debuff"] = not card["debuff"]
+            _same(ref, snap, f"card {i} debuff")
+            card["debuff"] = not card["debuff"]
             card["facing"] = "front"
 
     def test_hidden_card_excluded_from_best_hand(self):

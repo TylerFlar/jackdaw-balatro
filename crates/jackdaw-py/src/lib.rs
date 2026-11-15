@@ -257,7 +257,7 @@ impl Game {
     /// ``rows`` their row counts. ``jackdaw.env.rust_observation`` wraps it as an
     /// ``Observation``. With ``player_view`` it encodes the player's view: no card identity the
     /// player hasn't seen (``docs/rl-guide.md``, "Player view").
-    #[pyo3(signature = (*, player_view=false))]
+    #[pyo3(signature = (*, player_view=true))]
     fn observation<'py>(
         &mut self,
         py: Python<'py>,
@@ -350,7 +350,7 @@ impl Game {
     /// ``GameState`` summary, and the shop's card, voucher and booster counts. With
     /// ``free_moves`` false the mask allows no free move (swaps, sorts): the env's cap on them
     /// in a row is reached. ``player_view`` as for ``observation()``.
-    #[pyo3(signature = (legality="vanilla", free_moves=true, *, player_view=false))]
+    #[pyo3(signature = (legality="vanilla", free_moves=true, *, player_view=true))]
     fn env_view<'py>(
         &mut self,
         py: Python<'py>,
@@ -382,7 +382,7 @@ impl Game {
     /// unchanged).
     #[pyo3(signature = (
         action_type, entity_target=None, card_target=None, legality="vanilla", free_moves=true,
-        *, player_view=false
+        *, player_view=true
     ))]
     #[allow(clippy::too_many_arguments)]
     fn env_step<'py>(
@@ -727,7 +727,7 @@ mod _core {
     /// Returns ``(data, rows)`` as ``Game.observation()`` does. Raises ``ValueError`` when the
     /// Rust state can't hold the snapshot. ``player_view`` as for ``Game.observation()``.
     #[pyfunction]
-    #[pyo3(signature = (text, *, player_view=false))]
+    #[pyo3(signature = (text, *, player_view=true))]
     fn _encode_observation<'py>(
         py: Python<'py>,
         text: &str,

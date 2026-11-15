@@ -142,7 +142,7 @@ class Observation:
 # ---------------------------------------------------------------------------
 
 
-def encode_observation(game: Game, *, player_view: bool = False) -> Observation:
+def encode_observation(game: Game, *, player_view: bool = True) -> Observation:
     """The observation of a run's current state.
 
     The arrays are writable, C-contiguous views sharing one buffer per call

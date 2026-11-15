@@ -174,8 +174,8 @@ def test_wheel_round_from_the_engine() -> None:
     game.step(Discard(card_indices=(down[0],)))
     snap = game.to_dict()
     assert snap["blind"]["key"] == "bl_wheel"
-    assert encode_observation(game).global_context[HISTOGRAM].any()
-    assert not encode_observation(game, player_view=True).global_context[HISTOGRAM].any()
+    assert encode_observation(game, player_view=False).global_context[HISTOGRAM].any()
+    assert not encode_observation(game).global_context[HISTOGRAM].any()
     _check_hidden(snap, _swaps(snap, "discard", -1))
 
 

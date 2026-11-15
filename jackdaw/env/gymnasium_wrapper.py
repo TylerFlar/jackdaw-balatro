@@ -246,7 +246,7 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         max_free_moves: int | None = DEFAULT_MAX_FREE_MOVES,
         on_refusal: str = "truncate",
         copy: bool = True,
-        player_view: bool = False,
+        player_view: bool = True,
     ) -> None:
         super().__init__()
         if reward_fn is not None and reward_shaping:

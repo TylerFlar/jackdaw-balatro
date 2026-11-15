@@ -121,7 +121,7 @@ class BalatroEnvironment:
         end_on_win: bool = True,
         max_free_moves: int | None = DEFAULT_MAX_FREE_MOVES,
         on_refusal: str = "truncate",
-        player_view: bool = False,
+        player_view: bool = True,
     ) -> None:
         if on_refusal not in ("truncate", "raise"):
             raise ValueError(f"on_refusal must be 'truncate' or 'raise', not {on_refusal!r}")

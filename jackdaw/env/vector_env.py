@@ -159,7 +159,7 @@ class BalatroVectorEnv(VectorEnv):
         autoreset_mode: AutoresetMode = AutoresetMode.NEXT_STEP,
         max_free_moves: int | None = DEFAULT_MAX_FREE_MOVES,
         on_refusal: str = "truncate",
-        player_view: bool = False,
+        player_view: bool = True,
     ) -> None:
         if num_envs < 1:
             raise ValueError("num_envs must be at least 1")

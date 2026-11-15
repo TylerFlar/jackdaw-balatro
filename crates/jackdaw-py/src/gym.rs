@@ -255,7 +255,7 @@ impl GymEnv {
     #[new]
     #[pyo3(signature = (
         back, stake, seed, challenge, rng_seed, max_steps, end_on_win, reward, weights=None,
-        max_free_moves=None, *, player_view=false
+        max_free_moves=None, *, player_view=true
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -560,7 +560,7 @@ impl VectorEnv {
     #[new]
     #[pyo3(signature = (
         resets, max_steps, end_on_win, reward, weights=None, threads=0, max_free_moves=None,
-        *, player_view=false
+        *, player_view=true
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(

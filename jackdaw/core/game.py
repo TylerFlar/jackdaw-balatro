@@ -227,7 +227,7 @@ class Game:
         return self._g.state_hash()
 
     def observation_buffer(
-        self, *, player_view: bool = False
+        self, *, player_view: bool = True
     ) -> tuple[bytearray, tuple[int, int, int, int, int]]:
         """The current state's observation (encoder v1) as raw data: native-endian float32
         values (global context, then hand, joker, consumable, shop and pack rows) and the row
