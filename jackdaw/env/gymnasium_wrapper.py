@@ -202,6 +202,11 @@ class BalatroGymnasiumEnv(gymnasium.Env):
     max_free_moves:
         After this many free moves in a row (joker and hand swaps, hand sorts) the
         table holds none until another action.  ``None``: no cap.
+    player_view:
+        False (default): observation encoder v1 as it always was.  True: the
+        player's view, which encodes no card identity the player hasn't seen
+        (``docs/rl-guide.md``, "Player view").  It changes what some features
+        mean: record it with a trained policy.
     on_refusal:
         ``"truncate"`` (default) ends the episode on a table action the engine
         refuses, with the reason in ``info["balatro/refused"]``; ``"raise"`` raises
@@ -241,6 +246,7 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         max_free_moves: int | None = DEFAULT_MAX_FREE_MOVES,
         on_refusal: str = "truncate",
         copy: bool = True,
+        player_view: bool = False,
     ) -> None:
         super().__init__()
         if reward_fn is not None and reward_shaping:
@@ -252,6 +258,7 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         self.max_free_moves = max_free_moves
         self.on_refusal = on_refusal
         self.copy = copy
+        self.player_view = player_view
         if reward_fn is None:
             reward_fn = ShapedReward() if reward_shaping else sparse_reward
         self.reward_fn: RewardFn = reward_fn
@@ -272,7 +279,7 @@ class BalatroGymnasiumEnv(gymnasium.Env):
             back, stake, run_seed = self._starts.back_keys[0], self._starts.stakes[0], "INIT"
             self._core = _core.GymEnv(
                 back, stake, run_seed, None, secrets.randbits(64), max_steps, end_on_win,
-                kind, weights, max_free_moves,
+                kind, weights, max_free_moves, player_view=player_view,
             )  # fmt: skip
         else:
             self._inner = BalatroEnvironment(
@@ -284,6 +291,7 @@ class BalatroGymnasiumEnv(gymnasium.Env):
                 end_on_win=end_on_win,
                 max_free_moves=max_free_moves,
                 on_refusal=on_refusal,
+                player_view=player_view,
             )
 
         # Observation space

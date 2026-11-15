@@ -96,6 +96,11 @@ class BalatroEnvironment:
         After this many free moves in a row (joker and hand swaps, hand sorts:
         :data:`~jackdaw.env.action_space.FREE_ACTION_TYPES`) the mask allows none
         until another action, so a policy can't stall on them.  ``None``: no cap.
+    player_view:
+        False (default): observation encoder v1 as it always was.  True: the
+        player's view, which encodes no card identity the player hasn't seen
+        (``docs/rl-guide.md``, "Player view").  It changes what some features
+        mean: record it with a trained policy.
     on_refusal:
         ``"truncate"`` (default) ends the episode on an action the engine refuses;
         ``"raise"`` raises its ``IllegalActionError``.
@@ -116,6 +121,7 @@ class BalatroEnvironment:
         end_on_win: bool = True,
         max_free_moves: int | None = DEFAULT_MAX_FREE_MOVES,
         on_refusal: str = "truncate",
+        player_view: bool = False,
     ) -> None:
         if on_refusal not in ("truncate", "raise"):
             raise ValueError(f"on_refusal must be 'truncate' or 'raise', not {on_refusal!r}")
@@ -123,6 +129,7 @@ class BalatroEnvironment:
             raise ValueError("max_free_moves must be None or at least 0")
         self.max_free_moves = max_free_moves
         self.on_refusal = on_refusal
+        self.player_view = player_view
         self._adapter_factory = adapter_factory
         self._adapter = adapter_factory()
         self._back_keys = back_keys or ["b_red"]
@@ -175,7 +182,9 @@ class BalatroEnvironment:
                 "jackdaw.core.Game (DirectAdapter, LiveAdapter)"
             )
         obs, mask, state, splits = _rust_view(
-            game._g.env_view(self._legality(), self._free_moves_allowed())
+            game._g.env_view(
+                self._legality(), self._free_moves_allowed(), player_view=self.player_view
+            )
         )
         self._state = state
         info: dict[str, object] = {
@@ -211,23 +220,28 @@ class BalatroEnvironment:
         try:
             if type(adapter) is DirectAdapter:
                 parts = game._g.env_step(
-                    action.action_type, action.entity_target, action.card_target, legality, free
+                    action.action_type,
+                    action.entity_target,
+                    action.card_target,
+                    legality,
+                    free,
+                    player_view=self.player_view,
                 )
             else:
                 adapter.step(rust_factored_to_engine(action, game))
                 # Read the run again: an adapter may move its game to a new state object.
-                parts = game._g.env_view(legality, free)
+                parts = game._g.env_view(legality, free, player_view=self.player_view)
         except NotPortedError as exc:
             not_ported = str(exc)
-            parts = game._g.env_view(legality, free)
+            parts = game._g.env_view(legality, free, player_view=self.player_view)
         except VetoedActionError as exc:
             vetoed = str(exc)
-            parts = game._g.env_view(legality, free)
+            parts = game._g.env_view(legality, free, player_view=self.player_view)
         except IllegalActionError as exc:
             if self.on_refusal == "raise":
                 raise
             refused = str(exc)
-            parts = game._g.env_view(legality, free)
+            parts = game._g.env_view(legality, free, player_view=self.player_view)
         obs, mask, state, splits = _rust_view(parts)
         self._free_moves = free_moves
         self._state = state

@@ -47,6 +47,9 @@ pub struct EnvConfig {
     /// After this many free moves in a row the mask allows none until another action; `None`
     /// for no cap.
     pub max_free_moves: Option<u32>,
+    /// Encode the player's view (`Encoder::with_player_view`): no card identity the player
+    /// hasn't seen. Off by default, which keeps encoder v1's output.
+    pub player_view: bool,
 }
 
 impl Default for EnvConfig {
@@ -56,6 +59,7 @@ impl Default for EnvConfig {
             end_on_win: true,
             reward: Reward::Sparse,
             max_free_moves: Some(DEFAULT_MAX_FREE_MOVES),
+            player_view: false,
         }
     }
 }
@@ -289,6 +293,7 @@ impl GymEnv {
     /// The Gym observation of the current state, flattened ([`GYM_OBS_LEN`] values): the global
     /// context, each entity array's first rows padded with zeros, the entity counts.
     pub fn write_obs(&mut self, out: &mut [f32]) {
+        self.encoder.set_player_view(self.config.player_view);
         self.encoder.encode_padded(&self.game.gs, MAX_COUNTS, out);
     }
 
