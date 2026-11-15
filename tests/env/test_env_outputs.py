@@ -4,7 +4,8 @@ later step may overwrite.
 Each scenario plays a seeded random policy and folds everything a reset or step returns
 (every observation array, reward, flag, mask and info entry, with its dtype, shape,
 contiguity and writability) into a digest frozen from the envs' outputs before their
-Python-side bookkeeping was reworked for speed. ``BalatroGymnasiumEnv(copy=False)`` must
+Python-side bookkeeping was reworked for speed (refrozen when the observation became the
+player's view). ``BalatroGymnasiumEnv(copy=False)`` must
 return the same values as the default, and every array an env hands out as its own must stay
 as it was through later steps.
 """
@@ -137,11 +138,12 @@ def _vector_run(copy: bool, mode: AutoresetMode, steps: int = 150) -> _Recorder:
     return run
 
 
-#: The runs' digests, frozen before the Python-side bookkeeping was reworked.
-_GYM = "fa73e209deeecac9"
+#: The runs' digests, frozen before the Python-side bookkeeping was reworked, and refrozen when
+#: the observation became the player's view (0.3.0).
+_GYM = "09123f87e592b095"
 #: (``copy=False`` hands out the same values: views of buffers the next step overwrites.)
 _VECTOR = {
-    AutoresetMode.NEXT_STEP: "77002dd2640540f9",
+    AutoresetMode.NEXT_STEP: "36e00febda3be800",
     AutoresetMode.SAME_STEP: "c257fdfba478b4ed",
 }
 

@@ -142,14 +142,13 @@ class Observation:
 # ---------------------------------------------------------------------------
 
 
-def encode_observation(game: Game, *, player_view: bool = False) -> Observation:
-    """The observation of a run's current state.
+def encode_observation(game: Game) -> Observation:
+    """The observation of a run's current state, in the player's view: no card identity
+    the player hasn't seen (``docs/rl-guide.md``, "Player view").
 
     The arrays are writable, C-contiguous views sharing one buffer per call
-    (:func:`jackdaw.env.rust_observation.encode_game`).  With ``player_view`` it is the
-    player's view: no card identity the player hasn't seen (``docs/rl-guide.md``,
-    "Player view").
+    (:func:`jackdaw.env.rust_observation.encode_game`).
     """
     from jackdaw.env.rust_observation import encode_game
 
-    return encode_game(game, player_view=player_view)
+    return encode_game(game)

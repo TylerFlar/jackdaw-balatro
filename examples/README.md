@@ -23,6 +23,10 @@ and 2 for the envs. Every agent then played the same 1,000 runs (seeds 10,000,00
 - Blinds beaten: the mean and its standard error. The reward is the training reward (below),
   summed over the episode.
 - Episodes end when the run is lost or won, or after 2,000 steps.
+- The run trained and played on jackdaw 0.2's observation. Since 0.3.0 the observation is the
+  player's view ([Player view](../docs/rl-guide.md#player-view)), which leaves out a few card
+  fields a player can't see, so the saved model now gets inputs it didn't train on, and a new
+  run's numbers may differ a little.
 
 From beating essentially no blind, PPO learns to clear about four and a half per run, and
 its best runs reach ante 8 (`smart_agent`'s best: ante 7). The hand-written `smart_agent`

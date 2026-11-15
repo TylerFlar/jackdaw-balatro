@@ -1,11 +1,13 @@
-//! Observation encoder v1: a bit-for-bit port of the Python encoder `jackdaw/env/observation.py`
-//! had (its `encode_observation` now calls this one).
+//! Observation encoder v1: a port of the Python encoder `jackdaw/env/observation.py` had (its
+//! `encode_observation` now calls this one), in the player's view (below).
 //!
-//! The output equals the Python encoder's on the same state (`tests/env/test_rust_observation.py`
-//! checks it against that encoder's frozen outputs): the same arrays and shapes, the same
-//! `float32` values, quirks included. Every feature is computed in `f64` the way Python computes
-//! it (Python's `min`/`max` tie rules, float floor division, the platform libm's `log2` and
-//! `log1p`, which CPython calls too) and rounded to `f32` once, as a numpy assignment does.
+//! Apart from the features the player's view changes, the output equals the Python encoder's on
+//! the same state: the same arrays and shapes, the same `float32` values, quirks included. Every
+//! feature is computed in `f64` the way Python computes it (Python's `min`/`max` tie rules, float
+//! floor division, the platform libm's `log2` and `log1p`, which CPython calls too) and rounded
+//! to `f32` once, as a numpy assignment does. `tests/env/test_rust_observation.py` checks the
+//! output against frozen digests: that encoder's, refrozen when the player's view became the
+//! observation (0.3.0) from the player's view of 0.2.7, which matched it everywhere else.
 //!
 //! Quirks kept on purpose (encoder v2 is where they get fixed):
 //! - The flag features are dead. `global[29]` packs `gs["four_fingers"]`, `["shortcut"]`,
@@ -23,17 +25,17 @@
 //!
 //! # Player view
 //!
-//! By default the encoder reads some card fields a player can't see. [`Encoder::with_player_view`]
-//! (`player_view=True` in Python) turns on a variant that encodes only what the player has seen,
-//! so two states a player can't tell apart encode the same. It changes four features and leaves
-//! the layout and every other feature as they are. One exception stays: a consumable's `can_use`
-//! (column 3) is exact, as the action masks are, so it can react to a face-down card's hidden
-//! fields.
+//! The encoder encodes only what the player has seen, so two states a player can't tell apart
+//! encode the same. The Python encoder read some card fields a player can't see; the player's
+//! view (an option, `player_view=True`, in 0.2.7, and the only observation since 0.3.0) changes
+//! four of its features and leaves the layout and every other feature as they are. One
+//! exception stays: a consumable's `can_use` (column 3) is exact, as the action masks are, so it
+//! can react to a face-down card's hidden fields.
 //! - **Discard pile `[159:211]`.** The pile is face down, so the state doesn't record which
-//!   cards went there unseen (dealt face down and discarded). The player view leaves the
-//!   feature at zero for the whole round while cards can be dealt face down: the boss is The
-//!   Wheel, The House, The Mark or The Fish (disabled or not), or the `flipped_cards`
-//!   challenge rule is on. In other rounds it skips Stone cards.
+//!   cards went there unseen (dealt face down and discarded). The feature stays at zero for the
+//!   whole round while cards can be dealt face down: the boss is The Wheel, The House, The Mark
+//!   or The Fish (disabled or not), or the `flipped_cards` challenge rule is on. In other
+//!   rounds it skips Stone cards.
 //! - **Draw outs `[230:232]`.** These count over the cards the player can't see: the deck, the
 //!   face-down hand cards and, in a round that can deal face down, the discard pile. Exchanging
 //!   a hidden card with an undrawn one leaves that pool the same. Stone cards count in the
@@ -341,38 +343,18 @@ impl Observation {
     }
 }
 
-/// Encodes game states into one reusable [`Observation`]; after the first few calls it no
-/// longer allocates.
+/// Encodes game states, in the player's view ([Player view](self#player-view)), into one
+/// reusable [`Observation`]; after the first few calls it no longer allocates.
 #[derive(Clone, Debug, Default)]
 pub struct Encoder {
     obs: Observation,
     analyzer: Analyzer,
     memo: LogMemo,
-    player_view: bool,
 }
 
 impl Encoder {
     pub fn new() -> Encoder {
         Encoder::default()
-    }
-
-    /// An encoder for the player's view (see [Player view](self#player-view)) when
-    /// `player_view` is set, else [`Encoder::new`].
-    pub fn with_player_view(player_view: bool) -> Encoder {
-        Encoder {
-            player_view,
-            ..Encoder::default()
-        }
-    }
-
-    /// Whether this encoder encodes the player's view.
-    pub fn player_view(&self) -> bool {
-        self.player_view
-    }
-
-    /// Switch the player's view on or off for the next encodings.
-    pub fn set_player_view(&mut self, player_view: bool) {
-        self.player_view = player_view;
     }
 
     /// `encode_observation(gs)`.
@@ -397,14 +379,13 @@ impl Encoder {
 
         // The best-hand analysis of the live hand serves the global context and the hand rows.
         let flags = Flags::from_jokers(areas.jokers());
-        let pv = self.player_view;
-        let hand_analysis = self.analyzer.analyze_with(areas.hand(), flags, pv);
+        let hand_analysis = self.analyzer.analyze(areas.hand(), flags);
 
         let log = LogScale::new();
         let (global, rest) = self.obs.data.split_at_mut(D_GLOBAL);
-        encode_global(gs, &hand_analysis, log, &mut self.memo, pv, global);
+        encode_global(gs, &hand_analysis, log, &mut self.memo, global);
         let (hand, rest) = rest.split_at_mut(rows[0] * D_PLAYING_CARD);
-        encode_playing_cards(areas.hand(), &self.analyzer.scoring, log, pv, hand);
+        encode_playing_cards(areas.hand(), &self.analyzer.scoring, log, hand);
         let (jokers, rest) = rest.split_at_mut(rows[1] * D_JOKER);
         encode_jokers(areas.jokers(), log, jokers);
         let (consumables, rest) = rest.split_at_mut(rows[2] * D_CONSUMABLE);
@@ -413,8 +394,8 @@ impl Encoder {
         encode_shop(gs, log, shop);
         // Pack cards get their own analysis (only their scoring flags are encoded).
         if !areas.pack_cards().is_empty() {
-            self.analyzer.analyze_with(areas.pack_cards(), flags, pv);
-            encode_playing_cards(areas.pack_cards(), &self.analyzer.scoring, log, pv, pack);
+            self.analyzer.analyze(areas.pack_cards(), flags);
+            encode_playing_cards(areas.pack_cards(), &self.analyzer.scoring, log, pack);
         }
         &self.obs
     }
@@ -435,14 +416,13 @@ impl Encoder {
         ];
         out.fill(0.0);
         let flags = Flags::from_jokers(areas.jokers());
-        let pv = self.player_view;
-        let hand_analysis = self.analyzer.analyze_with(areas.hand(), flags, pv);
+        let hand_analysis = self.analyzer.analyze(areas.hand(), flags);
 
         let log = LogScale::new();
         let (global, rest) = out.split_at_mut(D_GLOBAL);
-        encode_global(gs, &hand_analysis, log, &mut self.memo, pv, global);
+        encode_global(gs, &hand_analysis, log, &mut self.memo, global);
         let (hand, rest) = rest.split_at_mut(max_rows[0] * D_PLAYING_CARD);
-        encode_playing_cards(areas.hand(), &self.analyzer.scoring, log, pv, hand);
+        encode_playing_cards(areas.hand(), &self.analyzer.scoring, log, hand);
         let (jokers, rest) = rest.split_at_mut(max_rows[1] * D_JOKER);
         encode_jokers(areas.jokers(), log, jokers);
         let (consumables, rest) = rest.split_at_mut(max_rows[2] * D_CONSUMABLE);
@@ -451,8 +431,8 @@ impl Encoder {
         encode_shop(gs, log, shop);
         let (pack, counts) = rest.split_at_mut(max_rows[4] * D_PLAYING_CARD);
         if !areas.pack_cards().is_empty() {
-            self.analyzer.analyze_with(areas.pack_cards(), flags, pv);
-            encode_playing_cards(areas.pack_cards(), &self.analyzer.scoring, log, pv, pack);
+            self.analyzer.analyze(areas.pack_cards(), flags);
+            encode_playing_cards(areas.pack_cards(), &self.analyzer.scoring, log, pack);
         }
         for (k, slot) in counts.iter_mut().enumerate() {
             *slot = rows[k].min(max_rows[k]) as f32;
@@ -719,19 +699,17 @@ fn deals_face_down(gs: &GameState) -> bool {
 }
 
 /// The draw outs' counts over `pool`: its size, its cards of the flush draw's suit and its cards
-/// of a rank that extends the straight draw. With `skip_stones` a Stone card counts in the size
-/// only.
+/// of a rank that extends the straight draw. A Stone card counts in the size only.
 fn count_outs<'a>(
     pool: impl Iterator<Item = &'a Card>,
     flush_suit: Option<Suit>,
     gaps: u16,
-    skip_stones: bool,
 ) -> (usize, usize, usize) {
     let (mut n, mut suited, mut matching) = (0, 0, 0);
     for c in pool {
         n += 1;
         let Some(b) = c.base else { continue };
-        if skip_stones && c.is_stone() {
+        if c.is_stone() {
             continue;
         }
         if flush_suit == Some(b.suit) {
@@ -744,13 +722,12 @@ fn count_outs<'a>(
     (n, suited, matching)
 }
 
-/// `encode_global_context(gs, hand_analysis)`; `player_view` as [`Encoder::with_player_view`].
+/// `encode_global_context(gs, hand_analysis)`, in the player's view.
 fn encode_global(
     gs: &GameState,
     ha: &HandAnalysis,
     log: LogScale,
     memo: &mut LogMemo,
-    player_view: bool,
     v: &mut [f32],
 ) {
     let v: &mut [f32; D_GLOBAL] = v.try_into().expect("the global context");
@@ -844,14 +821,14 @@ fn encode_global(
         }
     }
 
-    // Discard pile [159:211]: which suit/rank pairs it holds. The player's view leaves it blank
-    // while the round can deal face down, and skips Stone cards.
-    let face_down_round = player_view && deals_face_down(gs);
+    // Discard pile [159:211]: which suit/rank pairs it holds, Stone cards left out. Blank while
+    // the round can deal face down: the pile doesn't show which cards went there unseen.
+    let face_down_round = deals_face_down(gs);
     for c in areas.discard() {
         if face_down_round {
             break;
         }
-        if player_view && c.is_stone() {
+        if c.is_stone() {
             continue;
         }
         if let Some(b) = c.base {
@@ -894,7 +871,7 @@ fn encode_global(
     }
 
     // Draw proximity [227:229].
-    let draws = analysis::analyze_draws(areas.hand(), player_view);
+    let draws = analysis::analyze_draws(areas.hand());
     set(G_DRAWS, draws.flush_proximity);
     set(G_DRAWS + 1, draws.straight_proximity);
 
@@ -904,23 +881,21 @@ fn encode_global(
     let interest = py_min(py_floordiv(py_max(dollars, 0.0), 5.0), max_interest);
     set(G_INTEREST, interest / py_max(max_interest, 1.0));
 
-    // Draw outs [230:232]: the deck's share of cards completing the flush or straight draw. The
-    // player's view counts over the cards the player can't see instead: the deck, the face-down
-    // hand cards and, in a round that can deal face down, the discard pile. With no draw (an
-    // empty hand: a blind select, the shop) both stay 0, and no card is counted.
+    // Draw outs [230:232]: the share of the cards the player can't see that complete the flush or
+    // straight draw. Those are the deck, the face-down hand cards and, in a round that can deal
+    // face down, the discard pile. With no draw (an empty hand: a blind select, the shop) both
+    // stay 0, and no card is counted.
     let flush_suit = draws.best_flush_suit.filter(|_| draws.best_flush_count < 5);
     let gaps = draws.straight_gap_ranks;
     let (n, suited, matching) = if flush_suit.is_none() && gaps == 0 {
         (0, 0, 0)
-    } else if player_view {
+    } else {
         let unseen = areas
             .deck()
             .iter()
             .chain(areas.hand().iter().filter(|c| c.facing == Facing::Back))
             .chain(areas.discard().iter().filter(|_| face_down_round));
-        count_outs(unseen, flush_suit, gaps, true)
-    } else {
-        count_outs(areas.deck().iter(), flush_suit, gaps, false)
+        count_outs(unseen, flush_suit, gaps)
     };
     if n > 0 {
         let n = n as f64;
@@ -959,15 +934,9 @@ fn encode_global(
 // Entities
 // ---------------------------------------------------------------------------
 
-/// `encode_playing_cards_batch(cards, gs, analysis)`; `scoring` marks the best hand's cards,
-/// `player_view` as [`Encoder::with_player_view`].
-fn encode_playing_cards(
-    cards: Cards<'_>,
-    scoring: &[bool],
-    log: LogScale,
-    player_view: bool,
-    out: &mut [f32],
-) {
+/// `encode_playing_cards_batch(cards, gs, analysis)`, in the player's view; `scoring` marks the
+/// best hand's cards.
+fn encode_playing_cards(cards: Cards<'_>, scoring: &[bool], log: LogScale, out: &mut [f32]) {
     let rows = out.as_chunks_mut::<D_PLAYING_CARD>().0;
     for (i, (c, row)) in cards.iter().zip(rows).enumerate() {
         let position = (i as f64 / 20.0) as f32;
@@ -980,29 +949,25 @@ fn encode_playing_cards(
                 continue;
             }
         };
-        row[0] = (f64::from(base.id()) / 14.0) as f32;
-        row[1] = (suit_index(base.suit) as f64 / 3.0) as f32;
-        row[2] = (rank_chips(base.value) / 11.0) as f32;
+        // A Stone has no rank or suit in the game: its rank, suit, rank chips and face flag
+        // stay 0.
+        if !c.is_stone() {
+            row[0] = (f64::from(base.id()) / 14.0) as f32;
+            row[1] = (suit_index(base.suit) as f64 / 3.0) as f32;
+            row[2] = (rank_chips(base.value) / 11.0) as f32;
+            row[8] = flag(matches!(base.id(), 11..=13));
+        }
         row[3] = (enhancement_index(c.center) / 8.0) as f32;
         row[4] = (edition_index(c) / 4.0) as f32;
         row[5] = (seal_index(c.seal) / 4.0) as f32;
         row[6] = flag(c.debuff);
-        row[8] = flag(matches!(base.id(), 11..=13));
         // `splash or not debuff`, and the splash flag is never set.
         row[9] = flag(!c.debuff);
         row[10] = log.get(c.ability.bonus + c.ability.perma_bonus) as f32;
-        row[11] = log.get(base.times_played) as f32;
+        // [11], the Python encoder's play count, stays 0: the game shows no play count per card,
+        // and it tells copies that look the same apart.
         row[12] = position;
         row[13] = flag(scoring[i]);
-        if player_view {
-            // No per-card play count on screen, and a Stone shows no rank or suit.
-            row[11] = 0.0;
-            if c.is_stone() {
-                for k in [0, 1, 2, 8] {
-                    row[k] = 0.0;
-                }
-            }
-        }
     }
 }
 
@@ -1460,18 +1425,12 @@ mod tests {
     }
 
     #[test]
-    fn the_player_view_pads_what_it_encodes() {
-        // `encode` and `encode_padded` give the same values in the player's view too, and a
-        // switched encoder equals a fresh one.
-        let mut padded = Encoder::with_player_view(true);
-        let mut full = Encoder::new();
+    fn encode_padded_writes_what_encode_gives() {
+        // The env's padded layout holds `encode`'s values, bit for bit.
+        let mut padded = Encoder::new();
+        let mut plain = Encoder::new();
         for gs in rollout_states(1500) {
-            full.set_player_view(true);
-            let obs = full.encode(&gs).clone();
-            assert_eq!(padded_bits(&mut padded, &gs), pad(&obs));
-            assert_eq!(pad(&obs), pad(Encoder::with_player_view(true).encode(&gs)));
-            full.set_player_view(false);
-            assert_eq!(pad(full.encode(&gs)), padded_bits(&mut Encoder::new(), &gs));
+            assert_eq!(padded_bits(&mut padded, &gs), pad(plain.encode(&gs)));
         }
     }
 
@@ -1485,7 +1444,7 @@ mod tests {
                 assert_eq!(fast.analyze(cards, flags), slow.analyze(cards, flags));
                 assert_eq!(fast.scoring, slow.scoring);
                 assert_eq!(
-                    analysis::analyze_draws(cards, false),
+                    analysis::analyze_draws(cards),
                     analysis::reference::analyze_draws(cards)
                 );
             }
