@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import copy
 import random
+from collections import Counter
 from collections.abc import Callable, Iterator
 from typing import Any
 
@@ -334,6 +335,133 @@ def test_player_view_only_drops_the_play_count_elsewhere(seed: str) -> None:
         assert _equal(_arrays(default), _arrays(player))
         checked += 1
     assert checked > 50
+
+
+# ---------------------------------------------------------------------------
+# States the engine reaches
+# ---------------------------------------------------------------------------
+
+#: What the player can't see of a hidden card, as a snapshot records it.
+HIDDEN_FIELDS = ("center", "front", "base", "edition", "seal")
+#: The snapshot areas that hold playing cards.
+CARD_AREAS = ("deck", "hand", "discard", "pack_cards")
+#: The 52 cards, as ``debug_add`` names them.
+CARD_KEYS = [f"{suit}_{rank}" for suit in "SHCD" for rank in "23456789TJQKA"]
+#: The hand and pack row columns the player's view may change.
+PLAYER_VIEW_COLUMNS = [0, 1, 2, 8, 11, 13]
+
+
+def _engine_states(seed: str, runs: int, steps: int) -> Iterator[Snapshot]:
+    """Snapshots of random play in rounds that deal face down, with Stone cards. Each run meets
+    one of the four bosses every round (or plays X-ray Vision) with Marble Joker, Stones join the
+    hand, and some blinds are beaten outright so that runs reach the shop and its packs."""
+    rng = random.Random(seed)
+    idle = (SortHand, SwapHandLeft, SwapHandRight, SwapJokersLeft, SwapJokersRight)
+    for run in range(runs):
+        boss = (*FACE_DOWN_BOSSES, None)[run % 5]
+        game = Game.new("b_red", 1, f"{seed}_{run}", None if boss else FLIPPED_CHALLENGE)
+        game.debug_add("j_marble")
+        game.debug_set(money=200)
+        for _ in range(steps):
+            if game.phase == GamePhase.GAME_OVER:
+                break
+            if game.phase == GamePhase.BLIND_SELECT and boss:
+                game.apply_setup({"op": "force_boss", "key": boss})
+            if game.phase == GamePhase.SELECTING_HAND:
+                if rng.random() < 0.3:
+                    game.debug_add(rng.choice(CARD_KEYS), enhancement="m_stone")
+                if rng.random() < 0.15:
+                    game.debug_set(chips=1e12)  # the next hand beats the blind
+            yield game.to_dict()
+            legal = game.legal_actions()
+            if not legal:
+                break
+            action = rng.choice([a for a in legal if not isinstance(a, idle)] or legal)
+            hand = game.hand
+            if isinstance(action, (PlayHand, Discard)) and not action.card_indices and hand:
+                count = rng.randint(1, min(5, len(hand)))
+                action = type(action)(tuple(sorted(rng.sample(range(len(hand)), count))))
+            game.step(action)
+
+
+def _hidden_cards(snap: Snapshot) -> list[dict[str, Any]]:
+    """The cards the player can't see: the deck, the face-down hand cards and, in a round that
+    can deal face down, the discard pile."""
+    areas = snap["areas"]
+    cards = areas["deck"] + [c for c in areas["hand"] if c["facing"] == "back"]
+    if (snap["blind"] or {}).get("key") in FACE_DOWN_BOSSES or "flipped_cards" in snap["modifiers"]:
+        cards += areas["discard"]
+    return cards
+
+
+def _shuffle_hidden(snap: Snapshot, rng: random.Random) -> Snapshot:
+    s = copy.deepcopy(snap)
+    cards = _hidden_cards(s)
+    identities = [{key: card[key] for key in HIDDEN_FIELDS} for card in cards]
+    rng.shuffle(identities)
+    for card, identity in zip(cards, identities, strict=True):
+        card.update(identity)
+    return s
+
+
+def _rebase_stones(snap: Snapshot, rng: random.Random, bases: list[dict[str, Any]]) -> Snapshot:
+    s = copy.deepcopy(snap)
+    for area in CARD_AREAS:
+        for card in s["areas"][area]:
+            if card["center"] == "m_stone":
+                card.update(copy.deepcopy(rng.choice(bases)))
+    return s
+
+
+def _replay_counts(snap: Snapshot, rng: random.Random) -> Snapshot:
+    s = copy.deepcopy(snap)
+    for area in CARD_AREAS:
+        for card in s["areas"][area]:
+            if card["base"]:
+                card["base"]["times_played"] = rng.randint(0, 30)
+    return s
+
+
+def _outside_the_player_view(arrays: list[np.ndarray]) -> list[np.ndarray]:
+    """``arrays`` with the features the player's view changes zeroed."""
+    out = [a.copy() for a in arrays]
+    for part in (HISTOGRAM, DRAW_PROXIMITY, OUTS):
+        out[0][part] = 0.0
+    for rows in (out[1], out[5]):  # hand and pack
+        rows[:, PLAYER_VIEW_COLUMNS] = 0.0
+    return out
+
+
+def test_engine_states_hide_what_the_player_cant_see() -> None:
+    """On states the engine reaches in face-down rounds with Stone cards, every state a player
+    can't tell apart has the same player's view: the hidden cards' identities shuffled, each
+    Stone on another base, other play counts, and all three at once. The player's view is
+    encoder v1 outside the features it changes. A feature that starts reading a hidden card
+    field fails this."""
+    rng = random.Random(55)
+    deck = Game.new("b_red", 1, "PV_BASES").to_dict()["areas"]["deck"]
+    bases = [{key: card[key] for key in IDENTITY} for card in deck]
+    seen: Counter[str] = Counter()
+    for snap in _engine_states("PV_ENGINE", runs=10, steps=25):
+        player, default = _encode(snap, True), _encode(snap, False)
+        assert _equal(_outside_the_player_view(player), _outside_the_player_view(default))
+        hand = snap["areas"]["hand"]
+        seen["face down"] += any(card["facing"] == "back" for card in hand)
+        seen["stones"] += any(
+            card["center"] == "m_stone" for area in CARD_AREAS for card in snap["areas"][area]
+        )
+        variants = {
+            "hidden cards shuffled": _shuffle_hidden(snap, rng),
+            "stones rebased": _rebase_stones(snap, rng, bases),
+            "play counts": _replay_counts(snap, rng),
+            "all three": _replay_counts(
+                _rebase_stones(_shuffle_hidden(snap, rng), rng, bases), rng
+            ),
+        }
+        for label, variant in variants.items():
+            assert _equal(player, _encode(variant, True)), f"player's view sees {label}"
+            seen["told apart"] += not _equal(default, _encode(variant, False))
+    assert min(seen["face down"], seen["stones"], seen["told apart"]) >= 20, seen
 
 
 # ---------------------------------------------------------------------------
