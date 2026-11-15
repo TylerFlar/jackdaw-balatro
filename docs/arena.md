@@ -33,9 +33,9 @@ Arena takes that freedom away:
    ```
 
 3. Play. `ArenaEnv` is a drop-in for `BalatroGymnasiumEnv`: the same observation space,
-   `Discrete(500)` with `action_masks()`, and the same `balatro/*` info keys. The server
-   encodes the default observation, so a policy trained with `player_view=True`
-   ([Player view](rl-guide#player-view)) gets features there that it didn't see in training.
+   `Discrete(500)` with `action_masks()`, and the same `balatro/*` info keys. A policy trained
+   with `player_view=True` ([Player view](rl-guide#player-view)) plays the track that serves it:
+   `ArenaEnv(track="red-1-pv")` (see [The tracks](#the-tracks)).
 
    ```python
    from jackdaw_arena import ArenaEnv
@@ -68,13 +68,18 @@ Arena takes that freedom away:
    print(evaluate(choose, episodes=500, batch=32).summary())
    ```
 
-## The track
+## The tracks
 
 `red-1` is the protocol of `examples/`: Red Deck, white stake, a 2,000-step cap, and episodes
 that end on a win. The rank is the mean number of blinds beaten, with its standard error and
 95% interval. An episode that ends because the engine refused an action scores 0, as in
 `run_episodes`. The house baselines are listed apart: `random`, and `smart_agent`, which reads
 face-down cards.
+
+`red-1-pv` is the same game with the [player view](rl-guide#player-view): its observations
+leave out the card identities a player hasn't seen, as `player_view=True` does locally. It has
+its own leaderboard and budget, so agents that see less aren't ranked against agents that see
+more. `red-1` serves the default observation.
 
 Results belong to an engine version. A jackdaw release that changes the game starts a new
 season.
