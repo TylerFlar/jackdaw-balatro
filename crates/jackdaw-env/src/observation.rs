@@ -906,10 +906,13 @@ fn encode_global(
 
     // Draw outs [230:232]: the deck's share of cards completing the flush or straight draw. The
     // player's view counts over the cards the player can't see instead: the deck, the face-down
-    // hand cards and, in a round that can deal face down, the discard pile.
+    // hand cards and, in a round that can deal face down, the discard pile. With no draw (an
+    // empty hand: a blind select, the shop) both stay 0, and no card is counted.
     let flush_suit = draws.best_flush_suit.filter(|_| draws.best_flush_count < 5);
     let gaps = draws.straight_gap_ranks;
-    let (n, suited, matching) = if player_view {
+    let (n, suited, matching) = if flush_suit.is_none() && gaps == 0 {
+        (0, 0, 0)
+    } else if player_view {
         let unseen = areas
             .deck()
             .iter()

@@ -33,7 +33,9 @@ Arena takes that freedom away:
    ```
 
 3. Play. `ArenaEnv` is a drop-in for `BalatroGymnasiumEnv`: the same observation space,
-   `Discrete(500)` with `action_masks()`, and the same `balatro/*` info keys.
+   `Discrete(500)` with `action_masks()`, and the same `balatro/*` info keys. The server
+   encodes the default observation, so a policy trained with `player_view=True`
+   ([Player view](rl-guide#player-view)) gets features there that it didn't see in training.
 
    ```python
    from jackdaw_arena import ArenaEnv
