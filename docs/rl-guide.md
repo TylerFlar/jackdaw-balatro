@@ -324,6 +324,37 @@ obs, reward, terminated, truncated, info = env.step(action)
 
 `BalatroGymnasiumEnv` takes `max_free_moves` and `on_refusal` like `BalatroEnvironment`.
 
+### Actions the table doesn't hold
+
+Past its budgets the table holds a sample: with 8 hand cards there are 218 plays and 218
+discards, and a table of 200 of each leaves 18 of either out. A policy that picks indices never
+misses them. An agent that decides on actions (search, rules, a language model) can give the
+action itself instead:
+
+```python
+from jackdaw.env import FactoredAction
+from jackdaw.env.action_space import ActionType
+
+play = FactoredAction(action_type=ActionType.PlayHand, card_target=(0, 2, 3, 5, 7))
+if env.offers(play):
+    obs, reward, terminated, truncated, info = env.step_factored(play)
+```
+
+`env.offers(action)` says whether the env offers it: whether the table holds it, or would if it
+held every legal action. `card_target` lists hand indices in ascending order, as the table does.
+`env.step_factored(action)` takes such an action (a `FactoredAction`, or `(action_type,
+entity_target, card_target)`) and raises `IllegalActionError` for one the env doesn't offer.
+It is the step the index naming the action takes, and the next table is drawn as after that
+index, so a seed and a list of actions, each given either way, always replay the same episode.
+[Jackdaw Arena](arena) takes actions this way too.
+
+`env.player_view()` returns what a player sees of the run, as structured data: every hand card,
+joker and consumable (with no cap), the deck as the deck view shows it, the blinds and the rest,
+and with `env.record_scoring = True` the last hand's scoring events
+([What a player sees](api#what-a-player-sees)). Face-down cards keep their id and their place
+and show nothing else, and the ids are keyed from the episode's sampler seed, so the view holds
+no hidden information.
+
 With `copy=False` it hands out the same values without allocating them each step: the observation's arrays and `info["action_mask"]` are views of buffers the env owns, which the next `reset` or `step` overwrites in place. Copy whatever you keep across steps (a previous observation, a rollout buffer that stores the arrays themselves); `action_masks()` still returns a fresh array. That goes for wrappers too, and some keep an episode's last observation across the `reset` that overwrites it: Stable-Baselines3's `DummyVecEnv` (its `info["terminal_observation"]`, which MaskablePPO reads for truncated episodes) and gymnasium's `SyncVectorEnv` in `SAME_STEP` mode (its `info["final_obs"]`). Keep the default under those. On the Rust engine this saves about a third of the wrapper's per-step time.
 
 ### With MaskablePPO
@@ -464,7 +495,7 @@ A release that only takes entries no policy needs out of the Gym table keeps the
 ## Known Limitations
 
 - **Two dead global features.** `global[26]` (the blind's key) and `global[29]` (the Four Fingers, Shortcut, Smeared Joker and Splash flags) are always 0, and a playing card's `is_scoring` feature is just "not debuffed". Encoder v1 keeps the original Python encoder's output bit for bit, quirks included. The jokers themselves are visible in the `joker` rows.
-- **Observation rows past the maximum counts.** The Gym observation holds at most 8 hand cards, 5 jokers, 2 consumables, 10 shop items and 5 pack cards. Rows past those are dropped (`entity_counts` is capped too), but the action table can still target them: a sixth joker (Negative), a ninth hand card (a bigger hand size), a third consumable. A policy then picks such an action without seeing its target. The factored `BalatroEnvironment` has no such limit.
+- **Observation rows past the maximum counts.** The Gym observation holds at most 8 hand cards, 5 jokers, 2 consumables, 10 shop items and 5 pack cards. Rows past those are dropped (`entity_counts` is capped too), but the action table can still target them: a sixth joker (Negative), a ninth hand card (a bigger hand size), a third consumable. A policy then picks such an action without seeing its target. The factored `BalatroEnvironment` has no such limit, and neither has `env.player_view()`.
 
 ## Live Validation Adapter
 

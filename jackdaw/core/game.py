@@ -359,6 +359,21 @@ class Game:
         text = self._g.last_play_json()
         return None if text is None else Play.from_json(_from_json(json.loads(text)))
 
+    def player_view(self, key: int) -> dict[str, Any]:
+        """What a player sees of the run, as structured data (``jackdaw.player_view/1``,
+        ``docs/api.md``), without what they can't: face-down cards keep their id and place and
+        show nothing else, the deck is the multiset the deck view shows, and there is no seed,
+        RNG state or anything still to come. With :attr:`record_scoring` on, ``last_play``
+        holds the last hand's scoring events.
+
+        Cards are named by ids derived from their identity in the run and ``key`` (taken modulo
+        2**64): an id stays the same while a player can follow the card, and changes when they
+        lose track of it (the card goes into the deck, or turns face down). Keep ``key`` from
+        whoever reads the view, and the same for a whole run: the ids then say nothing of the
+        cards. The environments keep one per episode (:meth:`BalatroGymnasiumEnv.player_view
+        <jackdaw.env.BalatroGymnasiumEnv.player_view>`)."""
+        return _from_json(json.loads(self._g.player_view(int(key) & 0xFFFF_FFFF_FFFF_FFFF)))
+
     def check(self, action: Any) -> str | None:
         """Why the rules refuse ``action`` here, or ``None`` when it is legal. The run is
         unchanged either way (the action is tried on a copy)."""

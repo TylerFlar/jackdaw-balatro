@@ -310,6 +310,21 @@ impl Game {
         (actions, rng.state())
     }
 
+    /// Whether ``action_table`` lists the factored action before it subsamples (the Gym env's
+    /// ``offers``, without the free-move cap) for the current state's vanilla mask. For tests.
+    #[pyo3(signature = (action_type, entity_target=None, card_target=None))]
+    fn _offers(
+        &mut self,
+        action_type: i64,
+        entity_target: Option<i64>,
+        card_target: Option<Vec<i64>>,
+    ) -> PyResult<bool> {
+        let fa = env::factored_from_py(action_type, entity_target, card_target)?;
+        self.mask
+            .compute(&self.inner, jackdaw_env::mask::Legality::Vanilla);
+        Ok(jackdaw_env::gym::offers(&self.mask, &self.inner, &fa))
+    }
+
     /// The default hand selection for using the card at ``index`` of ``area``
     /// (``"consumables"``, ``"pack_cards"`` or ``"shop_jokers"``), or ``None``.
     fn default_targets(&self, area: &str, index: usize) -> PyResult<Option<Vec<usize>>> {
@@ -576,6 +591,35 @@ impl Game {
         self.inner.last_play().map(|p| p.to_json(score).to_string())
     }
 
+    /// The player's view of the run (JSON text, ``jackdaw.player_view/1``): what a player sees,
+    /// as structured data, without what they can't. Its cards are named by ids derived from
+    /// ``key``, which says nothing of a card to whoever doesn't know it. ``docs/api.md``
+    /// documents it.
+    fn player_view(&self, key: u64) -> String {
+        self.inner.player_view(key).to_string()
+    }
+
+    /// The id the player's view gives a card: from its sort id, its view epoch and ``key``.
+    /// For tests and tools that map view ids back to cards.
+    #[staticmethod]
+    fn _player_view_card_id(key: u64, sort_id: u32, epoch: u32) -> u64 {
+        jackdaw_core::player_view::card_id(key, sort_id, epoch)
+    }
+
+    /// Each card's ``(sort_id, view_epoch, wheel_flipped, juice)`` in ``area``, in order: the
+    /// runtime fields a snapshot leaves out. For tests.
+    fn _card_runtime(&self, area: &str) -> PyResult<Vec<(u32, u32, bool, bool)>> {
+        let a = area_id(area)?;
+        Ok(self
+            .inner
+            .gs
+            .areas
+            .get(a)
+            .iter()
+            .map(|c| (c.sort_id, c.view_epoch, c.wheel_flipped, c.juice))
+            .collect())
+    }
+
     /// The decision point: ``blind_select``, ``selecting_hand``, ``round_eval``, ``shop``,
     /// ``pack_opening`` or ``game_over``.
     #[getter]
@@ -668,6 +712,13 @@ mod _core {
     #[pyfunction]
     fn _gym_max_counts() -> [usize; 5] {
         jackdaw_env::env::MAX_COUNTS
+    }
+
+    /// The player's view key of an episode whose action-table sampler starts at ``state``
+    /// (``GymEnv`` derives its own so): the Python env's generic path keys its views the same.
+    #[pyfunction]
+    fn _player_view_key(state: [u64; 4]) -> u64 {
+        jackdaw_env::env::view_key(state)
     }
 
     #[pymodule_export]

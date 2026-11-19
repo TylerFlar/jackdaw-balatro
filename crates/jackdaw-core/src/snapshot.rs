@@ -62,7 +62,7 @@ pub fn num(x: f64) -> Value {
     }
 }
 
-fn opt_num(x: Option<f64>) -> Value {
+pub(crate) fn opt_num(x: Option<f64>) -> Value {
     x.map_or(Value::Null, num)
 }
 
@@ -303,7 +303,7 @@ fn extra_from(v: Option<&Value>, center: CenterId, path: &str) -> Result<Extra> 
     }
 }
 
-fn ability_json(c: &Card) -> Value {
+pub(crate) fn ability_json(c: &Card) -> Value {
     let a = &c.ability;
     let mut m = Map::new();
     for (k, v) in [
@@ -608,6 +608,9 @@ pub fn card_from(v: &Value, path: &str) -> Result<Card> {
         shattered: false,
         destroyed: false,
         getting_sliced: false,
+        juice: false,
+        wheel_flipped: false,
+        view_epoch: 0,
     })
 }
 
@@ -666,7 +669,7 @@ fn blind_json(gs: &GameState) -> Value {
 }
 
 /// The snapshot's `hands` section.
-fn hands_json(gs: &GameState) -> Value {
+pub(crate) fn hands_json(gs: &GameState) -> Value {
     Value::Object(
         HandType::ALL
             .iter()
@@ -769,7 +772,7 @@ fn pack_json(gs: &GameState) -> Value {
 }
 
 /// The snapshot's `sim.last_score`.
-fn last_score_json(gs: &GameState) -> Value {
+pub(crate) fn last_score_json(gs: &GameState) -> Value {
     gs.sim.last_score.map_or(Value::Null, |s| {
         json!({
             "hand_type": s.hand_type.name(),
@@ -1361,7 +1364,7 @@ pub fn import(v: &Value) -> Result<GameState> {
         ));
     }
 
-    let gs = GameState {
+    let mut gs = GameState {
         phase: ph,
         back,
         stake,
@@ -1450,7 +1453,32 @@ pub fn import(v: &Value) -> Result<GameState> {
     };
     g.done()?;
     o.done()?;
+    infer_wheel_flipped(&mut gs);
     Ok(gs)
+}
+
+/// A snapshot doesn't hold `wheel_flipped` ([`Card::wheel_flipped`]), so an import makes it up,
+/// never showing more in the deck view than the game would: the hand's face-down cards were
+/// dealt face down, and in a round whose boss deals face down and hasn't been disabled
+/// (blind.lua:370-372), or under the `flipped_cards` challenge rule, so may any card of the
+/// discard pile have been.
+fn infer_wheel_flipped(gs: &mut GameState) {
+    use jackdaw_data::blinds::{BL_FISH, BL_HOUSE, BL_MARK, BL_WHEEL};
+    gs.areas.get_mut(AreaId::Hand).for_each(|c| {
+        if c.facing == Facing::Back {
+            c.wheel_flipped = true;
+        }
+    });
+    let boss = gs.blind.as_ref().is_some_and(|b| {
+        !b.disabled
+            && b.key
+                .is_some_and(|k| [BL_WHEEL, BL_HOUSE, BL_MARK, BL_FISH].contains(&k))
+    });
+    if boss || gs.modifiers.contains_key("flipped_cards") {
+        gs.areas
+            .get_mut(AreaId::Discard)
+            .for_each(|c| c.wheel_flipped = true);
+    }
 }
 
 #[cfg(test)]

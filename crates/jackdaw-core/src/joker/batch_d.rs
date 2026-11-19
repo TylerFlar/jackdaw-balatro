@@ -329,8 +329,14 @@ fn certificate_create(g: &mut Game, _: u32, _: f64) {
 /// DNA (card.lua:2483-2486, 3501-3523): if the round's first hand is a single card, a copy of
 /// it joins the hand and the deck (`playing_cards_created`, which `card_eval_status_text`
 /// reports to the playing-card listeners, common_events.lua:922-924). Its `first_hand_drawn`
-/// branch only animates.
+/// branch makes it shake until a hand is played (`juice_card_until`).
 fn dna(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
+    if ctx.kind == Kind::FirstHandDrawn {
+        if ctx.blueprint == 0 {
+            g.card_mut(id).juice = true;
+        }
+        return None;
+    }
     if ctx.kind != Kind::Before
         || g.gs.current_round.hands_played != 0.0
         || ctx.full_hand.len() != 1
@@ -602,8 +608,15 @@ fn mail_in_rebate(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
 }
 
 /// Trading Card (card.lua:2487-2490, 2802-2812): a first discard of a single card pays and
-/// destroys the card. Its `first_hand_drawn` branch only animates.
+/// destroys the card. Its `first_hand_drawn` branch makes it shake until the round's first
+/// discard or its end (`juice_card_until`).
 fn trading_card(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
+    if ctx.kind == Kind::FirstHandDrawn {
+        if ctx.blueprint == 0 {
+            g.card_mut(id).juice = true;
+        }
+        return None;
+    }
     if ctx.kind != Kind::Discard
         || ctx.blueprint > 0
         || g.gs.current_round.discards_used > 0.0
