@@ -340,6 +340,7 @@ impl Game {
             } else if let Some(c) = deck.iter().find(|c| c.sort_id == id) {
                 let mut c = *c;
                 c.facing = Facing::Front;
+                c.wheel_flipped = false;
                 c
             } else {
                 return Err(StepError::Illegal(format!(
@@ -353,6 +354,8 @@ impl Game {
         new_deck.extend(hand.iter().filter(|c| !taken(c)).map(|c| {
             let mut c = *c;
             c.facing = Facing::Back;
+            // Into the deck: the player's view loses track of it, as with any card there.
+            c.view_epoch = c.view_epoch.wrapping_add(1);
             c
         }));
         let was_forced: Vec<u32> = hand
