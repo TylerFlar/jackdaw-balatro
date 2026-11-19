@@ -180,6 +180,77 @@ multiplied, `dollars` paid. It also carries the hand's chips and mult after it (
 Recording is off by default and changes nothing: the run, its snapshot and hash, the observations
 and the masks are the same either way.
 
+## What a player sees
+
+```python
+view = game.player_view(key=0x2F6A91C3)        # keep the key from whoever reads the view
+for card in view["hand"]:
+    print(card["id"], card["front"] if not card["face_down"] else "face down")
+print(view["deck_size"], [e["front"] for e in view["deck"] if e["remaining"]])
+```
+
+`player_view(key)` returns the state a player sees, as plain JSON-compatible data
+(`jackdaw.player_view/1`), with what they can't see left out. A search or rule-based agent that
+reads only this can't use hidden information, and the environments return the same document
+(`BalatroGymnasiumEnv.player_view()`, and Jackdaw Arena's agent protocol), so it runs the same
+code in both places.
+
+**Card ids.** A card's sort id gives its identity away (a run makes its deck in a fixed order),
+so the view names each card by an id derived from its sort id, `key` and the times the player
+has lost track of it. An id stays the same while the player can follow the card, a face-down
+card's included: through sorts, swaps, a play, a shop purchase. A card comes back under a new id
+after going into the deck, and a joker after Amber Acorn turns it face down and shuffles it.
+Ids are integers below 2^53. Keep `key` from whoever reads the view and the same for a whole
+run; the environments derive theirs from the episode's sampler seed.
+
+**Cards** (in `hand`, `play`, `jokers`, `consumables`, the shop's lists and the pack's `cards`,
+in their order) have `id`, `face_down`, `key`, `front`, `suit`, `rank`, `edition`, `seal`,
+`debuff`, `cost`, `sell_cost`, `stickers` (`eternal`, `perishable`, `perish_tally`, `rental`,
+`pinned`), `ability` (as the snapshot writes it), `shaking` and `forced`. A face-down card shows
+only its `id`, its place, `shaking` and `forced`: every other field is `null`, as the game shows
+its back and a `?` for its sell value. A Stone Card has no `front`, `suit` or `rank`.
+
+- **`shaking`**: the joker shakes because its effect is ready (`juice_card_until`): Trading
+  Card until the round's first discard, DNA until its first hand, Loyalty Card before the hand
+  that gives the x mult, Invisible Joker once it can be sold for a copy. It shows face down
+  too, which places Amber Acorn's jokers before any hand.
+- **`forced`**: Cerulean Bell's forced card.
+
+| Field | What it holds |
+|---|---|
+| `phase` | as `Game.phase` |
+| `run` | `back`, `stake`, `challenge`, `win_ante`, `won` |
+| `game` | `ante`, `round`, `dollars`, `chips` (the round's score), `skips`, `hands_played` (in the run), `unused_discards`, `hand_size`, `joker_slots`, `consumable_slots`, the interest, discount, inflation, rental and bankruptcy rules, `probabilities_normal`, `last_tarot_planet` (The Fool's card), `last_hand_played`, `most_played_hand` (The Ox's), `blind_on_deck`, `boss_rerolled` |
+| `current_round` | `hands_left`, `discards_left`, `hands_played`, `discards_used`, `reroll_cost`, `free_rerolls`; and, while one of those jokers shows face up (owned, in the shop or in a pack), `idol_card`, `mail_card`, `ancient_card`, `castle_card` |
+| `blind` | the blind being played: `key`, `name`, `chips`, `mult`, `dollars`, `boss`, `disabled`, `eye_hands` (The Eye), `mouth_hand` (The Mouth); `null` between rounds |
+| `blinds` | `Small`, `Big`, `Boss` as blind select shows them: `key`, `state`, `chips` to beat, skip `tag` and the Orbital Tag's `orbital_hand` |
+| `hands` | each poker hand's `level`, `chips`, `mult`, `played`, `played_this_round`, `visible` |
+| `vouchers`, `tags` | redeemed vouchers and held tags, by key |
+| `consumable_usage` | Tarots, Planets and Spectrals used in the run |
+| `hand`, `play`, `jokers`, `consumables` | cards, as above, every one of them (no cap at 8 or 5) |
+| `shop` | `jokers`, `vouchers`, `boosters` while the shop is open (in the shop, or in a pack opened there); else `null` |
+| `pack` | `kind`, `choices_remaining`, `cards` while a pack is open; else `null` |
+| `deck` | the deck view: every playing card, sorted by suit then rank, each with `key`, `front`, `suit`, `rank`, `edition`, `seal`, `perma_bonus` and `remaining`. No ids and no order |
+| `deck_size`, `discard_size` | the draw pile's and the discard pile's sizes |
+| `last_score` | as `Game.last_score` |
+| `last_play` | with `record_scoring` on, the last hand's scoring as `last_play_json` gives it, its cards named by their view ids; else `null` |
+
+**The deck** is what the game's deck view shows (UI_definitions.lua:3233): every playing card,
+with `remaining` set for the cards still to draw and, as in the game, for the cards dealt face
+down this round, wherever they are now, until the boss that dealt them is disabled. So the cards
+a player can't place (in the draw pile, face down in the hand, discarded face down) count
+together, and the deck's order never shows.
+
+**Not in the view**: the seed, the RNG state, the cards of shops, packs and vouchers not shown
+yet, sort ids, a card's play count. Non-finite numbers come as in snapshots (`{"$f": "inf"}`
+in the JSON; `float("inf")` from `player_view`).
+
+Two things the view reads aren't in snapshots, as in the game's own save: which cards were
+dealt face down, and which jokers shake. `Game.from_dict` makes the first up so that the view
+never shows more than the game would (the hand's face-down cards, and in a round that deals face
+down, the whole discard pile, count as remaining), and starts with no joker shaking. The ids
+start afresh there too.
+
 ## Building a state
 
 ```python

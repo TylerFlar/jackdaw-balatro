@@ -5,6 +5,39 @@ while it is 0.x, a minor release (0.2 → 0.3) can break things, and a patch rel
 
 ## Unreleased
 
+The engine plays the same runs as 0.3.0, with the same observations, masks and action tables:
+nothing added here reaches a snapshot or a state hash. What's new is for agents that decide on
+actions rather than table indices, and see the game as a player does.
+
+### Added
+
+- **Actions the table doesn't hold.** `BalatroGymnasiumEnv.step_factored(action)` takes a
+  factored action instead of an index, and `offers(action)` says whether the env offers it:
+  whether the table holds it, or would if it held every legal action rather than a sample (with
+  8 hand cards a table holds 200 of the 218 plays, and of the 218 discards). It steps as the
+  index naming the action would, and the sampler draws the next table as after it, so a seed and
+  a list of actions, each given either way, replay the same episode. Also on `_core.GymEnv`
+  (`offers`, `step_factored`, `step_factored_into`) and in Rust (`GymEnv::offers`,
+  `step_factored`, `step_factored_or_cut`, `jackdaw_env::gym::offers`). `ACTION_VERSION` stays
+  at 2: the table is unchanged ([rl-guide](docs/rl-guide.md#actions-the-table-doesnt-hold);
+  jackdaw-arena#18).
+- **What a player sees, as data.** `Game.player_view(key)` and `BalatroGymnasiumEnv.player_view()`
+  return the state a player sees (`jackdaw.player_view/1`): every hand card, joker and
+  consumable with no cap, the shop and the pack, the deck as the deck view shows it (a multiset,
+  counting the cards dealt face down as remaining, as the game does), the blinds, hand levels,
+  money and the rest, and with `record_scoring` on the last hand's scoring events. Face-down
+  cards keep their id and their place and show nothing else; there is no seed, RNG state or
+  anything not shown yet. Cards are named by ids keyed from a secret (the episode's sampler seed
+  in the envs): an id stays the same while a player can follow the card and changes when they
+  lose track of it, so it gives no identity away, as a sort id would
+  ([api](docs/api.md#what-a-player-sees); #61).
+- **Shaking jokers.** The view's `shaking` marks a joker whose effect is ready, as the game shakes
+  it (`juice_card_until`): Trading Card until the round's first discard, DNA until its first
+  hand, Loyalty Card before the hand that gives the x mult, Invisible Joker once it has waited
+  its rounds. It shows face down too. Like the game's own save, snapshots don't keep it (#62).
+- `BalatroGymnasiumEnv.record_scoring` (and `_core.GymEnv`'s): every run records how its hands
+  score, for the view's `last_play`.
+
 ## [0.3.0] - 2026-11-15
 
 The engine plays the same runs as 0.2.7, with the same masks and action tables: every ended

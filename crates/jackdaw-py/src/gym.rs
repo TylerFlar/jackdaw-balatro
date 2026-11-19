@@ -12,8 +12,9 @@ use pyo3::exceptions::{PyIndexError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyByteArray;
 
-use crate::env::{FactoredParts, factored_to_py};
+use crate::env::{FactoredParts, factored_from_py, factored_to_py};
 use crate::{IllegalActionError, value_error};
+use jackdaw_env::action::FactoredAction;
 
 /// A run's start: back key, stake, seed and challenge id.
 pub fn run_spec(back: &str, stake: u8, seed: &str, challenge: Option<&str>) -> PyResult<RunSpec> {
@@ -208,18 +209,27 @@ fn obs_and_mask<'a>(
     ))
 }
 
+/// What a step takes: an index into the action table, or a factored action the env offers.
+#[derive(Clone, Copy)]
+enum Act {
+    Index(usize),
+    Factored(FactoredAction),
+}
+
 impl GymEnv {
-    /// Take action `index` (see `step`), keeping the step for `last_transition`.
-    fn take_step(&mut self, index: usize, cut_refused: bool) -> PyResult<StepInfo> {
+    /// Take `act` (see `step` and `step_factored`), keeping the step for `last_transition`.
+    fn take_step(&mut self, act: Act, cut_refused: bool) -> PyResult<StepInfo> {
         let to_py = |e: StepError| match e {
             StepError::BadIndex(_) => PyIndexError::new_err(e.to_string()),
+            StepError::NotOffered(_) => IllegalActionError::new_err(e.to_string()),
             StepError::Convert(m) => PyValueError::new_err(m),
             StepError::Illegal(m) => IllegalActionError::new_err(m),
         };
-        let (r, refused) = if cut_refused {
-            self.inner.step_or_cut(index).map_err(to_py)?
-        } else {
-            (self.inner.step(index).map_err(to_py)?, None)
+        let (r, refused) = match (act, cut_refused) {
+            (Act::Index(i), true) => self.inner.step_or_cut(i).map_err(to_py)?,
+            (Act::Index(i), false) => (self.inner.step(i).map_err(to_py)?, None),
+            (Act::Factored(a), true) => self.inner.step_factored_or_cut(a).map_err(to_py)?,
+            (Act::Factored(a), false) => (self.inner.step_factored(a).map_err(to_py)?, None),
         };
         let ended = r.terminated() || r.truncated();
         let episode = ended.then(|| {
@@ -312,7 +322,7 @@ impl GymEnv {
         mask: bool,
     ) -> PyResult<StepParts<'py>> {
         let (reward, terminated, truncated, n_actions, episode, not_ported, refused) =
-            self.take_step(index, cut_refused)?;
+            self.take_step(Act::Index(index), cut_refused)?;
         Ok((
             obs_bytes(py, &mut self.inner, mask)?,
             reward,
@@ -360,10 +370,92 @@ impl GymEnv {
         mut mask: PyBuffer<u8>,
     ) -> PyResult<StepInfo> {
         let (obs, mask) = obs_and_mask(&mut obs, &mut mask)?;
-        let info = self.take_step(index, cut_refused)?;
+        let info = self.take_step(Act::Index(index), cut_refused)?;
         self.inner.write_obs(obs);
         self.inner.write_action_mask(mask);
         Ok(info)
+    }
+
+    /// Whether the env offers the factored action here: the action table holds it, or would if
+    /// it held every legal action instead of a sample. ``card_target`` lists hand indices in
+    /// ascending order, as the table does. An ended episode offers none.
+    #[pyo3(signature = (action_type, entity_target=None, card_target=None))]
+    fn offers(
+        &self,
+        action_type: i64,
+        entity_target: Option<i64>,
+        card_target: Option<Vec<i64>>,
+    ) -> PyResult<bool> {
+        let fa = factored_from_py(action_type, entity_target, card_target)?;
+        Ok(self.inner.offers(&fa))
+    }
+
+    /// ``step`` with a factored action instead of an index: any action the env ``offers``,
+    /// whether or not the table's sample holds it. It steps as the index naming it would, and
+    /// the next table is drawn as after that index. Raises ``IllegalActionError`` for an action
+    /// the env doesn't offer (the run is unchanged), ``ValueError`` for one that isn't a
+    /// factored action (an unknown type, a negative index).
+    #[pyo3(signature = (action_type, entity_target, card_target, cut_refused=false, *, mask=false))]
+    fn step_factored<'py>(
+        &mut self,
+        py: Python<'py>,
+        action_type: i64,
+        entity_target: Option<i64>,
+        card_target: Option<Vec<i64>>,
+        cut_refused: bool,
+        mask: bool,
+    ) -> PyResult<StepParts<'py>> {
+        let fa = factored_from_py(action_type, entity_target, card_target)?;
+        let (reward, terminated, truncated, n_actions, episode, not_ported, refused) =
+            self.take_step(Act::Factored(fa), cut_refused)?;
+        Ok((
+            obs_bytes(py, &mut self.inner, mask)?,
+            reward,
+            terminated,
+            truncated,
+            n_actions,
+            episode,
+            not_ported,
+            refused,
+        ))
+    }
+
+    /// ``step_factored``, writing the observation and the action mask into the caller's buffers
+    /// as ``step_into`` does.
+    #[allow(clippy::too_many_arguments)]
+    fn step_factored_into(
+        &mut self,
+        action_type: i64,
+        entity_target: Option<i64>,
+        card_target: Option<Vec<i64>>,
+        cut_refused: bool,
+        mut obs: PyBuffer<f32>,
+        mut mask: PyBuffer<u8>,
+    ) -> PyResult<StepInfo> {
+        let fa = factored_from_py(action_type, entity_target, card_target)?;
+        let (obs, mask) = obs_and_mask(&mut obs, &mut mask)?;
+        let info = self.take_step(Act::Factored(fa), cut_refused)?;
+        self.inner.write_obs(obs);
+        self.inner.write_action_mask(mask);
+        Ok(info)
+    }
+
+    /// The player's view of the run (JSON text, ``jackdaw.player_view/1``): what a player sees,
+    /// its cards named by ids keyed from the episode's sampler seed. ``docs/api.md`` documents it.
+    fn player_view(&self) -> String {
+        self.inner.player_view().to_string()
+    }
+
+    /// Whether every run records how its hands score, so the player's view shows the last
+    /// hand's events. Off by default; recording never changes a run.
+    #[getter]
+    fn record_scoring(&self) -> bool {
+        self.inner.record_scoring()
+    }
+
+    #[setter]
+    fn set_record_scoring(&mut self, on: bool) {
+        self.inner.set_record_scoring(on);
     }
 
     /// The last step as a reward sees it: ``(prev, curr, action)``, the states as

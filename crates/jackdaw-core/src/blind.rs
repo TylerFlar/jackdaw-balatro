@@ -513,6 +513,14 @@ impl Game {
                         c.flip();
                     }
                 });
+                // `v.ability.wheel_flipped = nil` for every playing card (blind.lua:370-372):
+                // the deck view greys out the ones it dealt face down that were discarded.
+                for a in AreaId::PLAYING {
+                    self.gs
+                        .areas
+                        .get_mut(a)
+                        .for_each(|c| c.wheel_flipped = false);
+                }
             }
             "The Needle" => {
                 let sub = self.blind_mut().hands_sub.unwrap_or(0.0);

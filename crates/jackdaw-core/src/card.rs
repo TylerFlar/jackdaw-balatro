@@ -666,6 +666,21 @@ pub struct Card {
     pub destroyed: bool,
     /// Within setting_blind: Ceremonial Dagger or Madness is destroying this joker.
     pub getting_sliced: bool,
+    /// The card shakes while its effect is ready, as `juice_card_until` makes it
+    /// (common_events.lua:1156-1161): Trading Card and DNA from the round's first hand drawn,
+    /// Loyalty Card when its next hand gives the x mult, Invisible Joker once it has waited its
+    /// rounds ([`Game::settle_juice`](crate::game::Game)). Not in snapshots: the shake is an
+    /// event, which the game's own save doesn't keep either.
+    pub juice: bool,
+    /// `ability.wheel_flipped`: dealt face down into the hand (cardarea.lua:41-43), so the deck
+    /// view still counts it as remaining (UI_definitions.lua:3264) until it turns face up
+    /// (card.lua:4119) or the boss that dealt it is disabled (blind.lua:370-372). Not in
+    /// snapshots, which an import makes up for (`snapshot::import`).
+    pub wheel_flipped: bool,
+    /// How many times the player has lost track of the card: it goes up when the card goes into
+    /// the deck and when it turns face down (Amber Acorn's jokers). The player's view keys the
+    /// card's id with it ([`crate::player_view`]). Not in snapshots.
+    pub view_epoch: u32,
 }
 
 /// The table `Card:set_ability(center)` builds from the center alone (card.lua:223-310): the
@@ -771,6 +786,9 @@ impl Card {
             shattered: false,
             destroyed: false,
             getting_sliced: false,
+            juice: false,
+            wheel_flipped: false,
+            view_epoch: 0,
         };
         card.set_ability(center, hands_played);
         if let Some(front) = front {
@@ -808,12 +826,19 @@ impl Card {
         self.set() == CenterSet::Joker
     }
 
-    /// `Card:flip()` (card.lua:4113-4124).
+    /// `Card:flip()` (card.lua:4113-4124): turning face up clears `wheel_flipped`; turning face
+    /// down, the player loses track of the card (its view epoch goes up).
     pub fn flip(&mut self) {
-        self.facing = match self.facing {
-            Facing::Front => Facing::Back,
-            Facing::Back => Facing::Front,
-        };
+        match self.facing {
+            Facing::Front => {
+                self.facing = Facing::Back;
+                self.view_epoch = self.view_epoch.wrapping_add(1);
+            }
+            Facing::Back => {
+                self.facing = Facing::Front;
+                self.wheel_flipped = false;
+            }
+        }
     }
 
     /// `Card:set_ability(center)` for the per-card state. The caller handles the game-level
