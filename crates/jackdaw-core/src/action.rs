@@ -206,6 +206,7 @@ impl Game {
         if self.poll_hand_size() {
             self.settle();
         }
+        self.settle_juice();
         if let Some(what) = self.rt.unported.take() {
             return unported(what);
         }
@@ -220,6 +221,7 @@ impl Game {
         if next.poll_hand_size() {
             next.settle();
         }
+        next.settle_juice();
         if let Some(what) = next.rt.unported.take() {
             return unported(what);
         }

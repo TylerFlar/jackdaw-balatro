@@ -8,6 +8,7 @@
 
 use serde_json::{Map, Value, json};
 
+use crate::area::AreaId;
 use crate::game::Game;
 use crate::hand_eval::HandType;
 use crate::state::LastScore;
@@ -219,9 +220,21 @@ pub struct PlayTrace {
     /// with Splash.
     pub scoring: Vec<u32>,
     pub events: Vec<ScoreEvent>,
+    /// The view epoch ([`crate::card::Card::view_epoch`]) of each card the events can name,
+    /// by sort id, as the play began: the player's view names a card by it even when the play
+    /// destroyed it.
+    pub epochs: Vec<(u32, u32)>,
 }
 
 impl PlayTrace {
+    /// The view epoch card `sort_id` had as the play began, when it was in an area then.
+    pub fn epoch_of(&self, sort_id: u32) -> Option<u32> {
+        self.epochs
+            .iter()
+            .find(|&&(id, _)| id == sort_id)
+            .map(|&(_, e)| e)
+    }
+
     /// The play as JSON, with what it scored (the run's last score).
     pub fn to_json(&self, score: Option<&LastScore>) -> Value {
         let mut v = json!({
@@ -271,12 +284,23 @@ impl Game {
     /// Start recording a play, when recording is on.
     pub(crate) fn trace_play(&mut self, hand: HandType, played: &[u32], scoring: &[u32]) {
         if self.trace.enabled {
+            let areas = &self.gs.areas;
+            let epochs = [
+                AreaId::Play,
+                AreaId::Hand,
+                AreaId::Jokers,
+                AreaId::Consumables,
+            ]
+            .into_iter()
+            .flat_map(|a| areas.get(a).iter().map(|c| (c.sort_id, c.view_epoch)))
+            .collect();
             self.trace.play = Some(PlayTrace {
                 hand,
                 level: self.gs.hand(hand).level,
                 played: played.to_vec(),
                 scoring: scoring.to_vec(),
                 events: Vec::new(),
+                epochs,
             });
         }
     }

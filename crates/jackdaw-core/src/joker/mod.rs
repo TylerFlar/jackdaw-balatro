@@ -397,6 +397,10 @@ impl Game {
             every + 1.0,
         );
         card.ability.loyalty_remaining = crate::card::OptF64::some(remaining);
+        // Its next hand gives the x mult: it shakes until then (card.lua:3643-3645).
+        if remaining == 0.0 && ctx.blueprint == 0 {
+            card.juice = true;
+        }
         if remaining == every {
             return Some(Effect {
                 xmult_mod: Some(xmult),
@@ -404,7 +408,6 @@ impl Game {
                 ..Effect::default()
             });
         }
-        let _ = ctx;
         None
     }
 }

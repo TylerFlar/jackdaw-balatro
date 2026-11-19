@@ -24,6 +24,7 @@ Example::
 
 from __future__ import annotations
 
+import json
 import math
 import operator
 import secrets
@@ -37,7 +38,8 @@ import numpy as np
 from gymnasium import spaces
 
 from jackdaw import _core
-from jackdaw.core import Game
+from jackdaw.core import Game, IllegalActionError
+from jackdaw.core.game import _from_json
 from jackdaw.env.action_space import ACTION_VERSION, DEFAULT_MAX_FREE_MOVES, ActionType
 from jackdaw.env.balatro_env import BalatroEnvironment
 from jackdaw.env.balatro_spec import balatro_game_spec
@@ -176,6 +178,70 @@ def _card_actions(
 def _target_action(action_type: int, entity_target: int | None = None) -> FactoredAction:
     """The single :class:`FactoredAction` with no card selection."""
     return FactoredAction(action_type=action_type, entity_target=entity_target)
+
+
+def _offers(mask: GameActionMask, info: dict[str, Any], fa: FactoredAction) -> bool:
+    """Whether :meth:`BalatroGymnasiumEnv._enumerate_actions` lists ``fa`` before it subsamples:
+    the generic path's :meth:`BalatroGymnasiumEnv.offers` (the Rust env's ``offers``)."""
+    t = int(fa.action_type)
+    type_mask = mask.type_mask
+    if not 0 <= t < len(type_mask) or not type_mask[t]:
+        return False
+    entity, cards = fa.entity_target, fa.card_target
+
+    def entity_ok() -> bool:
+        em = mask.entity_masks.get(t)
+        return em is not None and entity is not None and 0 <= entity < len(em) and bool(em[entity])
+
+    def selection_ok(min_select: int, max_select: int) -> bool:
+        if cards is None:
+            return False
+        legal = np.nonzero(mask.card_mask)[0].tolist()
+        first, stop = _selection_sizes(len(legal), min_select, max_select)
+        sel = [int(c) for c in cards]
+        return (
+            first <= len(sel) < stop
+            and all(a < b for a, b in zip(sel, sel[1:], strict=False))
+            and set(sel) <= set(legal)
+            and (mask.forced_card is None or mask.forced_card in sel)
+        )
+
+    if t in _SIMPLE_TYPES:
+        return entity is None and cards is None
+    if t in _ENTITY_ONLY_TYPES:
+        return cards is None and entity_ok()
+    if t in _CARD_ONLY_TYPES:
+        return entity is None and selection_ok(mask.min_card_select, mask.max_card_select)
+    if t in _TARGETED_ENTITY_SOURCES:
+        if not entity_ok():
+            return False
+        try:
+            lo, hi, needs = info["game"]._g.consumable_target_info(
+                _TARGETED_ENTITY_SOURCES[t], entity
+            )
+        except ValueError:  # past the end of the area
+            return False
+        return selection_ok(lo, hi) if needs else cards is None
+    return False
+
+
+def _factored(action: Any) -> FactoredAction:
+    """``action`` as a :class:`FactoredAction`: one already, or ``(action_type, entity_target,
+    card_target)``."""
+    if isinstance(action, FactoredAction):
+        return action
+    t, entity, cards = action
+    return FactoredAction(
+        action_type=int(t),
+        entity_target=None if entity is None else int(entity),
+        card_target=None if cards is None else tuple(int(c) for c in cards),
+    )
+
+
+def _parts(fa: FactoredAction) -> tuple[int, int | None, list[int] | None]:
+    cards = None if fa.card_target is None else [int(c) for c in fa.card_target]
+    entity = None if fa.entity_target is None else int(fa.entity_target)
+    return int(fa.action_type), entity, cards
 
 
 class BalatroGymnasiumEnv(gymnasium.Env):
@@ -318,6 +384,12 @@ class BalatroGymnasiumEnv(gymnasium.Env):
             self._action_table = RustActionTable(self._core)
             self._n_actions = self._core.n_actions
         self._rng = Xoshiro256(secrets.randbits(64))
+        # The generic path's mask and info for the current state (offers, step_factored), the
+        # key its player views name cards under, and whether its runs record their scoring.
+        self._game_mask: GameActionMask | None = None
+        self._game_info: dict[str, Any] = {}
+        self._view_key = _core._player_view_key(self._rng.state)
+        self._record_scoring = False
         self._episode_max_ante: int = 1
         self._episode_blinds_beaten: int = 0
         # With copy=False: the buffers every reset and step writes, and the views handed out.
@@ -341,6 +413,7 @@ class BalatroGymnasiumEnv(gymnasium.Env):
             return self._rust_reset(seed)
         if seed is not None:
             self._rng = Xoshiro256(seed)
+        self._view_key = _core._player_view_key(self._rng.state)
 
         kwargs: dict[str, Any] = {}
         if seed is not None:
@@ -348,6 +421,9 @@ class BalatroGymnasiumEnv(gymnasium.Env):
 
         assert self._inner is not None
         game_obs, game_mask, info = self._inner.reset(**kwargs)
+        if self._record_scoring:
+            self._run().record_scoring = True
+        self._game_mask, self._game_info = game_mask, info
         self._episode_max_ante = self._inner.episode_ante
         self._episode_blinds_beaten = 0
         reward_reset = getattr(self.reward_fn, "reset", None)
@@ -359,9 +435,79 @@ class BalatroGymnasiumEnv(gymnasium.Env):
 
     def step(self, action: int) -> tuple[dict[str, np.ndarray], float, bool, bool, dict[str, Any]]:
         if self._core is not None:
-            return self._rust_step(action)
+            return self._rust_step(int(action))
+        return self._generic_step(self._action_table[action])
+
+    def offers(self, action: Any) -> bool:
+        """Whether the env offers ``action`` here: a :class:`FactoredAction` (or its
+        ``(action_type, entity_target, card_target)``) that the action table holds, or would if
+        it held every legal action instead of a sample. Its ``card_target`` lists hand indices in
+        ascending order, as the table does. After the episode ends, nothing is offered."""
+        fa = _factored(action)
+        if self._core is not None:
+            return bool(self._core.offers(*_parts(fa)))
+        if self._game_mask is None or not self._action_table:
+            return False
+        return _offers(self._game_mask, self._game_info, fa)
+
+    def step_factored(
+        self, action: Any
+    ) -> tuple[dict[str, np.ndarray], float, bool, bool, dict[str, Any]]:
+        """:meth:`step` with a factored action instead of an index: any action the env
+        :meth:`offers`, whether or not the table's sample holds it. When the table holds no more
+        than ``MAX_ACTIONS`` actions and keeps every card selection (a hand of at most 7 cards,
+        no more than 200 selections of a kind), it holds every action the env offers; past
+        that, it holds a sample, and this reaches the rest. The step is the one an index naming
+        the action takes, and the next table is drawn as after it, so the same seed and the same
+        actions replay the same episode however each action was given.
+
+        Raises :class:`~jackdaw.core.IllegalActionError` for an action the env doesn't offer
+        (nothing changes)."""
+        fa = _factored(action)
+        if self._core is not None:
+            return self._rust_step(fa)
+        if not self.offers(fa):
+            raise IllegalActionError(f"{fa} is not an action the env offers here")
+        return self._generic_step(fa)
+
+    def player_view(self) -> dict[str, Any]:
+        """What a player sees of the run now, as structured data (``jackdaw.player_view/1``,
+        ``docs/api.md``): the hand, jokers, consumables, shop and pack with every card a player
+        can see, face-down cards with their place and nothing else, the deck as the deck view
+        shows it (a multiset), the blinds, hand levels, money and the rest, and with
+        :attr:`record_scoring` on the last hand's scoring events. No RNG state, nothing to
+        come. Cards are named by ids that stay the same while a player can follow the card,
+        keyed from the episode's sampler seed so that they say nothing of the card itself."""
+        if self._core is not None:
+            return _from_json(json.loads(self._core.player_view()))
+        return self._run().player_view(self._view_key)
+
+    @property
+    def record_scoring(self) -> bool:
+        """Whether every run records how its hands score, so :meth:`player_view` shows the last
+        hand's events (``last_play``). Off by default; recording never changes a run."""
+        if self._core is not None:
+            return bool(self._core.record_scoring)
+        return self._record_scoring
+
+    @record_scoring.setter
+    def record_scoring(self, on: bool) -> None:
+        if self._core is not None:
+            self._core.record_scoring = bool(on)
+            return
+        self._record_scoring = bool(on)
+        if self._inner is not None and self._game_mask is not None:
+            self._run().record_scoring = bool(on)
+
+    def _run(self) -> Game:
+        """The generic path's run itself (the adapter's, not a copy)."""
         assert self._inner is not None
-        factored = self._action_table[action]
+        return self._inner._adapter.game  # type: ignore[attr-defined]
+
+    def _generic_step(
+        self, factored: FactoredAction
+    ) -> tuple[dict[str, np.ndarray], float, bool, bool, dict[str, Any]]:
+        assert self._inner is not None
         game_obs, terminated, truncated, game_mask, info = self._inner.step(factored)
 
         transition = Transition.from_step(factored, terminated, truncated, info)
@@ -374,8 +520,10 @@ class BalatroGymnasiumEnv(gymnasium.Env):
 
         # Rebuild action table for next step
         if not (terminated or truncated):
+            self._game_mask, self._game_info = game_mask, info
             self._action_table = self._enumerate_actions(game_mask, info)
         else:
+            self._game_mask, self._game_info = None, {}
             self._action_table = []
 
         obs = self._output(self._build_obs(game_obs))
@@ -427,17 +575,22 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         return self._obs_views, {"action_mask": self._mask_buffer}
 
     def _rust_step(
-        self, action: int
+        self, action: int | FactoredAction
     ) -> tuple[dict[str, np.ndarray], float, bool, bool, dict[str, Any]]:
         cut = self.on_refusal == "truncate"
+        core = self._core
+        if isinstance(action, int):
+            step, step_into, args = core.step, core.step_into, (action,)
+        else:
+            step, step_into, args = core.step_factored, core.step_factored_into, _parts(action)
         if self.copy:
-            data, reward, terminated, truncated, n, episode, not_ported, refused = self._core.step(
-                int(action), cut, mask=True
+            data, reward, terminated, truncated, n, episode, not_ported, refused = step(
+                *args, cut, mask=True
             )
             obs, mask = gym_obs_and_mask(data)
         else:
-            reward, terminated, truncated, n, episode, not_ported, refused = self._core.step_into(
-                int(action), cut, self._obs_buffer, self._mask_bytes
+            reward, terminated, truncated, n, episode, not_ported, refused = step_into(
+                *args, cut, self._obs_buffer, self._mask_bytes
             )
             obs, mask = self._obs_views, self._mask_buffer
         self._n_actions = n

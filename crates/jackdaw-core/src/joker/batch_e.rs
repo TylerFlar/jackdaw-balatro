@@ -157,6 +157,10 @@ fn invisible_joker(g: &mut Game, id: u32, ctx: &mut Ctx) -> Option<Effect> {
         Kind::EndOfRound if !ctx.individual && !ctx.repetition => {
             let rounds = g.card(id).ability.invis_rounds.unwrap_or(0.0) + 1.0;
             g.card_mut(id).ability.invis_rounds = crate::card::OptF64::some(rounds);
+            // Ready: it shakes until it is gone (card.lua:2936-2939).
+            if rounds == g.extra(id) {
+                g.card_mut(id).juice = true;
+            }
             Some(message())
         }
         _ => None,

@@ -114,6 +114,7 @@ dependencies = [
  "jackdaw-core",
  "jackdaw-data",
  "mimalloc",
+ "serde_json",
 ]
 
 [[package]]

@@ -10,6 +10,28 @@ use crate::joker::{Ctx, Kind};
 use crate::state::BlindSlot;
 
 impl Game {
+    /// `juice_card_until`'s checks (common_events.lua:1156-1161): a joker's shake stops for good
+    /// once its condition fails. DNA's holds while no hand has been played this round
+    /// (card.lua:2484), Trading Card's while no discard has been used (card.lua:2488), Loyalty
+    /// Card's while its next hand gives the x mult (card.lua:3643), and Invisible Joker's until
+    /// it is gone (card.lua:2937). Run as a step comes to rest: none of them fails and holds
+    /// again within one step, so this stops each shake where the game would.
+    pub(crate) fn settle_juice(&mut self) {
+        let hands_played = self.gs.current_round.hands_played;
+        let discards_used = self.gs.current_round.discards_used;
+        self.gs.areas.jokers_mut().for_each(|c| {
+            if c.juice {
+                c.juice = match c.name() {
+                    "DNA" => hands_played == 0.0,
+                    "Trading Card" => discards_used == 0.0,
+                    "Loyalty Card" => c.ability.loyalty_remaining.get() == Some(0.0),
+                    "Invisible Joker" => true,
+                    _ => false,
+                };
+            }
+        });
+    }
+
     /// `end_round()`: queued.
     pub(crate) fn end_round(&mut self) {
         self.queue(Event::EndRound);
@@ -17,6 +39,14 @@ impl Game {
 
     /// `end_round`'s event (state_events.lua:91-286).
     pub(crate) fn end_round_body(&mut self) {
+        // `G.RESET_JIGGLES = true` (state_events.lua:95): Trading Card's shake checks it
+        // (card.lua:2488), so it stops with the round. `new_round` clears it, and only the next
+        // round's first hand drawn starts the shake again.
+        self.gs.areas.jokers_mut().for_each(|c| {
+            if c.name() == "Trading Card" {
+                c.juice = false;
+            }
+        });
         let blind_chips = self.gs.blind.as_ref().map_or(0.0, |b| b.chips);
         let mut game_over = crate::lua::sub(self.gs.chips, blind_chips) < 0.0;
         for id in self.gs.areas.ids(AreaId::Jokers) {

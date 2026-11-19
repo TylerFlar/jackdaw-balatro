@@ -65,6 +65,8 @@ impl Default for EnvConfig {
 pub enum StepError {
     /// The action index is past the end of the table.
     BadIndex(usize),
+    /// The factored action isn't one the env offers here ([`GymEnv::offers`]).
+    NotOffered(FactoredAction),
     /// The table's action has no engine form here.
     Convert(String),
     /// The engine refused the action.
@@ -75,6 +77,16 @@ impl std::fmt::Display for StepError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             StepError::BadIndex(i) => write!(f, "action {i} is not in the action table"),
+            StepError::NotOffered(a) => {
+                write!(f, "{} ", a.action_type.name())?;
+                if let Some(e) = a.entity_target {
+                    write!(f, "on entity {e} ")?;
+                }
+                if let Some(sel) = &a.card_target {
+                    write!(f, "with cards {sel:?} ")?;
+                }
+                f.write_str("is not an action the env offers here")
+            }
             StepError::Convert(m) | StepError::Illegal(m) => f.write_str(m),
         }
     }
@@ -125,6 +137,26 @@ pub struct GymEnv {
     free_moves: u32,
     state: StateSummary,
     ended: bool,
+    /// The key the player's view names cards under ([`GymEnv::player_view`]).
+    view_key: u64,
+    /// Every run records how its hands score ([`Game::set_record_scoring`]).
+    record_scoring: bool,
+}
+
+/// The player's view key of an episode whose sampler starts at `state`: the state's words mixed
+/// with SplitMix64's finalizer. It draws nothing from the sampler, so the action tables are
+/// those of an env that never makes a view.
+pub fn view_key(state: [u64; 4]) -> u64 {
+    let mut x = 0x6a61_636b_6461_7776; // "jackdawv"
+    for w in state {
+        x ^= w;
+        x = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = x;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        x = z ^ (z >> 31);
+    }
+    x
 }
 
 impl GymEnv {
@@ -132,12 +164,14 @@ impl GymEnv {
     pub fn new(spec: &RunSpec, config: EnvConfig, rng_seed: u64) -> Result<GymEnv, String> {
         let game = Game::new_run(spec)?;
         let state = StateSummary::of(&game);
+        let rng = Xoshiro256::seed_from_u64(rng_seed);
         let mut env = GymEnv {
             game,
             encoder: Encoder::new(),
             mask: ActionMask::new(),
             table: ActionTable::new(),
-            rng: Xoshiro256::seed_from_u64(rng_seed),
+            view_key: view_key(rng.state()),
+            rng,
             config,
             step_count: 0,
             episode_length: 0,
@@ -148,6 +182,7 @@ impl GymEnv {
             free_moves: 0,
             state,
             ended: false,
+            record_scoring: false,
         };
         env.refresh();
         Ok(env)
@@ -179,7 +214,9 @@ impl GymEnv {
         if let Some(seed) = rng_seed {
             self.rng = Xoshiro256::seed_from_u64(seed);
         }
+        self.view_key = view_key(self.rng.state());
         self.game = Game::new_run(spec)?;
+        self.game.set_record_scoring(self.record_scoring);
         self.step_count = 0;
         self.episode_length = 0;
         self.episode_ante = 1.0;
@@ -212,6 +249,26 @@ impl GymEnv {
     /// Take the table's action `index`.
     pub fn step(&mut self, index: usize) -> Result<StepResult, StepError> {
         let action = self.table.get(index).ok_or(StepError::BadIndex(index))?;
+        self.take(action)
+    }
+
+    /// Whether the env offers `action` here: the table holds it, or would if it held every
+    /// legal action rather than a sample ([`crate::gym::offers`]). An ended episode offers none.
+    pub fn offers(&self, action: &FactoredAction) -> bool {
+        !self.ended && crate::gym::offers(&self.mask, &self.game, action)
+    }
+
+    /// Take `action`, one the env offers ([`GymEnv::offers`]) whether or not the table's sample
+    /// holds it. The step is the one an index naming it takes: the sampler draws the next table
+    /// as it would then, so a run of steps given either way replays exactly.
+    pub fn step_factored(&mut self, action: FactoredAction) -> Result<StepResult, StepError> {
+        if !self.offers(&action) {
+            return Err(StepError::NotOffered(action));
+        }
+        self.take(action)
+    }
+
+    fn take(&mut self, action: FactoredAction) -> Result<StepResult, StepError> {
         let engine_action = to_engine(&action, &self.game).map_err(|e| StepError::Convert(e.0))?;
         // No rollback copy: an illegal action changes nothing, and a NotPorted refusal ends the
         // episode.
@@ -232,14 +289,49 @@ impl GymEnv {
     /// [`GymEnv::step`], with a table action the engine refuses cut into a truncated episode end
     /// ([`GymEnv::cut`]): the result, and the refusal. Only an index past the table fails.
     pub fn step_or_cut(&mut self, index: usize) -> Result<(StepResult, Option<String>), StepError> {
-        match self.step(index) {
-            Ok(r) => Ok((r, None)),
-            Err(StepError::BadIndex(i)) => Err(StepError::BadIndex(i)),
-            Err(StepError::Convert(m) | StepError::Illegal(m)) => {
-                let action = self.table.get(index).expect("checked index");
-                Ok((self.cut(action), Some(m)))
-            }
+        let action = self.table.get(index).ok_or(StepError::BadIndex(index))?;
+        self.take_or_cut(action)
+    }
+
+    /// [`GymEnv::step_factored`], with an action the engine refuses cut into a truncated episode
+    /// end as [`GymEnv::step_or_cut`] does. Only an action the env doesn't offer fails.
+    pub fn step_factored_or_cut(
+        &mut self,
+        action: FactoredAction,
+    ) -> Result<(StepResult, Option<String>), StepError> {
+        if !self.offers(&action) {
+            return Err(StepError::NotOffered(action));
         }
+        self.take_or_cut(action)
+    }
+
+    fn take_or_cut(
+        &mut self,
+        action: FactoredAction,
+    ) -> Result<(StepResult, Option<String>), StepError> {
+        match self.take(action) {
+            Ok(r) => Ok((r, None)),
+            Err(StepError::Convert(m) | StepError::Illegal(m)) => Ok((self.cut(action), Some(m))),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// The player's view of the run ([`jackdaw_core::player_view`]), its cards named under a
+    /// key drawn from the episode's sampler seed: without the seed, an id says nothing of the
+    /// card it stands for.
+    pub fn player_view(&self) -> serde_json::Value {
+        self.game.player_view(self.view_key)
+    }
+
+    /// Record how each hand scores, from now on and in every later run, so the player's view
+    /// shows the last hand's events. Recording never changes a run.
+    pub fn set_record_scoring(&mut self, on: bool) {
+        self.record_scoring = on;
+        self.game.set_record_scoring(on);
+    }
+
+    pub fn record_scoring(&self) -> bool {
+        self.record_scoring
     }
 
     fn finish(&mut self, action: FactoredAction, not_ported: Option<String>) -> StepResult {
@@ -371,6 +463,47 @@ mod tests {
         env.step(find(&env, ActionType::Discard).unwrap()).unwrap();
         assert!(!env.free_moves_spent());
         assert!(has_free(&env), "another action starts the count again");
+    }
+
+    #[test]
+    fn a_factored_step_is_the_index_step() {
+        let mut by_index = GymEnv::new(&spec("FACTORED"), EnvConfig::default(), 5).unwrap();
+        let mut by_action = by_index.clone();
+        let mut rng = Xoshiro256::seed_from_u64(2);
+        while !by_index.ended() {
+            let i = rng.below(by_index.table().len() as u64) as usize;
+            let action = by_index.table().get(i).unwrap();
+            assert!(by_action.offers(&action));
+            assert_eq!(by_index.step(i), by_action.step_factored(action));
+            assert_eq!(by_index.rng_state(), by_action.rng_state());
+            assert_eq!(by_index.table().actions(), by_action.table().actions());
+        }
+        let blind = FactoredAction::new(ActionType::SelectBlind);
+        assert!(!by_action.offers(&blind));
+        assert_eq!(
+            by_action.step_factored(blind),
+            Err(StepError::NotOffered(blind))
+        );
+    }
+
+    #[test]
+    fn views_draw_nothing_from_the_sampler() {
+        // A dealt hand: its cards carry ids, which the key sets.
+        let dealt = |env: &mut GymEnv| {
+            let blind = find(env, ActionType::SelectBlind).unwrap();
+            env.step(blind).unwrap();
+        };
+        let mut env = GymEnv::new(&spec("VIEWKEY"), EnvConfig::default(), 5).unwrap();
+        dealt(&mut env);
+        let before = env.rng_state();
+        let a = env.player_view();
+        assert_eq!(env.rng_state(), before);
+        env.reset(&spec("VIEWKEY"), Some(5)).unwrap();
+        dealt(&mut env);
+        assert_eq!(env.player_view(), a, "the same sampler seed, the same ids");
+        env.reset(&spec("VIEWKEY"), Some(6)).unwrap();
+        dealt(&mut env);
+        assert_ne!(env.player_view()["hand"], a["hand"]);
     }
 
     #[test]

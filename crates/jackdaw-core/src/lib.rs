@@ -28,6 +28,7 @@ pub mod joker;
 mod legal;
 pub mod lua;
 mod packs;
+pub mod player_view;
 pub mod pools;
 pub mod rng;
 mod round;

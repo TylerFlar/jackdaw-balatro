@@ -265,6 +265,84 @@ fn combinations_into(
     }
 }
 
+/// Whether `sel` is one of the selections [`combinations_into`] lists for the cards `card_mask`
+/// allows: `min_select..=max_select` of them (capped at the number allowed), strictly ascending,
+/// holding `required` when given.
+fn selection_listed(
+    sel: &Selection,
+    card_mask: &[bool],
+    min_select: usize,
+    max_select: usize,
+    required: Option<usize>,
+) -> bool {
+    let n = card_mask.iter().filter(|&&b| b).count();
+    let upper = n.min(max_select);
+    let lower = min_select.min(upper);
+    let s = sel.as_slice();
+    (lower..=upper.min(MAX_SELECTION)).contains(&s.len())
+        && s.windows(2).all(|w| w[0] < w[1])
+        && s.iter()
+            .all(|&i| card_mask.get(usize::from(i)).copied().unwrap_or(false))
+        && required.is_none_or(|r| s.contains(&(r as u8)))
+}
+
+/// Whether [`ActionTable::enumerate`] lists `action` for `game` before it subsamples: an action
+/// the table holds, or would if it held every legal action. Card selections are strictly
+/// ascending, as the table lists them.
+pub fn offers(mask: &ActionMask, game: &Game, action: &FactoredAction) -> bool {
+    let areas = &game.gs.areas;
+    offers_with(
+        &mask.type_mask,
+        &mask.card_mask,
+        |t| mask.entity_mask(t),
+        (mask.min_card_select, mask.max_card_select),
+        mask.forced_card,
+        |t, e| {
+            let source = match t {
+                ActionType::UseConsumable => areas.consumables(),
+                _ => areas.pack_cards(),
+            };
+            source.get(e).map(consumable_target_info)
+        },
+        action,
+    )
+}
+
+/// [`offers`] for any mask, as [`ActionTable::enumerate_with`] takes one.
+pub fn offers_with<'m>(
+    type_mask: &[bool],
+    card_mask: &[bool],
+    entity: impl Fn(ActionType) -> Option<&'m [bool]>,
+    (min_select, max_select): (usize, usize),
+    forced: Option<usize>,
+    target_info: impl Fn(ActionType, usize) -> Option<(usize, usize, bool)>,
+    action: &FactoredAction,
+) -> bool {
+    let t = action.action_type;
+    if !type_mask.get(t.index()).copied().unwrap_or(false) {
+        return false;
+    }
+    let entity_ok =
+        |e: u32| entity(t).is_some_and(|em| em.get(e as usize).copied().unwrap_or(false));
+    match (t.targets(), action.entity_target, &action.card_target) {
+        (Targets::None, None, None) => true,
+        (Targets::Entity, Some(e), None) => entity_ok(e),
+        (Targets::Cards, None, Some(sel)) => {
+            selection_listed(sel, card_mask, min_select, max_select, forced)
+        }
+        (Targets::EntityCards, Some(e), cards) if entity_ok(e) => {
+            match (target_info(t, e as usize), cards) {
+                (Some((lo, hi, true)), Some(sel)) => {
+                    selection_listed(sel, card_mask, lo, hi, forced)
+                }
+                (Some((_, _, false)), None) => true,
+                _ => false,
+            }
+        }
+        _ => false,
+    }
+}
+
 /// A run of the table's actions.
 #[derive(Clone, Copy, Debug)]
 enum Group {
@@ -688,6 +766,122 @@ mod tests {
         assert!(plays.iter().all(|s| s.contains(&2)));
         // Nothing was subsampled, so the sampler drew nothing.
         assert_eq!(rng, Xoshiro256::seed_from_u64(9));
+    }
+
+    /// Every factored action over `cards` hand cards and `entities` entities: with no target,
+    /// an entity, a selection of up to 6 cards (ascending or not, one past the hand), or both.
+    fn candidates(cards: usize, entities: usize) -> Vec<FactoredAction> {
+        let mut sels: Vec<Vec<usize>> = vec![vec![]];
+        for k in 1..=6usize {
+            let mut idx: Vec<usize> = (0..k).collect();
+            let n = cards + 1;
+            if k > n {
+                break;
+            }
+            loop {
+                sels.push(idx.clone());
+                let mut i = k;
+                while i > 0 && idx[i - 1] == i - 1 + n - k {
+                    i -= 1;
+                }
+                if i == 0 {
+                    break;
+                }
+                idx[i - 1] += 1;
+                for j in i..k {
+                    idx[j] = idx[j - 1] + 1;
+                }
+            }
+        }
+        sels.extend([vec![1, 0], vec![0, 0], vec![2, 0, 1]]);
+        let mut out = Vec::new();
+        for t in ActionType::ALL {
+            let sel = |s: &Vec<usize>| Selection::new(s).unwrap();
+            out.push(FactoredAction::new(t));
+            for e in 0..=entities {
+                out.push(FactoredAction::with_entity(t, e));
+                for s in &sels {
+                    out.push(FactoredAction {
+                        action_type: t,
+                        entity_target: Some(e as u32),
+                        card_target: Some(sel(s)),
+                    });
+                }
+            }
+            for s in &sels {
+                out.push(FactoredAction {
+                    action_type: t,
+                    entity_target: None,
+                    card_target: Some(sel(s)),
+                });
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn offers_is_the_unsampled_enumeration() {
+        // Masks small enough that nothing is subsampled: the table lists every action, and
+        // `offers_with` holds for exactly the actions it lists.
+        let mut r = Xoshiro256::seed_from_u64(42);
+        let mut checked = 0;
+        for case in 0..300u64 {
+            let mut bit = |p: u64| r.below(100) < p;
+            let n_cards = (case % 6) as usize;
+            let n_entities = 1 + (case % 3) as usize;
+            let types: Vec<bool> = (0..crate::action::NUM_ACTION_TYPES)
+                .map(|_| bit(70))
+                .collect();
+            let cards: Vec<bool> = (0..n_cards).map(|_| bit(80)).collect();
+            let entity: Vec<Option<Vec<bool>>> = (0..crate::action::NUM_ACTION_TYPES)
+                .map(|_| bit(85).then(|| (0..n_entities).map(|_| bit(70)).collect()))
+                .collect();
+            let infos: Vec<Option<(usize, usize, bool)>> = (0..n_entities)
+                .map(|_| {
+                    let lo = 1 + r.below(2) as usize;
+                    let hi = lo + r.below(3) as usize;
+                    (r.below(10) < 8).then_some((lo, hi, r.below(10) < 7))
+                })
+                .collect();
+            let select = (r.below(2) as usize, 1 + r.below(5) as usize);
+            let forced = (n_cards > 0 && r.below(4) == 0).then(|| r.below(n_cards as u64) as usize);
+            let entity_of = |t: ActionType| entity[t.index()].as_deref();
+            let info_of = |_: ActionType, e: usize| infos.get(e).copied().flatten();
+            let mut table = ActionTable::new();
+            let mut rng = Xoshiro256::seed_from_u64(case);
+            table.enumerate_with(&types, &cards, entity_of, select, forced, info_of, &mut rng);
+            if rng != Xoshiro256::seed_from_u64(case) {
+                continue; // sampled: not this test's case
+            }
+            let listed: std::collections::HashSet<FactoredAction> =
+                table.actions().into_iter().collect();
+            for fa in candidates(n_cards, n_entities) {
+                let offered = offers_with(&types, &cards, entity_of, select, forced, info_of, &fa);
+                assert_eq!(offered, listed.contains(&fa), "case {case}: {fa:?}");
+            }
+            checked += 1;
+        }
+        assert!(checked > 250, "only {checked} unsampled cases");
+    }
+
+    #[test]
+    fn a_sampled_table_is_offered() {
+        // Past the budgets the table holds a sample; everything in it is still offered.
+        for (cards, entities, targets) in [(8, 2, (1, 2)), (10, 5, (1, 3)), (12, 0, (1, 1))] {
+            let table = table_of(cards, entities, targets, 3);
+            let em = vec![true; entities];
+            for a in table.actions() {
+                assert!(offers_with(
+                    &[true; crate::action::NUM_ACTION_TYPES],
+                    &vec![true; cards],
+                    |_| Some(&em[..]),
+                    (1, 5),
+                    None,
+                    |_, _| Some((targets.0, targets.1, true)),
+                    &a,
+                ));
+            }
+        }
     }
 
     #[test]

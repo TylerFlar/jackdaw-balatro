@@ -273,6 +273,28 @@ const NO_SLOT: u32 = u32::MAX;
 /// The area of a free slot.
 const FREE: u8 = u8::MAX;
 
+/// How a card lands in area `id` (`CardArea:emplace`, cardarea.lua:32-44): face down in the deck
+/// and the discard pile; elsewhere a face-down card turns face up unless it stays flipped, and
+/// one that stays flipped in the hand is `wheel_flipped`. A card that goes into the deck is one
+/// the player loses track of, so its view epoch goes up.
+#[inline]
+fn land(card: &mut Card, id: AreaId, stay_flipped: bool) {
+    if id.face_down() {
+        card.facing = Facing::Back;
+        if id == AreaId::Deck {
+            card.view_epoch = card.view_epoch.wrapping_add(1);
+        }
+        return;
+    }
+    if card.facing == Facing::Back && !stay_flipped {
+        card.facing = Facing::Front;
+        card.wheel_flipped = false;
+    }
+    if id == AreaId::Hand && stay_flipped {
+        card.wheel_flipped = true;
+    }
+}
+
 /// The card areas, in area order.
 ///
 /// The cards live in an arena and never move while they stay in an area: each area is a list
@@ -844,11 +866,7 @@ impl Areas {
     pub fn attach(&mut self, id: AreaId, d: Detached, front: bool, stay_flipped: bool) {
         let slot = d.0;
         let card = &mut self.cards[slot as usize];
-        if id.face_down() {
-            card.facing = Facing::Back;
-        } else if card.facing == Facing::Back && !stay_flipped {
-            card.facing = Facing::Front;
-        }
+        land(card, id, stay_flipped);
         let sort = card.sort_id as usize;
         self.home[slot as usize] = id as u8;
         debug_assert_eq!(self.by_sort[sort], NO_SLOT);
@@ -864,11 +882,7 @@ impl Areas {
 
     /// `CardArea:emplace(card, location, stay_flipped)` (cardarea.lua:32-64), minus UI.
     pub fn emplace(&mut self, id: AreaId, mut card: Card, front: bool, stay_flipped: bool) {
-        if id.face_down() {
-            card.facing = Facing::Back;
-        } else if card.facing == Facing::Back && !stay_flipped {
-            card.facing = Facing::Front;
-        }
+        land(&mut card, id, stay_flipped);
         let slot = self.alloc(id, card);
         let list = &mut self.lists[id as usize];
         if front || id.kind() == AreaType::Deck {
@@ -883,11 +897,7 @@ impl Areas {
     pub fn emplace_all(&mut self, id: AreaId, new: Vec<Card>) {
         let mut slots = Vec::with_capacity(new.len());
         for mut card in new {
-            if id.face_down() {
-                card.facing = Facing::Back;
-            } else if card.facing == Facing::Back {
-                card.facing = Facing::Front;
-            }
+            land(&mut card, id, false);
             slots.push(self.alloc(id, card));
         }
         let list = &mut self.lists[id as usize];
@@ -960,11 +970,7 @@ impl Areas {
             let slot = src[p as usize];
             let c = &mut self.cards[slot as usize];
             moved.push(c.sort_id);
-            if to.face_down() {
-                c.facing = Facing::Back;
-            } else if c.facing == Facing::Back && !stay_flipped {
-                c.facing = Facing::Front;
-            }
+            land(c, to, stay_flipped);
             self.home[slot as usize] = to as u8;
         }
         let dst = &mut self.lists[to as usize];
@@ -1200,11 +1206,7 @@ mod tests {
         }
 
         fn emplace(&mut self, id: AreaId, mut card: Card, front: bool, stay_flipped: bool) {
-            if id.face_down() {
-                card.facing = Facing::Back;
-            } else if card.facing == Facing::Back && !stay_flipped {
-                card.facing = Facing::Front;
-            }
+            super::land(&mut card, id, stay_flipped);
             if front || id.kind() == AreaType::Deck {
                 self.0[id as usize].insert(0, card);
             } else {
