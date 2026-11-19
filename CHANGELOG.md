@@ -5,6 +5,8 @@ while it is 0.x, a minor release (0.2 → 0.3) can break things, and a patch rel
 
 ## Unreleased
 
+## [0.3.1] - 2026-11-19
+
 The engine plays the same runs as 0.3.0, with the same observations, masks and action tables:
 nothing added here reaches a snapshot or a state hash. What's new is for agents that decide on
 actions rather than table indices, and see the game as a player does.
