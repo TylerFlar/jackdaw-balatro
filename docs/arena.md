@@ -66,6 +66,21 @@ Arena takes that freedom away:
    print(evaluate(choose, episodes=500, batch=32).summary())
    ```
 
+   An agent that plans (search, rules, a language model) can read the run as a player sees it
+   and give its actions directly, as with `BalatroGymnasiumEnv`
+   ([Actions the table doesn't hold](rl-guide#actions-the-table-doesnt-hold)):
+
+   ```python
+   env = ArenaEnv(view=True)
+   obs, info = env.reset()
+   view = env.player_view()                 # jackdaw.player_view/1: no hidden information
+   obs, reward, terminated, truncated, info = env.step_factored((0, None, (0, 2, 3, 5, 7)))
+   ```
+
+   `step_factored` reaches the plays and discards a sampled table leaves out; an action the env
+   doesn't offer is refused, and nothing changes. `evaluate(..., view=True)` hands each episode's
+   view to the chooser, which may return factored actions too.
+
 ## The track
 
 `red-1` is the protocol of `examples/`: Red Deck, white stake, a 2,000-step cap, and episodes
