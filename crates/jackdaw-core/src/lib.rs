@@ -25,7 +25,7 @@ mod flow;
 pub mod game;
 pub mod hand_eval;
 pub mod joker;
-mod legal;
+pub mod legal;
 pub mod lua;
 mod packs;
 pub mod player_view;

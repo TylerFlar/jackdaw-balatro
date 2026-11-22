@@ -8,8 +8,10 @@
 //!   can follow the card, a face-down card's included, and a card the player loses track of
 //!   comes back under a new one.
 //! - **Face-down cards** (dealt face down by a boss, Amber Acorn's jokers) keep their id and
-//!   their place, and show nothing else: every identity field is `null`. Whether they shake
-//!   ([`Card::juice`]) and whether Cerulean Bell forces them shows, as in the game.
+//!   their place, and show nothing else: every identity field is `null`. What the game still
+//!   shows of them shows: the card's size ([`shape`]: four jokers have their own), whether its
+//!   sell button is active ([`crate::legal::can_sell`]: not for an eternal joker), whether it
+//!   shakes ([`Card::juice`]) and whether Cerulean Bell forces it.
 //! - **The deck** is a multiset, as the deck view shows it (UI_definitions.lua:3233-3275): every
 //!   playing card, sorted, with whether it counts as remaining (in the draw pile, or dealt face
 //!   down: `wheel_flipped`). No order, no ids.
@@ -46,8 +48,24 @@ fn num(x: f64) -> Value {
     crate::snapshot::num(x)
 }
 
+/// The size of the four jokers whose card isn't the standard one (`Card:set_ability`,
+/// card.lua:237-257; `Card:load`, 4669-4680): Half Joker (height / 1.7), Photograph
+/// (height / 1.2), Square Joker (height = width) and Wee Joker (both x 0.7). The back is drawn at
+/// the card's size (`set_sprites`, card.lua:213), so it shows face down too. The game applies
+/// the sizes once the joker is discovered; the engine's profile has discovered everything.
+pub fn shape(c: &Card) -> Option<&'static str> {
+    use jackdaw_data::centers::{J_HALF, J_PHOTOGRAPH, J_SQUARE, J_WEE};
+    match c.center {
+        J_HALF => Some("half"),
+        J_PHOTOGRAPH => Some("photograph"),
+        J_SQUARE => Some("square"),
+        J_WEE => Some("wee"),
+        _ => None,
+    }
+}
+
 /// A card where the player sees it: its id and, face up, what it shows.
-fn card(c: &Card, key: u64) -> Value {
+fn card(c: &Card, area: AreaId, key: u64) -> Value {
     let id = card_id(key, c.sort_id, c.view_epoch);
     let mut m = Map::new();
     m.insert("id".into(), id.into());
@@ -94,13 +112,17 @@ fn card(c: &Card, key: u64) -> Value {
         );
         m.insert("ability".into(), crate::snapshot::ability_json(c));
     }
+    // What shows whichever way the card faces: its size, whether its sell button is active,
+    // whether it shakes, and Cerulean Bell's forcing.
+    m.insert("shape".into(), json!(shape(c)));
+    m.insert("sellable".into(), crate::legal::can_sell(c, area).into());
     m.insert("shaking".into(), c.juice.into());
     m.insert("forced".into(), c.ability.forced_selection.into());
     Value::Object(m)
 }
 
 fn cards(gs: &GameState, a: AreaId, key: u64) -> Value {
-    Value::Array(gs.areas.get(a).iter().map(|c| card(c, key)).collect())
+    Value::Array(gs.areas.get(a).iter().map(|c| card(c, a, key)).collect())
 }
 
 /// A playing card as the deck view shows it (face up, wherever it is), and whether it counts as
