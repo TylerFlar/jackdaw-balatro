@@ -5,6 +5,37 @@ while it is 0.x, a minor release (0.2 → 0.3) can break things, and a patch rel
 
 ## Unreleased
 
+### Added
+
+- **A game built from the player's view.** `Game.from_player_view(view, shadow=None, *,
+  seed=None)` returns a `Game` whose every field a player sees is the view's and whose hidden
+  parts are stand-ins: the RNG and seed, the draw pile's order (the view has it as a multiset),
+  the cards dealt face down (taken from the cards the deck view counts as remaining, and left
+  face down), a Stone Card's rank and suit. Its own view is the one it was built from, card ids
+  aside, and it offers the same legal actions and gives the same observation as the run. The
+  `shadow`, a game built from an earlier view and stepped with the agent's action since, carries
+  what the agent knows from its own actions and no view lists: the consumables it used, the
+  cards it played this ante (The Pillar), the sort it chose. Where the shadow's own rolls went
+  otherwise than the run's (the draws, a shop, a boss, a Glass Card), the view's outcome
+  replaces them, and the jokers seen, the bosses met, Gros Michel's extinction and the
+  per-round hands and discards follow. Sort ids follow the view's card ids (`Game.view_ids`);
+  `seed` gives other stand-ins. `ViewTracker` keeps the shadow across a run (`update(view)`,
+  `step(action)`, with factored or engine actions), and `BalatroGymnasiumEnv.view_game()`
+  keeps one fed with the env's steps, as Jackdaw Arena's `ArenaEnv.view_game()` does, so an
+  agent that searches or simulates runs the same code on both. In Rust:
+  `jackdaw_core::rebuild` ([api](docs/api.md#a-game-from-the-view); #66).
+- **What a face-down joker still shows.** The view's cards have `shape`, the card's size where
+  it isn't the standard one (`"half"`, `"photograph"`, `"square"`, `"wee"`: Half Joker,
+  Photograph, Square Joker and Wee Joker, card.lua:237-257), and `sellable`, whether its sell
+  button is active (a joker that isn't eternal, or a consumable; card.lua:1649). Both show face
+  down, as in the game: the back has the card's size, and the sell button shows whichever way
+  the card faces. Under Amber Acorn they place those four jokers and the eternal ones; on a
+  face-up card `sellable` repeats the eternal sticker (#65).
+- The view's `current_round.cash_out`: what the Cash Out button pays at round evaluation, as the
+  screen shows it (0 elsewhere).
+- `jackdaw_core::legal::can_sell`: the sell rule the legal actions, the action mask and the view
+  share.
+
 ## [0.3.1] - 2026-11-19
 
 The engine plays the same runs as 0.3.0, with the same observations, masks and action tables:

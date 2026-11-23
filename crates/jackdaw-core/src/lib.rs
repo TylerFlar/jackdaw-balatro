@@ -30,6 +30,7 @@ pub mod lua;
 mod packs;
 pub mod player_view;
 pub mod pools;
+pub mod rebuild;
 pub mod rng;
 mod round;
 pub mod rules;

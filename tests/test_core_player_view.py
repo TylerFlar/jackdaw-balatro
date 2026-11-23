@@ -311,10 +311,8 @@ def test_a_face_down_eternal_joker_cant_be_sold() -> None:
     assert [c["sellable"] for c in v["consumables"]] == [True]
     assert not any(c["sellable"] for c in v["hand"])
     up = game.player_view(KEY)["jokers"]
-    assert [j["sellable"] for j in up] == [not j["stickers"]["eternal"] for j in up] == [
-        False,
-        True,
-    ]
+    assert [j["sellable"] for j in up] == [False, True]
+    assert [not j["stickers"]["eternal"] for j in up] == [False, True]
 
 
 def test_sellable_is_what_the_rules_let_sell() -> None:

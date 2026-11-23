@@ -18,6 +18,7 @@ from jackdaw.core.game import (
     encode_action,
     random_seed,
 )
+from jackdaw.core.tracker import ViewTracker, engine_action
 from jackdaw.core.views import BlindView, CardView, HandLevel, Play, Score, ScoreEvent
 
 __all__ = [
@@ -32,7 +33,9 @@ __all__ = [
     "IllegalActionError",
     "Legality",
     "NotPortedError",
+    "ViewTracker",
     "decode_action",
     "encode_action",
+    "engine_action",
     "random_seed",
 ]

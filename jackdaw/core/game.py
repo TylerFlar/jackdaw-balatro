@@ -96,6 +96,46 @@ class Game:
         """The run a canonical snapshot describes."""
         return cls(_core.Game.from_snapshot(json.dumps(_to_json(snapshot))))
 
+    @classmethod
+    def from_player_view(
+        cls,
+        view: Mapping[str, Any],
+        shadow: Game | None = None,
+        *,
+        seed: str | None = None,
+    ) -> Game:
+        """A game built from a player view (:meth:`player_view`): every field the player sees
+        is the view's, and the rest comes from ``shadow`` or is a stand-in. For an agent that
+        plans with the engine where it has only the view (Jackdaw Arena), so that it plans on
+        the same kind of state locally. ``docs/api.md`` has the details.
+
+        - **The shadow** is a game built from an earlier view of the run, then stepped with the
+          action taken since. It carries what the agent knows from its own actions though no
+          view lists it: the consumables it used, the cards it played this ante, the hand sort
+          it chose. Without one, the hidden counters are a new run's, with what the view's
+          vouchers and jokers did to them. :class:`ViewTracker` keeps the shadow across a run.
+        - **Stand-ins**: the RNG and the seed (the shadow's, or ``seed``'s), the draw pile's
+          order (the view gives it as a multiset), face-down cards (taken from the cards the
+          deck view counts as remaining, and left face down: read only what a player sees and
+          they show no more than the view), a Stone Card's rank and suit, play counts.
+        - **Sort ids** follow the view's card ids (:attr:`view_ids`): a card a player follows
+          from one view to the next keeps its sort id.
+
+        ``seed`` gives the game a new RNG and the draw pile a new order: rebuilds under several
+        seeds are several guesses at what's hidden. The game's own :meth:`player_view` shows
+        what ``view`` shows, card ids aside (and ``last_play``: it never played that hand)."""
+        try:
+            text = json.dumps(view, allow_nan=False)
+        except ValueError:  # a non-finite number, which JSON writes as {"$f": ...}
+            text = json.dumps(_to_json(dict(view)))
+        return cls(_core.Game.from_player_view(text, None if shadow is None else shadow._g, seed))
+
+    @property
+    def view_ids(self) -> dict[int, int]:
+        """For a game built from a player view, the sort id of each card the view named, by
+        the card's id in the view (a copy and its steps keep them). Empty for other games."""
+        return dict(self._g.view_ids)
+
     def to_dict(self) -> dict[str, Any]:
         """The canonical snapshot (``jackdaw.snapshot/1``)."""
         return _from_json(json.loads(self._g.snapshot()))

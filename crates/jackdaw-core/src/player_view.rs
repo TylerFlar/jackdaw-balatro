@@ -319,6 +319,8 @@ pub fn player_view(game: &Game, key: u64) -> Value {
         ("discards_used", cr.discards_used),
         ("reroll_cost", cr.reroll_cost),
         ("free_rerolls", cr.free_rerolls),
+        // What the Cash Out button pays (round evaluation; 0 elsewhere).
+        ("cash_out", gs.sim.pending_cashout),
     ] {
         current_round.insert(k.into(), num(v));
     }

@@ -66,7 +66,7 @@ pub(crate) fn opt_num(x: Option<f64>) -> Value {
     x.map_or(Value::Null, num)
 }
 
-fn as_num(v: &Value, path: &str) -> Result<f64> {
+pub(crate) fn as_num(v: &Value, path: &str) -> Result<f64> {
     if let Some(x) = v.as_f64() {
         return Ok(x);
     }
@@ -362,7 +362,7 @@ pub(crate) fn ability_json(c: &Card) -> Value {
     Value::Object(m)
 }
 
-fn ability_from(v: &Value, center: CenterId, path: &str) -> Result<Ability> {
+pub(crate) fn ability_from(v: &Value, center: CenterId, path: &str) -> Result<Ability> {
     let mut o = Obj::new(v, path)?;
     let mut a = Ability {
         mult: o.num("mult")?,

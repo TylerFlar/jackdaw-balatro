@@ -36,7 +36,7 @@ impl DebuffRule {
 }
 
 /// The empty blind between rounds (`set_blind(nil)`).
-fn empty_blind() -> BlindState {
+pub(crate) fn empty_blind() -> BlindState {
     BlindState {
         key: None,
         chips: 0.0,
