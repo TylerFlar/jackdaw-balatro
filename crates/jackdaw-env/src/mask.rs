@@ -12,6 +12,7 @@ use jackdaw_core::action::Action;
 use jackdaw_core::area::AreaId;
 use jackdaw_core::card::{Card, EditionKind};
 use jackdaw_core::game::Game;
+use jackdaw_core::legal::can_sell;
 use jackdaw_core::state::{BlindSlot, HandSort, Phase};
 use jackdaw_data::CenterSet;
 
@@ -247,16 +248,15 @@ impl ActionMask {
     fn sell_jokers(&mut self, game: &Game) {
         let jokers = game.gs.areas.jokers();
         self.entities(ActionType::SellJoker, jokers.len(), |i| {
-            !jokers[i].ability.eternal
+            can_sell(&jokers[i], AreaId::Jokers)
         });
     }
 
     fn sell_consumables(&mut self, game: &Game) {
-        self.entities(
-            ActionType::SellConsumable,
-            game.gs.areas.consumables().len(),
-            |_| true,
-        );
+        let consumables = game.gs.areas.consumables();
+        self.entities(ActionType::SellConsumable, consumables.len(), |i| {
+            can_sell(&consumables[i], AreaId::Consumables)
+        });
     }
 
     /// UseConsumable: the consumables usable now with some selection.

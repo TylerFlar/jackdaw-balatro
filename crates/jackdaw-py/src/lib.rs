@@ -49,6 +49,13 @@ struct Game {
     encoder: Encoder,
     /// The action mask's buffers, reused by every `action_mask()` call.
     mask: ActionMask,
+    /// For a game built from a player view (`from_player_view`), the sort id each card of the
+    /// view got, by view id. A copy and the steps keep it, so the game can be the next
+    /// rebuild's shadow.
+    view_ids: jackdaw_core::rebuild::ViewIds,
+    /// The playing cards `_step_tracked` steps destroyed since `from_player_view` built the
+    /// game: the next rebuild brings back those the view shows still there.
+    gone: Vec<jackdaw_core::card::Card>,
 }
 
 impl Game {
@@ -57,6 +64,8 @@ impl Game {
             inner,
             encoder: Encoder::new(),
             mask: ActionMask::new(),
+            view_ids: jackdaw_core::rebuild::ViewIds::new(),
+            gone: Vec::new(),
         }
     }
 }
@@ -357,6 +366,18 @@ impl Game {
         self.inner.step(&action).map_err(step_error)
     }
 
+    /// ``step``, keeping the playing cards it destroys for the next ``from_player_view`` that
+    /// builds on this game (``jackdaw.core.ViewTracker`` steps its shadow so).
+    fn _step_tracked(&mut self, action: &str) -> PyResult<()> {
+        let before: Vec<jackdaw_core::card::Card> = self.inner.playing_cards().copied().collect();
+        self.step(action)?;
+        let alive: std::collections::HashSet<u32> =
+            self.inner.playing_cards().map(|c| c.sort_id).collect();
+        self.gone
+            .extend(before.into_iter().filter(|c| !alive.contains(&c.sort_id)));
+        Ok(())
+    }
+
     /// What ``BalatroEnvironment`` reads from the run: ``(obs, rows, mask, state, shop_splits)``,
     /// the observation and mask as ``observation()`` and ``action_mask()`` give them, the
     /// ``GameState`` summary, and the shop's card, voucher and booster counts. With
@@ -604,6 +625,47 @@ impl Game {
     #[staticmethod]
     fn _player_view_card_id(key: u64, sort_id: u32, epoch: u32) -> u64 {
         jackdaw_core::player_view::card_id(key, sort_id, epoch)
+    }
+
+    /// A game built from a player view (JSON text, ``jackdaw.player_view/1``): every field the
+    /// player sees is the view's, and the hidden parts come from ``shadow`` (a game built from
+    /// an earlier view of the run, stepped with the agent's actions since) or a new run, or are
+    /// stand-ins. ``seed`` gives it a new RNG and the draw pile a new order.
+    /// (``jackdaw_core::rebuild``.)
+    #[staticmethod]
+    #[pyo3(signature = (view, shadow=None, seed=None))]
+    fn from_player_view(
+        view: &str,
+        shadow: Option<PyRef<'_, Game>>,
+        seed: Option<&str>,
+    ) -> PyResult<Self> {
+        let value: serde_json::Value = serde_json::from_str(view)
+            .map_err(|e| value_error(format!("player view: bad JSON: {e}")))?;
+        let base = shadow.as_ref().map(|g| jackdaw_core::rebuild::Shadow {
+            game: &g.inner,
+            ids: &g.view_ids,
+            gone: &g.gone,
+        });
+        let rebuilt =
+            jackdaw_core::rebuild::from_player_view(&value, base, seed).map_err(value_error)?;
+        let mut game = Game::wrap(rebuilt.game);
+        game.view_ids = rebuilt.ids;
+        Ok(game)
+    }
+
+    /// For a game built from a player view: the sort id of each card the view named, by its id
+    /// in the view. Empty for other games.
+    #[getter]
+    fn view_ids(&self) -> std::collections::HashMap<u64, u32> {
+        self.view_ids.clone()
+    }
+
+    /// A player view (JSON text) with its card ids replaced by the order they first appear in:
+    /// two views that show the same thing under other ids compare equal. For tests.
+    #[staticmethod]
+    fn _player_view_without_ids(view: &str) -> PyResult<String> {
+        let value: serde_json::Value = serde_json::from_str(view).map_err(value_error)?;
+        Ok(jackdaw_core::rebuild::without_ids(&value).to_string())
     }
 
     /// Each card's ``(sort_id, view_epoch, wheel_flipped, juice)`` in ``area``, in order: the

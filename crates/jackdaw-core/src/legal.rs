@@ -14,6 +14,15 @@ use crate::card::EditionKind;
 use crate::game::{Game, LuaState};
 use crate::state::{BlindSlot, HandSort};
 
+/// Whether the card at `area` can be sold: `Card:can_sell_card` (card.lua:1649-1660) without the
+/// moments the button is greyed out for every card (a hand in play, the controller locked). Its
+/// area must be a `'joker'` one, which the jokers' and the consumables' are (game.lua:2235-2245),
+/// and the card not eternal. The sell button shows whichever way the card faces
+/// (`Card:highlight`, card.lua:4582), so a face-down joker shows this too.
+pub fn can_sell(card: &crate::card::Card, area: AreaId) -> bool {
+    matches!(area, AreaId::Jokers | AreaId::Consumables) && !card.ability.eternal
+}
+
 /// `n` choose `k`, in lexicographic order.
 fn combinations(n: usize, k: usize) -> Vec<Vec<usize>> {
     let mut out = Vec::new();
@@ -191,19 +200,12 @@ impl Game {
     }
 
     fn sell_actions(&self, out: &mut Vec<Action>) {
-        for (i, j) in self.gs.areas.jokers().iter().enumerate() {
-            if !j.ability.eternal {
-                out.push(Action::SellCard {
-                    area: AreaId::Jokers,
-                    index: i,
-                });
+        for area in [AreaId::Jokers, AreaId::Consumables] {
+            for (index, c) in self.gs.areas.get(area).iter().enumerate() {
+                if can_sell(c, area) {
+                    out.push(Action::SellCard { area, index });
+                }
             }
-        }
-        for i in 0..self.gs.areas.consumables().len() {
-            out.push(Action::SellCard {
-                area: AreaId::Consumables,
-                index: i,
-            });
         }
     }
 
