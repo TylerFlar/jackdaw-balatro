@@ -57,12 +57,16 @@ def agent(game: Game, rng: random.Random) -> Any:
     return action
 
 
-def decisions(runs: int, seed: int, steps: int = 400) -> Iterator[tuple[Game, Game, str]]:
+def decisions(
+    runs: int, seed: int, steps: int = 400, bosses: tuple[str, ...] = ()
+) -> Iterator[tuple[Game, Game, str]]:
     """``(run, rebuilt, where)`` at every decision of ``runs`` runs, the rebuilt game kept by a
-    :class:`ViewTracker` across each run."""
+    :class:`ViewTracker` across each run. ``bosses``: each run starts against one of them."""
     rng = random.Random(seed)
     for n in range(runs):
         game = Game.new(rng.choice(BACKS), rng.randint(1, 8), f"REBUILD{seed}_{n}")
+        if bosses:
+            game.apply_setup({"op": "force_boss", "key": bosses[n % len(bosses)]})
         tracker = ViewTracker()
         for step in range(steps):
             if game.phase == GamePhase.GAME_OVER:
@@ -103,6 +107,33 @@ def test_a_view_alone_builds_a_game_that_shows_it() -> None:
         assert alone.legal_actions() == game.legal_actions(), where
         n += 1
     assert n > 200
+
+
+def _ranks(game: Game) -> list[str | None]:
+    """The hand by rank and suit, a Stone Card's hidden ones left out."""
+    return [None if c.key == "m_stone" else c.front for c in game.hand]
+
+
+def test_face_down_stand_ins_fit_the_sorted_hand() -> None:
+    """The hand is sorted after every draw, face-down cards by what they hide, so where a
+    face-down card sits among the face-up ones shows its rank (or suit) range. Its stand-in fits
+    that place: where the run's hand is in order, sorting the rebuilt one moves nothing."""
+    checked = 0
+    for game, rebuilt, where in decisions(
+        runs=24, seed=4, bosses=("bl_wheel", "bl_house", "bl_mark", "bl_fish")
+    ):
+        if game.phase != GamePhase.SELECTING_HAND or not any(c.face_down for c in game.hand):
+            continue
+        mode = "suit" if game.to_dict()["game"]["hand_sort"] == "suit desc" else "rank"
+        real = game.clone()
+        real.step(A.SortHand(mode=mode))
+        if _ranks(real) != _ranks(game):
+            continue  # swapped since the draw: the places show nothing
+        trial = rebuilt.clone()
+        trial.step(A.SortHand(mode=mode))
+        assert _ranks(trial) == _ranks(rebuilt), where
+        checked += 1
+    assert checked > 50
 
 
 # ---------------------------------------------------------------------------

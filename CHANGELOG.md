@@ -10,8 +10,9 @@ while it is 0.x, a minor release (0.2 → 0.3) can break things, and a patch rel
 - **A game built from the player's view.** `Game.from_player_view(view, shadow=None, *,
   seed=None)` returns a `Game` whose every field a player sees is the view's and whose hidden
   parts are stand-ins: the RNG and seed, the draw pile's order (the view has it as a multiset),
-  the cards dealt face down (taken from the cards the deck view counts as remaining, and left
-  face down), a Stone Card's rank and suit. Its own view is the one it was built from, card ids
+  the cards dealt face down (taken from the cards the deck view counts as remaining, each
+  fitting where it sits in the hand that every draw sorts, and left face down), a Stone Card's
+  rank and suit. Its own view is the one it was built from, card ids
   aside, and it offers the same legal actions and gives the same observation as the run. The
   `shadow`, a game built from an earlier view and stepped with the agent's action since, carries
   what the agent knows from its own actions and no view lists: the consumables it used, the

@@ -293,7 +293,9 @@ code runs on the same kind of state in both places.
   back, stake and challenge, with what the view's vouchers and jokers do to them.
 - **Stand-ins**: the RNG and the seed (the shadow's, or a new run's of `seed`), the draw pile's
   order (the view gives it as a multiset), the cards dealt face down (taken from the cards the
-  deck view counts as remaining, and left face down), a Stone Card's rank and suit, play
+  deck view counts as remaining, and left face down; every draw sorts the hand, face-down cards
+  by what they hide, so each fits where it sits among the face-up ones, and sorting the game's
+  hand moves nothing a sort of the run's wouldn't), a Stone Card's rank and suit, play
   counts, the Orbital Tag hands and the round's Idol, Mail-In Rebate, Ancient Joker and Castle
   cards while nothing shows them, and the ante's voucher before its shop. An agent that reads
   only what a player sees (no face-down card's identity, no deck order) reads no more than the

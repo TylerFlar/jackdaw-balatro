@@ -16,9 +16,10 @@
 //!   back, stake and challenge, with what the view's vouchers and jokers do to the hidden
 //!   counters.
 //! - **Stand-ins** fill what nobody sees: the RNG and seed, the draw pile's order, the identity
-//!   of face-down cards (taken from the cards the deck view counts as remaining, and left face
-//!   down), Amber Acorn's shuffle (each face-down joker matched on its size and sell button),
-//!   a Stone Card's rank and suit, a card's play count.
+//!   of face-down cards (taken from the cards the deck view counts as remaining, each fitting
+//!   where it sits in the hand, which every draw sorts, and left face down), Amber Acorn's
+//!   shuffle (each face-down joker matched on its size and sell button), a Stone Card's rank and
+//!   suit, a card's play count.
 //! - **Sort ids** follow the view's card ids ([`ViewIds`]): a card a player follows from one
 //!   view to the next keeps its sort id.
 //!
@@ -347,6 +348,20 @@ impl Identity {
     }
 }
 
+/// Where a playing card goes when the hand is sorted (`Card:get_nominal`, card.lua:950), without
+/// the tie-breaks between look-alikes no player can use (the card's creation, its first suit):
+/// by rank, or with `suit_sort` by suit first. A Stone Card goes last whatever its hidden base.
+fn sort_key(id: &Identity, suit_sort: bool) -> f64 {
+    match id.front {
+        None => f64::NEG_INFINITY,
+        Some(front) => {
+            let b = crate::card::set_base(None, front, true);
+            let mult = if suit_sort { 1000.0 } else { 1.0 };
+            b.nominal() + b.suit_nominal() * mult + b.face_nominal()
+        }
+    }
+}
+
 /// A multiset of identities that keeps the order they first came in, so that walking it is
 /// deterministic.
 #[derive(Default)]
@@ -383,17 +398,39 @@ impl Bag {
 
     /// Take one of the cards, each as likely as the others.
     fn take_random(&mut self, rng: &mut Rng) -> Identity {
-        let mut k = element_index(self.len, rng.seed(STREAM));
+        self.take_random_where(rng, |_| true)
+            .expect("a card in the bag")
+    }
+
+    /// Take one of the cards for which `ok` holds, each as likely as the others.
+    fn take_random_where(
+        &mut self,
+        rng: &mut Rng,
+        ok: impl Fn(&Identity) -> bool,
+    ) -> Option<Identity> {
+        let n: usize = self
+            .order
+            .iter()
+            .filter(|id| ok(id))
+            .map(|id| self.counts[id])
+            .sum();
+        if n == 0 {
+            return None;
+        }
+        let mut k = element_index(n, rng.seed(STREAM));
         for id in &self.order {
-            let n = self.counts[id];
-            if k < n {
+            if !ok(id) {
+                continue;
+            }
+            let c = self.counts[id];
+            if k < c {
                 let id = *id;
                 self.take(&id);
-                return id;
+                return Some(id);
             }
-            k -= n;
+            k -= c;
         }
-        unreachable!("an index within the bag")
+        unreachable!("an index within the cards that fit")
     }
 
     /// Every card left, in the order they came in.
@@ -1178,34 +1215,102 @@ impl Builder<'_> {
             ));
         }
 
-        // Face down in the hand: a card the base knows keeps its stand-in while that is still
-        // among the remaining cards; the others get one of those at random.
-        let mut pick = Vec::new();
-        for &(k, i) in &down {
-            let vc = &lists[k][i];
-            match self.known.get(&vc.id).and_then(|&s| self.pool.take_sort(s)) {
-                Some((_, _, c)) if c.base.is_some() && remaining.take(&Identity::of(&c)) => {
-                    held[k][i] = Some(c);
-                }
-                Some((_, _, c)) => pick.push((k, i, Some(c.sort_id))),
-                None => pick.push((k, i, None)),
+        // Face down in the hand: the hand is sorted after every draw (`G.hand:sort()`), face-down
+        // cards by what they hide, so where the face-up cards are in order a face-down card's
+        // place shows its rank (or suit) range, as a player reads it. A card the base knows
+        // keeps its stand-in while that is still among the remaining cards and fits its place;
+        // the others get remaining cards at random, each run of them between the face-up
+        // neighbours' bounds, in order.
+        let suit_sort = self.gs.hand_sort == crate::state::HandSort::SuitDesc;
+        let keys: Vec<Option<f64>> = lists[0]
+            .iter()
+            .map(|vc| {
+                vc.face
+                    .as_ref()
+                    .map(|f| Identity::of_face(f, &vc.path).map(|id| sort_key(&id, suit_sort)))
+                    .transpose()
+            })
+            .collect::<Result<_>>()?;
+        let shown: Vec<f64> = keys.iter().flatten().copied().collect();
+        let sorted = shown.windows(2).all(|w| w[0] >= w[1]);
+        let any = (f64::NEG_INFINITY, f64::INFINITY);
+        // The keys a face-down hand card at `i` lies between: its nearest face-up neighbours'.
+        let bounds = |k: usize, i: usize| -> (f64, f64) {
+            if k != 0 || !sorted {
+                return any;
             }
-        }
-        for (k, i, sort_id) in pick {
-            let id = remaining.take_random(&mut self.gs.rng);
-            held[k][i] = Some(match sort_id {
-                Some(s) => {
-                    self.made.push(s);
-                    self.playing_card(&id, s)
+            let hi = keys[..i].iter().rev().flatten().next().copied();
+            let lo = keys[i + 1..].iter().flatten().next().copied();
+            (lo.unwrap_or(f64::NEG_INFINITY), hi.unwrap_or(f64::INFINITY))
+        };
+        let fits = |id: &Identity, (lo, hi): (f64, f64)| {
+            let k = sort_key(id, suit_sort);
+            lo <= k && k <= hi
+        };
+        // The base's card for each face-down card it knows by id.
+        let known: Vec<Option<Card>> = down
+            .iter()
+            .map(|&(k, i)| {
+                let id = lists[k][i].id;
+                self.known
+                    .get(&id)
+                    .and_then(|&s| self.pool.take_sort(s))
+                    .map(|(_, _, c)| c)
+                    .filter(|c| c.base.is_some())
+            })
+            .collect();
+        // Each run of face-down cards between the same face-up neighbours takes its cards
+        // together: first the stand-ins it had that still fit, then remaining cards that fit, at
+        // random. In a sorted hand they go in order.
+        let mut start = 0;
+        while start < down.len() {
+            let (k0, i0) = down[start];
+            let place = bounds(k0, i0);
+            let mut end = start + 1;
+            while end < down.len() && down[end].0 == k0 && bounds(down[end].0, down[end].1) == place
+            {
+                end += 1;
+            }
+            let mut ids: Vec<Option<Identity>> = known[start..end]
+                .iter()
+                .map(|c| {
+                    let id = Identity::of(c.as_ref()?);
+                    (fits(&id, place) && remaining.take(&id)).then_some(id)
+                })
+                .collect();
+            for slot in &mut ids {
+                if slot.is_none() {
+                    *slot = Some(
+                        remaining
+                            .take_random_where(&mut self.gs.rng, |id| fits(id, place))
+                            .unwrap_or_else(|| remaining.take_random(&mut self.gs.rng)),
+                    );
                 }
-                None => match self
-                    .pool
-                    .take_identity(&id, &[AreaId::Deck, AreaId::Discard, AreaId::Hand])
-                {
-                    Some((_, _, c)) => c,
-                    None => self.new_playing_card(&id),
-                },
-            });
+            }
+            let mut ids: Vec<Identity> = ids.into_iter().flatten().collect();
+            if k0 == 0 && sorted {
+                ids.sort_by(|a, b| sort_key(b, suit_sort).total_cmp(&sort_key(a, suit_sort)));
+            }
+            for (j, id) in (start..end).zip(ids) {
+                let (k, i) = down[j];
+                held[k][i] = Some(match known[j] {
+                    // Its own stand-in, where it went.
+                    Some(c) if Identity::of(&c) == id => c,
+                    // Another card under the same sort id.
+                    Some(c) => {
+                        self.made.push(c.sort_id);
+                        self.playing_card(&id, c.sort_id)
+                    }
+                    None => match self
+                        .pool
+                        .take_identity(&id, &[AreaId::Deck, AreaId::Discard, AreaId::Hand])
+                    {
+                        Some((_, _, c)) => c,
+                        None => self.new_playing_card(&id),
+                    },
+                });
+            }
+            start = end;
         }
         let mut cards: [Vec<Card>; 2] = [Vec::new(), Vec::new()];
         for k in 0..2 {
