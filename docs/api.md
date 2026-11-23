@@ -206,10 +206,20 @@ run; the environments derive theirs from the episode's sampler seed.
 **Cards** (in `hand`, `play`, `jokers`, `consumables`, the shop's lists and the pack's `cards`,
 in their order) have `id`, `face_down`, `key`, `front`, `suit`, `rank`, `edition`, `seal`,
 `debuff`, `cost`, `sell_cost`, `stickers` (`eternal`, `perishable`, `perish_tally`, `rental`,
-`pinned`), `ability` (as the snapshot writes it), `shaking` and `forced`. A face-down card shows
-only its `id`, its place, `shaking` and `forced`: every other field is `null`, as the game shows
-its back and a `?` for its sell value. A Stone Card has no `front`, `suit` or `rank`.
+`pinned`), `ability` (as the snapshot writes it), `shape`, `sellable`, `shaking` and `forced`.
+A face-down card shows only its `id`, its place, `shape`, `sellable`, `shaking` and `forced`:
+every other field is `null`, as the game shows its back and a `?` for its sell value. A Stone
+Card has no `front`, `suit` or `rank`.
 
+- **`shape`**: the card's size, where it isn't the standard one: `"half"` (Half Joker, 1.7
+  times shorter), `"photograph"` (Photograph, 1.2 times shorter), `"square"` (Square Joker) or
+  `"wee"` (Wee Joker, 0.7 times the size); `null` for every other card (card.lua:237-257). The
+  back is drawn at the card's size, so it shows face down too, which places these four jokers
+  under Amber Acorn.
+- **`sellable`**: the card's sell button is active (`Card:can_sell_card`, card.lua:1649): a
+  joker that isn't eternal, or a consumable; `false` anywhere else (the hand, the shop, a pack).
+  The sell button shows whichever way the card faces (card.lua:4582), so a face-down eternal
+  joker shows as one, though its sticker doesn't. Face up, it repeats `stickers.eternal`.
 - **`shaking`**: the joker shakes because its effect is ready (`juice_card_until`): Trading
   Card until the round's first discard, DNA until its first hand, Loyalty Card before the hand
   that gives the x mult, Invisible Joker once it can be sold for a copy. It shows face down
@@ -221,7 +231,7 @@ its back and a `?` for its sell value. A Stone Card has no `front`, `suit` or `r
 | `phase` | as `Game.phase` |
 | `run` | `back`, `stake`, `challenge`, `win_ante`, `won` |
 | `game` | `ante`, `round`, `dollars`, `chips` (the round's score), `skips`, `hands_played` (in the run), `unused_discards`, `hand_size`, `joker_slots`, `consumable_slots`, the interest, discount, inflation, rental and bankruptcy rules, `probabilities_normal`, `last_tarot_planet` (The Fool's card), `last_hand_played`, `most_played_hand` (The Ox's), `blind_on_deck`, `boss_rerolled` |
-| `current_round` | `hands_left`, `discards_left`, `hands_played`, `discards_used`, `reroll_cost`, `free_rerolls`; and, while one of those jokers shows face up (owned, in the shop or in a pack), `idol_card`, `mail_card`, `ancient_card`, `castle_card` |
+| `current_round` | `hands_left`, `discards_left`, `hands_played`, `discards_used`, `reroll_cost`, `free_rerolls`, `cash_out` (what the Cash Out button pays at round evaluation; 0 elsewhere); and, while one of those jokers shows face up (owned, in the shop or in a pack), `idol_card`, `mail_card`, `ancient_card`, `castle_card` |
 | `blind` | the blind being played: `key`, `name`, `chips`, `mult`, `dollars`, `boss`, `disabled`, `eye_hands` (The Eye), `mouth_hand` (The Mouth); `null` between rounds |
 | `blinds` | `Small`, `Big`, `Boss` as blind select shows them: `key`, `state`, `chips` to beat, skip `tag` and the Orbital Tag's `orbital_hand` |
 | `hands` | each poker hand's `level`, `chips`, `mult`, `played`, `played_this_round`, `visible` |
@@ -250,6 +260,70 @@ dealt face down, and which jokers shake. `Game.from_dict` makes the first up so 
 never shows more than the game would (the hand's face-down cards, and in a round that deals face
 down, the whole discard pile, count as remaining), and starts with no joker shaking. The ids
 start afresh there too.
+
+## A game from the view
+
+```python
+from jackdaw.core import Game, ViewTracker
+
+game = Game.from_player_view(view)                 # a Game: plan, preview, roll out on it
+
+tracker = ViewTracker()                            # one per run: what the run's actions taught
+game = tracker.update(env.player_view())
+action = plan(game)                                # a factored action or an engine action
+env.step_factored(action)
+tracker.step(action)
+game = tracker.update(env.player_view())           # built on the last game, stepped with it
+```
+
+An agent that plans with the engine (a search, rollouts, `preview_play`) needs a `Game`. In a
+local run it can take the run itself; where it has only the player's view (Jackdaw Arena) it
+has `Game.from_player_view(view, shadow=None, *, seed=None)`: a game whose every field a player
+sees is the view's, and whose hidden parts are stand-ins. Its own `player_view()` shows what
+`view` shows, card ids aside (and `last_play`, the scoring of a hand it never played), and it
+offers the same legal actions and gives the same observation as the run. So the same agent
+code runs on the same kind of state in both places.
+
+- **The shadow** is a game built from an earlier view of the run, then stepped with the action
+  taken since. It carries what the agent knows from its own actions though no view lists it:
+  the consumables it used (Satellite counts the Planets), the cards it played this ante (The
+  Pillar debuffs them when they come back from the draw pile), the hand sort it chose, the
+  counters its purchases moved (Troubadour's hands, the vouchers' rates). The view then
+  overwrites every field it shows. Without a shadow those come from a new run of the view's
+  back, stake and challenge, with what the view's vouchers and jokers do to them.
+- **Stand-ins**: the RNG and the seed (the shadow's, or a new run's of `seed`), the draw pile's
+  order (the view gives it as a multiset), the cards dealt face down (taken from the cards the
+  deck view counts as remaining, and left face down; every draw sorts the hand, face-down cards
+  by what they hide, so each fits where it sits among the face-up ones, and sorting the game's
+  hand moves nothing a sort of the run's wouldn't), a Stone Card's rank and suit, play
+  counts, the Orbital Tag hands and the round's Idol, Mail-In Rebate, Ancient Joker and Castle
+  cards while nothing shows them, and the ante's voucher before its shop. An agent that reads
+  only what a player sees (no face-down card's identity, no deck order) reads no more than the
+  view.
+- **Amber Acorn** turns the jokers face down and shuffles them. Each face-down joker gets one
+  of the shadow's that looks the same from the back: its size (`shape`), its sell button
+  (`sellable`), whether it shakes. Those that look alike may trade places, as for a player.
+- **Where the shadow rolled.** The shadow's step draws from its own RNG, so where the run drew
+  other cards, rolled another boss or voucher, or shattered another Glass Card, the view's
+  outcome replaces the shadow's. The sets that remember such outcomes follow the view's cards:
+  the jokers seen (`used_jokers`), the bosses met, Gros Michel's extinction, the per-round hands
+  and discards. A card the shadow's roll destroyed that the run kept comes back as it was. And
+  where the shadow's last hand didn't end the round the run's did, the round's end happens in
+  the rebuild (after a boss: the next ante's voucher, the end of the ante's plays).
+- **Sort ids** follow the view's card ids. `game.view_ids` maps each id the view named to the
+  card's sort id, and a card a player follows from one view to the next keeps its sort id.
+
+`seed` gives the game a new RNG, other face-down stand-ins and a new draw pile order: rebuilds
+of one view under several seeds are several guesses at what's hidden (a determinization). A
+rebuild takes about 0.2 ms from Python.
+
+`ViewTracker` keeps the shadow across a run: `update(view)` returns the game for a view (a
+copy, to step as you like), `step(action)` gives it the action taken (a `FactoredAction`, its
+`(action_type, entity_target, card_target)`, or an engine action). An action the last game
+refuses (what it can't see differed) is dropped, and the next game builds on the last one as
+it was. `reset()` starts another run; a view of a new run starts one too.
+`BalatroGymnasiumEnv.view_game()` and Jackdaw Arena's `ArenaEnv.view_game()` keep one for you,
+fed with the env's own steps.
 
 ## Building a state
 

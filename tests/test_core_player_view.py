@@ -24,6 +24,7 @@ from jackdaw.engine.actions import (
     NextRound,
     PlayHand,
     SelectBlind,
+    SellCard,
     SortHand,
 )
 
@@ -32,8 +33,11 @@ KEY = 0x5EC12E7
 
 FACE_DOWN_BOSSES = ("bl_wheel", "bl_house", "bl_mark", "bl_fish")
 IDENTITY = ("front", "base")
-#: What a face-down card shows: its place, its id, whether it shakes or is forced.
-SHOWN_FACE_DOWN = {"id", "face_down", "shaking", "forced"}
+#: What a face-down card shows: its place, its id, its size, whether it can be sold, whether it
+#: shakes or is forced.
+SHOWN_FACE_DOWN = {"id", "face_down", "shape", "sellable", "shaking", "forced"}
+#: The jokers whose card has its own size (card.lua:237-257), and the view's name for it.
+SHAPES = {"j_half": "half", "j_photograph": "photograph", "j_square": "square", "j_wee": "wee"}
 
 
 def _dealt(seed: str) -> Game:
@@ -263,6 +267,116 @@ def test_amber_acorn_deals_the_jokers_new_ids() -> None:
     up = game.player_view(KEY)["jokers"]
     assert not any(j["face_down"] for j in up)
     assert sorted(j["id"] for j in up) == sorted(down)
+
+
+# ---------------------------------------------------------------------------
+# What a face-down joker still shows (#65)
+# ---------------------------------------------------------------------------
+
+
+def _jokers_face_down(game: Game) -> Snapshot:
+    snap = game.to_dict()
+    for c in snap["areas"]["jokers"]:
+        c["facing"] = "back"
+    return snap
+
+
+def test_a_face_down_joker_keeps_its_shape() -> None:
+    """Four jokers have cards of their own size (card.lua:237-257), and the back is drawn at the
+    card's size (card.lua:213), so the size shows whichever way the card faces."""
+    game = _dealt("PVIEW_SHAPE")
+    keys = [*SHAPES, "j_joker"]
+    for key in keys:
+        game.debug_add(key)
+    up = game.player_view(KEY)["jokers"]
+    down = _view(_jokers_face_down(game))["jokers"]
+    for key, u, d in zip(keys, up, down, strict=True):
+        assert u["shape"] == d["shape"] == SHAPES.get(key), key
+        assert d["face_down"] and d["key"] is None
+    assert all(c["shape"] is None for c in game.player_view(KEY)["hand"])
+
+
+def test_a_face_down_eternal_joker_cant_be_sold() -> None:
+    """The sell button shows face down too (card.lua:4582), greyed out for an eternal joker
+    (card.lua:1649); only the price turns to ``?``. Face up it repeats the sticker."""
+    game = _dealt("PVIEW_ETERNAL")
+    game.debug_add("j_joker", eternal=True)
+    game.debug_add("j_greedy_joker")
+    game.debug_add("c_fool")
+    v = _view(_jokers_face_down(game))
+    assert [(j["face_down"], j["sellable"], j["sell_cost"]) for j in v["jokers"]] == [
+        (True, False, None),
+        (True, True, None),
+    ]
+    assert [c["sellable"] for c in v["consumables"]] == [True]
+    assert not any(c["sellable"] for c in v["hand"])
+    up = game.player_view(KEY)["jokers"]
+    assert [j["sellable"] for j in up] == [False, True]
+    assert [not j["stickers"]["eternal"] for j in up] == [False, True]
+
+
+def test_sellable_is_what_the_rules_let_sell() -> None:
+    """``sellable`` marks the cards the legal actions sell, and nothing in the shop or a pack."""
+    game = Game.new("b_red", 1, "PVIEW_SELL")
+    game.debug_add("j_joker", eternal=True)
+    game.debug_add("j_greedy_joker")
+    game.debug_add("c_fool")
+    game.debug_add("c_mercury")
+    game.debug_set(money=100)
+    game.step(SelectBlind())
+    game.debug_set(chips=game.blind.chips)
+    game.step(PlayHand(card_indices=(0,)))
+    game.step(CashOut())
+    v = game.player_view(KEY)
+    legal = {(a.area, a.card_index) for a in game.legal_actions() if isinstance(a, SellCard)}
+    shown = {
+        (area, i)
+        for area in ("jokers", "consumables")
+        for i, c in enumerate(v[area])
+        if c["sellable"]
+    }
+    assert shown == legal == {("jokers", 1), ("consumables", 0), ("consumables", 1)}
+    shop = v["shop"]
+    assert not any(c["sellable"] for k in ("jokers", "vouchers", "boosters") for c in shop[k])
+
+
+def test_face_down_jokers_alike_in_size_and_sale_show_nothing_more() -> None:
+    """Two face-down jokers of one size, both sellable or both not, can't be told apart; a joker
+    of another size or with another sell button can."""
+    game = _dealt("PVIEW_ALIKE")
+    for key, eternal in (
+        ("j_half", False),
+        ("j_joker", False),
+        ("j_greedy_joker", True),
+        ("j_lusty_joker", True),
+    ):
+        game.debug_add(key, eternal=eternal)
+    snap = _jokers_face_down(game)
+    identity = ("center", "ability", "edition", "costs", "stickers")
+
+    def swapped(i: int, j: int) -> Snapshot:
+        s = copy.deepcopy(snap)
+        _swap(s["areas"]["jokers"][i], s["areas"]["jokers"][j], identity)
+        return s
+
+    _check_hidden(snap, [("the two eternal jokers exchanged", swapped(2, 3))])
+    ref = _view(snap)
+    assert _view(swapped(0, 1)) != ref, "the Half Joker's size shows"
+    assert _view(swapped(1, 2)) != ref, "the eternal sticker's sell button shows"
+
+
+def test_amber_acorn_shuffles_the_jokers_but_not_their_sizes() -> None:
+    """After Amber Acorn turns the jokers face down and shuffles them, each one's size still
+    shows where it went."""
+    game = Game.new("b_red", 1, "PVIEW_ACORN_SHAPE")
+    game.apply_setup({"op": "force_boss", "key": "bl_final_acorn"})
+    for key in ("j_wee", "j_joker", "j_square", "j_photograph"):
+        game.debug_add(key)
+    game.step(SelectBlind())
+    jokers = game.player_view(KEY)["jokers"]
+    assert all(j["face_down"] for j in jokers)
+    assert [j["shape"] for j in jokers] == [SHAPES.get(c.key) for c in game.jokers]
+    assert sorted(j["shape"] or "" for j in jokers) == ["", "photograph", "square", "wee"]
 
 
 # ---------------------------------------------------------------------------

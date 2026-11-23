@@ -355,6 +355,14 @@ and with `env.record_scoring = True` the last hand's scoring events
 and show nothing else, and the ids are keyed from the episode's sampler seed, so the view holds
 no hidden information.
 
+`env.view_game()` returns that view as a `Game` to plan on: every field a player sees is the
+view's, the hidden parts are stand-ins (the draw pile's order, face-down cards, the RNG), and
+the env keeps it across the episode with its own steps, so it knows what the actions taught
+and no view lists (the consumables used, the cards played this ante). Jackdaw Arena's
+`ArenaEnv.view_game()` builds the same game from the same view, so a search or rollout agent
+runs the same code locally and on the Arena ([A game from the view](api#a-game-from-the-view)).
+`env.game` is the run itself, hidden cards and all.
+
 With `copy=False` it hands out the same values without allocating them each step: the observation's arrays and `info["action_mask"]` are views of buffers the env owns, which the next `reset` or `step` overwrites in place. Copy whatever you keep across steps (a previous observation, a rollout buffer that stores the arrays themselves); `action_masks()` still returns a fresh array. That goes for wrappers too, and some keep an episode's last observation across the `reset` that overwrites it: Stable-Baselines3's `DummyVecEnv` (its `info["terminal_observation"]`, which MaskablePPO reads for truncated episodes) and gymnasium's `SyncVectorEnv` in `SAME_STEP` mode (its `info["final_obs"]`). Keep the default under those. On the Rust engine this saves about a third of the wrapper's per-step time.
 
 ### With MaskablePPO

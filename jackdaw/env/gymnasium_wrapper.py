@@ -38,7 +38,7 @@ import numpy as np
 from gymnasium import spaces
 
 from jackdaw import _core
-from jackdaw.core import Game, IllegalActionError
+from jackdaw.core import Game, IllegalActionError, ViewTracker
 from jackdaw.core.game import _from_json
 from jackdaw.env.action_space import ACTION_VERSION, DEFAULT_MAX_FREE_MOVES, ActionType
 from jackdaw.env.balatro_env import BalatroEnvironment
@@ -390,6 +390,9 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         self._game_info: dict[str, Any] = {}
         self._view_key = _core._player_view_key(self._rng.state)
         self._record_scoring = False
+        # view_game(): the tracker it keeps once used, and its game for the current state.
+        self._view_tracker: ViewTracker | None = None
+        self._view_game: Game | None = None
         self._episode_max_ante: int = 1
         self._episode_blinds_beaten: int = 0
         # With copy=False: the buffers every reset and step writes, and the views handed out.
@@ -409,6 +412,9 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         options: dict[str, Any] | None = None,
     ) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
         super().reset(seed=seed)
+        if self._view_tracker is not None:
+            self._view_tracker.reset()
+            self._view_game = None
         if self._core is not None:
             return self._rust_reset(seed)
         if seed is not None:
@@ -434,6 +440,10 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         return self._output(obs), {"action_mask": self._output_mask()}
 
     def step(self, action: int) -> tuple[dict[str, np.ndarray], float, bool, bool, dict[str, Any]]:
+        if self._view_tracker is not None:
+            table = self._action_table
+            fa = table[int(action)] if 0 <= int(action) < len(table) else None
+            return self._tracked_step(fa, int(action))
         if self._core is not None:
             return self._rust_step(int(action))
         return self._generic_step(self._action_table[action])
@@ -464,6 +474,8 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         Raises :class:`~jackdaw.core.IllegalActionError` for an action the env doesn't offer
         (nothing changes)."""
         fa = _factored(action)
+        if self._view_tracker is not None:
+            return self._tracked_step(fa, None)
         if self._core is not None:
             return self._rust_step(fa)
         if not self.offers(fa):
@@ -481,6 +493,47 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         if self._core is not None:
             return _from_json(json.loads(self._core.player_view()))
         return self._run().player_view(self._view_key)
+
+    def view_game(self) -> Game:
+        """The run as :meth:`player_view` shows it: a :class:`~jackdaw.core.Game` built from the
+        view, its hidden parts stand-ins (:meth:`Game.from_player_view
+        <jackdaw.core.Game.from_player_view>`), and kept across the episode with the env's own
+        steps (:class:`~jackdaw.core.ViewTracker`), so it knows what the actions taught and no
+        view lists. Jackdaw Arena's ``ArenaEnv.view_game()`` builds the same game from the same
+        view: an agent that plans on it runs the same code locally and on the Arena (the run
+        itself, hidden cards and all, is :attr:`game`). A copy: step it as you like.
+
+        Once called, every later step of the env also rebuilds the game (about 0.2 ms)."""
+        if self._view_tracker is None:
+            self._view_tracker = ViewTracker()
+        if self._view_game is None:
+            self._view_game = self._view_tracker.update(self.player_view())
+        return self._view_game.clone()
+
+    def _tracked_step(
+        self, fa: FactoredAction | None, index: int | None
+    ) -> tuple[dict[str, np.ndarray], float, bool, bool, dict[str, Any]]:
+        """A step while :meth:`view_game` is in use: the tracker gets the state's game before
+        it (if :meth:`view_game` didn't build it), and the action after (``fa``: the factored
+        action, or the one at ``index`` in the table; ``None`` for an index past it)."""
+        assert self._view_tracker is not None
+        if self._view_game is None:
+            self._view_game = self._view_tracker.update(self.player_view())
+        if index is not None:
+            if self._core is not None:
+                out = self._rust_step(index)
+            else:
+                out = self._generic_step(self._action_table[index])
+        elif self._core is not None:
+            out = self._rust_step(fa)
+        elif not self.offers(fa):
+            raise IllegalActionError(f"{fa} is not an action the env offers here")
+        else:
+            out = self._generic_step(fa)
+        if fa is not None:
+            self._view_tracker.step(fa)
+        self._view_game = None
+        return out
 
     @property
     def record_scoring(self) -> bool:

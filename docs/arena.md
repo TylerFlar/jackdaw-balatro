@@ -81,6 +81,24 @@ Arena takes that freedom away:
    doesn't offer is refused, and nothing changes. `evaluate(..., view=True)` hands each episode's
    view to the chooser, which may return factored actions too.
 
+   An agent that plans with the engine (a search, rollouts, score previews) needs a game to
+   plan on. With jackdaw installed, `env.view_game()` builds one from the view: every field a
+   player sees is the view's, and the hidden parts are stand-ins, kept across the episode with
+   the actions the agent took ([A game from the view](api#a-game-from-the-view)). It is the
+   game `BalatroGymnasiumEnv.view_game()` gives locally, so the agent runs the same code on
+   both:
+
+   ```python
+   env = ArenaEnv(view=True)
+   obs, info = env.reset()
+   game = env.view_game()                   # a jackdaw Game, with nothing hidden in it
+   action = search(game)                    # your planner, on a copy it can step
+   obs, reward, terminated, truncated, info = env.step_factored(action)
+   ```
+
+   Steps by index leave the env no action to step the game with (the table is the server's),
+   so a planning agent takes factored steps.
+
 ## The track
 
 `red-1` is the protocol of `examples/`: Red Deck, white stake, a 2,000-step cap, and episodes
