@@ -5,6 +5,12 @@ while it is 0.x, a minor release (0.2 → 0.3) can break things, and a patch rel
 
 ## Unreleased
 
+## [0.3.2] - 2026-11-22
+
+The engine plays the same runs as 0.3.1, with the same observations, masks and action tables:
+nothing added here reaches a snapshot or a state hash. What's new is for agents that plan on
+the player's view: a game built from it, and what a face-down joker still shows.
+
 ### Added
 
 - **A game built from the player's view.** `Game.from_player_view(view, shadow=None, *,
