@@ -7,14 +7,14 @@ and `jackdaw.cli.smart_agent`, the repo's hand-written heuristic player.
 
 ## Results
 
-The demo run trained for 30.0M environment steps in 40 min on 6 CPU threads for torch
+The demo run trained for 30.0M environment steps in 52 min on 6 CPU threads for torch
 and 2 for the envs. Every agent then played the same 1,000 runs (seeds 10,000,000 to
 10,000,999, Red Deck, stake 1), which training and validation never saw:
 
 | Agent | Mean ante reached | Blinds beaten per run | Win rate | Mean episode reward | Mean episode length (steps) |
 |---|---:|---:|---:|---:|---:|
-| MaskablePPO, greedy | 2.08 | 4.52 ± 0.13 | 0% | +1.23 | 65 |
-| MaskablePPO, sampled | 1.99 | 4.18 ± 0.12 | 0% | +1.11 | 58 |
+| MaskablePPO, greedy | 2.15 | 4.73 ± 0.13 | 0.1% | +1.28 | 68 |
+| MaskablePPO, sampled | 2.05 | 4.35 ± 0.12 | 0% | +1.17 | 62 |
 | `smart_agent` | 2.31 | 5.38 ± 0.13 | 0% | +1.48 | 50 |
 | Random legal action | 1.00 | 0.001 ± 0.001 | 0% | +0.02 | 9 |
 
@@ -23,24 +23,22 @@ and 2 for the envs. Every agent then played the same 1,000 runs (seeds 10,000,00
 - Blinds beaten: the mean and its standard error. The reward is the training reward (below),
   summed over the episode.
 - Episodes end when the run is lost or won, or after 2,000 steps.
-- The run trained and played on jackdaw 0.2's observation. Since 0.3.0 the observation is the
-  player's view ([Player view](../docs/rl-guide.md#player-view)), which leaves out a few card
-  fields a player can't see, so the saved model now gets inputs it didn't train on, and a new
-  run's numbers may differ a little.
+- The run trained and played on jackdaw 0.4: the player's view as the observation
+  ([Player view](../docs/rl-guide.md#player-view)), and action space 3
+  ([the action space's version](#how-the-training-is-set-up), below).
 
-From beating essentially no blind, PPO learns to clear about four and a half per run, and
-its best runs reach ante 8 (`smart_agent`'s best: ante 7). The hand-written `smart_agent`
-is still better on average, by almost a blind per run, and no agent wins a run. Learning
-hadn't stopped: the training rollouts gained 0.3 blinds per episode over the last 10M
-steps.
+From beating essentially no blind, PPO learns to clear about four and three quarters per run,
+and one of its greedy runs wins (`smart_agent`'s best: ante 7). The hand-written
+`smart_agent` is still better on average, by about two thirds of a blind per run. Learning
+hadn't stopped: the training rollouts gained 0.3 blinds per episode over the last 10M steps.
 
-Playing the most likely action (greedy) is the stronger way to use the policy here. The
-previous demo's greedy policy looped on free moves until the step cap; the cap on free
-moves in a row (below) ended that, and no episode reaches the step cap now.
+Playing the most likely action (greedy) is the stronger way to use the policy here. A demo
+trained before the cap on free moves in a row (below) had a greedy policy that looped on free
+moves until the step cap; the cap ended that, and no episode reaches the step cap now.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="results/learning_curve_dark.png">
-  <img src="results/learning_curve.png" alt="Learning curves over 30M environment steps. Blinds beaten per episode rises from 0 to about 3 in the first 3M steps, then slowly to about 4.1 by 30M; the greedy evaluation sits above the sampled one and the training rollouts, and smart_agent's 5.4 stays above all three. Ante reached and episode reward follow the same pattern; episodes settle around 60 steps.">
+  <img src="results/learning_curve.png" alt="Learning curves over 30M environment steps. Blinds beaten per episode rises from 0 to about 3 in the first 5M steps, then slowly to about 4.2 by 30M; the greedy evaluation mostly sits above the sampled one and the training rollouts, and smart_agent's 5.4 stays above all three. Ante reached and episode reward follow the same pattern; episodes settle around 55 steps.">
 </picture>
 
 The four panels show the training rollouts (episodes that ended in each rollout, smoothed), and
@@ -156,8 +154,9 @@ episode reaches the step cap.
 | Episodes | Red Deck, stake 1, ended by a loss, a win or 2,000 steps |
 | Threads | `--threads 6` caps torch's and the BLAS libraries' thread pools; `--env-threads 2` the vector env's |
 
-MaskablePPO trained at 12.4K steps/s on average (30.0M steps in 40 min), against 7.8K for
-the previous demo, which ran 32 `BalatroGymnasiumEnv`s in SB3's `DummyVecEnv`. torch's
+MaskablePPO trains at about 12.3K steps/s with the cores to itself (30M steps in 40 min),
+against 7.8K for an earlier demo, which ran 32 `BalatroGymnasiumEnv`s in SB3's `DummyVecEnv`.
+The demo run shared the machine with other jobs for part of the way and averaged 9.6K. torch's
 OpenMP threads spin between calls, so training keeps its cores busy throughout. With
 `KMP_BLOCKTIME=0` in the environment they sleep instead, at the cost of speed.
 
@@ -171,7 +170,9 @@ take them often. (An earlier demo model, trained before joker swaps became legal
 and on the cash-out screen, spent 97% of its sampled moves on those swaps on the newer engine,
 and its blinds beaten per run fell from 4.1 to 2.2.) `config.json` records
 `jackdaw.env.ACTION_VERSION`, and `evaluate_agents.py` refuses a model trained on another
-version. Retrain (or fine-tune) a policy when it changes.
+version. Retrain (or fine-tune) a policy when it changes. The demo model was retrained for
+version 3 (jackdaw 0.4), where Aura is used on a card the policy picks and a drag counts once
+toward the free-move cap.
 
 ## Files
 
