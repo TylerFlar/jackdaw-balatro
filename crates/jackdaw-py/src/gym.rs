@@ -258,7 +258,8 @@ impl GymEnv {
     /// An env at the start of a run. ``reward`` is ``"sparse"``, ``"blind_progress"``,
     /// ``"shaped"`` (with ``weights``: step_cost, shop_step_cost, blind_beaten, boss_beaten,
     /// hands_left, score_progress, win, loss) or ``"none"``. After ``max_free_moves`` free moves
-    /// (swaps, sorts) in a row the table holds none until another action (``None``: no cap).
+    /// (swaps, sorts; a drag counts once) in a row the table holds none until another action,
+    /// but the swap that carries the last drag on (``None``: no cap).
     #[new]
     #[pyo3(signature = (
         back, stake, seed, challenge, rng_seed, max_steps, end_on_win, reward, weights=None,

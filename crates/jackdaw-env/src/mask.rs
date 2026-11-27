@@ -16,7 +16,7 @@ use jackdaw_core::legal::can_sell;
 use jackdaw_core::state::{BlindSlot, HandSort, Phase};
 use jackdaw_data::CenterSet;
 
-use crate::action::{ActionType, NUM_ACTION_TYPES, default_targets};
+use crate::action::{ActionType, FactoredAction, NUM_ACTION_TYPES, default_targets};
 
 /// Which actions count as legal (`Legality` in Python).
 #[derive(Clone, Copy, Default)]
@@ -109,13 +109,33 @@ impl ActionMask {
 
     /// Mask out the free moves ([`ActionType::is_free`]), for an env at its cap of them.
     pub fn forbid_free_moves(&mut self) {
-        for t in ActionType::ALL {
-            if t.is_free() {
-                self.type_mask[t.index()] = false;
-                self.has_entity[t.index()] = false;
+        self.forbid_free_moves_but(None);
+    }
+
+    /// [`ActionMask::forbid_free_moves`], but keep `carry`, the swap that carries the current
+    /// drag on ([`crate::env::FreeMoves::carry`]), if the mask allows it: a drag counts once
+    /// toward the cap, however far it goes.
+    pub fn forbid_free_moves_but(&mut self, carry: Option<FactoredAction>) {
+        let keep = carry.and_then(|a| {
+            let e = a.entity_target? as usize;
+            let allowed = self.entity_mask(a.action_type)?.get(e).copied()?;
+            (allowed && a.action_type.is_free()).then_some((a.action_type, e))
+        });
+        for t in ActionType::ALL.into_iter().filter(|t| t.is_free()) {
+            match keep {
+                Some((kept, e)) if kept == t => {
+                    for (i, b) in self.entity[t.index()].iter_mut().enumerate() {
+                        *b = i == e;
+                    }
+                }
+                _ => {
+                    self.type_mask[t.index()] = false;
+                    self.has_entity[t.index()] = false;
+                }
             }
         }
-        self.order.retain(|t| !t.is_free());
+        let kept = keep.map(|(t, _)| t);
+        self.order.retain(|&t| !t.is_free() || Some(t) == kept);
     }
 
     fn clear(&mut self, n_hand: usize) {

@@ -137,8 +137,10 @@ same settings otherwise:
 | the demo's reward, after 1M steps | 2.56 / 1.55 |
 
 **Free moves.** The envs allow at most 10 free moves (swaps and sorts) in a row, the default
-`max_free_moves`. The previous demo was trained without the cap, and its greedy policy looped:
-in some states its most likely action was a free move (mostly swapping two cards in the hand,
+`max_free_moves`, counting a drag once: a run of swaps that carries one card the same way, as the
+game's drag does ([Free moves](../docs/rl-guide.md#free-moves)). A run of free moves can be
+longer than ten swaps, but it still ends. A demo trained without the cap looped: in some states
+its greedy policy's most likely action was a free move (mostly swapping two cards in the hand,
 or two jokers in the shop), and from the next state another one. 48% of its greedy episodes ran
 into the 2,000-step cap, and it beat 2.65 blinds per run against 3.74 sampled. With the cap, no
 episode reaches the step cap.

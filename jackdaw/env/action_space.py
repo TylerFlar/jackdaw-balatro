@@ -92,7 +92,10 @@ class ActionType(IntEnum):
 
 
 #: The action types that only reorder cards (joker and hand swaps, the hand sorts): the run
-#: doesn't move on, so the envs cap how many come in a row (``max_free_moves``).
+#: doesn't move on, so the envs cap how many come in a row (``max_free_moves``). A swap moves a
+#: card one place, as the game's drag does each time it carries the card past a neighbour, and
+#: the cap counts a drag once: a swap that carries on the card the last swap moved, the same
+#: way, is part of its drag.
 FREE_ACTION_TYPES: frozenset[ActionType] = frozenset(
     {
         ActionType.SwapJokersLeft,
@@ -107,12 +110,14 @@ FREE_ACTION_TYPES: frozenset[ActionType] = frozenset(
 #: The action space's version: what the action types mean, which ones a mask allows where, and
 #: how the Gym action table is built. A policy is tied to the masks it was trained with, so this
 #: goes up whenever they change. 2 (jackdaw 0.2): reordering follows the game's drag and drop,
-#: and the envs cap consecutive free moves. It stays the same when the table only loses entries
+#: and the envs cap consecutive free moves. 3 (jackdaw 0.4): Aura is used on a card the policy
+#: picks, and the cap counts a drag once. It stays the same when the table only loses entries
 #: no policy needs (ones the engine refuses, or the same move as an entry that stays), as in
 #: 0.2.5 against Cerulean Bell.
 ACTION_VERSION: int = _core.ACTION_VERSION
 
-#: The envs' default cap on free moves in a row (enough to put five jokers in any order).
+#: The envs' default cap on free moves in a row. A drag counts once however far it carries its
+#: card, so ten put up to eleven cards in any order.
 DEFAULT_MAX_FREE_MOVES: int = _core.DEFAULT_MAX_FREE_MOVES
 
 
@@ -178,6 +183,10 @@ def get_consumable_target_info(game: Game, area: str, index: int) -> tuple[int, 
     (``"consumables"`` or ``"pack_cards"``): how many hand cards a policy picks as its
     ``card_target``.  If ``needs_targets`` is False, ``card_target`` should be ``None``.
     Raises ``ValueError`` past the end of the area.
+
+    Any hand card will do, except that Aura (``(1, 1, True)``) takes one without an edition
+    (card.lua:1544-1546): :func:`jackdaw.env.consumable_targets.get_valid_target_cards` lists
+    the cards a consumable takes.
 
     Against Cerulean Bell a use highlights the forced card (:attr:`ActionMask.forced_card`)
     as well as the ``card_target``, and the bounds count the two together.  Include the

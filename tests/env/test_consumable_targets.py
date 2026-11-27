@@ -399,24 +399,26 @@ class TestPackOpeningEdgeCase:
 # Tests: The specs against the Rust engine
 # =========================================================================
 
-# Their targeting isn't in their config (card.lua's can_use_consumeable): the engine's
-# targeting info follows max_highlighted only.
-_SPECIAL = {"c_aura", "c_sigil", "c_ouija"}
-
 
 def test_specs_agree_with_the_engines_targeting_info():
-    """Every Tarot, Planet and Spectral: the spec's bounds are the engine's."""
+    """Every Tarot, Planet and Spectral: the spec's bounds are the engine's, Aura's and the
+    whole-hand Sigil and Ouija's included (#69), and so are the cards it takes."""
     keys = sorted(
         k for k, v in load("centers").items() if v.get("set") in ("Tarot", "Planet", "Spectral")
     )
     game = Game.new("b_red", 1, "TARGET_SPECS")
     game.step(SelectBlind())
+    snap = game.to_dict()
+    snap["areas"]["hand"][2]["edition"] = {"foil": True, "chips": 50, "type": "foil"}
+    game = Game.from_dict(snap)
     for key in keys:
-        if key in _SPECIAL:
-            continue
         run = game.clone()
         run.debug_add(key)
         (card,) = run.consumables
         spec = get_consumable_target_spec(card)
         info = get_consumable_target_info(run, "consumables", 0)
         assert (spec.min_targets, spec.max_targets, spec.needs_card_targets) == info, key
+        if spec.needs_card_targets:
+            assert get_valid_target_cards(card, run.hand) == run._g.target_cards(
+                "consumables", 0
+            ), key

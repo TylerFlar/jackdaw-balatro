@@ -193,10 +193,13 @@ def _offers(mask: GameActionMask, info: dict[str, Any], fa: FactoredAction) -> b
         em = mask.entity_masks.get(t)
         return em is not None and entity is not None and 0 <= entity < len(em) and bool(em[entity])
 
-    def selection_ok(min_select: int, max_select: int) -> bool:
+    def selection_ok(min_select: int, max_select: int, takes: Sequence[int] | None = None) -> bool:
         if cards is None:
             return False
         legal = np.nonzero(mask.card_mask)[0].tolist()
+        if takes is not None:
+            taken = set(takes)
+            legal = [c for c in legal if c in taken]
         first, stop = _selection_sizes(len(legal), min_select, max_select)
         sel = [int(c) for c in cards]
         return (
@@ -215,13 +218,12 @@ def _offers(mask: GameActionMask, info: dict[str, Any], fa: FactoredAction) -> b
     if t in _TARGETED_ENTITY_SOURCES:
         if not entity_ok():
             return False
+        area, g = _TARGETED_ENTITY_SOURCES[t], info["game"]._g
         try:
-            lo, hi, needs = info["game"]._g.consumable_target_info(
-                _TARGETED_ENTITY_SOURCES[t], entity
-            )
+            lo, hi, needs = g.consumable_target_info(area, entity)
         except ValueError:  # past the end of the area
             return False
-        return selection_ok(lo, hi) if needs else cards is None
+        return selection_ok(lo, hi, g.target_cards(area, entity)) if needs else cards is None
     return False
 
 
@@ -267,7 +269,8 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         :func:`~jackdaw.env.rewards.sparse_reward`.
     max_free_moves:
         After this many free moves in a row (joker and hand swaps, hand sorts) the
-        table holds none until another action.  ``None``: no cap.
+        table holds none until another action, but the swap that carries the last
+        drag on: a drag counts once, however many swaps it takes.  ``None``: no cap.
     on_refusal:
         ``"truncate"`` (default) ends the episode on a table action the engine
         refuses, with the reason in ``info["balatro/refused"]``; ``"raise"`` raises
@@ -762,6 +765,8 @@ class BalatroGymnasiumEnv(gymnasium.Env):
                         if needs:
                             if legal_cards is None:
                                 legal_cards = tuple(np.nonzero(mask.card_mask)[0].tolist())
+                            # The legal cards it takes: Aura's have no edition (#69).
+                            takes = set(game._g.target_cards(area, e_idx))
                             # A use highlights Cerulean Bell's card first, then the
                             # selection: without the card it is one card more than it
                             # names, and the same use as the selection that names it.
@@ -770,7 +775,7 @@ class BalatroGymnasiumEnv(gymnasium.Env):
                                 _card_actions(
                                     t,
                                     e_idx,
-                                    legal_cards,
+                                    tuple(c for c in legal_cards if c in takes),
                                     min_cards,
                                     max_cards,
                                     self._rng,
