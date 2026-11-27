@@ -5,6 +5,8 @@ while it is 0.x, a minor release (0.2 → 0.3) can break things, and a patch rel
 
 ## Unreleased
 
+## [0.4.0] - 2026-11-27
+
 The engine plays the same runs as 0.3.2, with the same observations: every ended episode
 Jackdaw Arena publishes replays with it to its recorded final state. What changes is the action
 space, version 3: two moves the game allows that the envs didn't. A policy trained on version 2
@@ -39,6 +41,9 @@ now meets table entries it never saw: retrain or fine-tune it.
 - `ACTION_VERSION` is 3 ([rl-guide](docs/rl-guide.md#saving-a-policy-the-action-version)).
 - In Rust, `ActionTable::enumerate_with` and `gym::offers_with` take which hand cards each
   consumable takes (`jackdaw_env::action::takes_card`).
+- The training demo in `examples/` is retrained on action space 3, since `evaluate_agents.py`
+  refuses a model of another version: its greedy policy beats 4.73 blinds per run on the test
+  seeds, up from 4.52, and wins one of them (#72).
 
 ## [0.3.2] - 2026-11-22
 
