@@ -638,7 +638,8 @@ mod tests {
         env.step_factored(swap(ActionType::SwapHandRight, 3))
             .unwrap();
         assert_eq!(env.free_moves().count(), 2);
-        // The card the last swap moved left is at 2 now; carrying it on is SwapHandLeft(2).
+        // The hand is back as it was. Left again: a third drag, which reaches the cap, and the
+        // one free move left is its carry-on, SwapHandLeft(3).
         env.step_factored(swap(ActionType::SwapHandLeft, 4))
             .unwrap();
         assert_eq!(env.free_moves().count(), 3);

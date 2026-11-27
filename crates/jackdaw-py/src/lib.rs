@@ -787,7 +787,7 @@ mod _core {
     #[pymodule_export]
     const ACTION_VERSION: u32 = jackdaw_env::ACTION_VERSION;
 
-    /// The envs' default cap on free moves (swaps, sorts) in a row.
+    /// The envs' default cap on free moves (swaps, sorts) in a row, a drag counting once.
     #[allow(non_upper_case_globals)]
     #[pymodule_export]
     const DEFAULT_MAX_FREE_MOVES: u32 = jackdaw_env::env::DEFAULT_MAX_FREE_MOVES;

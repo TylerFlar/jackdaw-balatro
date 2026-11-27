@@ -152,7 +152,7 @@ The swaps follow the game's drag and drop: the jokers can be reordered whenever 
 
 ### Free moves
 
-The swaps and sorts (types 15-20, `FREE_ACTION_TYPES`) cost nothing in the game, so a policy could take them forever. After `max_free_moves` of them in a row (10 by default) the mask offers none until another action. `max_free_moves=None` turns the cap off. Every env applies it the same way.
+The swaps and sorts (types 15-20, `FREE_ACTION_TYPES`) cost nothing in the game, so a policy could take them forever. After `max_free_moves` of them in a row (10 by default, a drag counting once: below) the mask offers none until another action, but the swap that carries the last drag on. `max_free_moves=None` turns the cap off. Every env applies it the same way.
 
 The cap counts moves as a player makes them: a sort once, and a drag once, however far it carries its card. The game carries a dragged card past one neighbour at a time (`CardArea:align_cards` sorts the area by position every frame, cardarea.lua:448, 463 and 528), and a swap is one of those steps: a swap that moves on the card the last swap moved, the same way (`SwapHandLeft(3)` right after `SwapHandLeft(4)`), is part of its drag and doesn't count again. At the cap the mask still offers that swap, so the last drag can go as far as any. A swap back counts as a new drag, so the cap still ends a stall. With drags counted once, the default puts up to eleven cards in any order: reversing a hand of eight is 28 swaps and seven drags.
 
@@ -166,7 +166,7 @@ env = BalatroEnvironment(
     max_steps=10_000,          # steps before truncation
     seed_prefix="TRAIN",       # prefix for deterministic seed generation
     end_on_win=True,           # end the episode when ante 8 is beaten
-    max_free_moves=10,         # free moves in a row before the mask holds none; None: no cap
+    max_free_moves=10,         # free moves in a row (a drag counts once) before the cap; None: no cap
     on_refusal="truncate",     # an action the engine refuses: "truncate" or "raise"
 )
 ```
