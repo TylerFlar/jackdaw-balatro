@@ -9,9 +9,10 @@ Given a consumable (a :class:`jackdaw.core.CardView` or its center key), determi
 The constraints come from the center's config in ``centers.json``
 (``max_highlighted``, ``min_highlighted``, ``mod_num``; card.lua:1564-1568), with
 overrides for the consumables whose targeting isn't in their config: Aura takes one
-card without an edition (card.lua:1571-1574), and Sigil and Ouija work on the whole
+card without an edition (card.lua:1544-1546), and Sigil and Ouija work on the whole
 hand without a selection.  :func:`jackdaw.env.action_space.get_consumable_target_info`
-gives the Rust engine's ``(min, max, needs_targets)`` for a card of a run.
+gives the Rust engine's ``(min, max, needs_targets)`` for a card of a run, which the
+envs' masks and action tables follow: they agree with these specs, Aura's included.
 
 These are the consumable's own rules, judged without the run.  Against Cerulean Bell
 the engine highlights the forced card as well as the selection, and the bounds count
@@ -77,7 +78,7 @@ _NO_TARGETS = ConsumableTargetSpec(
 # ---------------------------------------------------------------------------
 
 # Aura: needs exactly 1 highlighted card with no edition.
-# Config is empty [] but can_use_consumeable has a hardcoded check.
+# Config is empty [] but can_use_consumeable has a hardcoded check (card.lua:1544-1546).
 _AURA_SPEC = ConsumableTargetSpec(
     needs_card_targets=True,
     min_targets=1,

@@ -68,6 +68,16 @@ impl Game {
             gone: Vec::new(),
         }
     }
+
+    /// The card at `index` of `area` (by its snapshot name); `ValueError` past the end.
+    fn area_card(&self, area: &str, index: usize) -> PyResult<&jackdaw_core::card::Card> {
+        self.inner
+            .gs
+            .areas
+            .get(area_id(area)?)
+            .get(index)
+            .ok_or_else(|| value_error(format!("no card {index} in {area}")))
+    }
 }
 
 fn value_error(e: impl std::fmt::Display) -> PyErr {
@@ -347,14 +357,19 @@ impl Game {
     /// ``get_consumable_target_info`` for the card at ``index`` of ``area``:
     /// ``(min_cards, max_cards, needs_targets)``.
     fn consumable_target_info(&self, area: &str, index: usize) -> PyResult<(usize, usize, bool)> {
-        let card = self
-            .inner
-            .gs
-            .areas
-            .get(area_id(area)?)
-            .get(index)
-            .ok_or_else(|| value_error(format!("no card {index} in {area}")))?;
-        Ok(jackdaw_env::action::consumable_target_info(card))
+        Ok(jackdaw_env::action::consumable_target_info(
+            self.area_card(area, index)?,
+        ))
+    }
+
+    /// The hand indices a ``card_target`` for using the card at ``index`` of ``area`` may hold:
+    /// every hand card, but only the ones without an edition for Aura (card.lua:1544-1546).
+    fn target_cards(&self, area: &str, index: usize) -> PyResult<Vec<usize>> {
+        let card = self.area_card(area, index)?;
+        let hand = self.inner.gs.areas.hand();
+        Ok((0..hand.len())
+            .filter(|&j| jackdaw_env::action::takes_card(card, hand.at(j)))
+            .collect())
     }
 
     /// Take one action (its tape form, JSON text) and play until the game waits again.
@@ -382,19 +397,24 @@ impl Game {
     /// the observation and mask as ``observation()`` and ``action_mask()`` give them, the
     /// ``GameState`` summary, and the shop's card, voucher and booster counts. With
     /// ``free_moves`` false the mask allows no free move (swaps, sorts): the env's cap on them
-    /// in a row is reached.
-    #[pyo3(signature = (legality="vanilla", free_moves=true))]
+    /// in a row is reached. It still allows ``carry``, ``(action_type, entity_target)`` of the
+    /// swap that carries the last drag on, if the game does: a drag counts once.
+    #[pyo3(signature = (legality="vanilla", free_moves=true, carry=None))]
     fn env_view<'py>(
         &mut self,
         py: Python<'py>,
         legality: &str,
         free_moves: bool,
+        carry: Option<(i64, i64)>,
     ) -> PyResult<EnvView<'py>> {
         let legality = env::legality(legality)?;
+        let carry = carry
+            .map(|(t, e)| env::factored_from_py(t, Some(e), None))
+            .transpose()?;
         let obs = observation_to_py(py, self.encoder.encode(&self.inner.gs))?;
         self.mask.compute(&self.inner, legality);
         if !free_moves {
-            self.mask.forbid_free_moves();
+            self.mask.forbid_free_moves_but(carry);
         }
         let mask = env::mask_to_py(py, &self.mask)?;
         let state = gym::state_to_py(&jackdaw_env::reward::StateSummary::of(&self.inner));
@@ -412,8 +432,10 @@ impl Game {
     /// ``IllegalActionError`` or ``NotPortedError`` when the step is refused (the run is
     /// unchanged).
     #[pyo3(signature = (
-        action_type, entity_target=None, card_target=None, legality="vanilla", free_moves=true
+        action_type, entity_target=None, card_target=None, legality="vanilla", free_moves=true,
+        carry=None
     ))]
+    #[allow(clippy::too_many_arguments)]
     fn env_step<'py>(
         &mut self,
         py: Python<'py>,
@@ -422,13 +444,14 @@ impl Game {
         card_target: Option<Vec<i64>>,
         legality: &str,
         free_moves: bool,
+        carry: Option<(i64, i64)>,
     ) -> PyResult<EnvView<'py>> {
         let fa = env::factored_from_py(action_type, entity_target, card_target)?;
         let action = jackdaw_env::action::to_engine(&fa, &self.inner).map_err(value_error)?;
         // No rollback copy: an illegal action changes nothing, and BalatroEnvironment ends the
         // episode on a NotPorted refusal.
         self.inner.step_in_place(&action).map_err(step_error)?;
-        self.env_view(py, legality, free_moves)
+        self.env_view(py, legality, free_moves, carry)
     }
 
     /// The ``GameState`` summary of the run (``jackdaw.env.game_interface.GameState``).
@@ -885,9 +908,14 @@ mod _core {
 
     /// The Gym action table for any mask (tests): ``entity_masks`` maps an action type to its
     /// entity mask, ``target_info`` maps ``(action_type, entity)`` of the consumable and pack
-    /// types to ``(min_cards, max_cards, needs_targets)`` (absent past the end of the source).
+    /// types to ``(min_cards, max_cards, needs_targets)`` (absent past the end of the source),
+    /// and ``target_cards`` to the hand indices its selections may hold (absent: any).
     /// Returns ``(actions, rng_state)`` as ``Game.action_table`` does.
     #[pyfunction]
+    #[pyo3(signature = (
+        type_mask, card_mask, entity_masks, min_card_select, max_card_select, forced_card,
+        target_info, rng_state, target_cards=None
+    ))]
     #[allow(clippy::too_many_arguments)]
     fn _enumerate_actions(
         type_mask: Vec<bool>,
@@ -898,10 +926,12 @@ mod _core {
         forced_card: Option<usize>,
         target_info: std::collections::HashMap<(usize, usize), (usize, usize, bool)>,
         rng_state: [u64; 4],
+        target_cards: Option<std::collections::HashMap<(usize, usize), Vec<usize>>>,
     ) -> (Vec<super::env::FactoredParts>, [u64; 4]) {
         use jackdaw_env::gym::{ActionTable, Xoshiro256};
         let mut rng = Xoshiro256::from_state(rng_state);
         let mut table = ActionTable::new();
+        let target_cards = target_cards.unwrap_or_default();
         table.enumerate_with(
             &type_mask,
             &card_mask,
@@ -909,6 +939,7 @@ mod _core {
             (min_card_select, max_card_select),
             forced_card,
             |t, e| target_info.get(&(t.index(), e)).copied(),
+            |t, e, j| (target_cards.get(&(t.index(), e))).is_none_or(|cards| cards.contains(&j)),
             &mut rng,
         );
         let actions = table

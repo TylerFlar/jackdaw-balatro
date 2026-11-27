@@ -123,8 +123,9 @@ class BalatroVectorEnv(VectorEnv):
     autoreset_mode:
         ``AutoresetMode.NEXT_STEP`` (default) or ``AutoresetMode.SAME_STEP``.
     max_free_moves:
-        As for the Gym env: after this many free moves in a row (swaps, sorts) a sub-env's
-        table holds none until another action.  ``None``: no cap.
+        As for the Gym env: after this many free moves in a row (swaps, sorts; a drag counts
+        once) a sub-env's table holds none until another action, but the swap that carries
+        the last drag on.  ``None``: no cap.
     on_refusal:
         ``"truncate"`` (default): a table action the engine refuses ends that episode as
         truncated, flagged in ``info["balatro/refused"]``.  ``"raise"``: the step raises

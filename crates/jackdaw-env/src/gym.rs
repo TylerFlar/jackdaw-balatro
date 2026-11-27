@@ -3,12 +3,31 @@
 //! and subsampled to budgets with a seeded xoshiro256** generator. `jackdaw/env/sampler.py` is
 //! the same generator in Python, so both tables agree draw for draw.
 
+use jackdaw_core::area::Cards;
 use jackdaw_core::game::Game;
 
 use crate::action::{
     ActionType, FactoredAction, MAX_SELECTION, Selection, Targets, consumable_target_info,
+    takes_card,
 };
 use crate::mask::ActionMask;
+
+/// The cards an entity-and-card type's entities are: the consumables for UseConsumable, the
+/// pack's cards for PickPackCard.
+fn entity_source(game: &Game, t: ActionType) -> Cards<'_> {
+    match t {
+        ActionType::UseConsumable => game.gs.areas.consumables(),
+        _ => game.gs.areas.pack_cards(),
+    }
+}
+
+/// Whether a selection for using entity `e` of `t` may hold hand card `j` ([`takes_card`]).
+fn entity_takes(game: &Game, t: ActionType, e: usize, j: usize) -> bool {
+    match (entity_source(game, t).get(e), game.gs.areas.hand().get(j)) {
+        (Some(card), Some(target)) => takes_card(card, target),
+        _ => false,
+    }
+}
 
 /// The size of the Gym `Discrete` action space: the table holds at most this many actions.
 pub const MAX_ACTIONS: usize = 500;
@@ -265,24 +284,27 @@ fn combinations_into(
     }
 }
 
-/// Whether `sel` is one of the selections [`combinations_into`] lists for the cards `card_mask`
-/// allows: `min_select..=max_select` of them (capped at the number allowed), strictly ascending,
-/// holding `required` when given.
+/// Whether `sel` is one of the selections [`combinations_into`] lists for the hand cards
+/// `allowed` passes (hand indices below `n_hand`): `min_select..=max_select` of them (capped at
+/// the number allowed), strictly ascending, holding `required` when given.
 fn selection_listed(
     sel: &Selection,
-    card_mask: &[bool],
+    n_hand: usize,
+    allowed: impl Fn(usize) -> bool,
     min_select: usize,
     max_select: usize,
     required: Option<usize>,
 ) -> bool {
-    let n = card_mask.iter().filter(|&&b| b).count();
+    let n = (0..n_hand).filter(|&j| allowed(j)).count();
     let upper = n.min(max_select);
     let lower = min_select.min(upper);
     let s = sel.as_slice();
     (lower..=upper.min(MAX_SELECTION)).contains(&s.len())
         && s.windows(2).all(|w| w[0] < w[1])
-        && s.iter()
-            .all(|&i| card_mask.get(usize::from(i)).copied().unwrap_or(false))
+        && s.iter().all(|&i| {
+            let i = usize::from(i);
+            i < n_hand && allowed(i)
+        })
         && required.is_none_or(|r| s.contains(&(r as u8)))
 }
 
@@ -290,25 +312,20 @@ fn selection_listed(
 /// the table holds, or would if it held every legal action. Card selections are strictly
 /// ascending, as the table lists them.
 pub fn offers(mask: &ActionMask, game: &Game, action: &FactoredAction) -> bool {
-    let areas = &game.gs.areas;
     offers_with(
         &mask.type_mask,
         &mask.card_mask,
         |t| mask.entity_mask(t),
         (mask.min_card_select, mask.max_card_select),
         mask.forced_card,
-        |t, e| {
-            let source = match t {
-                ActionType::UseConsumable => areas.consumables(),
-                _ => areas.pack_cards(),
-            };
-            source.get(e).map(consumable_target_info)
-        },
+        |t, e| entity_source(game, t).get(e).map(consumable_target_info),
+        |t, e, j| entity_takes(game, t, e, j),
         action,
     )
 }
 
 /// [`offers`] for any mask, as [`ActionTable::enumerate_with`] takes one.
+#[allow(clippy::too_many_arguments)]
 pub fn offers_with<'m>(
     type_mask: &[bool],
     card_mask: &[bool],
@@ -316,6 +333,7 @@ pub fn offers_with<'m>(
     (min_select, max_select): (usize, usize),
     forced: Option<usize>,
     target_info: impl Fn(ActionType, usize) -> Option<(usize, usize, bool)>,
+    takes: impl Fn(ActionType, usize, usize) -> bool,
     action: &FactoredAction,
 ) -> bool {
     let t = action.action_type;
@@ -324,16 +342,20 @@ pub fn offers_with<'m>(
     }
     let entity_ok =
         |e: u32| entity(t).is_some_and(|em| em.get(e as usize).copied().unwrap_or(false));
+    let legal = |j: usize| card_mask.get(j).copied().unwrap_or(false);
+    let n_hand = card_mask.len();
     match (t.targets(), action.entity_target, &action.card_target) {
         (Targets::None, None, None) => true,
         (Targets::Entity, Some(e), None) => entity_ok(e),
         (Targets::Cards, None, Some(sel)) => {
-            selection_listed(sel, card_mask, min_select, max_select, forced)
+            selection_listed(sel, n_hand, legal, min_select, max_select, forced)
         }
         (Targets::EntityCards, Some(e), cards) if entity_ok(e) => {
-            match (target_info(t, e as usize), cards) {
+            let e = e as usize;
+            match (target_info(t, e), cards) {
                 (Some((lo, hi, true)), Some(sel)) => {
-                    selection_listed(sel, card_mask, lo, hi, forced)
+                    let allowed = |j: usize| legal(j) && takes(t, e, j);
+                    selection_listed(sel, n_hand, allowed, lo, hi, forced)
                 }
                 (Some((_, _, false)), None) => true,
                 _ => false,
@@ -367,6 +389,8 @@ pub struct ActionTable {
     len: usize,
     bits: Vec<u64>,
     legal_cards: Vec<usize>,
+    /// The legal cards one consumable takes (Aura: those without an edition).
+    entity_cards: Vec<usize>,
     combos: ComboCache,
     picked: Vec<u64>,
     chosen: Vec<usize>,
@@ -462,28 +486,23 @@ impl ActionTable {
     /// entity-and-card types targeting the consumables (UseConsumable) and the pack cards
     /// (PickPackCard).
     pub fn enumerate(&mut self, mask: &ActionMask, game: &Game, rng: &mut Xoshiro256) {
-        let areas = &game.gs.areas;
         self.enumerate_with(
             &mask.type_mask,
             &mask.card_mask,
             |t| mask.entity_mask(t),
             (mask.min_card_select, mask.max_card_select),
             mask.forced_card,
-            |t, e| {
-                let source = match t {
-                    ActionType::UseConsumable => areas.consumables(),
-                    _ => areas.pack_cards(),
-                };
-                source.get(e).map(consumable_target_info)
-            },
+            |t, e| entity_source(game, t).get(e).map(consumable_target_info),
+            |t, e, j| entity_takes(game, t, e, j),
             rng,
         );
     }
 
     /// The enumeration for any mask: `entity(t)` is `t`'s entity mask, `target_info(t, e)` the
     /// `(min, max, needs)` targeting of entity `e` of an entity-and-card type (`None` past the
-    /// end of its source). Every card selection holds `forced` (Cerulean Bell's card): a
-    /// play's and a discard's, and the cards a consumable is used on.
+    /// end of its source), and `takes(t, e, j)` whether its selections may hold hand card `j`
+    /// (asked of the legal cards only). Every card selection holds `forced` (Cerulean Bell's
+    /// card): a play's and a discard's, and the cards a consumable is used on.
     #[allow(clippy::too_many_arguments)]
     pub fn enumerate_with<'m>(
         &mut self,
@@ -493,6 +512,7 @@ impl ActionTable {
         (min_select, max_select): (usize, usize),
         forced: Option<usize>,
         target_info: impl Fn(ActionType, usize) -> Option<(usize, usize, bool)>,
+        takes: impl Fn(ActionType, usize, usize) -> bool,
         rng: &mut Xoshiro256,
     ) {
         self.clear();
@@ -524,7 +544,11 @@ impl ActionTable {
                         }
                     }
                 }
-                Targets::Cards => self.card_actions(t, None, min_select, max_select, forced, rng),
+                Targets::Cards => {
+                    let cards = std::mem::take(&mut self.legal_cards);
+                    self.card_actions(t, None, &cards, min_select, max_select, forced, rng);
+                    self.legal_cards = cards;
+                }
                 Targets::EntityCards => {
                     if let Some(em) = entity(t) {
                         for (e, &ok) in em.iter().enumerate() {
@@ -537,8 +561,18 @@ impl ActionTable {
                                     // selection (`consumable_highlight`): a selection without
                                     // the card is one card more than it names, and the same
                                     // use as the selection that names it. Each use is listed
-                                    // once, with the card, as a play is (#49).
-                                    self.card_actions(t, Some(e), lo, hi, forced, rng);
+                                    // once, with the card, as a play is (#49). Its cards are
+                                    // the legal ones it takes: Aura's have no edition (#69).
+                                    let mut cards = std::mem::take(&mut self.entity_cards);
+                                    cards.clear();
+                                    cards.extend(
+                                        self.legal_cards
+                                            .iter()
+                                            .copied()
+                                            .filter(|&j| takes(t, e, j)),
+                                    );
+                                    self.card_actions(t, Some(e), &cards, lo, hi, forced, rng);
+                                    self.entity_cards = cards;
                                 }
                                 Some((_, _, false)) => {
                                     self.push(Group::One(FactoredAction::with_entity(t, e)), 1);
@@ -568,22 +602,24 @@ impl ActionTable {
         }
     }
 
-    /// `_card_actions`: the selections of `min_select..=max_select` legal cards (capped at the
-    /// number of legal cards), by size then lexicographically, those containing `required`
-    /// only, subsampled to [`CARD_COMBO_BUDGET`].
+    /// `_card_actions`: the selections of `min_select..=max_select` of `cards` (capped at their
+    /// number), by size then lexicographically, those containing `required` only, subsampled to
+    /// [`CARD_COMBO_BUDGET`].
+    #[allow(clippy::too_many_arguments)]
     fn card_actions(
         &mut self,
         t: ActionType,
         entity: Option<usize>,
+        cards: &[usize],
         min_select: usize,
         max_select: usize,
         required: Option<usize>,
         rng: &mut Xoshiro256,
     ) {
-        let n = self.legal_cards.len();
+        let n = cards.len();
         let upper = n.min(max_select);
         let lower = min_select.min(upper);
-        let slot = self.combos.slot(&self.legal_cards, lower, upper, required);
+        let slot = self.combos.slot(cards, lower, upper, required);
         let count = self.combos.slots[slot].selections.len();
         let entity_target = entity.map(|e| e as u32);
         if count <= CARD_COMBO_BUDGET {
@@ -646,6 +682,7 @@ mod tests {
             (1, 5),
             None,
             |_, _| Some((lo, hi, true)),
+            |_, _, _| true,
             &mut rng,
         );
         table
@@ -696,6 +733,7 @@ mod tests {
                 let (lo, hi) = range(e);
                 Some((lo, hi, true))
             },
+            |_, _, _| true,
             &mut rng,
         );
         let actions = table.actions();
@@ -737,6 +775,7 @@ mod tests {
             (1, 5),
             Some(2),
             |_, e| Some((targets[e].0, targets[e].1, true)),
+            |_, _, _| true,
             &mut rng,
         );
         let actions = table.actions();
@@ -766,6 +805,54 @@ mod tests {
         assert!(plays.iter().all(|s| s.contains(&2)));
         // Nothing was subsampled, so the sampler drew nothing.
         assert_eq!(rng, Xoshiro256::seed_from_u64(9));
+    }
+
+    #[test]
+    fn a_consumable_takes_only_the_cards_it_can() {
+        // Aura (one card) is used only on a card without an edition (card.lua:1544-1546, #69):
+        // here hand cards 1 and 3 have one. The Tower (one card) takes any.
+        let mut types = [false; crate::action::NUM_ACTION_TYPES];
+        types[ActionType::UseConsumable.index()] = true;
+        types[ActionType::PickPackCard.index()] = true;
+        let aura = |t: ActionType, e: usize| t == ActionType::PickPackCard || e == 1;
+        let takes = |t: ActionType, e: usize, j: usize| !aura(t, e) || (j != 1 && j != 3);
+        let table = |forced: Option<usize>| {
+            let mut table = ActionTable::new();
+            let mut rng = Xoshiro256::seed_from_u64(4);
+            table.enumerate_with(
+                &types,
+                &[true; 6],
+                |_| Some(&[true; 2][..]),
+                (1, 5),
+                forced,
+                |_, _| Some((1, 1, true)),
+                takes,
+                &mut rng,
+            );
+            let actions = table.actions();
+            let sels = |t: ActionType, e: u32| -> Vec<Vec<u8>> {
+                (actions.iter())
+                    .filter(|a| a.action_type == t && a.entity_target == Some(e))
+                    .map(|a| a.card_target.unwrap().as_slice().to_vec())
+                    .collect()
+            };
+            (
+                sels(ActionType::UseConsumable, 0),
+                sels(ActionType::UseConsumable, 1),
+                sels(ActionType::PickPackCard, 0),
+            )
+        };
+        let (tower, aura_tray, aura_pack) = table(None);
+        assert_eq!(tower, [[0], [1], [2], [3], [4], [5]]);
+        assert_eq!(aura_tray, [[0], [2], [4], [5]]);
+        assert_eq!(aura_pack, aura_tray);
+        // Against Cerulean Bell a use highlights the forced card: Aura's one card is that one,
+        // if it has no edition.
+        let (tower, aura_tray, _) = table(Some(2));
+        assert_eq!((tower, aura_tray), (vec![vec![2]], vec![vec![2]]));
+        let (tower, aura_tray, aura_pack) = table(Some(3));
+        assert_eq!(tower, [[3]]);
+        assert!(aura_tray.is_empty() && aura_pack.is_empty());
     }
 
     /// Every factored action over `cards` hand cards and `entities` entities: with no target,
@@ -845,18 +932,34 @@ mod tests {
                 .collect();
             let select = (r.below(2) as usize, 1 + r.below(5) as usize);
             let forced = (n_cards > 0 && r.below(4) == 0).then(|| r.below(n_cards as u64) as usize);
+            // The hand cards each entity takes, by type: all of them, or (as Aura's, #69) some.
+            let taken: Vec<Vec<Vec<bool>>> = (0..crate::action::NUM_ACTION_TYPES)
+                .map(|_| {
+                    (0..n_entities)
+                        .map(|_| {
+                            let some = r.below(3) == 0;
+                            (0..n_cards).map(|_| !some || r.below(2) == 0).collect()
+                        })
+                        .collect()
+                })
+                .collect();
             let entity_of = |t: ActionType| entity[t.index()].as_deref();
             let info_of = |_: ActionType, e: usize| infos.get(e).copied().flatten();
+            let takes = |t: ActionType, e: usize, j: usize| taken[t.index()][e][j];
             let mut table = ActionTable::new();
             let mut rng = Xoshiro256::seed_from_u64(case);
-            table.enumerate_with(&types, &cards, entity_of, select, forced, info_of, &mut rng);
+            table.enumerate_with(
+                &types, &cards, entity_of, select, forced, info_of, takes, &mut rng,
+            );
             if rng != Xoshiro256::seed_from_u64(case) {
                 continue; // sampled: not this test's case
             }
             let listed: std::collections::HashSet<FactoredAction> =
                 table.actions().into_iter().collect();
             for fa in candidates(n_cards, n_entities) {
-                let offered = offers_with(&types, &cards, entity_of, select, forced, info_of, &fa);
+                let offered = offers_with(
+                    &types, &cards, entity_of, select, forced, info_of, takes, &fa,
+                );
                 assert_eq!(offered, listed.contains(&fa), "case {case}: {fa:?}");
             }
             checked += 1;
@@ -878,6 +981,7 @@ mod tests {
                     (1, 5),
                     None,
                     |_, _| Some((targets.0, targets.1, true)),
+                    |_, _, _| true,
                     &a,
                 ));
             }

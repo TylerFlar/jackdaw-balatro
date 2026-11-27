@@ -13,7 +13,7 @@
 use jackdaw_core::game::{Game, StepError as CoreStepError};
 use jackdaw_core::run::RunSpec;
 
-use crate::action::{FactoredAction, to_engine};
+use crate::action::{ActionType, FactoredAction, to_engine};
 use crate::gym::{ActionTable, MAX_ACTIONS, Xoshiro256};
 use crate::mask::{ActionMask, Legality};
 use crate::observation::{D_GLOBAL, ENTITY_WIDTHS, Encoder};
@@ -33,9 +33,65 @@ pub const GYM_OBS_LEN: usize = D_GLOBAL
     + MAX_COUNTS[4] * ENTITY_WIDTHS[4]
     + 5;
 
-/// How many free moves (swaps and sorts, [`ActionType::is_free`]) an env allows in a row by
-/// default: enough to put five jokers in any order.
+/// How many free moves (drags and sorts, [`FreeMoves`]) an env allows in a row by default: a
+/// drag carries a card any distance and counts once, so ten put up to eleven cards in any order.
 pub const DEFAULT_MAX_FREE_MOVES: u32 = 10;
+
+/// The free moves taken in a row ([`ActionType::is_free`]), counted as a player makes them: a
+/// sort once, and a drag once however far it carries its card.
+///
+/// The game moves a dragged card past one neighbour at a time: `CardArea:align_cards` sorts the
+/// area by position every frame (cardarea.lua:448, 463 and 528), so a drag over three cards
+/// swaps the card with each of them in turn. The envs' swaps are those steps, and a swap that
+/// carries on the card the last one moved, the same way, is part of its drag (#70).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct FreeMoves {
+    count: u32,
+    carry: Option<FactoredAction>,
+}
+
+impl FreeMoves {
+    /// The free moves since the last other action, a drag counting once.
+    pub fn count(&self) -> u32 {
+        self.count
+    }
+
+    /// The swap that carries the last drag on ([`carry_on`]), if the last move was a swap.
+    pub fn carry(&self) -> Option<FactoredAction> {
+        self.carry
+    }
+
+    /// Count `action`, the move just taken.
+    pub fn record(&mut self, action: &FactoredAction) {
+        if !action.action_type.is_free() {
+            *self = FreeMoves::default();
+            return;
+        }
+        if self.carry != Some(*action) {
+            self.count += 1;
+        }
+        self.carry = carry_on(action);
+    }
+
+    /// Whether `cap` free moves are taken (`None`: no cap). The mask then offers no free move
+    /// but [`FreeMoves::carry`], so the last drag can still go as far as any.
+    pub fn spent(&self, cap: Option<u32>) -> bool {
+        cap.is_some_and(|cap| self.count >= cap)
+    }
+}
+
+/// The swap that carries on the drag `action` makes: its card one more place the same way
+/// (`SwapHandLeft(i - 1)` after `SwapHandLeft(i)`). `None` for anything but a swap.
+pub fn carry_on(action: &FactoredAction) -> Option<FactoredAction> {
+    use ActionType::*;
+    let i = action.entity_target? as usize;
+    let next = match action.action_type {
+        SwapHandLeft | SwapJokersLeft => i.checked_sub(1)?,
+        SwapHandRight | SwapJokersRight => i + 1,
+        _ => return None,
+    };
+    Some(FactoredAction::with_entity(action.action_type, next))
+}
 
 /// The env's settings (`BalatroEnvironment`'s `max_steps` and `end_on_win`, the reward, and the
 /// cap on free moves in a row).
@@ -44,8 +100,8 @@ pub struct EnvConfig {
     pub max_steps: u64,
     pub end_on_win: bool,
     pub reward: Reward,
-    /// After this many free moves in a row the mask allows none until another action; `None`
-    /// for no cap.
+    /// After this many free moves in a row ([`FreeMoves`]: a drag counts once) the mask allows
+    /// none but the swap carrying the last drag on, until another action; `None` for no cap.
     pub max_free_moves: Option<u32>,
 }
 
@@ -134,7 +190,7 @@ pub struct GymEnv {
     /// Blinds beaten this episode (`balatro/rounds_beaten`).
     pub blinds_beaten: u64,
     /// Free moves since the last other action.
-    free_moves: u32,
+    free_moves: FreeMoves,
     state: StateSummary,
     ended: bool,
     /// The key the player's view names cards under ([`GymEnv::player_view`]).
@@ -179,7 +235,7 @@ impl GymEnv {
             episode_won: false,
             max_ante: 1.0,
             blinds_beaten: 0,
-            free_moves: 0,
+            free_moves: FreeMoves::default(),
             state,
             ended: false,
             record_scoring: false,
@@ -223,25 +279,29 @@ impl GymEnv {
         self.episode_won = false;
         self.max_ante = 1.0;
         self.blinds_beaten = 0;
-        self.free_moves = 0;
+        self.free_moves = FreeMoves::default();
         self.state = StateSummary::of(&self.game);
         self.ended = false;
         self.refresh();
         Ok(())
     }
 
-    /// The env's free moves in a row are at its cap: the mask allows no more.
+    /// The env's free moves in a row are at its cap: the mask allows no more, but the swap
+    /// carrying the last drag on.
     pub fn free_moves_spent(&self) -> bool {
-        self.config
-            .max_free_moves
-            .is_some_and(|cap| self.free_moves >= cap)
+        self.free_moves.spent(self.config.max_free_moves)
+    }
+
+    /// The free moves taken in a row.
+    pub fn free_moves(&self) -> FreeMoves {
+        self.free_moves
     }
 
     /// The mask and the action table of the current state.
     fn refresh(&mut self) {
         self.mask.compute(&self.game, Legality::Vanilla);
         if self.free_moves_spent() {
-            self.mask.forbid_free_moves();
+            self.mask.forbid_free_moves_but(self.free_moves.carry());
         }
         self.table.enumerate(&self.mask, &self.game, &mut self.rng);
     }
@@ -337,11 +397,7 @@ impl GymEnv {
     fn finish(&mut self, action: FactoredAction, not_ported: Option<String>) -> StepResult {
         self.episode_length += 1;
         self.step_count += 1;
-        if action.action_type.is_free() {
-            self.free_moves += 1;
-        } else {
-            self.free_moves = 0;
-        }
+        self.free_moves.record(&action);
         let prev = self.state;
         let curr = StateSummary::of(&self.game);
         let won = run_won(&self.game);
@@ -504,6 +560,173 @@ mod tests {
         env.reset(&spec("VIEWKEY"), Some(6)).unwrap();
         dealt(&mut env);
         assert_ne!(env.player_view()["hand"], a["hand"]);
+    }
+
+    fn swap(t: ActionType, i: usize) -> FactoredAction {
+        FactoredAction::with_entity(t, i)
+    }
+
+    /// The free moves the table holds.
+    fn free_in_table(env: &GymEnv) -> Vec<FactoredAction> {
+        (env.table().actions().into_iter())
+            .filter(|a| a.action_type.is_free())
+            .collect()
+    }
+
+    fn hand_ids(env: &GymEnv) -> Vec<u32> {
+        env.game()
+            .gs
+            .areas
+            .ids(jackdaw_core::area::AreaId::Hand)
+            .to_vec()
+    }
+
+    fn in_round(seed: &str, max_free_moves: Option<u32>) -> GymEnv {
+        let config = EnvConfig {
+            max_free_moves,
+            ..EnvConfig::default()
+        };
+        let mut env = GymEnv::new(&spec(seed), config, 7).unwrap();
+        env.step(find(&env, ActionType::SelectBlind).unwrap())
+            .unwrap();
+        env
+    }
+
+    #[test]
+    fn a_drag_counts_once_however_far() {
+        // #70: the game drags a card past one neighbour at a time (cardarea.lua:463), so taking
+        // the last of eight cards to the front is seven swaps, and one move.
+        let mut env = in_round("DRAGTEST", Some(2));
+        let before = hand_ids(&env);
+        let n = before.len();
+        assert_eq!(n, 8);
+        for i in (1..n).rev() {
+            env.step_factored(swap(ActionType::SwapHandLeft, i))
+                .unwrap();
+            assert_eq!(env.free_moves().count(), 1);
+        }
+        let after = hand_ids(&env);
+        assert_eq!(after[0], before[n - 1]);
+        assert_eq!(after[1..], before[..n - 1]);
+
+        // The second drag reaches the cap: the table holds no free move but its next swap, which
+        // carries the card as far as it goes.
+        env.step_factored(swap(ActionType::SwapHandRight, 2))
+            .unwrap();
+        assert_eq!(env.free_moves().count(), 2);
+        assert!(env.free_moves_spent());
+        for i in 3..n - 1 {
+            assert_eq!(free_in_table(&env), [swap(ActionType::SwapHandRight, i)]);
+            let other = swap(ActionType::SwapHandLeft, i);
+            assert_eq!(env.step_factored(other), Err(StepError::NotOffered(other)));
+            env.step_factored(swap(ActionType::SwapHandRight, i))
+                .unwrap();
+        }
+        assert!(free_in_table(&env).is_empty(), "the card is at the end");
+        env.step(find(&env, ActionType::Discard).unwrap()).unwrap();
+        assert_eq!(env.free_moves(), FreeMoves::default());
+        assert!(has_free(&env));
+    }
+
+    #[test]
+    fn a_swap_back_is_another_drag() {
+        // Only a swap that carries the card on, the same way, continues a drag: back and forth
+        // counts every time, so the cap still ends a stall.
+        let mut env = in_round("DRAGBACK", Some(3));
+        env.step_factored(swap(ActionType::SwapHandLeft, 4))
+            .unwrap();
+        env.step_factored(swap(ActionType::SwapHandRight, 3))
+            .unwrap();
+        assert_eq!(env.free_moves().count(), 2);
+        // The card the last swap moved left is at 2 now; carrying it on is SwapHandLeft(2).
+        env.step_factored(swap(ActionType::SwapHandLeft, 4))
+            .unwrap();
+        assert_eq!(env.free_moves().count(), 3);
+        assert_eq!(free_in_table(&env), [swap(ActionType::SwapHandLeft, 3)]);
+        // A sort counts once and carries nothing on.
+        let mut sorted = in_round("DRAGBACK", Some(1));
+        sorted
+            .step(find(&sorted, ActionType::SortHandRank).unwrap())
+            .unwrap();
+        assert!(free_in_table(&sorted).is_empty());
+    }
+
+    #[test]
+    fn a_joker_drag_counts_once() {
+        let mut env = in_round("DRAGJOKER", Some(1));
+        for key in [
+            "j_joker",
+            "j_greedy_joker",
+            "j_lusty_joker",
+            "j_wrathful_joker",
+        ] {
+            (env.game)
+                .apply_setup_op(&serde_json::json!({"op": "add", "key": key}))
+                .unwrap();
+        }
+        env.refresh();
+        env.step_factored(swap(ActionType::SwapJokersLeft, 3))
+            .unwrap();
+        assert!(env.free_moves_spent());
+        assert_eq!(free_in_table(&env), [swap(ActionType::SwapJokersLeft, 2)]);
+        env.step_factored(swap(ActionType::SwapJokersLeft, 2))
+            .unwrap();
+        env.step_factored(swap(ActionType::SwapJokersLeft, 1))
+            .unwrap();
+        let jokers: Vec<&str> = (env.game.gs.areas.jokers().iter())
+            .map(|j| j.center().key)
+            .collect();
+        assert_eq!(
+            jokers,
+            [
+                "j_wrathful_joker",
+                "j_joker",
+                "j_greedy_joker",
+                "j_lusty_joker"
+            ]
+        );
+        assert!(free_in_table(&env).is_empty());
+    }
+
+    /// Put the hand in `order` (hand indices), one drag per card that isn't in its place yet:
+    /// each card in turn is carried left to where it goes.
+    fn drag_into(env: &mut GymEnv, order: &[usize]) {
+        let want: Vec<u32> = order.iter().map(|&i| hand_ids(env)[i]).collect();
+        for (k, id) in want.iter().enumerate() {
+            let from = hand_ids(env).iter().position(|x| x == id).unwrap();
+            for i in (k + 1..=from).rev() {
+                let action = swap(ActionType::SwapHandLeft, i);
+                assert!(
+                    env.offers(&action),
+                    "{action:?} after {:?}",
+                    env.free_moves()
+                );
+                env.step_factored(action).unwrap();
+            }
+        }
+        assert_eq!(hand_ids(env), want);
+    }
+
+    #[test]
+    fn any_order_of_a_hand_is_within_the_default_cap() {
+        // #70: reversing eight cards is 28 swaps, more than the old cap of ten in a row allowed.
+        // As drags it is seven moves.
+        let mut env = in_round("DRAGORDER", Some(DEFAULT_MAX_FREE_MOVES));
+        drag_into(&mut env, &[7, 6, 5, 4, 3, 2, 1, 0]);
+        assert_eq!(env.free_moves().count(), 7);
+        // After a sort, which counts once too.
+        let mut rng = Xoshiro256::seed_from_u64(3);
+        for k in 0..20 {
+            let mut env = in_round(&format!("DRAGORDER{k}"), Some(DEFAULT_MAX_FREE_MOVES));
+            env.step(find(&env, ActionType::SortHandSuit).unwrap())
+                .unwrap();
+            let mut order: Vec<usize> = (0..8).collect();
+            for i in (1..8).rev() {
+                order.swap(i, rng.below(i as u64 + 1) as usize);
+            }
+            drag_into(&mut env, &order);
+            assert!(env.free_moves().count() <= 8);
+        }
     }
 
     #[test]

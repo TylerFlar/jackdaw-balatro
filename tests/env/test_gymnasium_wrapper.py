@@ -385,9 +385,9 @@ class TestCeruleanBellConsumables:
         assert by_key["c_strength"] == {(forced,)} | pairs
         # Death (2, 2): the forced card and one other.
         assert by_key["c_death"] == pairs
-        # Aura and Mars are listed once, without a selection: Mars takes no card, and Aura
-        # the engine's own choice, which is the forced card.
-        assert by_key["c_aura"] == {None} and by_key["c_mars"] == {None}
+        # Aura (1, 1): the forced card, which has no edition (#69). Mars takes no card, and is
+        # listed once, without a selection.
+        assert by_key["c_aura"] == {(forced,)} and by_key["c_mars"] == {None}
 
     @pytest.mark.parametrize("route", ["rust", "python"])
     def test_uses_are_the_ones_the_engine_takes(self, route: str) -> None:
@@ -399,7 +399,7 @@ class TestCeruleanBellConsumables:
             if get_consumable_target_info(game, "consumables", e)[2]:
                 self._check_uses(game, table, e, forced)
                 checked += 1
-        assert checked == 3
+        assert checked == 4  # The Tower, Strength, Death and Aura
 
     @pytest.mark.parametrize("route", ["rust", "python"])
     def test_the_first_of_several_forced_cards(self, route: str) -> None:
@@ -439,6 +439,104 @@ class TestCeruleanBellConsumables:
             game = base.clone()
             game.debug_add(key)
             self._check_uses(game, self._table(game, route), 0, position)
+
+
+class TestAura:
+    """Aura takes one hand card, one without an edition (card.lua:1544-1546). The tables list it
+    on each such card, as they list The Tower on each card, and a factored action naming one
+    is offered (#69). It was listed once, without a selection: the engine picked the card (the
+    first one without an edition), and naming it was refused as not offered."""
+
+    _FOIL = {"foil": True, "chips": 50, "type": "foil"}
+
+    @classmethod
+    def _with_foil(cls, game: Game, *cards: int) -> Game:
+        snap = game.to_dict()
+        for i in cards:
+            snap["areas"]["hand"][i]["edition"] = dict(cls._FOIL)
+        return Game.from_dict(snap)
+
+    @classmethod
+    def _spectral_pack(cls) -> Game:
+        """A Spectral pack of Aura and Trance, its hand dealt: cards 1 and 4 are foil."""
+        game = Game.new("b_red", 1, "AURA5")
+        game.step(SelectBlind())
+        game.debug_set(chips=game.blind.chips)
+        game.step(PlayHand(card_indices=(0,)))
+        game.step(CashOut())
+        game.debug_add("p_spectral_normal_1")
+        game.debug_set(money=50)
+        game.step(OpenBooster(card_index=len(game.shop_boosters) - 1))
+        assert [c.key for c in game.pack_cards] == ["c_aura", "c_trance"]
+        assert len(game.hand) == 8
+        return cls._with_foil(game, 1, 4)
+
+    @classmethod
+    def _round(cls) -> Game:
+        """A round with Aura and The Tower in the tray: cards 0 and 5 are foil."""
+        game = Game.new("b_red", 1, "AURA_TRAY")
+        game.step(SelectBlind())
+        game.debug_add("c_aura")
+        game.debug_add("c_tower")
+        return cls._with_foil(game, 0, 5)
+
+    @staticmethod
+    def _selections(table: list[FactoredAction], t: ActionType, e: int) -> list[tuple]:
+        return [a.card_target for a in table if a.action_type == t and a.entity_target == e]
+
+    @pytest.mark.parametrize("route", ["rust", "python"])
+    def test_a_pack_lists_aura_on_each_card_without_an_edition(self, route: str) -> None:
+        game = self._spectral_pack()
+        assert get_consumable_target_info(game, "pack_cards", 0) == (1, 1, True)
+        assert game._g.target_cards("pack_cards", 0) == [0, 2, 3, 5, 6, 7]
+        table = TestCeruleanBellConsumables._table(game, route)
+        aura = self._selections(table, ActionType.PickPackCard, 0)
+        assert aura == [(0,), (2,), (3,), (5,), (6,), (7,)]
+        # Trance takes any card.
+        assert self._selections(table, ActionType.PickPackCard, 1) == [(j,) for j in range(8)]
+
+    @pytest.mark.parametrize("route", ["rust", "python"])
+    def test_the_tray_lists_aura_on_each_card_without_an_edition(self, route: str) -> None:
+        game = self._round()
+        assert get_consumable_target_info(game, "consumables", 0) == (1, 1, True)
+        table = TestCeruleanBellConsumables._table(game, route)
+        aura = self._selections(table, ActionType.UseConsumable, 0)
+        assert aura == [(j,) for j in range(8) if j not in (0, 5)]
+        assert self._selections(table, ActionType.UseConsumable, 1) == [(j,) for j in range(8)]
+
+    def test_naming_its_card_is_offered(self) -> None:
+        game = self._spectral_pack()
+        env = BalatroGymnasiumEnv(adapter_factory=GenericAdapter)
+        _rebuild_table(env, game)
+        env._game_mask = _action_mask_to_game(get_action_mask(game))
+        env._game_info = {"game": game}
+        pick = int(ActionType.PickPackCard)
+        for cards, offered in [
+            ((3,), True),
+            ((1,), False),  # foil
+            (None, False),  # Aura names its card, as The Tower does
+            ((), False),
+            ((2, 3), False),
+            ((8,), False),
+        ]:
+            assert game._g._offers(pick, 0, cards) is offered, cards
+            assert env.offers((pick, 0, cards)) is offered, cards
+
+    def test_the_named_card_gets_the_edition(self) -> None:
+        game = self._spectral_pack()
+        target = game.hand[6].sort_id
+        before = {c.sort_id: c.edition for c in game.hand}
+        fa = FactoredAction(ActionType.PickPackCard, card_target=(6,), entity_target=0)
+        game.step(factored_to_engine_action(fa, game))
+        # The pack's one pick closes it, and the dealt hand goes back to the deck.
+        after = {c.sort_id: c.edition for c in game.deck if c.sort_id in before}
+        changed = {i for i in before if after[i] != before[i]}
+        assert changed == {target} and after[target] in ("foil", "holo", "polychrome")
+
+    def test_without_a_card_the_default_is_the_first_without_an_edition(self) -> None:
+        game = self._round()
+        fa = FactoredAction(ActionType.UseConsumable, entity_target=0)
+        assert factored_to_engine_action(fa, game) == UseConsumable(0, (1,))
 
 
 # ------------------------------------------------------------------

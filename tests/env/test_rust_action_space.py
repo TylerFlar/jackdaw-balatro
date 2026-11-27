@@ -77,20 +77,32 @@ def test_fuzz_states_match(chunk: int) -> None:
 # ---------------------------------------------------------------------------
 
 _CONSUMABLES = ("c_magician", "c_death", "c_fool", "c_aura", "c_hanged_man", "c_cryptid")
+_AURA = _CONSUMABLES.index("c_aura")
 
 
 class _Targets:
     """Stands in for a run in the Python table builder: only the targeting info of the
-    consumables and pack cards."""
+    consumables and pack cards, and the cards of an ``n_hand``-card hand each takes (``takes``
+    by ``(area, index)``; any card when absent)."""
 
-    def __init__(self, info: dict[str, list[tuple[int, int, bool]]]) -> None:
+    def __init__(
+        self,
+        info: dict[str, list[tuple[int, int, bool]]],
+        takes: dict[tuple[str, int], list[int]] | None = None,
+        n_hand: int = 0,
+    ) -> None:
         self._g = self
         self._info = info
+        self._takes = takes or {}
+        self._n_hand = n_hand
 
     def consumable_target_info(self, area: str, index: int) -> tuple[int, int, bool]:
         if index >= len(self._info[area]):
             raise ValueError(f"no card {index} in {area}")
         return self._info[area][index]
+
+    def target_cards(self, area: str, index: int) -> list[int]:
+        return self._takes.get((area, index), list(range(self._n_hand)))
 
 
 def _target_info() -> dict[str, list[tuple[int, int, bool]]]:
@@ -133,9 +145,12 @@ def test_tables_on_random_masks() -> None:
         }
         forced = gen.randrange(n) if n and gen.random() < 0.3 else None
         mask = GameActionMask(type_mask, card_mask, entity_masks, lo, hi, forced)
+        # Aura takes the cards without an edition: here, some of them.
+        aura_takes = [j for j in range(n) if gen.random() < 0.6]
+        takes = {("consumables", _AURA): aura_takes}
         seed = gen.getrandbits(64)
         _GYM._rng = Xoshiro256(seed)
-        table = _GYM._enumerate_actions(mask, {"game": _Targets(targets)})
+        table = _GYM._enumerate_actions(mask, {"game": _Targets(targets, takes, n)})
         rs_table, rs_state = _core._enumerate_actions(
             type_mask.tolist(),
             card_mask.tolist(),
@@ -145,6 +160,7 @@ def test_tables_on_random_masks() -> None:
             forced,
             info,
             list(Xoshiro256(seed).state),
+            {(int(ActionType.UseConsumable), _AURA): aura_takes},
         )
         assert frozen.table_parts(table) == frozen.table_parts(rs_table), f"case {case}"
         assert _GYM._rng.state == tuple(rs_state), f"case {case}: sampler states"

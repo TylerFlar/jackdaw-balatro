@@ -15,7 +15,10 @@
 /// - 1: jackdaw 0.1.
 /// - 2: jackdaw 0.2. Reordering follows the game's drag and drop (jokers in every decision
 ///   state, the hand in a dealt pack, G206), and the envs cap consecutive free moves.
-pub const ACTION_VERSION: u32 = 2;
+/// - 3: jackdaw 0.4. Aura is used on a card the policy picks, one without an edition, as The
+///   Tower is (#69), and the free-move cap counts a drag once, however many swaps it takes
+///   (#70).
+pub const ACTION_VERSION: u32 = 3;
 
 pub mod action;
 pub mod env;
