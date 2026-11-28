@@ -1,6 +1,6 @@
 [project]
 name = "jackdaw"
-version = "0.3.2"
+version = "0.4.0"
 description = "Headless Balatro simulator for reinforcement learning research"
 readme = "README.md"
 requires-python = ">=3.12"

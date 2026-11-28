@@ -18,6 +18,7 @@ from jackdaw.env.action_space import (
     DEFAULT_MAX_FREE_MOVES,
     FREE_ACTION_TYPES,
     ActionMask,
+    ActionType,
     FactoredAction,
 )
 from jackdaw.env.balatro_spec import balatro_game_spec
@@ -45,6 +46,26 @@ def _rust_view(
         game_state_from_parts(state_parts),
         splits,
     )
+
+
+#: Where a swap takes its card: one place left, or one right.
+_SWAP_STEP: dict[int, int] = {
+    ActionType.SwapJokersLeft: -1,
+    ActionType.SwapJokersRight: 1,
+    ActionType.SwapHandLeft: -1,
+    ActionType.SwapHandRight: 1,
+}
+
+
+def _carry_on(action: FactoredAction) -> FactoredAction | None:
+    """The swap that carries on the drag ``action`` makes: its card one more place the same
+    way (``SwapHandLeft(i - 1)`` after ``SwapHandLeft(i)``). None for anything but a swap.
+    ``jackdaw_env::env::carry_on``."""
+    step = _SWAP_STEP.get(int(action.action_type))
+    if step is None or action.entity_target is None:
+        return None
+    to = int(action.entity_target) + step
+    return None if to < 0 else FactoredAction(int(action.action_type), entity_target=to)
 
 
 class BalatroEnvironment:
@@ -95,7 +116,10 @@ class BalatroEnvironment:
     max_free_moves:
         After this many free moves in a row (joker and hand swaps, hand sorts:
         :data:`~jackdaw.env.action_space.FREE_ACTION_TYPES`) the mask allows none
-        until another action, so a policy can't stall on them.  ``None``: no cap.
+        until another action, so a policy can't stall on them.  A drag counts once,
+        however far it carries its card: a swap that moves on the card the last swap
+        moved, the same way, is part of that drag, and stays allowed at the cap.
+        ``None``: no cap.
     on_refusal:
         ``"truncate"`` (default) ends the episode on an action the engine refuses;
         ``"raise"`` raises its ``IllegalActionError``.
@@ -134,8 +158,10 @@ class BalatroEnvironment:
 
         self._episode_count = 0
         self._step_count = 0
-        # Free moves since the last other action.
+        # Free moves since the last other action (a drag counts once), and the swap that
+        # would carry the last drag on.
         self._free_moves = 0
+        self._carry: FactoredAction | None = None
         # The Rust engine's summary of the last state (the next step's prev_state).
         self._state: GameState | None = None
 
@@ -157,6 +183,7 @@ class BalatroEnvironment:
         self._episode_count += 1
         self._step_count = 0
         self._free_moves = 0
+        self._carry = None
         self.episode_length = 0
         self.episode_won = False
         self.episode_ante = 1
@@ -205,31 +232,42 @@ class BalatroEnvironment:
         vetoed: str | None = None
         refused: str | None = None
         # The mask after this move counts it among the free moves in a row (or ends the run of
-        # them); the count is kept once the step is through.
-        free_moves = self._free_moves + 1 if action.action_type in FREE_ACTION_TYPES else 0
+        # them), a drag once; the count is kept once the step is through. At the cap the mask
+        # still allows the swap that carries the drag on.
+        if action.action_type in FREE_ACTION_TYPES:
+            free_moves = self._free_moves + (action != self._carry)
+            carry = _carry_on(action)
+        else:
+            free_moves, carry = 0, None
         free = self.max_free_moves is None or free_moves < self.max_free_moves
+        carried = None if carry is None else (int(carry.action_type), carry.entity_target)
         try:
             if type(adapter) is DirectAdapter:
                 parts = game._g.env_step(
-                    action.action_type, action.entity_target, action.card_target, legality, free
+                    action.action_type,
+                    action.entity_target,
+                    action.card_target,
+                    legality,
+                    free,
+                    carried,
                 )
             else:
                 adapter.step(rust_factored_to_engine(action, game))
                 # Read the run again: an adapter may move its game to a new state object.
-                parts = game._g.env_view(legality, free)
+                parts = game._g.env_view(legality, free, carried)
         except NotPortedError as exc:
             not_ported = str(exc)
-            parts = game._g.env_view(legality, free)
+            parts = game._g.env_view(legality, free, carried)
         except VetoedActionError as exc:
             vetoed = str(exc)
-            parts = game._g.env_view(legality, free)
+            parts = game._g.env_view(legality, free, carried)
         except IllegalActionError as exc:
             if self.on_refusal == "raise":
                 raise
             refused = str(exc)
-            parts = game._g.env_view(legality, free)
+            parts = game._g.env_view(legality, free, carried)
         obs, mask, state, splits = _rust_view(parts)
-        self._free_moves = free_moves
+        self._free_moves, self._carry = free_moves, carry
         self._state = state
         self.episode_length += 1
         self._step_count += 1

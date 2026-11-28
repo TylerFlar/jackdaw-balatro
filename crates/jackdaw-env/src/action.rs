@@ -255,12 +255,17 @@ pub fn default_targets(game: &Game, area: AreaId, index: usize) -> Option<Vec<us
 }
 
 /// `get_consumable_target_info(card)`: `(min_cards, max_cards, needs_targets)` from the
-/// consumable's `max_highlighted` / `min_highlighted` / `mod_num` (`(0, 0, false)` for any
-/// card without `max_highlighted`, Aura included).
+/// consumable's `max_highlighted` / `min_highlighted` / `mod_num` (card.lua:1564-1568), and
+/// `(0, 0, false)` for one that takes no hand cards. Aura has none of those in its config but
+/// takes exactly one card (card.lua:1544-1546), and only one without an edition
+/// ([`takes_card`]).
 pub fn consumable_target_info(card: &Card) -> (usize, usize, bool) {
     let center = card.center();
     if !center.consumeable {
         return (0, 0, false);
+    }
+    if center.name == "Aura" {
+        return (1, 1, true);
     }
     let num = |key: &str| match center.config(key) {
         Some(Value::Num(x)) => Some(*x),
@@ -272,6 +277,14 @@ pub fn consumable_target_info(card: &Card) -> (usize, usize, bool) {
     let min_h = num("min_highlighted").unwrap_or(1.0);
     let mod_num = num("mod_num").unwrap_or(max_h);
     (min_h as usize, mod_num as usize, true)
+}
+
+/// Whether a selection for using the consumable `card` may hold the hand card `target`, for a
+/// consumable that takes hand cards ([`consumable_target_info`]). Any card may, except that Aura
+/// is only used on a card without an edition (`Card:can_use_consumeable`, card.lua:1544-1546),
+/// the one rule of the game about which cards a consumable takes rather than how many.
+pub fn takes_card(card: &Card, target: &Card) -> bool {
+    card.center().name != "Aura" || target.edition.is_none()
 }
 
 fn require_entity(fa: &FactoredAction, what: &str) -> Result<usize, ConvertError> {

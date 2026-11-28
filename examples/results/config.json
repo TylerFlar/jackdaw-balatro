@@ -22,5 +22,5 @@
   "eval_freq": 2000000,
   "eval_episodes": 64,
   "resume": null,
-  "action_version": 2
+  "action_version": 3
 }

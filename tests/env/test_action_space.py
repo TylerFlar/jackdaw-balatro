@@ -446,6 +446,9 @@ class TestConsumableTargeting:
             ("c_star", (1, 3, True)),
             ("c_chariot", (1, 1, True)),
             ("c_hermit", (0, 0, False)),
+            # One card, not from max_highlighted: card.lua:1544-1546 (#69).
+            ("c_aura", (1, 1, True)),
+            ("c_sigil", (0, 0, False)),
         ],
     )
     def test_target_info(self, key: str, info: tuple[int, int, bool]):

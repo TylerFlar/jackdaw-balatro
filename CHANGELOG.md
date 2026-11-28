@@ -5,6 +5,46 @@ while it is 0.x, a minor release (0.2 → 0.3) can break things, and a patch rel
 
 ## Unreleased
 
+## [0.4.0] - 2026-11-27
+
+The engine plays the same runs as 0.3.2, with the same observations: every ended episode
+Jackdaw Arena publishes replays with it to its recorded final state. What changes is the action
+space, version 3: two moves the game allows that the envs didn't. A policy trained on version 2
+now meets table entries it never saw: retrain or fine-tune it.
+
+### Changed
+
+- **Aura is used on a card the policy picks** (#69). Aura takes one hand card, and only one
+  without an edition (`Card:can_use_consumeable`, card.lua:1544-1546), but its config has no
+  `max_highlighted`, and the envs gave it no card: `get_consumable_target_info` returned
+  `(0, 0, False)`, so the tables listed Aura once, without a selection, and the edition went on
+  the engine's choice, the first card without one. A factored action naming the card was refused
+  as not offered. Now `get_consumable_target_info` gives `(1, 1, True)`, and the Gym tables
+  (`BalatroGymnasiumEnv`, `BalatroVectorEnv`, and the generic path's) list Aura on each hand
+  card without an edition, used from the tray or picked from a Spectral pack, as they list The
+  Tower on each card. A factored action naming one is offered; one without a `card_target`
+  isn't anymore, as for The Tower (`factored_to_engine_action` still gives it the engine's
+  default). Against the Cerulean Bell Aura's one card is the forced card, as before. An agent
+  that picks a consumable's cards from `get_consumable_target_info` alone should leave out
+  Aura's editioned ones: `get_valid_target_cards(card, game.hand)` lists the cards it takes.
+  `smart_agent`, `RandomAgent` and the lockstep's random policy do.
+- **The free-move cap counts a drag once** (#70). A swap moves a card one place, so a hand of
+  eight could take 28 swaps to put in order, and the cap of 10 in a row left some orders out of
+  reach before a play, orders a player makes by dragging cards. The game carries a dragged card
+  past one neighbour at a time (`CardArea:align_cards` sorts the area by position every frame,
+  cardarea.lua:448, 463 and 528), and the swaps are those steps: a swap that moves on the card
+  the last swap moved, the same way, is part of its drag and doesn't count again, and at the cap
+  the mask still offers it. A sort counts once, and a swap back is a new drag, so the cap still
+  ends a stall. The default of 10 puts up to eleven cards in any order. Every env counts the
+  same way (`BalatroEnvironment`, `BalatroGymnasiumEnv`, `BalatroVectorEnv`); in Rust,
+  `jackdaw_env::env::FreeMoves` and `ActionMask::forbid_free_moves_but`.
+- `ACTION_VERSION` is 3 ([rl-guide](docs/rl-guide.md#saving-a-policy-the-action-version)).
+- In Rust, `ActionTable::enumerate_with` and `gym::offers_with` take which hand cards each
+  consumable takes (`jackdaw_env::action::takes_card`).
+- The training demo in `examples/` is retrained on action space 3, since `evaluate_agents.py`
+  refuses a model of another version: its greedy policy beats 4.73 blinds per run on the test
+  seeds, up from 4.52, and wins one of them (#72).
+
 ## [0.3.2] - 2026-11-22
 
 The engine plays the same runs as 0.3.1, with the same observations, masks and action tables:

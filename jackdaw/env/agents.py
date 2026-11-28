@@ -88,7 +88,11 @@ class RandomAgent:
             if info_cards is not None:
                 min_cards, max_cards, needs = info_cards
                 if needs:
-                    legal_cards = np.nonzero(action_mask.card_mask)[0]
+                    # The legal cards it takes (Aura: those without an edition).
+                    legal_cards = np.intersect1d(
+                        np.nonzero(action_mask.card_mask)[0],
+                        info["game"]._g.target_cards(source_key, entity_target),
+                    )
                     if len(legal_cards) >= min_cards:
                         n = min(len(legal_cards), max_cards)
                         count = _random.randint(min_cards, n)

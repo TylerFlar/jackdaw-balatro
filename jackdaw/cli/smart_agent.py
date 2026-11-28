@@ -308,11 +308,13 @@ def _pick_consumable_targets(
     min_h, max_h, needs = game._g.consumable_target_info(area, index)
     if not needs or not hand_size:
         return None
-    n = min(max_h, hand_size)
+    # The cards it takes: any, but Aura's have no edition.
+    takes = game._g.target_cards(area, index)
+    n = min(max_h, len(takes))
     if n < min_h:
         return None
     # Target the first N cards (simplest valid choice)
-    return tuple(range(n))
+    return tuple(takes[:n])
 
 
 # ---------------------------------------------------------------------------

@@ -167,11 +167,13 @@ class RandomPolicy:
                 area = "consumables" if isinstance(action, UseConsumable) else "pack_cards"
                 try:
                     lo, hi, needs = game._g.consumable_target_info(area, action.card_index)
+                    # The cards it takes: any, but Aura's have no edition.
+                    takes = game._g.target_cards(area, action.card_index)
                 except ValueError:
                     return action
-                if needs and hi >= 1:
-                    k = rng.randint(max(1, lo), max(1, min(hi, len(hand))))
-                    targets = _with_forced(rng.sample(range(len(hand)), k), forced, limit=k)
+                if needs and hi >= 1 and takes:
+                    k = rng.randint(max(1, lo), max(1, min(hi, len(takes))))
+                    targets = _with_forced(rng.sample(takes, k), forced, limit=k)
                     return type(action)(action.card_index, targets)
         return action
 

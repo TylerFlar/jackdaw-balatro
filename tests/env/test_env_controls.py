@@ -71,6 +71,67 @@ def test_balatro_environment_caps_free_moves(adapter: type) -> None:
     assert _free_in_mask(mask), "another action starts the count again"
 
 
+def _free_moves_in_mask(mask: Any) -> list[FactoredAction]:
+    """The free moves the mask allows."""
+    out = []
+    for t in sorted(FREE_ACTION_TYPES):
+        if not mask.type_mask[t]:
+            continue
+        if t in mask.entity_masks:
+            out += [
+                FactoredAction(t, entity_target=int(e))
+                for e in np.flatnonzero(mask.entity_masks[t])
+            ]
+        else:
+            out.append(FactoredAction(t))
+    return out
+
+
+@_ADAPTERS
+def test_a_drag_counts_once(adapter: type) -> None:
+    """#70: the game drags a card past one neighbour at a time (cardarea.lua:463), so taking the
+    last of eight cards to the front is seven swaps and one move. At the cap the mask still
+    allows the swap that carries the last drag on, so it can go as far as any."""
+    env = BalatroEnvironment(adapter_factory=adapter, max_free_moves=2)
+    env.reset(seed="DRAG")
+    _, _, _, mask, info = env.step(FactoredAction(ActionType.SelectBlind))
+    hand = [c.sort_id for c in info["game"].hand]
+    assert len(hand) == 8
+    for i in range(7, 0, -1):
+        _, _, _, mask, info = env.step(FactoredAction(ActionType.SwapHandLeft, entity_target=i))
+        assert ActionType.SortHandRank in {a.action_type for a in _free_moves_in_mask(mask)}
+    assert [c.sort_id for c in info["game"].hand] == [hand[7], *hand[:7]]
+    _, _, _, mask, _ = env.step(FactoredAction(ActionType.SwapHandRight, entity_target=2))
+    for i in range(3, 7):
+        assert _free_moves_in_mask(mask) == [
+            FactoredAction(ActionType.SwapHandRight, entity_target=i)
+        ]
+        _, _, _, mask, _ = env.step(FactoredAction(ActionType.SwapHandRight, entity_target=i))
+    assert _free_moves_in_mask(mask) == [], "the card is at the end"
+    # A swap back is another drag, and a sort carries nothing on.
+    env.step(FactoredAction(ActionType.Discard, card_target=(0,)))
+    env.step(FactoredAction(ActionType.SwapHandLeft, entity_target=4))
+    _, _, _, mask, _ = env.step(FactoredAction(ActionType.SwapHandRight, entity_target=3))
+    assert _free_moves_in_mask(mask) == [FactoredAction(ActionType.SwapHandRight, entity_target=4)]
+    env.step(FactoredAction(ActionType.Discard, card_target=(0,)))
+    env.step(FactoredAction(ActionType.SortHandRank))
+    _, _, _, mask, _ = env.step(FactoredAction(ActionType.SortHandSuit))
+    assert _free_moves_in_mask(mask) == []
+
+
+def test_the_vector_env_counts_a_drag_once() -> None:
+    vec = BalatroVectorEnv(1, seed_prefix="VDRAG", max_free_moves=1)
+    vec.reset(seed=1)
+    vec.step([0])  # SelectBlind
+
+    def free() -> list[FactoredAction]:
+        return [a for a in vec.action_table(0) if a.action_type in FREE_ACTION_TYPES]
+
+    left = FactoredAction(ActionType.SwapHandLeft, entity_target=5)
+    vec.step([vec.action_table(0).index(left)])
+    assert free() == [FactoredAction(ActionType.SwapHandLeft, entity_target=4)]
+
+
 def test_no_cap() -> None:
     env = BalatroEnvironment(adapter_factory=DirectAdapter, max_free_moves=None)
     env.reset(seed="NOCAP")
@@ -253,7 +314,7 @@ def test_a_partial_reset() -> None:
 
 
 def test_the_action_version() -> None:
-    assert ACTION_VERSION == 2
+    assert ACTION_VERSION == 3
     for env in (
         BalatroEnvironment(DirectAdapter),
         BalatroGymnasiumEnv(DirectAdapter),

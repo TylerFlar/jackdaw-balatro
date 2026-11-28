@@ -148,11 +148,13 @@ action = FactoredAction(
 
 The swaps follow the game's drag and drop: the jokers can be reordered whenever the game waits for a move, the hand whenever it holds cards (while choosing a hand, and in an Arcana or Spectral pack, where the order decides which card Death copies and the order the cards go back into the deck). The sort buttons exist only while choosing a hand. Consumables can be dragged in the game too, but their order changes nothing, so there is no action for it. Under BALATROBOT legality (the live bot) the jokers can't be reordered at blind select or on the cash-out screen: BalatroBot's `rearrange` refuses there.
 
-`UseConsumable` and `PickPackCard` take a `card_target` when the consumable works on hand cards (The Magician, Death, Aura...). Bound it with `get_consumable_target_info(info["game"], "consumables", index)` (or `"pack_cards"`), which returns `(min_cards, max_cards, needs_targets)`. Leave `card_target` as `None` to get the engine's default selection: the lowest-index legal cards. Against the Cerulean Bell, include `forced_card` in it: the bounds count the forced card either way (see [Action Masks](#action-masks)). The default selection includes it: against the Bell it is the forced card and the lowest-index others.
+`UseConsumable` and `PickPackCard` take a `card_target` when the consumable works on hand cards (The Magician, Death, Aura...). Bound it with `get_consumable_target_info(info["game"], "consumables", index)` (or `"pack_cards"`), which returns `(min_cards, max_cards, needs_targets)`. Any hand card will do, except that Aura (one card) takes one without an edition, as the game's Use button does (card.lua:1544-1546); `get_valid_target_cards(card, game.hand)` lists the cards a consumable takes. The Gym table lists each such use with its cards, Aura's on each card without an edition. Leave `card_target` as `None` to get the engine's default selection: the lowest-index legal cards. Against the Cerulean Bell, include `forced_card` in it: the bounds count the forced card either way (see [Action Masks](#action-masks)). The default selection includes it: against the Bell it is the forced card and the lowest-index others.
 
 ### Free moves
 
-The swaps and sorts (types 15-20, `FREE_ACTION_TYPES`) cost nothing in the game, so a policy could take them forever. After `max_free_moves` of them in a row (10 by default, enough to put five jokers in any order) the mask offers none until another action. `max_free_moves=None` turns the cap off. Every env applies it the same way.
+The swaps and sorts (types 15-20, `FREE_ACTION_TYPES`) cost nothing in the game, so a policy could take them forever. After `max_free_moves` of them in a row (10 by default, a drag counting once: below) the mask offers none until another action, but the swap that carries the last drag on. `max_free_moves=None` turns the cap off. Every env applies it the same way.
+
+The cap counts moves as a player makes them: a sort once, and a drag once, however far it carries its card. The game carries a dragged card past one neighbour at a time (`CardArea:align_cards` sorts the area by position every frame, cardarea.lua:448, 463 and 528), and a swap is one of those steps: a swap that moves on the card the last swap moved, the same way (`SwapHandLeft(3)` right after `SwapHandLeft(4)`), is part of its drag and doesn't count again. At the cap the mask still offers that swap, so the last drag can go as far as any. A swap back counts as a new drag, so the cap still ends a stall. With drags counted once, the default puts up to eleven cards in any order: reversing a hand of eight is 28 swaps and seven drags.
 
 ## Environment Config
 
@@ -164,7 +166,7 @@ env = BalatroEnvironment(
     max_steps=10_000,          # steps before truncation
     seed_prefix="TRAIN",       # prefix for deterministic seed generation
     end_on_win=True,           # end the episode when ante 8 is beaten
-    max_free_moves=10,         # free moves in a row before the mask holds none; None: no cap
+    max_free_moves=10,         # free moves in a row (a drag counts once) before the cap; None: no cap
     on_refusal="truncate",     # an action the engine refuses: "truncate" or "raise"
 )
 ```
@@ -497,6 +499,7 @@ A trained policy only knows the masks it was trained with: when a new release ma
 |---|---|---|
 | 1 | 0.1 | the first action space |
 | 2 | 0.2 | joker swaps at every decision point, as the game's drag and drop allows; the free-move cap |
+| 3 | 0.4 | Aura used on a card the policy picks, one without an edition (it was listed once, on the engine's choice); the free-move cap counts a drag once |
 
 A release that only takes entries no policy needs out of the Gym table keeps the version. 0.2.5 did that against the Cerulean Bell: a Tarot or Spectral used on cards is listed only with selections that hold the forced card. The selections it dropped either left no room for the forced card, so that taking one ended the episode (or raised, with `on_refusal="raise"`), or were the same use as a selection that stays. In such a hand the table drops those selections, so the entries after them sit at lower indices, and an env's sampler may draw differently from then on: an env's tables are the same as 0.2.4's up to its first such hand.
 
